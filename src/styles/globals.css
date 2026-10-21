@@ -163,3 +163,31 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 .checks .label { margin-bottom: 4px; }
 .check { display: flex; align-items: center; gap: 10px; font-size: var(--clair-type-form); }
 .check input { width: 16px; height: 16px; }
+
+/* Module Collaborateurs */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabs a { padding: 10px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: var(--clair-type-form); font-weight: 500; }
+.tabs a[aria-current="page"] { color: var(--blue); border-bottom-color: var(--blue); }
+.prov { display: inline-block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; text-decoration: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.prov:hover { color: var(--blue); border-color: var(--blue); }
+.nd { color: var(--muted); font-style: italic; }
+.lower { color: var(--muted); font-weight: 500; }
+.strip { display: inline-grid; grid-template-columns: repeat(12, 14px); gap: 2px; }
+.strip span { display: inline-block; width: 14px; height: 14px; border-radius: 3px; background: var(--surface); border: 1px solid var(--line); }
+.strip span.present { background: var(--ok); border-color: var(--ok); }
+.strip span.nd { background: repeating-linear-gradient(45deg, #fff, #fff 3px, #e7eaf0 3px, #e7eaf0 6px); }
+.finding { display: inline-flex; align-items: center; gap: 6px; font-size: var(--clair-type-label); font-weight: 600; color: var(--danger); background: var(--danger-bg); border: 1px solid #f1d6dc; border-radius: 999px; padding: 2px 9px; }
+.finding.info { color: var(--muted); background: var(--surface); border-color: var(--line); }
+.finding-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.finding-list li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: var(--clair-type-form); }
+.filters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.filters .field-row { flex: 0 1 180px; }
+.tile-foot { font-size: var(--clair-type-label); color: var(--muted); font-weight: 400; }
+.tile-foot a { color: var(--muted); }
+.data-table td.wrap, .data-table th.wrap { white-space: normal; }
+.data-table details summary { cursor: pointer; color: var(--muted); font-size: var(--clair-type-label); }
+.data-table details ul { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 4px; white-space: normal; }
+.defs { display: grid; gap: 12px; }
+.defs dt { font-weight: 600; font-size: var(--clair-type-form); }
+.defs dd { margin: 2px 0 0; color: var(--muted); font-size: var(--clair-type-form); line-height: 1.55; }
+.contract-months { margin-top: 8px; }

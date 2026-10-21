@@ -242,13 +242,14 @@ function monthCount(data: RhBuildData, month: string, kind: "entry" | "exit", op
   const value = rows.filter((r) => r.inScope && (!ref || r.event.date <= ref)).length;
   const cov = coverageAt(data, month, opts.establishments);
   if (!cov.length) return { rows, count: { kind: "nd", nd: nd("month-not-covered", `période non couverte par la source retenue (couverture : ${coverageLabel(data)})`) } };
+  // Qualificatifs courts : la raison complète est portée par la couverture du mois (bandeau à l'écran).
   const lower = cov.filter((c) => c.presenceStatus === "lower_bound");
   if (lower.length) {
-    if (kind === "exit") return { rows, count: { kind: "nd", nd: nd("coverage-incomplete", `contrats archivés depuis plus d'un an absents de PayFit (hypothèse à confirmer) : sorties de ${month} inconnues`) } };
-    return { rows, count: { kind: "lower_bound", value, qualifiers: lower.map((c) => c.presenceReason ?? "borne basse") } };
+    if (kind === "exit") return { rows, count: { kind: "nd", nd: nd("coverage-incomplete", `sorties de ${month} inconnues : contrats archivés depuis plus de 12 mois absents de PayFit (hypothèse à confirmer)`) } };
+    return { rows, count: { kind: "lower_bound", value, qualifiers: ["borne basse (PayFit)"] } };
   }
   const bad = cov.filter((c) => c.presenceStatus !== "complete");
-  if (bad.length) return { rows, count: { kind: "lower_bound", value, qualifiers: [`mois non couvert (${bad.map((c) => c.presenceReason ?? c.presenceStatus).join(" ")}) : un contrat commencé et fini dans le mois serait invisible`] } };
+  if (bad.length) return { rows, count: { kind: "lower_bound", value, qualifiers: ["mois non couvert : un contrat commencé et fini dans le mois serait invisible"] } };
   return { rows, count: { kind: "exact", value, qualifiers: [] } };
 }
 
@@ -418,24 +419,23 @@ export function annualList(data: RhBuildData, year: number, opts: HeadcountOpts)
   const yearCount = (kind: "entry" | "exit"): Count => {
     let value = 0;
     const qualifiers = new Set<string>();
+    const ndMonths: string[] = [];
     let lower = false;
-    let ndAll = true;
     for (const M of months) {
       const c = monthCount(data, M, kind, opts).count;
       if (c.kind === "nd") {
-        if (M <= (data.build.presenceTo ?? "") && M >= (data.build.presenceFrom ?? "9999")) qualifiers.add(`${M} : ${c.nd.reason}`);
+        ndMonths.push(M);
         continue;
       }
-      ndAll = false;
       value += c.value;
       if (c.kind === "lower_bound") {
         lower = true;
         for (const q of c.qualifiers) qualifiers.add(q);
       }
     }
-    if (ndAll) return { kind: "nd", nd: nd("month-not-covered", `aucun mois de ${year} couvert par la source retenue (couverture : ${coverageLabel(data)})`) };
-    const covered = months.filter((M) => monthCount(data, M, kind, opts).count.kind !== "nd").length;
-    if (covered < 12) qualifiers.add(`${value} sur les mois couverts (${covered}/12)`);
+    if (ndMonths.length === 12) return { kind: "nd", nd: nd("month-not-covered", `aucun mois de ${year} couvert par la source retenue (couverture : ${coverageLabel(data)})`) };
+    const covered = 12 - ndMonths.length;
+    if (ndMonths.length) qualifiers.add(`${value} sur les mois couverts (${covered}/12) ; n.d. de ${ndMonths[0]} à ${ndMonths[ndMonths.length - 1]}`);
     return { kind: lower || covered < 12 ? "lower_bound" : "exact", value, qualifiers: [...qualifiers] };
   };
   return {

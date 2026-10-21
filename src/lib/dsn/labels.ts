@@ -33,6 +33,27 @@ export const END_REASON_LABELS: Record<string, string> = {
   "059": "Démission",
 };
 
+// Unité de la quotité (S21.G00.40.011) et modalité d'exercice du temps (S21.G00.40.014).
+export const QUOTA_UNIT_LABELS: Record<string, string> = {
+  "10": "heures",
+  "12": "journées",
+  "20": "forfait jours",
+  "21": "forfait heures",
+  "90": "autre unité",
+  "99": "sans objet",
+};
+export const MODALITY_LABELS: Record<string, string> = {
+  "10": "temps plein",
+  "20": "temps partiel",
+  "21": "temps partiel thérapeutique",
+  "99": "non concerné",
+};
+
+export function quotaUnitLabel(code: string | null): string {
+  if (!code) return "unité n.d.";
+  return QUOTA_UNIT_LABELS[code] ?? `unité ${code}`;
+}
+
 export function contractNatureLabel(code: string | null): string {
   if (!code) return "n.d.";
   return CONTRACT_NATURE_LABELS[code] ? `${CONTRACT_NATURE_LABELS[code]} (${code})` : `code ${code} — libellé n.d.`;
