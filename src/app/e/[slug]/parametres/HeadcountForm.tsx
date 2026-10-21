@@ -23,7 +23,11 @@ export function HeadcountForm({ slug, choices, selected, disabled }: { slug: str
         <label htmlFor="extra">Autres codes de nature (deux chiffres, séparés par des virgules)</label>
         <input className="input" id="extra" name="extra" defaultValue={extra.join(", ")} disabled={disabled} placeholder="ex. 50, 60" />
       </div>
-      {!disabled && <button className="btn primary" type="submit" disabled={pending}>{pending ? "Enregistrement…" : "Enregistrer"}</button>}
+      {!disabled && (
+        <div className="actions">
+          <button className="btn primary" type="submit" disabled={pending}>{pending ? "Enregistrement…" : "Enregistrer"}</button>
+        </div>
+      )}
     </form>
   );
 }

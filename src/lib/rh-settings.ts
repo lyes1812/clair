@@ -26,5 +26,6 @@ export async function setHeadcountNatures(workspaceId: string, codes: string[], 
 }
 
 export function natureChoices(): { code: string; label: string }[] {
-  return Object.entries(CONTRACT_NATURE_LABELS).map(([code, label]) => ({ code, label }));
+  // Tri explicite par code : Object.entries place les clés numériques canoniques (« 10 », « 20 ») avant « 01 ».
+  return Object.entries(CONTRACT_NATURE_LABELS).map(([code, label]) => ({ code, label })).sort((a, b) => a.code.localeCompare(b.code));
 }
