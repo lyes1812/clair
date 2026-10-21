@@ -21,7 +21,11 @@ export function SignUpForm({ returnTo }: { returnTo: string }) {
     setPending(false);
     if (error) {
       setError(
-        error.code === "USER_ALREADY_EXISTS" || error.code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"
+        error.status === 429
+          ? "Trop de tentatives. Réessayez dans quelques instants."
+          : error.code === "SIGNUP_INVITATION_REQUIRED"
+          ? "L'inscription se fait sur invitation. Utilisez le lien reçu de l'administrateur de votre espace, avec l'adresse invitée."
+          : error.code === "USER_ALREADY_EXISTS" || error.code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"
           ? "Un compte existe déjà avec cet e-mail."
           : error.code === "PASSWORD_TOO_SHORT"
             ? "Le mot de passe doit contenir au moins 12 caractères."

@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { ac, orgRoles } from "@/lib/roles";
 import { recordEvent } from "@/lib/events";
+import { signupAllowed } from "@/lib/signup";
 
 const ADMIN_PATHS = new Set([
   "/organization/update",
@@ -33,8 +34,17 @@ export const auth = betterAuth({
     ipAddress: { ipAddressHeaders: ["x-forwarded-for"] },
   },
   hooks: {
-    // TOTP obligatoire pour toute action d'administration d'un espace, y compris appelée directement sur l'API.
+    // Inscription sur invitation ; TOTP obligatoire pour toute action d'administration d'un espace, y compris appelée directement sur l'API.
     before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === "/sign-up/email") {
+        if (!(await signupAllowed(ctx.body?.email))) {
+          throw new APIError("FORBIDDEN", {
+            code: "SIGNUP_INVITATION_REQUIRED",
+            message: "Inscription sur invitation uniquement.",
+          });
+        }
+        return;
+      }
       if (!ADMIN_PATHS.has(ctx.path)) return;
       const session = ctx.context.session;
       if (session && !session.user.twoFactorEnabled) {

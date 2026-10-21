@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("@/lib/auth", () => ({ auth: {} }));
+vi.mock("@/db/client", () => ({ db: {} }));
 
 const { hasAtLeast, isRole } = await import("@/lib/roles");
 const { safeReturnPath } = await import("@/lib/session");
@@ -53,5 +54,21 @@ describe("menu figé", () => {
       "Reporting social",
     ]);
     expect(STUDIO_RH_ITEMS).toHaveLength(5);
+  });
+});
+
+describe("inscription sur invitation", async () => {
+  const { allowedDomains, domainAllowed } = await import("@/lib/signup");
+  it("lit la liste des domaines de recette et ignore les valeurs invalides", () => {
+    expect(allowedDomains(" test.invalid, ,pas un domaine,Exemple.FR ")).toEqual(["test.invalid", "exemple.fr"]);
+    expect(allowedDomains(undefined)).toEqual([]);
+  });
+  it("n'ouvre que les domaines listés, sans correspondance partielle", () => {
+    const d = ["test.invalid"];
+    expect(domainAllowed("a@test.invalid", d)).toBe(true);
+    expect(domainAllowed("A@TEST.INVALID", d)).toBe(true);
+    expect(domainAllowed("a@evil-test.invalid", d)).toBe(false);
+    expect(domainAllowed("a@test.invalid.evil.com", d)).toBe(false);
+    expect(domainAllowed("a@example.com", [])).toBe(false);
   });
 });

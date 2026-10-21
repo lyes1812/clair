@@ -8,7 +8,8 @@ const PASSWORD = "Fictif-Test-2026!";
 const users = {
   admin: { name: "Admin Test", email: `admin-${run}@test.invalid` },
   outsider: { name: "Externe Test", email: `externe-${run}@test.invalid` },
-  reader: { name: "Lecteur Test", email: `lecteur-${run}@test.invalid` },
+  // Hors du domaine de recette : ne peut s'inscrire que grâce à son invitation.
+  reader: { name: "Lecteur Test", email: `lecteur-${run}@invite.example` },
 };
 const CAPTURES = process.env.CAPTURES_DIR ?? "captures";
 const MENU = ["Données", "Collaborateurs", "KPI RH", "Masse salariale", "Hypothèses budgétaires", "Reporting social"];
@@ -65,6 +66,22 @@ test.describe.serial("Module 0 — socle", () => {
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(label);
       await expect(page.getByTestId("placeholder")).toBeVisible();
     }
+  });
+
+  test("l'inscription sans invitation est refusée", async ({ page }) => {
+    await page.goto("/inscription");
+    await page.getByLabel("Nom").fill("Inconnu");
+    await page.getByLabel("E-mail").fill(`inconnu-${run}@example.com`);
+    await page.getByLabel(/Mot de passe/).fill(PASSWORD);
+    await page.getByRole("button", { name: "Créer le compte" }).click();
+    await expect(page.locator("p.error")).toContainText("sur invitation");
+    await expect(page).toHaveURL(/\/inscription/);
+    const api = await page.request.post("/api/auth/sign-up/email", {
+      data: { name: "Inconnu", email: `inconnu2-${run}@example.com`, password: PASSWORD },
+    });
+    expect(api.status()).toBe(403);
+    // Better Auth limite les inscriptions à 3 par 10 s et par IP : on laisse passer la fenêtre.
+    await page.waitForTimeout(11_000);
   });
 
   test("un second utilisateur ne voit pas l'espace (liste, URL directe, API)", async ({ page }) => {

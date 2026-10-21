@@ -9,6 +9,7 @@ export default async function InscriptionPage({ searchParams }: { searchParams: 
   if (await getSession()) redirect(returnTo);
   return (
     <AuthCard title="Créer un compte">
+      <p className="desc">L'inscription se fait sur invitation : utilisez l'adresse à laquelle vous avez été invité.</p>
       <SignUpForm returnTo={returnTo} />
       <p className="desc">
         Déjà un compte ? <a href={`/connexion?retour=${encodeURIComponent(returnTo)}`}>Se connecter</a>
