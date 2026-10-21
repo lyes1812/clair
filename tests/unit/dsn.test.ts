@@ -51,9 +51,14 @@ describe("lecture d'une DSN fictive (profil A, octobre 2024)", () => {
     expect(parseDsn(fixtureDsnBytes({ month: "2024-10" }), { fingerprint: fp("ws") }).hash).toBe(r.hash);
   });
 
-  it("fin de contrat : le CDD 003 se termine le 31/12/2025", () => {
+  it("fin de contrat : le CDD 003 se termine le 31/12/2025, motif 026 (fin de CDD)", () => {
     const dec = parseDsn(fixtureDsnBytes({ month: "2025-12" }), { fingerprint: fp("ws") }).declarations[0];
-    expect(dec.contracts.find((c) => c.contractNumber === "TEST-A-CONTRACT-003")?.endDate).toBe("2025-12-31");
+    expect(dec.contracts.find((c) => c.contractNumber === "TEST-A-CONTRACT-003")).toMatchObject({ endDate: "2025-12-31", endReason: "026" });
+    expect(dec.contracts.find((c) => c.contractNumber === "TEST-A-CONTRACT-001")).toMatchObject({ endDate: null, endReason: null });
+  });
+  it("motif de rupture invalide ou absent : n.d. (null), la fin reste valable", () => {
+    const text = fixtureDsnText({ month: "2025-12" }).replace("S21.G00.62.002,'026'", "S21.G00.62.002,'AB'");
+    expect(parse(text).declarations[0].contracts.find((c) => c.contractNumber === "TEST-A-CONTRACT-003")).toMatchObject({ endDate: "2025-12-31", endReason: null });
   });
 });
 

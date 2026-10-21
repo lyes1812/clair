@@ -28,6 +28,8 @@ export class DsnError extends Error {
 export type DsnPerson = { personId: string; identifierKind: "nir" | "ntt"; familyName: string | null; givenNames: string | null; usageName: string | null; employeeNumber: string | null };
 export type DsnContract = {
   contractId: string; personId: string; contractNumber: string; startDate: string; endDate: string | null;
+  // Motif de la rupture (S21.G00.62.002, code à 3 chiffres), connu seulement avec une fin de contrat.
+  endReason: string | null;
   nature: string | null; unit: string | null; referenceQuota: number | null; contractQuota: number | null; modality: string | null;
 };
 export type DsnRemuneration = {
@@ -313,6 +315,7 @@ function buildDeclaration(c: Context, global: string[], opts: DsnParseOptions): 
           contractNumber: number,
           startDate,
           endDate: null,
+          endReason: null,
           nature: code2(cv.get("S21.G00.40.007")),
           unit: code2(cv.get("S21.G00.40.011")),
           referenceQuota: decimal(opt(cv.get("S21.G00.40.012"))),
@@ -332,7 +335,11 @@ function buildDeclaration(c: Context, global: string[], opts: DsnParseOptions): 
         else if (!end) push(blocking, `Fin de contrat (${line}) : date invalide.`);
         else if (lastContract.endDate) push(blocking, `Fin de contrat (${line}) : seconde fin pour le même contrat.`);
         else if (end < lastContract.startDate) push(blocking, `Fin de contrat (${line}) antérieure au début.`);
-        else lastContract.endDate = end;
+        else {
+          lastContract.endDate = end;
+          const reason = opt(cv.get("S21.G00.62.002"));
+          lastContract.endReason = reason && /^\d{3}$/.test(reason) ? reason : null;
+        }
       } else if (b.base === "S21.G00.50") {
         paymentDate = isoDate(opt(cv.get("S21.G00.50.001")));
         if (!paymentDate) push(blocking, `Versement (${line}) : date invalide.`);

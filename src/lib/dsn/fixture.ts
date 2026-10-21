@@ -67,7 +67,11 @@ export function fixtureDsnText(o: FixtureDsnOptions): string {
     const reference = (c.referenceMinutesPerWeek / 60) * 52 / 12;
     r("S21.G00.40.012", reference.toFixed(2));
     r("S21.G00.40.013", (reference * c.quotaBps / 10000).toFixed(2));
-    if (c.endDate && c.endDate <= monthEnd) r("S21.G00.62.001", ddmmyyyy(c.endDate));
+    if (c.endDate && c.endDate <= monthEnd) {
+      r("S21.G00.62.001", ddmmyyyy(c.endDate));
+      // 026 : fin de contrat à durée déterminée (nomenclature DSN).
+      if (c.contractType === "TEST-FIXED-TERM") r("S21.G00.62.002", "026");
+    }
     const period = ph.periods.find((p) => p.contractId === c.id && p.month === o.month);
     if (period && period.grossMinor !== null) {
       r("S21.G00.50.001", ddmmyyyy(monthEnd));
