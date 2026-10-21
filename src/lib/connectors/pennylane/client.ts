@@ -133,47 +133,52 @@ export async function readPennylane(client: PennylaneClient, months: string[]): 
   collections.push({ collection: "accounts", status: "read", count: accounts.length });
 
   const scoped = accounts.filter((a) => LINE_SCOPE.test(a.number)).map((a) => String(a.id));
+  // Un seul filtre de dates couvrant toute la période, par bloc de comptes ; chaque ligne est rattachée
+  // à son mois d'après sa date (12 fois moins d'appels qu'une lecture mois par mois).
+  const wanted = new Set(months);
+  const begin = monthBounds([...months].sort()[0]).begin;
+  const end = monthBounds([...months].sort()[months.length - 1]).end;
   let lineCount = 0;
-  for (const month of months) {
-    const { begin, end } = monthBounds(month);
-    for (let i = 0; i < scoped.length; i += IDS_PER_FILTER) {
-      const block = scoped.slice(i, i + IDS_PER_FILTER);
-      const filter = JSON.stringify([
-        { field: "date", operator: "gteq", value: begin },
-        { field: "date", operator: "lteq", value: end },
-        { field: "ledger_account_id", operator: "in", value: block },
-      ]);
-      const rows = await client.paginate("/ledger_entry_lines", LINE_PAGE, { sort: "id", filter });
-      for (const row of rows) {
-        const id = positiveId(row.id, "ledger_entry_lines.id");
-        const date = row.date;
-        if (!isIsoDate(date) || date < begin || date > end) fail("ledger_entry_lines.date");
-        const nested = isObj(row.ledger_account) ? row.ledger_account : null;
-        const accountRef = nested ? positiveId(nested.id, "ledger_entry_lines.ledger_account.id") : positiveId(row.ledger_account_id, "ledger_entry_lines.ledger_account_id");
-        if (nested && row.ledger_account_id !== undefined && row.ledger_account_id !== accountRef) fail("ledger_entry_lines: compte incohérent");
-        if (!block.includes(String(accountRef))) fail("ledger_entry_lines: compte hors périmètre");
-        const account = byId.get(accountRef)!;
-        if (nested && nested.number !== undefined && nested.number !== account.number) fail("ledger_entry_lines.ledger_account.number");
-        if (row.currency !== undefined && row.currency !== null && row.currency !== "EUR") fail("ledger_entry_lines.currency");
-        records.push({
-          collection: "ledger_lines",
-          key: String(id),
-          period: month,
-          data: {
-            id,
-            month,
-            operationDate: date,
-            accountId: account.number,
-            accountName: account.label,
-            ledgerAccountId: account.id,
-            debitCents: decimal(row.debit, "ledger_entry_lines.debit"),
-            creditCents: decimal(row.credit, "ledger_entry_lines.credit"),
-            currency: "EUR",
-            label: PERSONAL_ACCOUNTS.test(account.number) ? null : text(row.label, "ledger_entry_lines.label", 1000),
-          },
-        });
-        lineCount += 1;
-      }
+  for (let i = 0; i < scoped.length; i += IDS_PER_FILTER) {
+    const block = scoped.slice(i, i + IDS_PER_FILTER);
+    const filter = JSON.stringify([
+      { field: "date", operator: "gteq", value: begin },
+      { field: "date", operator: "lteq", value: end },
+      { field: "ledger_account_id", operator: "in", value: block },
+    ]);
+    const rows = await client.paginate("/ledger_entry_lines", LINE_PAGE, { sort: "id", filter });
+    for (const row of rows) {
+      const id = positiveId(row.id, "ledger_entry_lines.id");
+      const date = row.date;
+      if (!isIsoDate(date) || date < begin || date > end) fail("ledger_entry_lines.date");
+      const month = date.slice(0, 7);
+      // Période non contiguë : seuls les mois demandés sont conservés.
+      if (!wanted.has(month)) continue;
+      const nested = isObj(row.ledger_account) ? row.ledger_account : null;
+      const accountRef = nested ? positiveId(nested.id, "ledger_entry_lines.ledger_account.id") : positiveId(row.ledger_account_id, "ledger_entry_lines.ledger_account_id");
+      if (nested && row.ledger_account_id !== undefined && row.ledger_account_id !== accountRef) fail("ledger_entry_lines: compte incohérent");
+      if (!block.includes(String(accountRef))) fail("ledger_entry_lines: compte hors périmètre");
+      const account = byId.get(accountRef)!;
+      if (nested && nested.number !== undefined && nested.number !== account.number) fail("ledger_entry_lines.ledger_account.number");
+      if (row.currency !== undefined && row.currency !== null && row.currency !== "EUR") fail("ledger_entry_lines.currency");
+      records.push({
+        collection: "ledger_lines",
+        key: String(id),
+        period: month,
+        data: {
+          id,
+          month,
+          operationDate: date,
+          accountId: account.number,
+          accountName: account.label,
+          ledgerAccountId: account.id,
+          debitCents: decimal(row.debit, "ledger_entry_lines.debit"),
+          creditCents: decimal(row.credit, "ledger_entry_lines.credit"),
+          currency: "EUR",
+          label: PERSONAL_ACCOUNTS.test(account.number) ? null : text(row.label, "ledger_entry_lines.label", 1000),
+        },
+      });
+      lineCount += 1;
     }
   }
   collections.push({ collection: "ledger_lines", status: "read", count: lineCount });

@@ -77,10 +77,29 @@ describe("contrôles Pennylane", () => {
     [{ debit: 12.5 }, "montant numérique au lieu de chaîne"],
     [{ debit: "1.234" }, "plus de deux décimales"],
     [{ currency: "USD" }, "autre devise"],
-    [{ date: "2026-08-31" }, "date hors du mois"],
+    [{ date: "2026-08-31" }, "date hors de la période"],
     [{ ledger_account: { id: 6, number: "512000" } }, "compte hors périmètre"],
     [{ ledger_account: { id: 5, number: "641200" } }, "numéro de compte incohérent"],
   ])("refuse %o (%s)", async (line, _why) => {
     await expect(readWith(line)).rejects.toMatchObject({ code: "invalid_response" });
+  });
+});
+
+describe("lecture Pennylane sur plusieurs mois", () => {
+  it("un appel par bloc de comptes pour toute la période, lignes rattachées à leur mois", async () => {
+    const key = "fixture-pl-A-1";
+    const inner = createPennylaneFixtureFetch(key);
+    let lineCalls = 0;
+    const f: FetchLike = (u, i) => (u.includes("/ledger_entry_lines") && lineCalls++, inner(u, i));
+    const r = await readPennylane(createPennylaneClient(key, null, { fetchImpl: f, minIntervalMs: 0 }), ["2024-10", "2024-11", "2024-12"]);
+    const lines = r.records.filter((x) => x.collection === "ledger_lines");
+    expect(lineCalls).toBe(1);
+    expect(new Set(lines.map((l) => l.period))).toEqual(new Set(["2024-10", "2024-11", "2024-12"]));
+    expect(lines.every((l) => String(l.data.operationDate).startsWith(String(l.period)))).toBe(true);
+  });
+  it("ignore les mois non demandés d'une période non contiguë", async () => {
+    const key = "fixture-pl-A-1";
+    const r = await readPennylane(createPennylaneClient(key, null, { fetchImpl: createPennylaneFixtureFetch(key), minIntervalMs: 0 }), ["2024-10", "2024-12"]);
+    expect(new Set(r.records.filter((x) => x.collection === "ledger_lines").map((l) => l.period))).toEqual(new Set(["2024-10", "2024-12"]));
   });
 });
