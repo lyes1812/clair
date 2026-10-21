@@ -18,7 +18,7 @@ export default async function WorkspaceLayout({
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div style={{ padding: "0 10px" }}><Brand /></div>
+        <div style={{ padding: "0 12px" }}><Brand /></div>
         <div className="ws">
           <span className="ws-name" data-testid="workspace-name">{workspace.name}</span>
           <span className="desc">{ROLE_LABELS[workspace.role]}</span>
