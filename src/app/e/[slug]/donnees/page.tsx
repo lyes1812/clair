@@ -1,6 +1,7 @@
 import { DATA_ITEM } from "@/lib/nav";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { activeSync, getConnection, lastSync, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
+import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
 import { requireWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,6 @@ const SOURCES = [
 ] as const;
 
 const UPCOMING = [
-  { label: "Fichiers DSN", step: "1c", summary: "Import des DSN P25V01 / P26V01, avec aperçu et détection des réimports." },
   { label: "Rapprochement DSN–PayFit", step: "1d", summary: "Personnes et contrats rapprochés, écarts par champ, décisions tracées." },
 ];
 
@@ -28,6 +28,9 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
       return { ...src, conn, last, active };
     }),
   );
+
+  const [dsnFiles, dsnLast, coverage] = await Promise.all([listDsnFiles(workspace.id), lastSync(workspace.id, "dsn"), dsnCoverage(workspace.id)]);
+  const complete = coverage.filter((c) => c.status === "complete").length;
 
   return (
     <>
@@ -62,6 +65,32 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
           </dl>
         </section>
       ))}
+
+      <section className="panel" data-testid="source-dsn">
+        <div className="source-head">
+          <div>
+            <h2>Fichiers DSN</h2>
+            <p className="desc">Déclarations mensuelles déposées fichier par fichier : individus, contrats, rémunérations, activités.</p>
+          </div>
+          <a className="btn" href={`/e/${slug}/donnees/dsn`}>Gérer</a>
+        </div>
+        <dl className="facts">
+          <div>
+            <dt>Fichiers conservés</dt>
+            <dd data-testid="dsn-files-count">{dsnFiles.length === 0 ? "aucun" : dsnFiles.length}</dd>
+          </div>
+          <div>
+            <dt>Dernier dépôt</dt>
+            <dd>{dsnLast ? `${dateTimeFmt.format(dsnLast.startedAt)} — ${SYNC_STATUS_LABELS[dsnLast.status as SyncStatus]}` : "n.d. — aucun dépôt"}</dd>
+          </div>
+          <div>
+            <dt>Couverture</dt>
+            <dd data-testid="dsn-coverage-summary">
+              {coverage.length === 0 ? "n.d. — aucune déclaration appliquée" : `${complete} mois × établissement complet(s) sur ${coverage.length}`}
+            </dd>
+          </div>
+        </dl>
+      </section>
 
       {UPCOMING.map((s) => (
         <section key={s.label} className="placeholder">

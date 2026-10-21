@@ -18,6 +18,7 @@ const EVENT_LABELS: Record<string, string> = {
   "connector.disconnected": "Source déconnectée",
   "source.applied": "Synchronisation appliquée",
   "source.discarded": "Synchronisation abandonnée",
+  "dsn.uploaded": "Fichiers DSN déposés",
 };
 
 const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });

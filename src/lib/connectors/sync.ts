@@ -5,7 +5,8 @@ import { canonicalJson, decryptSecret, encryptSecret, sha256 } from "@/lib/crypt
 import { recordEvent } from "@/lib/events";
 import { ProviderError } from "./http";
 import { PROVIDERS, type VerifiedConnection } from "./providers";
-import type { CollectionOutcome, ProviderId, SourceRecordInput } from "./types";
+import { dsnFile } from "@/db/schema";
+import type { CollectionOutcome, ProviderId, SourceId, SourceRecordInput } from "./types";
 
 export { payfitClientFor } from "./providers";
 
@@ -25,6 +26,8 @@ const STALE_AFTER_MS = 15 * 60 * 1000;
 
 export type CollectionDiff = { total: number; added: number; changed: number; removed: number };
 export type SyncSummary = {
+  // « additive » : les lectures appliquées s'additionnent (fichiers DSN) au lieu de se remplacer.
+  mode?: "additive";
   company?: { id: string; name: string; identificationNumber: string | null };
   scopes?: string[];
   collections?: CollectionOutcome[];
@@ -134,7 +137,7 @@ async function expireStale(workspaceId: string) {
   );
 }
 
-async function activeSyncId(tx: Parameters<Parameters<typeof withWorkspace>[1]>[0], provider: ProviderId): Promise<string | null> {
+async function activeSyncId(tx: Parameters<Parameters<typeof withWorkspace>[1]>[0], provider: SourceId): Promise<string | null> {
   const [row] = await tx
     .select({ id: sourceSync.id })
     .from(sourceSync)
@@ -257,10 +260,12 @@ export async function applySync(workspaceId: string, syncId: string, actorUserId
     const [sync] = await tx.select().from(sourceSync).where(eq(sourceSync.id, syncId)).for("update");
     if (!sync) throw new SyncError("Synchronisation introuvable.");
     if (sync.status !== "preview") throw new SyncError("Seul un aperçu peut être appliqué.");
-    const active = await activeSyncId(tx, sync.provider as ProviderId);
-    if (active !== sync.baselineSyncId) throw new SyncError("La source a changé depuis cet aperçu : relancez une lecture.");
     const now = new Date();
-    if (active) await tx.update(sourceSync).set({ status: "superseded" }).where(eq(sourceSync.id, active));
+    if ((sync.summary as SyncSummary).mode !== "additive") {
+      const active = await activeSyncId(tx, sync.provider as SourceId);
+      if (active !== sync.baselineSyncId) throw new SyncError("La source a changé depuis cet aperçu : relancez une lecture.");
+      if (active) await tx.update(sourceSync).set({ status: "superseded" }).where(eq(sourceSync.id, active));
+    }
     await tx.update(sourceSync).set({ status: "applied", decidedBy: actorUserId, decidedAt: now }).where(eq(sourceSync.id, syncId));
     return sync.provider;
   });
@@ -272,13 +277,15 @@ export async function discardSync(workspaceId: string, syncId: string, actorUser
     const [sync] = await tx.select().from(sourceSync).where(eq(sourceSync.id, syncId)).for("update");
     if (!sync || sync.status !== "preview") throw new SyncError("Seul un aperçu peut être abandonné.");
     await tx.delete(sourceRecord).where(eq(sourceRecord.syncId, syncId));
+    // Fichiers DSN d'un aperçu abandonné : supprimés, pour permettre un nouveau dépôt du même fichier.
+    await tx.delete(dsnFile).where(eq(dsnFile.syncId, syncId));
     await tx.update(sourceSync).set({ status: "discarded", decidedBy: actorUserId, decidedAt: new Date() }).where(eq(sourceSync.id, syncId));
     return sync.provider;
   });
   await recordEvent(workspaceId, actorUserId, "source.discarded", { provider, syncId });
 }
 
-export async function listSyncs(workspaceId: string, provider: ProviderId, limit = 30) {
+export async function listSyncs(workspaceId: string, provider: SourceId, limit = 30) {
   await expireStale(workspaceId);
   return withWorkspace(workspaceId, (tx) =>
     tx.select().from(sourceSync).where(eq(sourceSync.provider, provider)).orderBy(desc(sourceSync.startedAt)).limit(limit),
@@ -291,7 +298,7 @@ export async function getSync(workspaceId: string, syncId: string) {
   return row ?? null;
 }
 
-export async function lastSync(workspaceId: string, provider: ProviderId) {
+export async function lastSync(workspaceId: string, provider: SourceId) {
   const [row] = await withWorkspace(workspaceId, (tx) =>
     tx
       .select()
@@ -303,7 +310,7 @@ export async function lastSync(workspaceId: string, provider: ProviderId) {
   return row ?? null;
 }
 
-export async function activeSync(workspaceId: string, provider: ProviderId) {
+export async function activeSync(workspaceId: string, provider: SourceId) {
   return withWorkspace(workspaceId, async (tx) => {
     const id = await activeSyncId(tx, provider);
     if (!id) return null;

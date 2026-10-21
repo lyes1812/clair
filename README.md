@@ -29,4 +29,6 @@ E2E_BASE_URL=https://<environnement> npm run e2e            # acceptation, captu
 - `src/lib/nav.ts` : menu figé (Données + 5 sous-modules Studio RH).
 - `src/lib/workspace.ts` : garde d'accès à un espace, appelée par chaque page et action serveur.
 - `src/db/workspace-scope.ts` : toute table métier se lit et s'écrit via `withWorkspace` (RLS).
+- `src/lib/connectors/` : cadre commun des sources (clés chiffrées, lecture → aperçu → application), clients PayFit et Pennylane, transports fictifs.
+- `src/lib/dsn/` : lecteur DSN (P25V01/P26V01), sélection des déclarations qui font foi, import additif, générateur de DSN fictives.
 - `ref/` : spécifications, charte et jeu fictif de référence.

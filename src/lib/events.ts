@@ -12,7 +12,8 @@ export type EventKind =
   | "connector.connected"
   | "connector.disconnected"
   | "source.applied"
-  | "source.discarded";
+  | "source.discarded"
+  | "dsn.uploaded";
 
 export async function recordEvent(
   workspaceId: string,

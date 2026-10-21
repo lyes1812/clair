@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { connectSource, decideSync, launchSync, type FormState } from "./actions";
+import { connectSource, decideSync, launchSync, uploadDsn, type FormState } from "./actions";
 
 function Feedback({ state }: { state: FormState }) {
   if (state?.error) return <p className="error" role="alert">{state.error}</p>;
@@ -84,5 +84,25 @@ export function DecisionButtons({ slug, syncId }: { slug: string; syncId: string
         </form>
       </div>
     </div>
+  );
+}
+
+export function DsnUploadForm({ slug }: { slug: string }) {
+  const [state, action, pending] = useActionState(uploadDsn.bind(null, slug), undefined);
+  return (
+    <form className="form" action={action}>
+      <Feedback state={state} />
+      <div className="inline-form">
+        <div className="field-row">
+          <label htmlFor="dsn-files">Fichiers DSN (norme P25V01 ou P26V01, 24 fichiers et 4 Mo par fichier au plus)</label>
+          <input className="input" id="dsn-files" name="files" type="file" multiple accept=".dsn,.txt,text/plain" required />
+        </div>
+        <button className="btn primary" type="submit" disabled={pending}>{pending ? "Lecture…" : "Déposer et prévisualiser"}</button>
+      </div>
+      <p className="desc">
+        Chaque fichier est lu, contrôlé et présenté en aperçu avant d'être appliqué. Un fichier déjà déposé est reconnu à son empreinte et
+        n'est pas importé deux fois. Le fichier d'origine est conservé chiffré ; le NIR n'est jamais stocké en clair.
+      </p>
+    </form>
   );
 }

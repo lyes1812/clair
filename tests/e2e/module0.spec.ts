@@ -1,30 +1,20 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { TOTP } from "otpauth";
+import { CAPTURES, PASSWORD, signUp } from "./helpers";
 
 // Acceptation du module 0 : connexion, création d'espace, menu figé, accès croisé refusé, rôle lecteur.
 // Comptes jetables à adresses fictives ; aucune donnée réelle.
 const run = Date.now().toString(36);
-const PASSWORD = "Fictif-Test-2026!";
 const users = {
   admin: { name: "Admin Test", email: `admin-${run}@test.invalid` },
   outsider: { name: "Externe Test", email: `externe-${run}@test.invalid` },
   // Hors du domaine de recette : ne peut s'inscrire que grâce à son invitation.
   reader: { name: "Lecteur Test", email: `lecteur-${run}@invite.example` },
 };
-const CAPTURES = process.env.CAPTURES_DIR ?? "captures";
 const MENU = ["Données", "Collaborateurs", "KPI RH", "Masse salariale", "Hypothèses budgétaires", "Reporting social"];
 
 let slug = "";
 let totpSecret = "";
-
-async function signUp(page: Page, u: { name: string; email: string }) {
-  await page.goto("/inscription");
-  await page.getByLabel("Nom").fill(u.name);
-  await page.getByLabel("E-mail").fill(u.email);
-  await page.getByLabel(/Mot de passe/).fill(PASSWORD);
-  await page.getByRole("button", { name: "Créer le compte" }).click();
-  await expect(page).toHaveURL(/\/espaces$/);
-}
 
 function totpCode() {
   return new TOTP({ secret: totpSecret, digits: 6, period: 30 }).generate();

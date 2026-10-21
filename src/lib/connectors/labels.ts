@@ -8,8 +8,12 @@ export const COLLECTION_LABELS: Record<string, string> = {
   absences: "Absences",
   payroll_status: "Statut de paie par mois",
   ledger_lines: "Lignes du journal comptable",
+  declarations: "Déclarations",
+  people: "Individus déclarés",
+  remunerations: "Rémunérations",
+  activities: "Activités (temps)",
 };
 
-export const PROVIDER_LABELS = { payfit: "PayFit", pennylane: "Pennylane" } as const;
+export const PROVIDER_LABELS = { payfit: "PayFit", pennylane: "Pennylane", dsn: "Fichiers DSN" } as const;
 
 export const dateTimeFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });

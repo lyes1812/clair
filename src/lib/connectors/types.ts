@@ -16,4 +16,6 @@ export type ProviderReadResult = {
   warnings: string[];
 };
 
+// Fournisseurs lus par API (clé chiffrée) ; « dsn » est une source par fichiers déposés, sans clé.
 export type ProviderId = "payfit" | "pennylane";
+export type SourceId = ProviderId | "dsn";
