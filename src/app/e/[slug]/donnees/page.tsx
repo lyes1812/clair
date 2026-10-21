@@ -31,6 +31,8 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
     listFecFiles(workspace.id), lastSync(workspace.id, "fec"), fecCoverage(workspace.id),
   ]);
   const complete = coverage.filter((c) => c.status === "complete").length;
+  // Dépôts additifs : « Appliquée » suffit, il n'y a pas de lecture « active » unique.
+  const fileStatus = (status: string) => (status === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[status as SyncStatus]);
   const byId = Object.fromEntries(states.map((s) => [s.id, s]));
   const apiCard = ({ id, label, summary, conn, last, active }: (typeof states)[number]) => (
     <section key={id} className="panel" data-testid={`source-${id}`}>
@@ -75,7 +77,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
           </div>
           <div>
             <dt>Dernier dépôt</dt>
-            <dd>{dsnLast ? `${dateTimeFmt.format(dsnLast.startedAt)} — ${SYNC_STATUS_LABELS[dsnLast.status as SyncStatus]}` : "n.d. — aucun dépôt"}</dd>
+            <dd>{dsnLast ? `${dateTimeFmt.format(dsnLast.startedAt)} — ${fileStatus(dsnLast.status)}` : "n.d. — aucun dépôt"}</dd>
           </div>
           <div>
             <dt>Couverture</dt>
@@ -99,7 +101,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
         </div>
         <dl className="facts">
           <div><dt>Fichiers conservés</dt><dd data-testid="fec-files-count">{fecFiles.length === 0 ? "aucun" : fecFiles.length}</dd></div>
-          <div><dt>Dernier dépôt</dt><dd>{fecLast ? `${dateTimeFmt.format(fecLast.startedAt)} — ${SYNC_STATUS_LABELS[fecLast.status as SyncStatus]}` : "n.d. — aucun dépôt"}</dd></div>
+          <div><dt>Dernier dépôt</dt><dd>{fecLast ? `${dateTimeFmt.format(fecLast.startedAt)} — ${fileStatus(fecLast.status)}` : "n.d. — aucun dépôt"}</dd></div>
           <div>
             <dt>Exercices en vigueur</dt>
             <dd data-testid="fec-coverage-summary">{exercises.length === 0 ? "n.d. — aucun FEC appliqué" : exercises.map((e) => `${e.firstDate} → ${e.lastDate}`).join(" ; ")}</dd>
