@@ -15,7 +15,9 @@ export type EventKind =
   | "source.discarded"
   | "dsn.uploaded"
   | "fec.uploaded"
-  | "setting.changed";
+  | "setting.changed"
+  | "rh.rebuilt"
+  | "rh.rebuild_failed";
 
 export async function recordEvent(
   workspaceId: string,

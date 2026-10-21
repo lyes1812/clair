@@ -26,6 +26,12 @@ export function addMonths(month: string, n: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+export function addDays(date: string, n: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 export function monthsBetween(from: string, to: string): string[] {
   const out: string[] = [];
   for (let m = from; m <= to; m = addMonths(m, 1)) out.push(m);

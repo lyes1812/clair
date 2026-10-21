@@ -11,7 +11,10 @@ export function SourceBadge({ resolution, slug }: { resolution: SourceResolution
       ) : (
         <strong>n.d.</strong>
       )}
-      <span>— {resolution.reason}</span>
+      <span>
+        — {resolution.reason}
+        {resolution.mode !== "auto" && resolution.modeSetAt ? ` Choix forcé par l'administrateur le ${dateTimeFmt.format(resolution.modeSetAt)}.` : ""}
+      </span>
       <a href={`/e/${slug}/donnees`}>Données</a>
     </p>
   );

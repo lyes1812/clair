@@ -131,18 +131,23 @@ export async function importDsnFiles(workspaceId: string, uploads: DsnUpload[], 
 
 export const listDsnFiles = (workspaceId: string) => listSourceFiles(workspaceId, "dsn");
 
+type Tx = Parameters<Parameters<typeof withWorkspace>[1]>[0];
+
 // Couverture : déclarations retenues par établissement et par mois, calculées sur toutes les lectures appliquées.
 export async function dsnCoverage(workspaceId: string, extraSyncId?: string): Promise<CoverageRow[]> {
-  const rows = await withWorkspace(workspaceId, async (tx) => {
-    const applied = await tx.select({ id: sourceSync.id }).from(sourceSync).where(and(eq(sourceSync.provider, "dsn"), eq(sourceSync.status, "applied")));
-    const ids = applied.map((s) => s.id);
-    if (extraSyncId && !ids.includes(extraSyncId)) ids.push(extraSyncId);
-    if (ids.length === 0) return [];
-    return tx
-      .select({ syncId: sourceRecord.syncId, data: sourceRecord.data })
-      .from(sourceRecord)
-      .where(and(inArray(sourceRecord.syncId, ids), eq(sourceRecord.collection, "declarations")));
-  });
+  return withWorkspace(workspaceId, (tx) => dsnCoverageIn(tx, extraSyncId));
+}
+
+// Même calcul dans une transaction déjà ouverte (reconstruction du référentiel sous verrou).
+export async function dsnCoverageIn(tx: Tx, extraSyncId?: string): Promise<CoverageRow[]> {
+  const applied = await tx.select({ id: sourceSync.id }).from(sourceSync).where(and(eq(sourceSync.provider, "dsn"), eq(sourceSync.status, "applied")));
+  const ids = applied.map((s) => s.id);
+  if (extraSyncId && !ids.includes(extraSyncId)) ids.push(extraSyncId);
+  if (ids.length === 0) return [];
+  const rows = await tx
+    .select({ syncId: sourceRecord.syncId, data: sourceRecord.data })
+    .from(sourceRecord)
+    .where(and(inArray(sourceRecord.syncId, ids), eq(sourceRecord.collection, "declarations")));
   const declarations: SelectableDeclaration[] = rows.map((r) => {
     const d = r.data as Record<string, unknown>;
     return {

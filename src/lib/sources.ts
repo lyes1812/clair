@@ -1,9 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { sourceSync } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { activeSync } from "./connectors/sync";
 import type { SourceId } from "./connectors/types";
-import { getSetting, setSetting } from "./settings";
+import { getSettingMeta, setSetting } from "./settings";
 
 // Source retenue par domaine (règle validée par Lyes) : l'API fait foi si elle est connectée et qu'une lecture est
 // appliquée, sinon les fichiers ; l'administrateur peut forcer le choix ; la source retenue est affichée sur chaque écran.
@@ -25,7 +25,11 @@ export type SourceResolution = {
   reason: string;
   apiApplied: boolean;
   filesApplied: boolean;
+  // Date d'application de la source retenue : la lecture API active, ou le dernier dépôt de fichiers appliqué.
   appliedAt: Date | null;
+  // Choix forcé par un administrateur (mode ≠ auto) : quand et par qui.
+  modeSetAt: Date | null;
+  modeSetBy: string | null;
 };
 
 export function isSourceMode(v: unknown): v is SourceMode {
@@ -43,14 +47,19 @@ export function resolveSourceMode(mode: SourceMode, apiApplied: boolean, filesAp
 
 export async function resolveSource(workspaceId: string, domain: SourceDomain): Promise<SourceResolution> {
   const d = DOMAINS[domain];
-  const [mode, api, files] = await Promise.all([
-    getSetting(workspaceId, d.settingKey, (v) => (isSourceMode(v) ? v : null)),
+  const [modeMeta, api, files] = await Promise.all([
+    getSettingMeta(workspaceId, d.settingKey, (v) => (isSourceMode(v) ? v : null)),
     activeSync(workspaceId, d.api),
     withWorkspace(workspaceId, (tx) =>
-      tx.select({ decidedAt: sourceSync.decidedAt }).from(sourceSync).where(and(eq(sourceSync.provider, d.files), eq(sourceSync.status, "applied"))).limit(1),
+      tx
+        .select({ decidedAt: sourceSync.decidedAt })
+        .from(sourceSync)
+        .where(and(eq(sourceSync.provider, d.files), eq(sourceSync.status, "applied")))
+        .orderBy(desc(sourceSync.decidedAt))
+        .limit(1),
     ),
   ]);
-  const effectiveMode = mode ?? "auto";
+  const effectiveMode = modeMeta?.value ?? "auto";
   const { pick, reason } = resolveSourceMode(effectiveMode, Boolean(api), files.length > 0);
   return {
     domain,
@@ -59,7 +68,9 @@ export async function resolveSource(workspaceId: string, domain: SourceDomain): 
     reason,
     apiApplied: Boolean(api),
     filesApplied: files.length > 0,
-    appliedAt: pick === "api" ? (api?.decidedAt ?? null) : null,
+    appliedAt: pick === "api" ? (api?.decidedAt ?? null) : pick === "files" ? (files[0]?.decidedAt ?? null) : null,
+    modeSetAt: effectiveMode === "auto" ? null : (modeMeta?.updatedAt ?? null),
+    modeSetBy: effectiveMode === "auto" ? null : (modeMeta?.updatedBy ?? null),
   };
 }
 

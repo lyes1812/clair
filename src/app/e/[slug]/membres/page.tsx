@@ -21,6 +21,8 @@ const EVENT_LABELS: Record<string, string> = {
   "dsn.uploaded": "Fichiers DSN déposés",
   "fec.uploaded": "Fichiers FEC déposés",
   "setting.changed": "Paramètre modifié",
+  "rh.rebuilt": "Référentiel Collaborateurs reconstruit",
+  "rh.rebuild_failed": "Reconstruction du référentiel en échec",
 };
 
 const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });

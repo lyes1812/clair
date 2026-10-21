@@ -13,6 +13,19 @@ export async function getSetting<T>(workspaceId: string, key: string, parse: (va
   return row ? parse(row.value) : null;
 }
 
+// Valeur et traçabilité d'un paramètre (qui l'a changé, quand) : affichées à côté d'un choix forcé.
+export async function getSettingMeta<T>(workspaceId: string, key: string, parse: (value: unknown) => T | null): Promise<{ value: T; updatedAt: Date; updatedBy: string | null } | null> {
+  const [row] = await withWorkspace(workspaceId, (tx) =>
+    tx
+      .select({ value: workspaceSetting.value, updatedAt: workspaceSetting.updatedAt, updatedBy: workspaceSetting.updatedBy })
+      .from(workspaceSetting)
+      .where(and(eq(workspaceSetting.workspaceId, workspaceId), eq(workspaceSetting.key, key))),
+  );
+  if (!row) return null;
+  const value = parse(row.value);
+  return value === null ? null : { value, updatedAt: row.updatedAt, updatedBy: row.updatedBy };
+}
+
 export async function setSetting(workspaceId: string, key: string, value: unknown, actorUserId: string): Promise<void> {
   const now = new Date();
   await withWorkspace(workspaceId, (tx) =>

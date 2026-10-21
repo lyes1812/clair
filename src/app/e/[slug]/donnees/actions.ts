@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { ProviderError } from "@/lib/connectors/http";
 import { isMonth, monthRange } from "@/lib/connectors/months";
 import { isProviderId } from "@/lib/connectors/providers";
-import { applySync, deleteCredential, discardSync, saveCredential, startSync, SyncError, verifyKey } from "@/lib/connectors/sync";
+import { applySync, deleteCredential, discardSync, getSync, saveCredential, startSync, SyncError, verifyKey } from "@/lib/connectors/sync";
 import type { ProviderId } from "@/lib/connectors/types";
 import { safeFilename } from "@/lib/connectors/files";
 import { importDsnFiles } from "@/lib/dsn/import";
 import { DSN_MAX_BYTES, DsnError } from "@/lib/dsn/parser";
 import { importFecFiles } from "@/lib/fec/import";
+import { ensureRhBuild } from "@/lib/rh/referential/store";
 import { FEC_MAX_BYTES, FecError } from "@/lib/fec/parser";
 import { chooseSourceMode, DOMAINS, isSourceMode, type SourceDomain } from "@/lib/sources";
 import { requireWorkspace } from "@/lib/workspace";
@@ -72,14 +73,27 @@ export async function launchSync(slug: string, source: string, _prev: FormState,
 
 export async function decideSync(slug: string, syncId: string, decision: "apply" | "discard"): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
+  let provider: string | null = null;
   try {
+    provider = (await getSync(workspace.id, syncId))?.provider ?? null;
     if (decision === "apply") await applySync(workspace.id, syncId, session.user.id);
     else await discardSync(workspace.id, syncId, session.user.id);
   } catch (e) {
     return { error: e instanceof SyncError ? e.message : "Opération impossible." };
   }
-  revalidatePath(`/e/${slug}/donnees`, "layout");
-  return { ok: decision === "apply" ? "Synchronisation appliquée : c'est désormais la source active." : "Aperçu abandonné." };
+  // Référentiel Collaborateurs : reconstruit dès l'application d'une lecture RH (sinon à l'ouverture du module).
+  let rhNote = "";
+  if (decision === "apply" && (provider === "payfit" || provider === "dsn")) {
+    try {
+      const state = await ensureRhBuild(workspace.id, provider, session.user.id);
+      if (state.kind === "unavailable") rhNote = ` Référentiel Collaborateurs indisponible : ${state.reason}.`;
+    } catch (e) {
+      console.error("[rh] reconstruction impossible", provider, e instanceof Error ? e.name : "inconnu");
+      rhNote = " Le référentiel Collaborateurs n'a pas pu être reconstruit ; il le sera à l'ouverture du module.";
+    }
+  }
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: decision === "apply" ? `Synchronisation appliquée : c'est désormais la source active.${rhNote}` : "Aperçu abandonné." };
 }
 
 const UPLOAD_KINDS = {

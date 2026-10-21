@@ -48,9 +48,13 @@ describe("import de fichiers DSN", () => {
     expect((await dsnCoverage(A, first)).map((c) => [c.month, c.status])).toEqual([["2024-10", "complete"], ["2024-11", "complete"]]);
   });
 
-  it("application : couverture complète sur deux mois", async () => {
+  it("application : couverture complète sur deux mois, date d'application connue en mode fichiers", async () => {
     await sync.applySync(A, first, actor);
     expect((await dsnCoverage(A)).map((c) => c.status)).toEqual(["complete", "complete"]);
+    const res = await resolveSource(A, "rh");
+    expect(res.chosen).toBe("dsn");
+    expect(res.appliedAt).toBeInstanceOf(Date);
+    expect(res.modeSetAt).toBeNull();
   });
 
   it("réimport du même fichier : reconnu à son empreinte, aucun doublon", async () => {
