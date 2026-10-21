@@ -3,7 +3,7 @@ import { listSyncs, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors
 import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
-import { DsnUploadForm } from "../Forms";
+import { FileUploadForm } from "../Forms";
 import { CoverageTable } from "./CoverageTable";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
       {hasAtLeast(workspace.role, "editor") && (
         <section className="panel">
           <h2>Déposer</h2>
-          <DsnUploadForm slug={slug} />
+          <FileUploadForm slug={slug} kind="dsn" />
         </section>
       )}
 
@@ -54,7 +54,7 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
                     <td>{dateTimeFmt.format(f.createdAt)}</td>
                     <td className="num">{sizeFmt(f.sizeBytes)}</td>
                     <td><code>{f.sha256.slice(0, 12)}</code></td>
-                    <td><a href={`/e/${slug}/donnees/synchro/${f.syncId}`}><span className={`status-pill ${f.syncStatus}`}>{SYNC_STATUS_LABELS[f.syncStatus as SyncStatus]}</span></a></td>
+                    <td><a href={`/e/${slug}/donnees/synchro/${f.syncId}`}><span className={`status-pill ${f.syncStatus}`}>{f.syncStatus === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[f.syncStatus as SyncStatus]}</span></a></td>
                   </tr>
                 ))}
               </tbody>
@@ -79,7 +79,7 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
                       <td>{dateTimeFmt.format(s.startedAt)}</td>
                       <td>{scope.files?.join(", ") ?? "n.d."}</td>
                       <td>{scope.months?.length ? scope.months.join(", ") : "—"}</td>
-                      <td><span className={`status-pill ${s.status}`}>{SYNC_STATUS_LABELS[s.status as SyncStatus]}</span></td>
+                      <td><span className={`status-pill ${s.status}`}>{s.status === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[s.status as SyncStatus]}</span></td>
                       <td><a href={`/e/${slug}/donnees/synchro/${s.id}`}>Détail</a></td>
                     </tr>
                   );

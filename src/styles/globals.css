@@ -154,3 +154,5 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 .status-pill.preview, .status-pill.running { background: var(--blue-soft); color: var(--blue); }
 .status-pill.failed { background: var(--danger-bg); color: var(--danger); }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.group-title { font-size: var(--clair-type-section); margin-top: 8px; }
+.group-title .desc { font-weight: 400; }

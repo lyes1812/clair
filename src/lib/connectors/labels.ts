@@ -14,6 +14,6 @@ export const COLLECTION_LABELS: Record<string, string> = {
   activities: "Activités (temps)",
 };
 
-export const PROVIDER_LABELS = { payfit: "PayFit", pennylane: "Pennylane", dsn: "Fichiers DSN" } as const;
+export const PROVIDER_LABELS = { payfit: "PayFit", pennylane: "Pennylane", dsn: "Fichiers DSN", fec: "Fichiers FEC" } as const;
 
 export const dateTimeFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });

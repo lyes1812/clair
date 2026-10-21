@@ -4,7 +4,9 @@ import { COLLECTION_LABELS, dateTimeFmt, PROVIDER_LABELS } from "@/lib/connector
 import { getSync, sampleRecords, SYNC_STATUS_LABELS, type SyncStatus, type SyncSummary } from "@/lib/connectors/sync";
 import { ledgerTotals } from "@/lib/connectors/views";
 import { dsnCoverage, type DsnSyncSummary } from "@/lib/dsn/import";
+import { fecCoverage, type FecSyncSummary } from "@/lib/fec/import";
 import { CoverageTable } from "../../dsn/CoverageTable";
+import { ExercisesTable } from "../../fec/ExercisesTable";
 import { formatEuros } from "@/lib/money";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
@@ -29,15 +31,18 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
     ? await Promise.all([
         sampleRecords(workspace.id, id, "collaborators", 10),
         sampleRecords(workspace.id, id, "contracts", 10),
-        ledgerTotals(workspace.id, id),
+        ledgerTotals(workspace.id, id, sync.provider === "fec" ? /^(?:[67]|421|431|437)/ : undefined),
         sampleRecords(workspace.id, id, "people", 200),
       ])
     : [[], [], [], []];
   const canDecide = status === "preview" && hasAtLeast(workspace.role, "editor");
   const additive = summary.mode === "additive";
   const statusLabel = additive && status === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[status];
-  const dsn = additive ? (summary as DsnSyncSummary) : null;
+  const dsn = sync.provider === "dsn" ? (summary as DsnSyncSummary) : null;
+  const fec = sync.provider === "fec" ? (summary as FecSyncSummary) : null;
+  const uploaded = dsn ?? fec;
   const coverage = dsn && (status === "preview" || status === "applied") ? await dsnCoverage(workspace.id, status === "preview" ? id : undefined) : null;
+  const exercises = fec && (status === "preview" || status === "applied") ? await fecCoverage(workspace.id, status === "preview" ? id : undefined) : null;
 
   return (
     <>
@@ -69,14 +74,14 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
         </p>
       )}
 
-      {dsn && (
+      {uploaded && (
         <section className="panel">
           <h2>Fichiers du dépôt</h2>
           <div className="table-wrap">
             <table className="data-table" data-testid="dsn-upload-files">
               <thead><tr><th>Fichier</th><th>Résultat</th><th>Détail</th></tr></thead>
               <tbody>
-                {dsn.files.map((f) => (
+                {uploaded.files.map((f) => (
                   <tr key={`${f.filename}-${f.status}`}>
                     <td>{f.filename}</td>
                     <td>
@@ -85,7 +90,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
                       </span>
                     </td>
                     <td style={{ whiteSpace: "normal" }}>
-                      {f.status === "read" && `${f.norm ?? "norme n.d."} · ${f.encoding} · ${f.declarations} déclaration(s) · empreinte ${f.sha256.slice(0, 12)}`}
+                      {f.status === "read" && `${f.detail} · ${f.encoding} · empreinte ${f.sha256.slice(0, 12)}`}
                       {f.status === "duplicate" && `Même empreinte qu'un fichier déposé ${f.importedAt === "ce dépôt" ? "dans ce dépôt" : `le ${dateTimeFmt.format(new Date(f.importedAt))}`} ; non importé.`}
                       {f.status === "rejected" && f.reason}
                     </td>
@@ -94,7 +99,13 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
               </tbody>
             </table>
           </div>
-          {dsn.declarations.length > 0 && (
+          {fec && fec.exercises.length > 0 && (
+            <>
+              <h3>Exercices lus</h3>
+              <ExercisesTable rows={fec.exercises.map((e) => ({ ...e, syncId: id, pending: status === "preview" }))} showWarnings />
+            </>
+          )}
+          {dsn && dsn.declarations.length > 0 && (
             <>
               <h3>Déclarations lues</h3>
               <div className="table-wrap">
@@ -128,6 +139,13 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
         <section className="panel">
           <h2>{status === "preview" ? "Couverture après application" : "Couverture"}</h2>
           <CoverageTable rows={coverage} />
+        </section>
+      )}
+
+      {exercises && (
+        <section className="panel">
+          <h2>{status === "preview" ? "Exercices en vigueur après application" : "Exercices en vigueur"}</h2>
+          <ExercisesTable rows={exercises} />
         </section>
       )}
 
@@ -238,8 +256,8 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
 
       {ledger.length > 0 && (
         <section className="panel">
-          <h2>Journal comptable : totaux par mois et par compte</h2>
-          <p className="desc">Montants tels que lus à la source, sans retraitement. « — » : aucune ligne de ce côté du compte.</p>
+          <h2>{fec ? "Écritures : totaux par mois et par compte (classes 6 et 7, comptes 421, 431, 437)" : "Journal comptable : totaux par mois et par compte"}</h2>
+          <p className="desc">Montants tels que lus à la source, sans retraitement. « — » : aucune ligne de ce côté du compte.{fec && " Les autres classes sont conservées mais ne sont pas affichées ici."}</p>
           <div className="table-wrap">
             <table className="data-table" data-testid="ledger-totals">
               <thead><tr><th>Mois</th><th>Compte</th><th>Libellé</th><th className="num">Lignes</th><th className="num">Débit</th><th className="num">Crédit</th></tr></thead>

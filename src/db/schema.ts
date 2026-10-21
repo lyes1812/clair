@@ -201,13 +201,15 @@ export const sourceRecord = pgTable(
   ],
 ).enableRLS();
 
-// Fichiers DSN déposés : contenu brut chiffré (contient des NIR), supprimable ; un fichier par empreinte et par espace.
-export const dsnFile = pgTable(
-  "dsn_file",
+// Fichiers déposés (DSN, FEC) : contenu brut chiffré (les DSN contiennent des NIR), supprimable ;
+// un fichier par empreinte et par espace, quel que soit son type.
+export const sourceFile = pgTable(
+  "source_file",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
     syncId: uuid("sync_id").notNull().references(() => sourceSync.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
     sha256: text("sha256").notNull(),
     filename: text("filename").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -215,5 +217,5 @@ export const dsnFile = pgTable(
     sealedContent: text("sealed_content").notNull(),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [uniqueIndex("dsn_file_ws_sha_uq").on(t.workspaceId, t.sha256), workspaceIsolation("dsn_file")],
+  (t) => [uniqueIndex("source_file_ws_sha_uq").on(t.workspaceId, t.sha256), index("source_file_ws_kind_idx").on(t.workspaceId, t.kind), workspaceIsolation("source_file")],
 ).enableRLS();

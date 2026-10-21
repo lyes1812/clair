@@ -5,7 +5,7 @@ import { canonicalJson, decryptSecret, encryptSecret, sha256 } from "@/lib/crypt
 import { recordEvent } from "@/lib/events";
 import { ProviderError } from "./http";
 import { PROVIDERS, type VerifiedConnection } from "./providers";
-import { dsnFile } from "@/db/schema";
+import { sourceFile } from "@/db/schema";
 import type { CollectionOutcome, ProviderId, SourceId, SourceRecordInput } from "./types";
 
 export { payfitClientFor } from "./providers";
@@ -26,8 +26,10 @@ const STALE_AFTER_MS = 15 * 60 * 1000;
 
 export type CollectionDiff = { total: number; added: number; changed: number; removed: number };
 export type SyncSummary = {
-  // « additive » : les lectures appliquées s'additionnent (fichiers DSN) au lieu de se remplacer.
+  // « additive » : les lectures appliquées s'additionnent (fichiers déposés) au lieu de se remplacer ;
+  // « replaces » liste les lectures appliquées que celle-ci remplace (ex. FEC du même exercice).
   mode?: "additive";
+  replaces?: string[];
   company?: { id: string; name: string; identificationNumber: string | null };
   scopes?: string[];
   collections?: CollectionOutcome[];
@@ -261,10 +263,13 @@ export async function applySync(workspaceId: string, syncId: string, actorUserId
     if (!sync) throw new SyncError("Synchronisation introuvable.");
     if (sync.status !== "preview") throw new SyncError("Seul un aperçu peut être appliqué.");
     const now = new Date();
-    if ((sync.summary as SyncSummary).mode !== "additive") {
+    const summary = sync.summary as SyncSummary;
+    if (summary.mode !== "additive") {
       const active = await activeSyncId(tx, sync.provider as SourceId);
       if (active !== sync.baselineSyncId) throw new SyncError("La source a changé depuis cet aperçu : relancez une lecture.");
       if (active) await tx.update(sourceSync).set({ status: "superseded" }).where(eq(sourceSync.id, active));
+    } else if (summary.replaces?.length) {
+      await tx.update(sourceSync).set({ status: "superseded" }).where(and(inArray(sourceSync.id, summary.replaces), eq(sourceSync.status, "applied")));
     }
     await tx.update(sourceSync).set({ status: "applied", decidedBy: actorUserId, decidedAt: now }).where(eq(sourceSync.id, syncId));
     return sync.provider;
@@ -277,8 +282,8 @@ export async function discardSync(workspaceId: string, syncId: string, actorUser
     const [sync] = await tx.select().from(sourceSync).where(eq(sourceSync.id, syncId)).for("update");
     if (!sync || sync.status !== "preview") throw new SyncError("Seul un aperçu peut être abandonné.");
     await tx.delete(sourceRecord).where(eq(sourceRecord.syncId, syncId));
-    // Fichiers DSN d'un aperçu abandonné : supprimés, pour permettre un nouveau dépôt du même fichier.
-    await tx.delete(dsnFile).where(eq(dsnFile.syncId, syncId));
+    // Fichiers d'un aperçu abandonné : supprimés, pour permettre un nouveau dépôt du même fichier.
+    await tx.delete(sourceFile).where(eq(sourceFile.syncId, syncId));
     await tx.update(sourceSync).set({ status: "discarded", decidedBy: actorUserId, decidedAt: new Date() }).where(eq(sourceSync.id, syncId));
     return sync.provider;
   });

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 process.env.CLAIR_SECRETS_KEY ??= Buffer.alloc(32, 3).toString("base64");
 
 const { db, pool } = await import("@/db/client");
-const { dsnFile, organization, sourceRecord } = await import("@/db/schema");
+const { organization, sourceFile, sourceRecord } = await import("@/db/schema");
 const { withWorkspace } = await import("@/db/workspace-scope");
 const sync = await import("@/lib/connectors/sync");
 const { dsnCoverage, importDsnFiles, listDsnFiles } = await import("@/lib/dsn/import");
@@ -39,7 +39,7 @@ describe("import de fichiers DSN", () => {
     expect(summary.files.map((f) => f.status)).toEqual(["read", "read"]);
     expect(summary.declarations.every((d) => d.eligible)).toBe(true);
     expect(summary.collections.find((c) => c.collection === "people")).toMatchObject({ count: 12 });
-    const stored = await withWorkspace(A, (tx) => tx.select().from(dsnFile));
+    const stored = await withWorkspace(A, (tx) => tx.select().from(sourceFile));
     expect(stored).toHaveLength(2);
     expect(stored.every((f) => !f.sealedContent.includes("S21.G00.30.001") && !/2990175\d{6}/.test(f.sealedContent))).toBe(true);
     // Aperçu : la couverture « après application » inclut ce dépôt ; la couverture réelle est encore vide.

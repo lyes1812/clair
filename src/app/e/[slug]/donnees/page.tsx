@@ -2,6 +2,7 @@ import { DATA_ITEM } from "@/lib/nav";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { activeSync, getConnection, lastSync, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
 import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
+import { fecCoverage, listFecFiles } from "@/lib/fec/import";
 import { requireWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -10,10 +11,6 @@ const SOURCES = [
   { id: "payfit", label: "PayFit", summary: "Collaborateurs, contrats, temps, absences, statut de paie et journal comptable." },
   { id: "pennylane", label: "Pennylane", summary: "Plan comptable et écritures des classes 6 et 7 et des comptes 421, 431, 437." },
 ] as const;
-
-const UPCOMING = [
-  { label: "Rapprochement DSN–PayFit", step: "1d", summary: "Personnes et contrats rapprochés, écarts par champ, décisions tracées." },
-];
 
 export default async function DonneesPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -29,8 +26,28 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
     }),
   );
 
-  const [dsnFiles, dsnLast, coverage] = await Promise.all([listDsnFiles(workspace.id), lastSync(workspace.id, "dsn"), dsnCoverage(workspace.id)]);
+  const [dsnFiles, dsnLast, coverage, fecFiles, fecLast, exercises] = await Promise.all([
+    listDsnFiles(workspace.id), lastSync(workspace.id, "dsn"), dsnCoverage(workspace.id),
+    listFecFiles(workspace.id), lastSync(workspace.id, "fec"), fecCoverage(workspace.id),
+  ]);
   const complete = coverage.filter((c) => c.status === "complete").length;
+  const byId = Object.fromEntries(states.map((s) => [s.id, s]));
+  const apiCard = ({ id, label, summary, conn, last, active }: (typeof states)[number]) => (
+    <section key={id} className="panel" data-testid={`source-${id}`}>
+      <div className="source-head">
+        <div>
+          <h2>{label} <span className="tag">API</span></h2>
+          <p className="desc">{summary}</p>
+        </div>
+        <a className="btn" href={`/e/${slug}/donnees/${id}`}>Gérer</a>
+      </div>
+      <dl className="facts">
+        <div><dt>Connexion</dt><dd data-testid={`${id}-connection`}>{conn ? `Vérifiée — ${conn.companyName ?? "société"}` : "Non connectée"}</dd></div>
+        <div><dt>Dernière lecture</dt><dd>{last ? `${dateTimeFmt.format(last.startedAt)} — ${SYNC_STATUS_LABELS[last.status as SyncStatus]}` : "n.d. — aucune lecture"}</dd></div>
+        <div><dt>Source active</dt><dd data-testid={`${id}-active`}>{active?.decidedAt ? `Appliquée le ${dateTimeFmt.format(active.decidedAt)}` : "n.d. — aucune lecture appliquée"}</dd></div>
+      </dl>
+    </section>
+  );
 
   return (
     <>
@@ -40,31 +57,8 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
         <p className="desc">Toutes les sources de l'espace, lues à la demande, en lecture seule. Chaque lecture passe par un aperçu avant d'être appliquée.</p>
       </div>
 
-      {states.map(({ id, label, summary, conn, last, active }) => (
-        <section key={id} className="panel" data-testid={`source-${id}`}>
-          <div className="source-head">
-            <div>
-              <h2>{label}</h2>
-              <p className="desc">{summary}</p>
-            </div>
-            <a className="btn" href={`/e/${slug}/donnees/${id}`}>Gérer</a>
-          </div>
-          <dl className="facts">
-            <div>
-              <dt>Connexion</dt>
-              <dd data-testid={`${id}-connection`}>{conn ? `Vérifiée — ${conn.companyName ?? "société"}` : "Non connectée"}</dd>
-            </div>
-            <div>
-              <dt>Dernière lecture</dt>
-              <dd>{last ? `${dateTimeFmt.format(last.startedAt)} — ${SYNC_STATUS_LABELS[last.status as SyncStatus]}` : "n.d. — aucune lecture"}</dd>
-            </div>
-            <div>
-              <dt>Source active</dt>
-              <dd data-testid={`${id}-active`}>{active?.decidedAt ? `Appliquée le ${dateTimeFmt.format(active.decidedAt)}` : "n.d. — aucune lecture appliquée"}</dd>
-            </div>
-          </dl>
-        </section>
-      ))}
+      <h2 className="group-title">Ressources humaines <span className="desc">— par l'API PayFit, ou par les DSN que PayFit génère</span></h2>
+      {apiCard(byId.payfit)}
 
       <section className="panel" data-testid="source-dsn">
         <div className="source-head">
@@ -92,12 +86,26 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
         </dl>
       </section>
 
-      {UPCOMING.map((s) => (
-        <section key={s.label} className="placeholder">
-          <h3>{s.label} <span className="tag">étape {s.step} — à venir</span></h3>
-          <p className="muted">{s.summary}</p>
-        </section>
-      ))}
+      <h2 className="group-title">Comptabilité <span className="desc">— par l'API Pennylane, ou par le FEC que Pennylane génère</span></h2>
+      {apiCard(byId.pennylane)}
+
+      <section className="panel" data-testid="source-fec">
+        <div className="source-head">
+          <div>
+            <h2>Fichiers FEC</h2>
+            <p className="desc">Fichier des écritures comptables, un par exercice : toutes les écritures, journaux et comptes.</p>
+          </div>
+          <a className="btn" href={`/e/${slug}/donnees/fec`}>Gérer</a>
+        </div>
+        <dl className="facts">
+          <div><dt>Fichiers conservés</dt><dd data-testid="fec-files-count">{fecFiles.length === 0 ? "aucun" : fecFiles.length}</dd></div>
+          <div><dt>Dernier dépôt</dt><dd>{fecLast ? `${dateTimeFmt.format(fecLast.startedAt)} — ${SYNC_STATUS_LABELS[fecLast.status as SyncStatus]}` : "n.d. — aucun dépôt"}</dd></div>
+          <div>
+            <dt>Exercices en vigueur</dt>
+            <dd data-testid="fec-coverage-summary">{exercises.length === 0 ? "n.d. — aucun FEC appliqué" : exercises.map((e) => `${e.firstDate} → ${e.lastDate}`).join(" ; ")}</dd>
+          </div>
+        </dl>
+      </section>
     </>
   );
 }

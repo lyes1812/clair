@@ -4,7 +4,7 @@ import { withWorkspace } from "@/db/workspace-scope";
 
 // Totaux du journal par mois et par compte, tels que lus (centimes) ; un total n'est donné
 // que si toutes ses lignes ont un montant, sinon « n.d. » avec le nombre de lignes sans montant.
-export async function ledgerTotals(workspaceId: string, syncId: string) {
+export async function ledgerTotals(workspaceId: string, syncId: string, accountPrefixes?: RegExp) {
   const rows = await withWorkspace(workspaceId, (tx) =>
     tx
       .select({
@@ -21,7 +21,7 @@ export async function ledgerTotals(workspaceId: string, syncId: string) {
       .groupBy(sourceRecord.period, sql`${sourceRecord.data}->>'accountId'`)
       .orderBy(sourceRecord.period, sql`${sourceRecord.data}->>'accountId'`),
   );
-  return rows.map((r) => ({
+  return rows.filter((r) => !accountPrefixes || accountPrefixes.test(r.accountId)).map((r) => ({
     ...r,
     // null : aucune ligne n'a de montant de ce côté (affiché « — », pas 0).
     debitCents: r.debitCents === null ? null : Number(r.debitCents),

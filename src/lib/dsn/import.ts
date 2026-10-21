@@ -1,8 +1,9 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { dsnFile, sourceRecord, sourceSync } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { sourceRecord, sourceSync } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
-import { canonicalJson, encryptSecret, sha256, workspaceFingerprint } from "@/lib/crypto";
+import { canonicalJson, sha256, workspaceFingerprint } from "@/lib/crypto";
 import { recordEvent } from "@/lib/events";
+import { digestOf, knownFileHashes, listSourceFiles, storeSourceFiles, type FileOutcome, type StoredUpload } from "@/lib/connectors/files";
 import { contentHash, type SyncSummary } from "@/lib/connectors/sync";
 import type { CollectionOutcome, SourceRecordInput } from "@/lib/connectors/types";
 import { DsnError, parseDsn, type DsnDeclaration } from "./parser";
@@ -12,10 +13,7 @@ import { selectDeclarations, type CoverageRow, type SelectableDeclaration } from
 // s'additionnent et la couverture (quelle déclaration fait foi par établissement et par mois) est recalculée à chaque fois.
 export type DsnUpload = { filename: string; bytes: Uint8Array };
 
-export type DsnFileOutcome =
-  | { filename: string; status: "read"; sha256: string; sizeBytes: number; encoding: string; norm: string | null; declarations: number }
-  | { filename: string; status: "duplicate"; sha256: string; importedAt: string }
-  | { filename: string; status: "rejected"; reason: string };
+export type DsnFileOutcome = FileOutcome;
 
 export type DsnDeclarationSummary = {
   key: string; month: string | null; siret: string | null; type: string | null; fraction: string | null; order: string | null;
@@ -26,7 +24,6 @@ export type DsnDeclarationSummary = {
 export type DsnSyncSummary = SyncSummary & { mode: "additive"; files: DsnFileOutcome[]; declarations: DsnDeclarationSummary[]; collections: CollectionOutcome[] };
 
 const MAX_FILES = 24;
-const FILE_CONTEXT = (workspaceId: string) => `${workspaceId}:dsn-file`;
 
 function declarationRecords(d: DsnDeclaration, filename: string): SourceRecordInput[] {
   const content = sha256(canonicalJson({ people: d.people, contracts: d.contracts, remunerations: d.remunerations, activities: d.activities }));
@@ -56,25 +53,22 @@ export async function importDsnFiles(workspaceId: string, uploads: DsnUpload[], 
   const files: DsnFileOutcome[] = [];
   const declarations: DsnDeclarationSummary[] = [];
   const records: SourceRecordInput[] = [];
-  const toStore: { filename: string; sha256: string; sizeBytes: number; encoding: string; bytes: Uint8Array }[] = [];
+  const toStore: StoredUpload[] = [];
   const warnings: string[] = [];
   const months = new Set<string>();
 
-  const existing = await withWorkspace(workspaceId, (tx) =>
-    tx.select({ sha256: dsnFile.sha256, filename: dsnFile.filename, createdAt: dsnFile.createdAt }).from(dsnFile),
-  );
-  const known = new Map(existing.map((f) => [f.sha256, f]));
+  const known = await knownFileHashes(workspaceId);
   const seenInBatch = new Set<string>();
 
   for (const u of uploads) {
-    const digest = sha256(Buffer.from(u.bytes));
+    const digest = digestOf(u.bytes);
     const prior = known.get(digest);
     if (prior) { files.push({ filename: u.filename, status: "duplicate", sha256: digest, importedAt: prior.createdAt.toISOString() }); continue; }
     if (seenInBatch.has(digest)) { files.push({ filename: u.filename, status: "duplicate", sha256: digest, importedAt: "ce dépôt" }); continue; }
     seenInBatch.add(digest);
     try {
       const parsed = parseDsn(u.bytes, { fingerprint });
-      files.push({ filename: u.filename, status: "read", sha256: parsed.hash, sizeBytes: parsed.sizeBytes, encoding: parsed.encoding, norm: parsed.norm, declarations: parsed.declarations.length });
+      files.push({ filename: u.filename, status: "read", sha256: parsed.hash, sizeBytes: parsed.sizeBytes, encoding: parsed.encoding, detail: `${parsed.norm ?? "norme n.d."} · ${parsed.declarations.length} déclaration(s)` });
       for (const w of parsed.warnings) if (!warnings.includes(`${u.filename} : ${w}`)) warnings.push(`${u.filename} : ${w}`);
       for (const d of parsed.declarations) {
         if (d.month) months.add(d.month);
@@ -127,12 +121,7 @@ export async function importDsnFiles(workspaceId: string, uploads: DsnUpload[], 
     if (status === "preview") {
       const rows = dedup.map((r) => ({ workspaceId, syncId: row.id, collection: r.collection, recordKey: r.key, period: r.period, data: r.data, recordHash: hashes.get(`${r.collection}\u0000${r.key}`)! }));
       for (let i = 0; i < rows.length; i += 500) await tx.insert(sourceRecord).values(rows.slice(i, i + 500));
-      await tx.insert(dsnFile).values(
-        toStore.map((f) => ({
-          workspaceId, syncId: row.id, sha256: f.sha256, filename: f.filename, sizeBytes: f.sizeBytes, encoding: f.encoding,
-          sealedContent: encryptSecret(Buffer.from(f.bytes).toString("base64"), FILE_CONTEXT(workspaceId)),
-        })),
-      );
+      await storeSourceFiles(tx, workspaceId, row.id, "dsn", toStore);
     }
     return row.id;
   });
@@ -140,16 +129,7 @@ export async function importDsnFiles(workspaceId: string, uploads: DsnUpload[], 
   return syncId;
 }
 
-// Fichiers conservés (chiffrés) : nom, empreinte, date, statut de leur lecture.
-export async function listDsnFiles(workspaceId: string) {
-  return withWorkspace(workspaceId, (tx) =>
-    tx
-      .select({ id: dsnFile.id, filename: dsnFile.filename, sha256: dsnFile.sha256, sizeBytes: dsnFile.sizeBytes, createdAt: dsnFile.createdAt, syncId: dsnFile.syncId, syncStatus: sourceSync.status })
-      .from(dsnFile)
-      .innerJoin(sourceSync, eq(dsnFile.syncId, sourceSync.id))
-      .orderBy(desc(dsnFile.createdAt)),
-  );
-}
+export const listDsnFiles = (workspaceId: string) => listSourceFiles(workspaceId, "dsn");
 
 // Couverture : déclarations retenues par établissement et par mois, calculées sur toutes les lectures appliquées.
 export async function dsnCoverage(workspaceId: string, extraSyncId?: string): Promise<CoverageRow[]> {
