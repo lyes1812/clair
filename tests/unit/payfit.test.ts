@@ -150,3 +150,26 @@ describe("journal comptable : montants", () => {
     expect(normalizeLedger([{ ...line(1, null), operationDate: "2026-08-31" }], "2026-09").offPeriod).toBe(1);
   });
 });
+
+describe("temps par contrat", async () => {
+  const { normalizeWorkedTime } = await import("@/lib/connectors/payfit/client");
+  it("conserve un temps payé négatif (régularisation) sans le corriger", () => {
+    expect(normalizeWorkedTime({ contractId: "k1", payedWorkedTime: -7.5, effectiveWorkedTime: 0, workTimeUnit: "hours" }, "2026-01").data).toMatchObject({
+      paidWorkedTime: -7.5,
+      effectiveWorkedTime: 0,
+    });
+  });
+  it("refuse toujours un temps en texte ou une unité inconnue", () => {
+    expect(() => normalizeWorkedTime({ contractId: "k1", payedWorkedTime: "7.5" }, "2026-01")).toThrow();
+    expect(() => normalizeWorkedTime({ contractId: "k1", payedWorkedTime: 1, workTimeUnit: "minutes" }, "2026-01")).toThrow();
+  });
+  it("signale les temps négatifs dans les avertissements de la lecture", async () => {
+    const base = createFixtureFetch("fixture-A-1");
+    const f: FetchLike = async (url, init) => {
+      if (url.includes("/contracts/time")) return json({ contracts: [{ contractId: "TEST-A-CONTRACT-001", payedWorkedTime: -3, effectiveWorkedTime: 0, workTimeUnit: "hours" }], meta: { nextPageToken: null } });
+      return base(url, init);
+    };
+    const r = await readPayFit(createPayFitClient("fixture-A-1", { fetchImpl: f, minIntervalMs: 0 }), ["2025-01"]);
+    expect(r.warnings.some((w) => w.includes("2025-01") && w.includes("négatif"))).toBe(true);
+  });
+});

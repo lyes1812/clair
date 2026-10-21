@@ -58,6 +58,12 @@ function num(v: unknown, where: string): number | null {
   if (typeof v !== "number" || !Number.isFinite(v) || v < 0) fail(where);
   return v;
 }
+// Temps signé : PayFit renvoie des temps payés négatifs (régularisations) ; conservés tels quels.
+function signedNum(v: unknown, where: string): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== "number" || !Number.isFinite(v)) fail(where);
+  return v;
+}
 function bool(v: unknown, where: string): boolean | null {
   if (v === null || v === undefined) return null;
   if (typeof v !== "boolean") fail(where);
@@ -231,8 +237,8 @@ export function normalizeWorkedTime(row: Obj, month: string): SourceRecordInput 
     data: {
       contractId,
       month,
-      effectiveWorkedTime: num(row.effectiveWorkedTime, "time.effectiveWorkedTime"),
-      paidWorkedTime: num(row.payedWorkedTime, "time.payedWorkedTime"),
+      effectiveWorkedTime: signedNum(row.effectiveWorkedTime, "time.effectiveWorkedTime"),
+      paidWorkedTime: signedNum(row.payedWorkedTime, "time.payedWorkedTime"),
       unit: (unit as string | null | undefined) ?? null,
     },
   };
@@ -396,6 +402,15 @@ export async function readPayFit(client: PayFitClient, months: string[]): Promis
     }
     return out;
   });
+  const negativeTimes = new Map<string, number>();
+  for (const r of records) {
+    if (r.collection === "worked_time" && ((r.data.paidWorkedTime as number) < 0 || (r.data.effectiveWorkedTime as number) < 0)) {
+      negativeTimes.set(r.period!, (negativeTimes.get(r.period!) ?? 0) + 1);
+    }
+  }
+  for (const [month, n] of [...negativeTimes].sort()) {
+    warnings.push(`Temps ${month} : ${n} contrat(s) avec un temps négatif (régularisation probable), conservé(s) tel(s) quel(s).`);
+  }
   for (const r of records) {
     if (r.collection === "payroll_status" && r.data.status === "not_completed") warnings.push(`Paie ${r.period} non clôturée : journal provisoire.`);
   }

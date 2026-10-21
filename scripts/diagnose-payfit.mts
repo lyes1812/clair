@@ -1,13 +1,18 @@
 // Diagnostic de format des réponses PayFit : n'affiche que des types et des effectifs, jamais de valeur.
-// Usage (conteneur ponctuel) : npx tsx scripts/diagnose-payfit.mts <slug-espace> <AAAA-MM> [<AAAA-MM>…]
+// Usage (conteneur ponctuel) : npx tsx scripts/diagnose-payfit.mts <slug-espace> [--complet] <AAAA-MM> [<AAAA-MM>…]
+// --complet : exécute la lecture complète du bouton « Synchroniser », sans rien enregistrer, et n'affiche que
+// les comptages par collection, le nombre d'avertissements ou le champ refusé.
 import { and, eq } from "drizzle-orm";
 import { db, pool } from "@/db/client";
 import { connectorCredential, organization } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { decryptSecret } from "@/lib/crypto";
+import { readPayFit } from "@/lib/connectors/payfit/client";
 import { payfitClientFor } from "@/lib/connectors/sync";
 
-const [slug, ...months] = process.argv.slice(2);
+const [slug, ...rest] = process.argv.slice(2);
+const full = rest.includes("--complet");
+const months = rest.filter((m) => m !== "--complet");
 const kind = (v: unknown): string => {
   if (v === undefined) return "absent";
   if (v === null) return "null";
@@ -23,6 +28,19 @@ const [cred] = await withWorkspace(ws.id, (tx) =>
   tx.select().from(connectorCredential).where(and(eq(connectorCredential.workspaceId, ws.id), eq(connectorCredential.provider, "payfit"))),
 );
 const client = payfitClientFor(decryptSecret(cred.sealedSecret, `${ws.id}:payfit`));
+if (full) {
+  try {
+    const r = await readPayFit(client, months);
+    for (const c of r.collections) console.log(`[diag] ${c.collection} : ${c.status === "read" ? `${c.count} lus` : `indisponible (${c.reason})`}`);
+    console.log(`[diag] avertissements : ${r.warnings.length}`);
+    for (const w of r.warnings) console.log(`[diag]   ${w.replace(/\d+([.,]\d+)?(?= ?€)/g, "#")}`);
+  } catch (e) {
+    console.log(`[diag] ÉCHEC : ${e instanceof Error ? e.message : "erreur"}`);
+  }
+  console.log("[diag] fin");
+  await pool.end();
+  process.exit(0);
+}
 const { companyId } = await client.introspect();
 for (const month of months) {
   const rows = await client.paginate(companyId, "contracts/time", "contracts", (r) => String(r.contractId), { date: month.replace("-", "") });
