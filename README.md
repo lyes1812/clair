@@ -25,6 +25,12 @@ E2E_BASE_URL=https://<environnement> npm run e2e            # acceptation, captu
 - Le `Procfile` applique les migrations au déploiement (`postdeploy`).
 - Avant le **premier** déploiement : dump vérifié de la base, puis `scripts/codex-archive.sql` (déplace les tables Codex dans `codex_archive`, sans suppression).
 
+## Sources (module Données)
+- **Ressources humaines** : API PayFit (clé par espace, chiffrée) ou fichiers DSN (P25V01/P26V01) générés par PayFit.
+- **Comptabilité** : API Pennylane ou fichiers FEC (un par exercice) générés par Pennylane.
+- Même cycle pour tout : lecture ou dépôt → aperçu → application → historique ; réimport reconnu à l'empreinte.
+- Transports fictifs pour le développement (clés `fixture-…`, `fixture-pl-…`, générateurs DSN/FEC), activés par `CLAIR_ENABLE_FIXTURE_PROVIDERS=true` ; jamais en production.
+
 ## Organisation
 - `src/lib/nav.ts` : menu figé (Données + 5 sous-modules Studio RH).
 - `src/lib/workspace.ts` : garde d'accès à un espace, appelée par chaque page et action serveur.
