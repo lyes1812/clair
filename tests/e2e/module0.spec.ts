@@ -61,6 +61,12 @@ test.describe.serial("Module 0 — socle", () => {
     await expect(menu.getByText("Studio RH", { exact: true })).toBeVisible();
     await page.screenshot({ path: `${CAPTURES}/01-espace-menu-fige.png`, fullPage: true });
 
+    // Studio RH se replie et se déplie.
+    await menu.getByText("Studio RH", { exact: true }).click();
+    await expect(menu.getByRole("link", { name: "Collaborateurs" })).toBeHidden();
+    await menu.getByText("Studio RH", { exact: true }).click();
+    await expect(menu.getByRole("link", { name: "Collaborateurs" })).toBeVisible();
+
     for (const label of MENU.slice(1)) {
       await menu.getByRole("link", { name: label }).click();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(label);
