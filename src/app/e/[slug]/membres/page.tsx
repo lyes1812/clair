@@ -14,6 +14,10 @@ const EVENT_LABELS: Record<string, string> = {
   "member.joined": "Membre ajouté",
   "member.role_changed": "Rôle modifié",
   "member.removed": "Membre retiré",
+  "connector.connected": "Source connectée",
+  "connector.disconnected": "Source déconnectée",
+  "source.applied": "Synchronisation appliquée",
+  "source.discarded": "Synchronisation abandonnée",
 };
 
 const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });

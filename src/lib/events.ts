@@ -8,7 +8,11 @@ export type EventKind =
   | "invitation.created"
   | "member.joined"
   | "member.role_changed"
-  | "member.removed";
+  | "member.removed"
+  | "connector.connected"
+  | "connector.disconnected"
+  | "source.applied"
+  | "source.discarded";
 
 export async function recordEvent(
   workspaceId: string,

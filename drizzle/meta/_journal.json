@@ -15,6 +15,20 @@
       "when": 1792576616157,
       "tag": "0001_force_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792593624664,
+      "tag": "0002_connectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792593625885,
+      "tag": "0003_connectors_force_rls",
+      "breakpoints": true
     }
   ]
 }
