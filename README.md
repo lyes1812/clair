@@ -17,7 +17,7 @@ La base doit être utilisée avec un rôle **non superutilisateur** (comme sur S
 ## Tests
 ```sh
 DATABASE_URL=<base de test migrée> npm test                 # unitaires + isolation RLS
-E2E_BASE_URL=https://<environnement> npm run e2e            # acceptation, captures dans captures/
+E2E_BASE_URL=https://<environnement> npm run e2e            # acceptation, captures dans captures/ (E2E_PROXY si sortie par proxy)
 ```
 
 ## Scalingo (clair-test, osc-fr1)

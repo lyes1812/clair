@@ -12,6 +12,8 @@ export default defineConfig({
     locale: "fr-FR",
     trace: "retain-on-failure",
     launchOptions: process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : undefined,
+    // Sortie réseau par un proxy (environnements cloud) : vaut aussi pour les appels API des tests.
+    proxy: process.env.E2E_PROXY ? { server: process.env.E2E_PROXY } : undefined,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });
