@@ -58,5 +58,15 @@ test("DSN : dépôt, aperçu, application, réimport détecté, annule et rempla
 
   await page.goto(`/e/${slug}/donnees`);
   await expect(page.getByTestId("dsn-files-count")).toHaveText("3");
+  // Source retenue : fichiers DSN par défaut ; forcer « API uniquement » donne n.d. avec sa raison.
+  await expect(page.getByTestId("source-chosen-rh")).toContainText("Fichiers DSN");
+  const choice = page.getByTestId("source-choice-rh");
+  await choice.getByLabel("Règle").selectOption("api");
+  await choice.getByRole("button", { name: "Appliquer" }).click();
+  await expect(page.getByTestId("source-chosen-rh")).toContainText("n.d.");
+  await expect(page.getByTestId("source-chosen-rh")).toContainText("aucune lecture API appliquée");
+  await choice.getByLabel("Règle").selectOption("auto");
+  await choice.getByRole("button", { name: "Appliquer" }).click();
+  await expect(page.getByTestId("source-chosen-rh")).toContainText("Fichiers DSN");
   await expect(page.getByTestId("dsn-coverage-summary")).toContainText("2 mois × établissement complet(s) sur 2");
 });

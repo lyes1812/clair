@@ -14,7 +14,8 @@ export type EventKind =
   | "source.applied"
   | "source.discarded"
   | "dsn.uploaded"
-  | "fec.uploaded";
+  | "fec.uploaded"
+  | "setting.changed";
 
 export async function recordEvent(
   workspaceId: string,

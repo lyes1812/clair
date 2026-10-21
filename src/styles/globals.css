@@ -156,3 +156,6 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 .actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .group-title { font-size: var(--clair-type-section); margin-top: 8px; }
 .group-title .desc { font-weight: 400; }
+.source-choice { background: var(--surface); }
+.source-badge { display: inline-flex; align-items: center; gap: 8px; font-size: var(--clair-type-form); color: var(--muted); }
+.source-badge strong { color: var(--ink); font-weight: 600; }

@@ -219,3 +219,17 @@ export const sourceFile = pgTable(
   },
   (t) => [uniqueIndex("source_file_ws_sha_uq").on(t.workspaceId, t.sha256), index("source_file_ws_kind_idx").on(t.workspaceId, t.kind), workspaceIsolation("source_file")],
 ).enableRLS();
+
+// Paramètres d'un espace (règles métier, choix de source…) : une valeur JSON par clé, sans valeur par défaut cachée.
+export const workspaceSetting = pgTable(
+  "workspace_setting",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: jsonb("value").$type<unknown>().notNull(),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    updatedAt: ts("updated_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("workspace_setting_ws_key_uq").on(t.workspaceId, t.key), workspaceIsolation("workspace_setting")],
+).enableRLS();

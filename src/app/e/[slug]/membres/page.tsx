@@ -20,6 +20,7 @@ const EVENT_LABELS: Record<string, string> = {
   "source.discarded": "Synchronisation abandonnée",
   "dsn.uploaded": "Fichiers DSN déposés",
   "fec.uploaded": "Fichiers FEC déposés",
+  "setting.changed": "Paramètre modifié",
 };
 
 const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });

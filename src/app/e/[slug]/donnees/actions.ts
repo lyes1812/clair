@@ -11,6 +11,7 @@ import { importDsnFiles } from "@/lib/dsn/import";
 import { DSN_MAX_BYTES, DsnError } from "@/lib/dsn/parser";
 import { importFecFiles } from "@/lib/fec/import";
 import { FEC_MAX_BYTES, FecError } from "@/lib/fec/parser";
+import { chooseSourceMode, DOMAINS, isSourceMode, type SourceDomain } from "@/lib/sources";
 import { requireWorkspace } from "@/lib/workspace";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -105,4 +106,13 @@ export async function uploadFiles(slug: string, kind: keyof typeof UPLOAD_KINDS,
     return { error: rules.isError(e) ? (e as Error).message : "Dépôt impossible. Réessayez." };
   }
   redirect(`/e/${slug}/donnees/synchro/${id}`);
+}
+
+export async function chooseSource(slug: string, domain: string, formData: FormData): Promise<void> {
+  if (!(domain in DOMAINS)) return;
+  const mode = formData.get("mode");
+  if (!isSourceMode(mode)) return;
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  await chooseSourceMode(workspace.id, domain as SourceDomain, mode, session.user.id);
+  revalidatePath(`/e/${slug}`, "layout");
 }

@@ -9,6 +9,7 @@ const { withWorkspace } = await import("@/db/workspace-scope");
 const sync = await import("@/lib/connectors/sync");
 const { dsnCoverage, importDsnFiles, listDsnFiles } = await import("@/lib/dsn/import");
 const { fixtureDsnBytes } = await import("@/lib/dsn/fixture");
+const { chooseSourceMode, resolveSource } = await import("@/lib/sources");
 type DsnSyncSummary = import("@/lib/dsn/import").DsnSyncSummary;
 
 const run = Date.now();
@@ -98,6 +99,16 @@ describe("import de fichiers DSN", () => {
     expect((await listDsnFiles(A)).some((f) => f.filename === "2025-01.dsn")).toBe(false);
     const retry = await importDsnFiles(A, [file("2025-01.dsn", { month: "2025-01" })], actor);
     expect((await sync.getSync(A, retry))!.status).toBe("preview");
+  });
+
+  it("source retenue : fichiers DSN par défaut sans API ; « API uniquement » → n.d. avec raison ; B non affecté", async () => {
+    expect(await resolveSource(A, "rh")).toMatchObject({ mode: "auto", chosen: "dsn", filesApplied: true, apiApplied: false });
+    await chooseSourceMode(A, "rh", "api", actor);
+    expect(await resolveSource(A, "rh")).toMatchObject({ mode: "api", chosen: null });
+    expect((await resolveSource(A, "rh")).reason).toContain("aucune lecture API appliquée");
+    await chooseSourceMode(A, "rh", "auto", actor);
+    expect((await resolveSource(A, "rh")).chosen).toBe("dsn");
+    expect(await resolveSource(B, "rh")).toMatchObject({ mode: "auto", chosen: null });
   });
 
   it("isolation : l'espace B ne voit ni fichiers ni couverture de A, et ses identifiants diffèrent", async () => {
