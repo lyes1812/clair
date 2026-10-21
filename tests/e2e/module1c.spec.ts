@@ -69,4 +69,17 @@ test("DSN : dépôt, aperçu, application, réimport détecté, annule et rempla
   await choice.getByRole("button", { name: "Appliquer" }).click();
   await expect(page.getByTestId("source-chosen-rh")).toContainText("Fichiers DSN");
   await expect(page.getByTestId("dsn-coverage-summary")).toContainText("2 mois × établissement complet(s) sur 2");
+
+  // Paramètres de l'espace : définition de l'effectif (défaut validé CDI + CDD), modifiable par l'administrateur.
+  await page.goto(`/e/${slug}/parametres`);
+  await expect(page.getByTestId("setting-headcount-origin")).toContainText("Valeur par défaut");
+  await expect(page.getByRole("checkbox", { name: /^CDI 01$/ })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /^CDD 02$/ })).toBeChecked();
+  await page.getByRole("checkbox", { name: /^CDD 02$/ }).uncheck();
+  await page.getByRole("button", { name: "Enregistrer" }).click();
+  await expect(page.getByRole("status")).toContainText("enregistrées");
+  await page.reload();
+  await expect(page.getByTestId("setting-headcount-origin")).toContainText("Modifié le");
+  await expect(page.getByRole("checkbox", { name: /^CDD 02$/ })).not.toBeChecked();
+  await page.screenshot({ path: `${CAPTURES}/2a-01-parametres.png`, fullPage: true });
 });

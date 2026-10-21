@@ -159,3 +159,7 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 .source-choice { background: var(--surface); }
 .source-badge { display: inline-flex; align-items: center; gap: 8px; font-size: var(--clair-type-form); color: var(--muted); }
 .source-badge strong { color: var(--ink); font-weight: 600; }
+.checks { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.checks .label { margin-bottom: 4px; }
+.check { display: flex; align-items: center; gap: 10px; font-size: var(--clair-type-form); }
+.check input { width: 16px; height: 16px; }

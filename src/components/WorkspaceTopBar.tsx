@@ -11,7 +11,7 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email }: { slug
   const pathname = usePathname();
   const rest = pathname.replace(`/e/${slug}/`, "");
   const item = [...ALL_ITEMS].sort((a, b) => b.path.length - a.path.length).find((i) => rest === i.path || rest.startsWith(`${i.path}/`));
-  const page = rest === "membres" ? "Membres et accès" : item?.label;
+  const page = rest === "membres" ? "Membres et accès" : rest === "parametres" ? "Paramètres" : item?.label;
   return (
     <header className="ws-topbar">
       <nav className="breadcrumb" aria-label="Fil d'Ariane">
@@ -23,6 +23,7 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email }: { slug
         <div className="user-menu-panel">
           <div className="user-menu-id"><strong>{userName}</strong><span className="muted" data-testid="current-user">{email}</span></div>
           <a href={`/e/${slug}/membres`}>Membres et accès</a>
+          <a href={`/e/${slug}/parametres`}>Paramètres de l'espace</a>
           <a href="/espaces">Changer d'espace</a>
           <a href="/securite">Sécurité</a>
           <SignOutButton />
