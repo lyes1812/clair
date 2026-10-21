@@ -10,7 +10,7 @@ import { DecisionButtons } from "../../Forms";
 
 export const dynamic = "force-dynamic";
 
-const ORDER = ["company", "collaborators", "contracts", "worked_time", "absences", "payroll_status", "ledger_lines"];
+const ORDER = ["company", "accounts", "collaborators", "contracts", "worked_time", "absences", "payroll_status", "ledger_lines"];
 const nd = (v: unknown) => (v === null || v === undefined || v === "" ? "n.d." : String(v));
 
 export default async function SyncPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
@@ -37,7 +37,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
       {status === "running" && <AutoRefresh />}
       <div style={{ display: "grid", gap: 8 }}>
         <span className="label">
-          <a href={`/e/${slug}/donnees`}>Données</a> / <a href={`/e/${slug}/donnees/payfit`}>{PROVIDER_LABELS[sync.provider as "payfit"]}</a> / Lecture
+          <a href={`/e/${slug}/donnees`}>Données</a> / <a href={`/e/${slug}/donnees/${sync.provider}`}>{PROVIDER_LABELS[sync.provider as keyof typeof PROVIDER_LABELS]}</a> / Lecture
         </span>
         <h1>Lecture du {dateTimeFmt.format(sync.startedAt)}</h1>
         <p className="desc">
@@ -136,7 +136,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
       {ledger.length > 0 && (
         <section className="panel">
           <h2>Journal comptable : totaux par mois et par compte</h2>
-          <p className="desc">Montants tels que lus dans PayFit, sans retraitement. « — » : aucune ligne de ce côté du compte.</p>
+          <p className="desc">Montants tels que lus à la source, sans retraitement. « — » : aucune ligne de ce côté du compte.</p>
           <div className="table-wrap">
             <table className="data-table" data-testid="ledger-totals">
               <thead><tr><th>Mois</th><th>Compte</th><th>Libellé</th><th className="num">Lignes</th><th className="num">Débit</th><th className="num">Crédit</th></tr></thead>

@@ -1,6 +1,7 @@
 // Libellés français des collections lues, partagés par les écrans Données.
 export const COLLECTION_LABELS: Record<string, string> = {
   company: "Société",
+  accounts: "Plan comptable",
   collaborators: "Collaborateurs",
   contracts: "Contrats",
   worked_time: "Temps par contrat et par mois",

@@ -110,6 +110,19 @@ describe("synchronisation PayFit (transport fictif)", () => {
     expect(s.errorMessage).not.toMatch(/fixture-/);
   });
 
+  it("Pennylane : même cadre, aperçu puis application, indépendant de PayFit", async () => {
+    const verified = await sync.verifyKey("pennylane", "fixture-pl-A-1");
+    expect(verified.companyId).toBe("9001");
+    await sync.saveCredential(A, "pennylane", "fixture-pl-A-1", verified, null as unknown as string);
+    const id = await sync.startSync(A, "pennylane", MONTHS, null as unknown as string);
+    const s = await settle(A, id);
+    expect(s.status).toBe("preview");
+    expect((s.summary as SyncSummary).diff!.accounts).toEqual({ total: 9, added: 9, changed: 0, removed: 0 });
+    await sync.applySync(A, id, null as unknown as string);
+    expect((await sync.activeSync(A, "pennylane"))?.id).toBe(id);
+    expect((await sync.activeSync(A, "payfit"))?.id).not.toBe(id);
+  });
+
   it("isolation : l'espace B ne voit ni la connexion ni les synchronisations de A", async () => {
     expect(await sync.getConnection(B, "payfit")).toBeNull();
     expect(await sync.listSyncs(B, "payfit")).toHaveLength(0);

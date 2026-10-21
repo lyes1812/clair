@@ -4,9 +4,10 @@ import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, decryptSecret, encryptSecret, sha256 } from "@/lib/crypto";
 import { recordEvent } from "@/lib/events";
 import { ProviderError } from "./http";
-import { createPayFitClient, readPayFit } from "./payfit/client";
-import { createFixtureFetch, fixtureProvidersEnabled, isFixtureKey } from "./payfit/fixture";
+import { PROVIDERS, type VerifiedConnection } from "./providers";
 import type { CollectionOutcome, ProviderId, SourceRecordInput } from "./types";
+
+export { payfitClientFor } from "./providers";
 
 export type SyncStatus = "running" | "preview" | "applied" | "superseded" | "discarded" | "failed" | "unchanged";
 
@@ -35,26 +36,17 @@ const secretContext = (workspaceId: string, provider: ProviderId) => `${workspac
 
 // --- Clés
 
-export function payfitClientFor(apiKey: string) {
-  if (isFixtureKey(apiKey)) {
-    if (!fixtureProvidersEnabled()) throw new ProviderError("key_rejected", "clé fictive refusée sur cet environnement");
-    return createPayFitClient(apiKey, { fetchImpl: createFixtureFetch(apiKey), minIntervalMs: 0 });
-  }
-  return createPayFitClient(apiKey);
+export function verifyKey(provider: ProviderId, apiKey: string, companyId: string | null = null): Promise<VerifiedConnection> {
+  return PROVIDERS[provider].verify(apiKey.trim(), companyId);
 }
 
-export async function verifyPayFitKey(apiKey: string) {
-  const client = payfitClientFor(apiKey.trim());
-  const identity = await client.introspect();
-  const company = await client.company(identity.companyId);
-  return { companyId: company.id, companyName: company.name, scopes: identity.scopes };
-}
+export const verifyPayFitKey = (apiKey: string) => verifyKey("payfit", apiKey);
 
 export async function saveCredential(
   workspaceId: string,
   provider: ProviderId,
   apiKey: string,
-  verified: { companyId: string; companyName: string; scopes: string[] },
+  verified: VerifiedConnection,
   actorUserId: string,
 ) {
   const sealed = encryptSecret(apiKey.trim(), secretContext(workspaceId, provider));
@@ -114,16 +106,16 @@ export async function getConnection(workspaceId: string, provider: ProviderId) {
   return row ?? null;
 }
 
-async function readSecret(workspaceId: string, provider: ProviderId): Promise<string> {
+async function readSecret(workspaceId: string, provider: ProviderId): Promise<{ apiKey: string; companyId: string | null }> {
   const [row] = await withWorkspace(workspaceId, (tx) =>
     tx
-      .select({ sealed: connectorCredential.sealedSecret })
+      .select({ sealed: connectorCredential.sealedSecret, companyId: connectorCredential.externalCompanyId })
       .from(connectorCredential)
       .where(and(eq(connectorCredential.workspaceId, workspaceId), eq(connectorCredential.provider, provider))),
   );
   if (!row) throw new ProviderError("key_rejected", "aucune clé configurée");
   try {
-    return decryptSecret(row.sealed, secretContext(workspaceId, provider));
+    return { apiKey: decryptSecret(row.sealed, secretContext(workspaceId, provider)), companyId: row.companyId };
   } catch {
     throw new ProviderError("key_rejected", "clé enregistrée illisible : reconnectez la source");
   }
@@ -194,9 +186,8 @@ export function diffByCollection(baseline: Map<string, string>, current: Map<str
 
 export async function runSync(workspaceId: string, provider: ProviderId, syncId: string, months: string[]) {
   try {
-    if (provider !== "payfit") throw new ProviderError("unavailable", "connecteur non disponible");
-    const apiKey = await readSecret(workspaceId, provider);
-    const result = await readPayFit(payfitClientFor(apiKey), months);
+    const { apiKey, companyId } = await readSecret(workspaceId, provider);
+    const result = await PROVIDERS[provider].read(apiKey, companyId, months);
     const { hash, hashes } = contentHash(result.records);
 
     await withWorkspace(workspaceId, async (tx) => {

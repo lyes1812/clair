@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ProviderError } from "@/lib/connectors/http";
 import { isMonth, monthRange } from "@/lib/connectors/months";
-import { applySync, deleteCredential, discardSync, saveCredential, startSync, SyncError, verifyPayFitKey } from "@/lib/connectors/sync";
+import { isProviderId } from "@/lib/connectors/providers";
+import { applySync, deleteCredential, discardSync, saveCredential, startSync, SyncError, verifyKey } from "@/lib/connectors/sync";
+import type { ProviderId } from "@/lib/connectors/types";
 import { requireWorkspace } from "@/lib/workspace";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -14,27 +16,37 @@ function currentMonth(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit" }).format(new Date());
 }
 
-export async function connectPayFit(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+function provider(value: string): ProviderId {
+  if (!isProviderId(value)) throw new Error("Source inconnue");
+  return value;
+}
+
+export async function connectSource(slug: string, source: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const p = provider(source);
   const { session, workspace } = await requireWorkspace(slug, "admin");
   const key = String(formData.get("apiKey") ?? "").trim();
-  if (!key) return { error: "Saisissez la clé API PayFit." };
+  const companyId = String(formData.get("companyId") ?? "").trim() || null;
+  if (!key) return { error: "Saisissez la clé API." };
+  if (companyId !== null && !/^[1-9]\d{0,29}$/.test(companyId)) return { error: "L'identifiant de société est un nombre." };
   try {
-    const verified = await verifyPayFitKey(key);
-    await saveCredential(workspace.id, "payfit", key, verified, session.user.id);
+    const verified = await verifyKey(p, key, companyId);
+    await saveCredential(workspace.id, p, key, verified, session.user.id);
   } catch (e) {
     return { error: e instanceof ProviderError ? e.message : "Vérification impossible. Réessayez." };
   }
   revalidatePath(`/e/${slug}/donnees`, "layout");
-  return { ok: "Connexion vérifiée auprès de PayFit." };
+  return { ok: "Connexion vérifiée auprès du fournisseur." };
 }
 
-export async function disconnectPayFit(slug: string) {
+export async function disconnectSource(slug: string, source: string) {
+  const p = provider(source);
   const { session, workspace } = await requireWorkspace(slug, "admin");
-  await deleteCredential(workspace.id, "payfit", session.user.id);
+  await deleteCredential(workspace.id, p, session.user.id);
   revalidatePath(`/e/${slug}/donnees`, "layout");
 }
 
-export async function launchPayFitSync(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+export async function launchSync(slug: string, source: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const p = provider(source);
   const { session, workspace } = await requireWorkspace(slug, "editor");
   const from = String(formData.get("from") ?? "");
   const to = String(formData.get("to") ?? "");
@@ -45,7 +57,7 @@ export async function launchPayFitSync(slug: string, _prev: FormState, formData:
   if (months.length > MAX_MONTHS) return { error: `${MAX_MONTHS} mois au plus par lecture.` };
   let id: string;
   try {
-    id = await startSync(workspace.id, "payfit", months, session.user.id);
+    id = await startSync(workspace.id, p, months, session.user.id);
   } catch (e) {
     return { error: e instanceof SyncError ? e.message : "Lecture impossible. Réessayez." };
   }

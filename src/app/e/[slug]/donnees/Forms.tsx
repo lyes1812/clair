@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { connectPayFit, decideSync, launchPayFitSync, type FormState } from "./actions";
+import { connectSource, decideSync, launchSync, type FormState } from "./actions";
 
 function Feedback({ state }: { state: FormState }) {
   if (state?.error) return <p className="error" role="alert">{state.error}</p>;
@@ -8,28 +8,48 @@ function Feedback({ state }: { state: FormState }) {
   return null;
 }
 
-export function ConnectForm({ slug, connected }: { slug: string; connected: boolean }) {
-  const [state, action, pending] = useActionState(connectPayFit.bind(null, slug), undefined);
+const KEY_HELP: Record<string, string> = {
+  payfit:
+    "Créez dans PayFit (Intégrations → Accès API) une clé dédiée à Clair, en lecture seule : accounting:read, collaborators:read, contracts:read, contracts:time-information:read, time:read.",
+  pennylane:
+    "Créez dans Pennylane (Paramètres → Connectivité → Développeurs) un jeton d'API dédié à Clair, en lecture seule sur la comptabilité.",
+};
+
+export function ConnectForm({ slug, source, label, connected }: { slug: string; source: string; label: string; connected: boolean }) {
+  const [state, action, pending] = useActionState(connectSource.bind(null, slug, source), undefined);
   return (
     <form className="form" action={action}>
       <Feedback state={state} />
       <div className="inline-form">
         <div className="field-row">
-          <label htmlFor="apiKey">{connected ? "Remplacer la clé API PayFit" : "Clé API PayFit"}</label>
+          <label htmlFor="apiKey">{connected ? `Remplacer la clé API ${label}` : `Clé API ${label}`}</label>
           <input className="input" id="apiKey" name="apiKey" type="password" autoComplete="off" spellCheck={false} required />
         </div>
+        {source === "pennylane" && (
+          <div className="field-row" style={{ flex: "0 1 240px" }}>
+            <label htmlFor="companyId">Identifiant de société (facultatif)</label>
+            <input className="input" id="companyId" name="companyId" inputMode="numeric" autoComplete="off" />
+          </div>
+        )}
         <button className="btn primary" type="submit" disabled={pending}>{pending ? "Vérification…" : "Vérifier et enregistrer"}</button>
       </div>
       <p className="desc">
-        Créez dans PayFit (Intégrations → Accès API) une clé dédiée à Clair, en lecture seule : accounting:read, collaborators:read,
-        contracts:read, contracts:time-information:read, time:read. La clé est vérifiée auprès de PayFit, puis stockée chiffrée ; elle n'est plus jamais affichée.
+        {KEY_HELP[source]} La clé est vérifiée auprès du fournisseur, puis stockée chiffrée ; elle n'est plus jamais affichée.
+        {source === "pennylane" && " L'identifiant de société n'est utile qu'avec un jeton donnant accès à plusieurs sociétés."}
       </p>
     </form>
   );
 }
 
-export function SyncForm({ slug, defaultFrom, defaultTo }: { slug: string; defaultFrom: string; defaultTo: string }) {
-  const [state, action, pending] = useActionState(launchPayFitSync.bind(null, slug), undefined);
+const SYNC_HELP: Record<string, string> = {
+  payfit:
+    "Collaborateurs et contrats : état actuel chez PayFit (contrats archivés depuis plus d'un an non fournis). Temps, absences, statut de paie et journal : pour chaque mois de la période (24 au plus).",
+  pennylane:
+    "Plan comptable complet, puis lignes d'écritures des classes 6 et 7 et des comptes 421, 431, 437, pour chaque mois de la période (24 au plus).",
+};
+
+export function SyncForm({ slug, source, defaultFrom, defaultTo }: { slug: string; source: string; defaultFrom: string; defaultTo: string }) {
+  const [state, action, pending] = useActionState(launchSync.bind(null, slug, source), undefined);
   return (
     <form className="form" action={action}>
       <Feedback state={state} />
@@ -44,10 +64,7 @@ export function SyncForm({ slug, defaultFrom, defaultTo }: { slug: string; defau
         </div>
         <button className="btn primary" type="submit" disabled={pending}>{pending ? "Lancement…" : "Synchroniser"}</button>
       </div>
-      <p className="desc">
-        Collaborateurs et contrats : état actuel chez PayFit (contrats archivés depuis plus d'un an non fournis). Temps, absences, statut de paie et
-        journal : pour chaque mois de la période (24 au plus). Rien n'est modifié avant validation de l'aperçu.
-      </p>
+      <p className="desc">{SYNC_HELP[source]} Rien n'est modifié avant validation de l'aperçu.</p>
     </form>
   );
 }

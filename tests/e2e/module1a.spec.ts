@@ -22,8 +22,8 @@ test("PayFit : connexion, lecture, aperçu, application, relecture sans doublon"
   await page.getByLabel("Clé API PayFit").fill("fixture-A-1");
   await page.getByRole("button", { name: "Vérifier et enregistrer" }).click();
   await expect(page.getByRole("status")).toContainText("Connexion vérifiée");
-  await expect(page.getByTestId("payfit-connection-detail")).toContainText("TEST");
-  await expect(page.getByTestId("payfit-connection-detail")).toContainText("time:read");
+  await expect(page.getByTestId("connection-detail")).toContainText("TEST");
+  await expect(page.getByTestId("connection-detail")).toContainText("time:read");
 
   await page.getByLabel("Du mois").fill("2024-10");
   await page.getByLabel("Au mois").fill("2025-03");
