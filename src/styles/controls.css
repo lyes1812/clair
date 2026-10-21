@@ -1,0 +1,265 @@
+/* Clair controls for the airy appearance. The original report's actions,
+   selectors, visibility rules and print presentation remain in charge. */
+@media screen {
+  html[data-clair-theme="airy"] :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible {
+    outline:3px solid #8aafff;
+    outline-offset:3px;
+  }
+
+  html[data-clair-theme="airy"] .btn {
+    gap:8px;
+    max-width:100%;
+    min-width:0;
+    min-height:40px;
+    padding:var(--clair-button-pad-y) var(--clair-button-pad-x);
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--ink);
+    font-weight:550;
+    line-height:1.35;
+    letter-spacing:normal;
+    text-decoration:none;
+    transition:background .15s,color .15s,border-color .15s,box-shadow .15s;
+  }
+  html[data-clair-theme="airy"] .btn:hover {
+    background:#f7f8fb;
+    border-color:#d8dce5;
+    color:var(--ink);
+  }
+  html[data-clair-theme="airy"] .btn.primary {
+    padding:var(--clair-button-pad-y) var(--clair-button-pad-x);
+    background:var(--blue);
+    border-color:var(--blue);
+    color:#fff;
+  }
+  html[data-clair-theme="airy"] .btn.primary:hover {
+    background:#0f4ee0;
+    border-color:var(--blue);
+    color:#fff;
+  }
+  html[data-clair-theme="airy"] .btn[aria-pressed="true"] {
+    background:#edf3ff;
+    border-color:#d6e3ff;
+    color:var(--blue);
+  }
+  html[data-clair-theme="airy"] button:disabled {
+    cursor:not-allowed;
+    opacity:.5;
+  }
+  html[data-clair-theme="airy"] .btn:disabled {
+    color:#747b8a;
+    background:#fff;
+    border-color:var(--line);
+    opacity:.5;
+  }
+  html[data-clair-theme="airy"] .btn.primary:disabled {
+    color:#fff;
+    background:var(--blue);
+    border-color:var(--blue);
+  }
+
+  /* Comparison filters use the overview's label-and-select envelope.
+     Wrapping keeps the full set of controls available at intermediate widths. */
+  html[data-clair-theme="airy"] .scope-controls .filterbar {
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:9px;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .field {
+    display:flex;
+    flex:1 1 180px;
+    align-items:center;
+    gap:8px;
+    min-width:0;
+    min-height:40px;
+    padding:var(--clair-filter-pad-y) var(--clair-filter-pad-x);
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .field:nth-child(2) {
+    flex-basis:240px;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .field label {
+    flex:none;
+    margin:0;
+    color:#747b8a;
+    letter-spacing:normal;
+    text-transform:none;
+    white-space:nowrap;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .field select {
+    flex:1 1 auto;
+    width:auto;
+    min-width:0;
+    max-width:100%;
+    height:auto;
+    min-height:0;
+    padding:0 6px 0 0;
+    border:0;
+    border-radius:0;
+    background:transparent;
+    color:var(--ink);
+    font-weight:550;
+    line-height:1.35;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .btn {
+    flex:0 1 auto;
+    height:auto;
+    min-height:40px;
+    margin:0;
+    align-self:center;
+    justify-content:center;
+    color:var(--ink);
+  }
+  html[data-clair-theme="airy"] .scope-drawer > summary {
+    color:var(--ink);
+  }
+  html[data-clair-theme="airy"] .scope-drawer > summary:hover .scope-label {
+    color:var(--blue);
+  }
+  html[data-clair-theme="airy"] .period-presets {
+    gap:8px;
+  }
+  html[data-clair-theme="airy"] .period-preset {
+    max-width:100%;
+    min-height:40px;
+    padding:9px 13px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--ink);
+    font-weight:550;
+    line-height:1.35;
+    letter-spacing:normal;
+    transition:background .15s,color .15s,border-color .15s;
+  }
+  html[data-clair-theme="airy"] .period-preset:hover {
+    background:#f7f8fb;
+    border-color:#d8dce5;
+  }
+  html[data-clair-theme="airy"] .period-preset[aria-pressed="true"] {
+    background:#edf3ff;
+    border-color:#d6e3ff;
+    color:var(--blue);
+  }
+
+  /* Standalone business selectors keep their existing text sizes and options. */
+  html[data-clair-theme="airy"] :is(.field,.fte-mode-bar,.bonus-series) select,
+  html[data-clair-theme="airy"] #legalSearch {
+    min-width:0;
+    max-width:100%;
+    height:auto;
+    min-height:40px;
+    padding:9px 11px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--ink);
+    line-height:1.5;
+    transition:border-color .15s,box-shadow .15s;
+  }
+  html[data-clair-theme="airy"] :is(.field,.fte-mode-bar,.bonus-series) select:hover,
+  html[data-clair-theme="airy"] #legalSearch:hover {
+    border-color:#d8dce5;
+  }
+  html[data-clair-theme="airy"] :is(.fte-mode-bar label,.bonus-series) {
+    min-width:0;
+    max-width:100%;
+  }
+  html[data-clair-theme="airy"] .fte-mode-bar label { width:min(360px,100%); }
+
+  /* Contextual links, sortable table headers and icon buttons stay compact.
+     They do not inherit the outlined action button's layout. */
+  html[data-clair-theme="airy"] :is(.service-button,.month-link,.tuilage-signal,.effects-action-link) {
+    max-width:100%;
+    border:0;
+    border-radius:4px;
+    background:transparent;
+    color:var(--blue);
+    letter-spacing:normal;
+    text-decoration:none;
+  }
+  html[data-clair-theme="airy"] :is(.service-button,.month-link,.tuilage-signal,.effects-action-link):hover {
+    background:#f7f8fb;
+    color:#0f4ee0;
+  }
+  html[data-clair-theme="airy"] :is(.service-button,.tuilage-signal,.effects-action-link) {
+    padding:4px 7px;
+    text-align:left;
+    white-space:normal;
+  }
+  html[data-clair-theme="airy"] .month-link {
+    padding:9px 7px;
+    text-align:left;
+  }
+  html[data-clair-theme="airy"] .data-table th button {
+    border:0;
+    border-radius:0;
+    padding:0;
+    background:transparent;
+    color:inherit;
+    text-align:inherit;
+    font-weight:inherit;
+  }
+  html[data-clair-theme="airy"] .data-table th button:hover { color:var(--blue); }
+  html[data-clair-theme="airy"] .legal-star {
+    border:0;
+    border-radius:6px;
+    background:transparent;
+    color:var(--ink);
+  }
+  html[data-clair-theme="airy"] .legal-star:hover { background:#f7f8fb; }
+  html[data-clair-theme="airy"] .legal-star[aria-pressed="true"] { color:var(--blue); }
+  html[data-clair-theme="airy"] :is(.fte-clear,.rigidity-clear,.reorg-clear,.effects-action-secondary,.legal-remove) {
+    max-width:100%;
+    color:#aa4051;
+    letter-spacing:normal;
+    white-space:normal;
+  }
+  html[data-clair-theme="airy"] :is(.fte-clear,.rigidity-clear,.reorg-clear,.effects-action-secondary) {
+    padding:8px 7px;
+    border:0;
+    border-radius:4px;
+    background:transparent;
+    text-align:left;
+  }
+  html[data-clair-theme="airy"] :is(.fte-clear,.rigidity-clear,.reorg-clear,.effects-action-secondary,.legal-remove):hover {
+    color:#aa4051;
+    background:#fff8fa;
+  }
+  html[data-clair-theme="airy"] .btn.legal-remove { border-color:var(--line); }
+}
+
+@media screen and (max-width:720px) {
+  html[data-clair-theme="airy"] .btn {
+    min-height:44px;
+    white-space:normal;
+    overflow-wrap:anywhere;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .field {
+    flex-basis:100%;
+    min-height:44px;
+    padding:var(--clair-filter-pad-y) var(--clair-filter-pad-x);
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .field:nth-child(2) {
+    flex-basis:100%;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .btn { min-height:44px; }
+  html[data-clair-theme="airy"] .period-preset {
+    min-height:44px;
+    white-space:normal;
+  }
+  html[data-clair-theme="airy"] :is(.field,.fte-mode-bar,.bonus-series) select,
+  html[data-clair-theme="airy"] #legalSearch {
+    min-height:44px;
+    padding:8px 11px;
+  }
+  html[data-clair-theme="airy"] .scope-controls .filterbar .field select {
+    min-height:0;
+    padding:0 6px 0 0;
+  }
+  html[data-clair-theme="airy"] .fte-mode-bar label { width:100%; }
+}

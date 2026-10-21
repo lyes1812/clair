@@ -1,0 +1,2554 @@
+{
+  "id": "clair-studio-rh-budget-2026-10-15",
+  "title": "Modélisation budgétaire RH",
+  "date": "2026-10-15",
+  "scope": "Cahier des charges, sources, revue documentaire DSN–PayFit et activation contrôlée de KPI DSN de septembre 2026 — moteur budgétaire RH complet non activé",
+  "phases": [
+    {
+      "id": "R0",
+      "title": "Références, versions, contrats et contrôles",
+      "goal": "Sources DSN/PayFit conservées, revue documentaire personne/contrat et activation versionnée de trois KPI DSN de septembre disponibles. Conserver les couches de gestion et les ajustements ; terminer les contrôles de temps, références multiannuelles et couverture historique avant généralisation."
+    },
+    {
+      "id": "R1",
+      "title": "Hypothèses, rubriques, proratas et exécutions",
+      "goal": "Définir un moteur RH déterministe, ses paramètres sourcés, calendriers et exécutions reproductibles avant de généraliser les simulations."
+    },
+    {
+      "id": "R2",
+      "title": "Construction du budget et mouvements",
+      "goal": "Construire les postes projetés, changements, départs et enveloppes avec saisies contrôlées et sans double comptage."
+    },
+    {
+      "id": "R3",
+      "title": "Analyses, rapprochements et exports",
+      "goal": "Explorer les résultats, comparer les versions et expliquer exactement les écarts jusqu’au détail autorisé, puis exporter leur contexte."
+    },
+    {
+      "id": "R4",
+      "title": "Extensions à cadrer séparément",
+      "goal": "Étudier le reporting social, l’agent modélisateur local, les outils périphériques et la multidevise après le socle prioritaire France en EUR."
+    }
+  ],
+  "features": [
+    {
+      "id": "RH-BUD-001",
+      "title": "Versions RH multiannuelles",
+      "description": "Créer, copier et comparer des budgets et révisés RH avec horizon, période de référence et date de bascule explicites.",
+      "family": "Références et versions",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Lot 6 du 16/10 : versions RH indépendantes sur 36 mois maximum, référence de septembre 2026, bascule au mois suivant, copie sans modifier l’origine et révisions conservées. Le calcul est une simulation agrégée de gestion ; les versions individuelles et workflows de validation restent à construire. Lot 35 : registre documentaire facultatif de bases individuelles, par poste et mois, conservé dans les révisions et les copies avec une empreinte v9. La reprise T4 explicite exige les preuves exactes ; les saisies ne sont pas ajoutées au socle et 2027 reste à compléter. Aucun contrat réel ou rapprochement nominatif n’est créé. Lot 36 : composition financière exclusive d’un seul mois prévisionnel vide hors T4, à partir des postes choisis et d’un reste non ventilé explicite. Le socle matérialisé conserve les ajustements ; sélection, coûts et population sont figés dans une preuve versionnée v10. Une source modifiée ferme le socle et exige une recomposition explicite. Aucune reconduction T4 vers 2027 ni donnée RH validée par cette simulation. Les liens généraux aux contrats et personnes et les événements sur les salariés déjà inclus restent incomplets. Lot 37 : rattachement documentaire explicite d’une base à une personne et son contrat PayFit confirmés dans la référence active de septembre 2026, avec preuve d’identifiants, révisions, empreintes et motif conservés. La création est reconstruite côté serveur et conditionnée atomiquement au contexte encore actif ; un lien ancien reste lisible sans devenir courant. Aucun salaire, coût, date, quotité, service, présence future ou validation de base n’est déduit. Les autres mois et les règles individuelles générales restent incomplets.",
+      "codeEvidence": [
+        {
+          "file": "src/engine.js",
+          "line": 192,
+          "note": "Validation des bornes et de la bascule des scénarios du moteur financier, distinct du RH."
+        },
+        {
+          "file": "src/engine.js",
+          "line": 591,
+          "note": "Copie indépendante d’un scénario financier ; ce n’est pas un gestionnaire de versions RH."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 1,
+          "note": "Lot 6 : versions et calculs budgétaires agrégés, indépendants des KPI et paramètres RH actifs."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 278,
+          "note": "Lot 35 : provenance individuelle T4 protégée, créée uniquement depuis les propositions courantes et conservée dans les révisions."
+        },
+        {
+          "file": "src/rh-budget-base-composition.js",
+          "line": 1,
+          "note": "Lot 36 : composition exclusive, preuve conservée, contrôle de péremption et inconnues sans report T4."
+        },
+        {
+          "file": "src/rh-budget-base-composition-workbench.js",
+          "line": 1,
+          "note": "Lot 36 : préparation par mois, aperçu financier, application explicite et export complet ; ancien socle protégé."
+        },
+        {
+          "file": "src/rh-budget-individual-links.js",
+          "line": 1,
+          "note": "Lot 37 : catalogue confirmé, choix exact personne/contrat, preuve documentaire conservée et états courant/ancien/indisponible sans effet financier."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 311,
+          "note": "Lot 37 : aperçu privé et rattachement reconstruit depuis le répertoire confirmé, avec garde atomique et conservation des anciennes preuves."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145047",
+        "SCR-20261015-144848",
+        "SCR-20261015-144901"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [],
+      "acceptance": [
+        "Une nouvelle version possède un identifiant stable, un horizon mensuel, une période de référence et une date de bascule.",
+        "Copier une version puis changer ses hypothèses ne modifie ni la version d’origine ni les sources réalisées.",
+        "Les résultats précisent réel, budget ou révisé, ainsi que l’année et la version."
+      ],
+      "questions": [
+        "Quel horizon initial doit être proposé et quelles versions doivent être figées ?",
+        "Qui peut créer, copier, archiver et valider une version RH ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-002",
+      "title": "Référence figée et couches source, ajustée et prévisionnelle",
+      "description": "Conserver une référence reproductible et séparer les sources, les rapprochements, les ajustements de gestion et les hypothèses futures.",
+      "family": "Références et versions",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Lot 6 du 16/10 : chaque version fige ses journaux rapprochés et leurs empreintes, l’extourne de janvier comme ligne séparée et la révision/empreinte des paramètres RH sans recopier leurs valeurs. Les hypothèses et exécutions sont indépendantes des KPI, des ETP et des ajustements actifs. Les références individuelles budgétaires restent à compléter. Le lot 33 ajoute un registre des périodes documentées et la relecture privée d’une révision de rapprochement avec ses sources et décisions propres. Cette relecture n’est pas un résultat historique figé et ne valide aucun mois supplémentaire ni base budgétaire individuelle. Le lot 34 permet de conserver une photographie documentaire complète d’une relecture compatible, avec empreintes, audit et date de capture actuelle, puis de la consulter sans moteur courant ou sources. Cette capture ne valide aucun KPI et ne fournit pas de base individuelle budgétaire.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/payfit-overlay.js",
+          "line": 74,
+          "note": "Les ajustements sont ajoutés comme lignes séparées selon la lecture sélectionnée."
+        },
+        {
+          "file": "src/rh/payfit-overlay.js",
+          "line": 128,
+          "note": "Les références individuelles et les saisies restent assises sur la paie historique."
+        },
+        {
+          "file": "src/rh-reference-api.js",
+          "line": 197,
+          "note": "Référence brouillon versionnée et décisions manuelles, séparées des sources et KPI."
+        },
+        {
+          "file": "src/rh-reference-engine.js",
+          "line": 249,
+          "note": "Propositions et comparaisons DSN–PayFit sans activation implicite."
+        },
+        {
+          "file": "src/rh-validated-api.js",
+          "line": 259,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-validated-engine.js",
+          "line": 111,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 1,
+          "note": "Lot 6 : versions et calculs budgétaires agrégés, indépendants des KPI et paramètres RH actifs."
+        },
+        {
+          "file": "src/rh-reference-history-engine.js",
+          "line": 152,
+          "note": "Lot 33 : relecture des entrées d’une révision choisie, avec empreinte et méthode prises en charge ; pas de résultat historique sérialisé ni activation."
+        },
+        {
+          "file": "src/rh-reference-history-api.js",
+          "line": 73,
+          "note": "Lot 33 : registre annuel et lectures de révisions privées en SELECT seulement, sans substitution de source courante."
+        },
+        {
+          "file": "src/rh-reference-history-workbench.js",
+          "line": 23,
+          "note": "Lot 33 : périodes, choix de révision et exports contextuels privés ; les mois non validés restent explicites."
+        },
+        {
+          "file": "src/rh-reference-snapshot-engine.js",
+          "line": 161,
+          "note": "Lot 34 : photographie documentaire figée, sérialisation versionnée et vérification autonome sans moteur de rapprochement."
+        },
+        {
+          "file": "src/rh-reference-snapshot-api.js",
+          "line": 90,
+          "note": "Lot 34 : préparation exacte et ajout idempotent dans une table distincte ; aucune source, activation ou référence courante modifiée."
+        },
+        {
+          "file": "src/rh-reference-snapshot-workbench.js",
+          "line": 19,
+          "note": "Lot 34 : préparation de la référence entière, conservation explicite et consultation/export de photographies datées."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144848",
+        "SCR-20261015-144901",
+        "SCR-20261015-145047"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-001"
+      ],
+      "acceptance": [
+        "Une référence figée enregistre les identifiants de sources, dates d’arrêté, empreintes et règles de rapprochement utilisés.",
+        "Changer de version, recharger une source ou recalculer n’efface aucun ajustement utilisateur et ne l’applique pas deux fois.",
+        "Une absence de source reste manquante ; elle n’est remplacée ni par zéro ni par une prévision présentée comme réalisée."
+      ],
+      "questions": [
+        "Quelle date d’arrêté retenir pour la première référence ?",
+        "Comment soumettre et tracer une correction d’une référence déjà validée ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-003",
+      "title": "Axes organisationnels historisés",
+      "description": "Porter société, établissement, direction, service, centre de coûts, poste, métier, catégorie et contrat avec dates de validité.",
+      "family": "Référentiels RH",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Les sources RH sont déjà filtrées par mois, service et contrat. Il manque un référentiel temporel complet et les axes absents ne doivent pas être inventés à partir du journal comptable. Lot 38 : chronologie mensuelle déclarée de service et type de contrat sur les postes du registre individuel. Bornes inconnues, trous, axes absents et périodes inactives restent explicites ; chevauchements actifs connus refusés. Les coûts du registre sont classés une seule fois sans allocation du journal ou du socle. Les autres axes et la validité réelle des périodes restent à documenter ; ce lot ne clôt pas le référentiel temporel général. Lot 39 : six autres axes explicites dans les périodes du registre (société, établissement, direction, centre de coûts, métier, catégorie), chacun avec code stable local au scénario et libellé ou inconnu. Dates et axes absents ne sont pas déduits des contrats, services ou journaux ; aucun référentiel réel validé, manager ou hiérarchie n’est créé. Les autres périodes et la recette du référentiel complet restent ouverts.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2981,
+          "note": "Lecture des cellules d’effectifs par année, mois, service et contrat."
+        },
+        {
+          "file": "src/rh/payfit-overlay.js",
+          "line": 66,
+          "note": "Le pont comptable API reste non ventilé et ne crée aucune personne."
+        },
+        {
+          "file": "src/rh-budget-assignments.js",
+          "line": 42,
+          "note": "Lot 38 : périodes mensuelles strictes, inconnus explicites et chevauchements connus refusés, sans compléter les repères statiques."
+        },
+        {
+          "file": "src/rh-budget-assignments-workbench.js",
+          "line": 29,
+          "note": "Lot 38 : préparation explicite, aperçu des axes, application documentaire seule et conservation du brouillon."
+        },
+        {
+          "file": "src/rh-budget-assignments.js",
+          "line": 21,
+          "note": "Lot 39 : six axes optionnels stricts par période, codes et libellés documentés ou valeurs inconnues ; aucun héritage statique implicite."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144838",
+        "SCR-20261015-144914",
+        "SCR-20261015-145029",
+        "SCR-20261015-144954"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-001",
+        "RH-BUD-002"
+      ],
+      "acceptance": [
+        "Une affectation possède des dates de validité sans chevauchement non justifié pour le même rattachement.",
+        "Un changement de ventilation conserve le total ; les valeurs sans axe restent dans une catégorie non ventilée identifiable.",
+        "Aucune ventilation par personne, service ou contrat n’est fabriquée par proratisation d’un journal PayFit agrégé."
+      ],
+      "questions": [
+        "Quels axes disposent de sources fiables et d’identifiants stables chez MiiMOSA ?",
+        "Faut-il analyser chaque mois selon son organisation historique ou selon une organisation de gestion retraitée ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-004",
+      "title": "Référentiel salarié et contrat",
+      "description": "Distinguer personne, contrats successifs ou simultanés et postes ; gérer identifiants, quotité, dates et rattachements.",
+      "family": "Référentiels RH",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Revue mensuelle DSN–PayFit et décisions de rapprochement documentées conservées. Le lot 17 fournit un annuaire et des fiches en lecture seule pour septembre 2026 : personnes et contrats aux liens confirmés, appartenant au jeu de validation actif et concordant. Identité, dates, nature, quotités et temps observés gardent leur source, date de lecture, manques et comparaisons ; aucun champ API actuel n’est assimilé à un historique certifié. Les dossiers DSN seuls restent dans la couverture sans profil PayFit fictif. Les ETP contractuels au 30 septembre et les classifications documentaires ne sont repris que depuis l’instantané ETP activé, utilisable et concordant ; les temps PayFit, ETP d’activité et moyennes ne sont pas promus. Lot 18 : liste mensuelle de septembre, une ligne par contrat confirmé, personnes distinctes comptées séparément, recherche et filtres service/type documentés, détails de source et liens vers les fiches. Un autre mois reste indisponible sans réutilisation des données ni activations de septembre ; classifications inconnues et contrats exclus des ETP restent visibles. Les compteurs, sous-totaux ETP connus ou complets et profils sans contrat sont distincts. Lot 19 : projection annuelle locale des douze mois avec leur disponibilité propre ; septembre 2026 seul est actuellement pris en charge. Personnes et contrats annuels sont l’union des observations mensuelles validées, sans somme des effectifs mensuels ni total ou moyenne ETP intermois. Service et contrat se filtrent dans une même observation, sans imputation historique ; mois non validé, contrat non observé, hors filtre et ETP exclu ou inconnu restent distincts. Une autre année ne reprend pas septembre 2026. Lot 20 : liste par type de rémunération DSN S21.G00.51 pour septembre 2026, avec mois, recherche et filtres service/contrat documentés. Les occurrences 001 sont rapprochées exactement du jeu actif ; les autres types restent observés et non validés, avec libellés neutres. Centimes signés, périodes, manques et occurrences distinctes sont conservés ; les sommes restent propres à chaque type, sans total intertypes ni reconstruction de blocs 52, cotisations ou rubriques individuelles PayFit. Les dossiers DSN seuls documentés gardent leur identité et leur statut, sans fausse fiche API ; les lignes hors rattachement prouvé sont signalées séparément. Aucun salaire contractuel, contrat nouveau ou donnée source n’est créé. Le référentiel complet, l’historisation multi-mois et organisationnelle générale, les registres annuels complets et le catalogue général des rubriques de paie restent à développer. La recette intégrée et la publication du lot 20 sont à confirmer séparément. Lot 24 : exports JSON de la lecture filtrée avec sources, période, révisions, statuts et manques conservés ; aucune présence ni donnée validée supplémentaire n’est créée. Le lot 33 ajoute un registre des périodes documentées et la relecture privée d’une révision de rapprochement avec ses sources et décisions propres. Cette relecture n’est pas un résultat historique figé et ne valide aucun mois supplémentaire ni base budgétaire individuelle. Lot 37 : rattachement documentaire explicite d’une base à une personne et son contrat PayFit confirmés dans la référence active de septembre 2026, avec preuve d’identifiants, révisions, empreintes et motif conservés. La création est reconstruite côté serveur et conditionnée atomiquement au contexte encore actif ; un lien ancien reste lisible sans devenir courant. Aucun salaire, coût, date, quotité, service, présence future ou validation de base n’est déduit. Les autres mois et les règles individuelles générales restent incomplets.",
+      "codeEvidence": [
+        {
+          "file": "src/rh-reference-api.js",
+          "line": 197,
+          "note": "Référence brouillon versionnée et décisions manuelles, séparées des sources et KPI."
+        },
+        {
+          "file": "src/rh-reference-engine.js",
+          "line": 249,
+          "note": "Propositions et comparaisons DSN–PayFit sans activation implicite."
+        },
+        {
+          "file": "src/rh-validated-api.js",
+          "line": 259,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-validated-engine.js",
+          "line": 111,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-etp-engine.js",
+          "line": 133,
+          "note": "Quotités et contrats de fin de mois documentés, sans activation des temps ni moyennes."
+        },
+        {
+          "file": "src/rh-etp-api.js",
+          "line": 118,
+          "note": "Activation ETP versionnée indépendante des ajustements, KPI DSN et qualification N/S."
+        },
+        {
+          "file": "src/rh-people-engine.js",
+          "line": 62,
+          "note": "Lot 17 : projection de fiches aux liens confirmés et validation active concordante ; temps observés, ETP activés séparément, champs autorisés sans donnée source brute."
+        },
+        {
+          "file": "src/rh-people-api.js",
+          "line": 20,
+          "note": "Lot 17 : lecture privée GET de septembre 2026, assemblage des contextes conservés en mémoire sans appel PayFit distant ni écriture métier."
+        },
+        {
+          "file": "src/rh-people-workbench.js",
+          "line": 11,
+          "note": "Lot 17 : annuaire et fiches en lecture seule, identités et contrats datés, temps et quotités séparés, sources et contrôles, fermeture des données périmées en relecture."
+        },
+        {
+          "file": "src/rh-monthly-engine.js",
+          "line": 83,
+          "note": "Lot 18 : projection mensuelle du DTO validé, une ligne par contrat et personnes distinctes ; mois non couvert sans report de septembre, classifications et ETP documentés ou inconnus séparés."
+        },
+        {
+          "file": "src/rh-monthly-api.js",
+          "line": 12,
+          "note": "Lot 18 : GET privé strictement borné au mois demandé ; autres mois structurellement indisponibles sans lecture du jeu de septembre, aucun appel PayFit ni écriture métier."
+        },
+        {
+          "file": "src/rh-monthly-workbench.js",
+          "line": 14,
+          "note": "Lot 18 : liste mensuelle filtrée, compteurs cohérents, détail des sources et accès aux fiches ; fermeture des anciennes données en changement de mois ou échec de relecture."
+        },
+        {
+          "file": "src/rh-annual-engine.js",
+          "line": 64,
+          "note": "Lot 19 : douze mois à disponibilité propre et union des contrats/personnes observés sur les seuls mois validés ; filtres attachés aux observations sans ETP annuel ou report de septembre."
+        },
+        {
+          "file": "src/rh-annual-api.js",
+          "line": 7,
+          "note": "Lot 19 : GET privé avec année bornée, réutilisation en mémoire des lectures mensuelles supportées ; aucune lecture de septembre 2026 pour une autre année ni écriture métier."
+        },
+        {
+          "file": "src/rh-annual-workbench.js",
+          "line": 15,
+          "note": "Lot 19 : matrice de douze mois avec états séparés, compteurs de personnes/contrats observés, filtres par observation, détails datés et liens vers fiches ou liste mensuelle ; aucune valeur ETP annuelle ni export supplémentaire."
+        },
+        {
+          "file": "src/rh-rubrics-engine.js",
+          "line": 38,
+          "note": "Lot 20 : projection des occurrences S21.G00.51 sélectionnées avec rapprochement exact du 001 actif, autres types observés séparés, montants signés et DSN seules documentées ; aucune somme intertypes ou nouvelle validation."
+        },
+        {
+          "file": "src/rh-rubrics-api.js",
+          "line": 9,
+          "note": "Lot 20 : GET privé propriétaire strictement borné au mois demandé, assemblage des lectures et sources conservées sans appel PayFit distant, écriture ou réutilisation de septembre pour un autre mois."
+        },
+        {
+          "file": "src/rh-rubrics-workbench.js",
+          "line": 16,
+          "note": "Lot 20 : liste filtrée par type, service et contrat avec totaux par code, statuts validé/observé, périodes et provenance distincte du classement ; anciennes données fermées en erreur ou changement de mois, sans export supplémentaire."
+        },
+        {
+          "file": "src/rh-reference-history-engine.js",
+          "line": 152,
+          "note": "Lot 33 : relecture des entrées d’une révision choisie, avec empreinte et méthode prises en charge ; pas de résultat historique sérialisé ni activation."
+        },
+        {
+          "file": "src/rh-reference-history-api.js",
+          "line": 73,
+          "note": "Lot 33 : registre annuel et lectures de révisions privées en SELECT seulement, sans substitution de source courante."
+        },
+        {
+          "file": "src/rh-reference-history-workbench.js",
+          "line": 23,
+          "note": "Lot 33 : périodes, choix de révision et exports contextuels privés ; les mois non validés restent explicites."
+        },
+        {
+          "file": "src/rh-budget-individual-links.js",
+          "line": 1,
+          "note": "Lot 37 : catalogue confirmé, choix exact personne/contrat, preuve documentaire conservée et états courant/ancien/indisponible sans effet financier."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 311,
+          "note": "Lot 37 : aperçu privé et rattachement reconstruit depuis le répertoire confirmé, avec garde atomique et conservation des anciennes preuves."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145029",
+        "SCR-20261015-145131",
+        "SCR-20261015-144922",
+        "SCR-20261015-142136"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-002",
+        "RH-BUD-003"
+      ],
+      "acceptance": [
+        "Une personne et chacun de ses contrats disposent d’identifiants distincts et stables.",
+        "Une réembauche ou un contrat simultané ne crée ni doublon de personne ni disparition d’un contrat.",
+        "Les champs inconnus et les conflits entre sources sont signalés sans valeur inventée.",
+        "Le référentiel conserve des correspondances explicites entre identifiants DSN et API PayFit, avec provenance et conflits à revoir ; il reste utilisable à partir d’une seule source disponible sans exiger DSN et API simultanément.",
+        "Les fiches de ce premier lot concernent septembre 2026 et exigent des liens personne/contrat confirmés, un rattachement parent cohérent et un jeu de validation actif concordant ; une activation périmée ou retirée ne qualifie pas des données nouvelles.",
+        "Les dossiers validés sur DSN seule restent dans la couverture et les contrôles sans identifiant ni fiche PayFit fictifs ; un candidat, nom ou matricule ne crée aucun rapprochement automatique.",
+        "La fiche distingue les valeurs DSN déclarées et les photographies API datées ; les temps restent observés et aucun salaire contractuel, zéro manquant ou présence actuelle n’est déduit.",
+        "Les valeurs et classifications ETP individuelles ne sont reprises que depuis une activation actuelle et utilisable ; une ligne exclue ne devient pas un zéro validé et les ETP d’activité ou moyens restent non validés.",
+        "La réponse privée suit une liste de champs autorisés et les erreurs n’exposent ni DSN brute, identifiant social, sel de rapprochement, secret ou donnée technique du propriétaire inutile à la fiche.",
+        "La consultation, la recherche, les filtres et la sélection de fiche ne déclenchent aucun appel PayFit distant, import, activation ou écriture dans les sources, préférences, KPI et budgets ; un échec de relecture ferme les anciennes fiches.",
+        "La liste mensuelle de ce premier lot prend en charge septembre 2026 depuis les fiches validées du mois ; un autre mois valide est indisponible sans reprendre ses lignes, compteurs, ETP ou contexte, et un mois explicitement vide ou invalide ne revient pas silencieusement à septembre.",
+        "La liste contient une ligne par contrat confirmé et compte séparément les personnes distinctes présentes dans les lignes filtrées ; contrats multiples et homonymes ne provoquent ni fusion ni double comptage de personne au total.",
+        "Service et type de contrat viennent exclusivement de la classification documentaire ETP actuelle et concordante ; les valeurs non documentées gardent leurs lignes et une catégorie explicite, sans affectation ou présence historique déduite.",
+        "Les compteurs du répertoire et profils sans contrat listé restent une couverture distincte ; une personne présente dans plusieurs groupes ou filtres ne rend pas leurs sous-totaux de personnes automatiquement additionnables.",
+        "Le résumé ETP distingue valeurs contractuelles activées, sous-total connu partiel, valeurs à documenter et contrats exclus ; un filtre entièrement exclu est hors périmètre et un filtre vide ne prouve pas un ETP nul.",
+        "La recherche, les filtres et la table mensuelle partagent le même jeu de lignes ; les détails et liens de fiche gardent leurs identifiants et sources, sans appel PayFit distant ni modification des données, préférences, budgets ou calculs.",
+        "La liste annuelle présente les douze mois de l’année demandée entre 1900 et 2100, avec leur disponibilité propre ; septembre 2026 seul est pris en charge dans ce premier périmètre, sans reprise de ses observations ou contextes sur une autre période.",
+        "Les nombres annuels de contrats et personnes sont des ensembles distincts de l’union des observations mensuelles validées et filtrées ; ils ne résultent pas de la somme des effectifs mensuels et ne constituent pas un effectif légal ou présent toute l’année.",
+        "Les filtres annuels service et type de contrat doivent concorder dans une même observation mensuelle ; aucune classification connue n’est propagée à d’autres mois et les valeurs inconnues restent identifiables.",
+        "La matrice annuelle distingue mois non validé, contrat non observé dans un mois validé, observation hors filtre, ETP exclu, ETP inconnu et valeur validée explicite ; une absence n’est jamais remplacée par zéro.",
+        "Les ETP restent attachés à leur activation mensuelle concordante : aucun total, cumul ou moyenne intermois, présence annuelle, salaire ou coût individuel n’est reconstitué.",
+        "La lecture annuelle conserve les identifiants et contextes des observations, bloque les rattachements de contrat contradictoires, ferme les anciennes données lors d’une erreur ou d’un changement d’année et ne modifie aucune source, préférence, activation, budget ou calcul.",
+        "La liste par type DSN est limitée aux rémunérations S21.G00.51 du mois validé pris en charge ; les accès GET privés contrôlent mois et contexte actif, sans réutiliser les lignes, valeurs ou empreintes de septembre sur une autre période.",
+        "Chaque occurrence conserve sa source, son empreinte, sa déclaration sélectionnée, son indice de projection, son contrat et sa personne ; le 001 reprojeté doit concorder exactement avec l’instantané activé, sans fusion ou déduplication implicite des occurrences.",
+        "Seul le type 001 concordant est présenté comme validé ; les autres codes restent des observations non validées à libellés neutres. Les sommes portent sur un seul type et aucun total intertypes, prime de bloc 52, cotisation, net ou rubrique individuelle PayFit n’est reconstitué.",
+        "Les montants sont des centimes entiers signés : corrections négatives, zéro explicite, montant manquant et somme hors limite restent distingués. La complétude des lignes présentes ne prouve pas la couverture de toutes les rubriques du contrat ; l’absence d’identifiant et de date de versement conservés est signalée.",
+        "Les dossiers DSN seuls documentés restent inclus avec leur identité et leur statut, sans identifiant ou fiche PayFit fictifs ; les autres rattachements non prouvés sont signalés séparément. Service et type de contrat exigent le classement ETP activé et concordant ; les inconnus ne sont pas affectés par défaut.",
+        "Mois de déclaration et périodes d’emploi restent distincts sans réaffectation ni prorata inventés ; recherche, filtres et groupes partagent les mêmes lignes. Une relecture échouée ferme les anciennes données et la consultation ne modifie aucune source, préférence, activation, budget ou ajustement."
+      ],
+      "questions": [
+        "Quelle source fait autorité pour chaque champ contractuel ?",
+        "Comment identifier les transformations de contrat, réembauches et contrats simultanés ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-005",
+      "title": "Changements de postes datés",
+      "description": "Saisir et historiser les évolutions de poste, service, quotité et présence avec date d’effet dans un scénario.",
+      "family": "Mouvements budgétaires",
+      "priority": "P1",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Le simulateur de réorganisation actuel accepte des hypothèses agrégées et une date de référence. Il ne constitue pas une chronologie de changements individuels de poste. Lot 26 : chronologie de changements absolus de salaire mensuel temps plein et de quotité sur les seules embauches prévisionnelles en brut, avec dates inclusives, conflits contrôlés et motif. Les changements de service, métier ou poste réel restent hors de ce lot.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2098,
+          "note": "Saisie validée des paramètres agrégés de réorganisation, dont une date de référence."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2114,
+          "note": "Calcul agrégé avant/après et coûts de substitution ; pas de chaîne de postes individuels."
+        },
+        {
+          "file": "src/rh-budget-events.js",
+          "line": 25,
+          "note": "Lot 26 : cible de simulation, dates, valeurs absolues, conflits et identifiants stricts."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144954",
+        "SCR-20261015-144945",
+        "SCR-20261015-144931"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-001",
+        "RH-BUD-003",
+        "RH-BUD-004"
+      ],
+      "acceptance": [
+        "Chaque événement précise contrat ou poste, date d’effet, nouvelle valeur, motif et scénario.",
+        "Un changement daté ne modifie que les périodes concernées ; le réalisé figé reste conservé.",
+        "Les dates identiques, chevauchements et changements contradictoires sont contrôlés avant calcul.",
+        "Un changement daté du lot 26 cible exclusivement une embauche prévisionnelle en brut par UUID de mouvement ; il ne modifie aucun collaborateur ni contrat réel."
+      ],
+      "questions": [
+        "Quelle convention retenir lorsque plusieurs changements prennent effet le même jour ?",
+        "Quels champs sont modifiables dans un scénario sans modifier le référentiel réel ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-006",
+      "title": "Embauches prévisionnelles",
+      "description": "Créer des postes projetés avec dates, contrat, affectations, salaire, variable, quotité et coûts explicitement renseignés.",
+      "family": "Mouvements budgétaires",
+      "priority": "P0",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Lots 7 et 12 du 16/10 : embauches par version avec dates, service, contrat, brut mensuel à temps plein, quotité, taux estimé et coût ponctuel employeur ; préparation CSV avec aperçu puis sauvegarde explicite. Lot 13 : calendrier et répertoire en lecture seule des embauches d’une exécution conservée, avec filtres communs et fin d’embauche dérivée au lendemain du dernier jour payé. Les contrats PayFit réels, variables génériques et règles de paie individuelle ne sont pas créés par ces fonctions. Les données manquantes, notamment 2027, restent à compléter ; la recette et la publication du lot 13 doivent être constatées séparément.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1710,
+          "note": "Le calcul d’onboarding actuel est agrégé ; il ne crée pas de contrat prévisionnel."
+        },
+        {
+          "file": "src/rh-budget-movements.js",
+          "line": 5,
+          "note": "Lot 7 : mouvements budgétaires versionnés, sans modification des sources et ajustements actifs."
+        },
+        {
+          "file": "src/rh-budget-bulk.js",
+          "line": 139,
+          "note": "Lot 12 : prévisualisation de nouveaux mouvements RH en brut ; les cellules vides restent manquantes."
+        },
+        {
+          "file": "src/rh-budget-plan-engine.js",
+          "line": 157,
+          "note": "Lot 13 : dates d’embauche, fin de présence et événements dérivés rattachés au mouvement conservé."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145007",
+        "SCR-20261015-145029"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-001",
+        "RH-BUD-003",
+        "RH-BUD-004",
+        "RH-BUD-014",
+        "RH-BUD-015"
+      ],
+      "acceptance": [
+        "Une embauche projetée possède un identifiant distinct des salariés réels et appartient à une version donnée.",
+        "Les unités de salaire, nombre de versements, variable et quotité sont explicites ; les champs manquants restent à compléter.",
+        "La projection ne débute pas avant la date d’embauche et ne génère pas de coût chargé à partir du seul brut sans hypothèse de cotisations documentée."
+      ],
+      "questions": [
+        "Quels profils et paramètres sont disponibles pour préparer une embauche ?",
+        "Quels coûts annexes et calendriers de versement faut-il inclure dans le périmètre initial ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-007",
+      "title": "Vacances de postes, remplacements et clonage",
+      "description": "Relier postes vacants, départs et remplacements ; copier un profil ou une hypothèse sans modifier son origine.",
+      "family": "Mouvements budgétaires",
+      "priority": "P1",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Lot 12 du 16/10 : copie indépendante d’un mouvement budgétaire avec nouvel UUID et repère de poste distinct, désactivée et présence dans les bases à reconfirmer. Les valeurs inconnues et le mode brut ou chargé sont conservés ; la preuve protégée d’un import T4 n’est pas attribuée à la copie. L’origine figure dans une note de préparation éditable ; le mouvement original est inchangé. Lot 25 : lien documentaire optionnel et explicite entre une embauche et un départ de la même version, avec identifiants et postes distincts. Dates de vacance, continuité, chevauchement et absence de couverture conservent les jours civils et manques, sans reprise automatique de salaire, service, base ou activation. Les regroupements relisent uniquement les contributions déjà présentes dans l’exécution sélectionnée ; ils ne créent aucune couche d’économie ou de coût supplémentaire. Les groupes partageant un départ ne s’additionnent pas. Moteur financier v5 et formules inchangés. Les anciens clients omettant le champ conservent le lien, null explicite délie ; copie de version conservatrice et copie isolée inactive déliée. Le clonage de salarié réel PayFit, la gestion générale des postes et les données individuelles manquantes restent à construire. La recette intégrée et la publication sont à constater séparément.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1704,
+          "note": "Estimation agrégée de noria à partir de paramètres saisis, sans suivi de poste vacant."
+        },
+        {
+          "file": "src/rh-budget-bulk.js",
+          "line": 201,
+          "note": "Lot 12 : copie inactive et indépendante, nouveau repère, base à reconfirmer et preuve T4 retirée de la copie."
+        },
+        {
+          "file": "src/rh-budget-replacements.js",
+          "line": 23,
+          "note": "Lot 25 : références explicites d’une embauche vers un départ, unicité des relations actives et aucune normalisation historique."
+        },
+        {
+          "file": "src/rh-budget-replacements.js",
+          "line": 87,
+          "note": "Lot 25 : dates documentaires de vacance, continuité, chevauchement et contrôles, sans nouveau calcul de coût."
+        },
+        {
+          "file": "src/rh-budget-replacements.js",
+          "line": 130,
+          "note": "Lot 25 : regroupement des seules contributions de l’exécution figée, inconnus et mois absents explicites sans seconde couche financière."
+        },
+        {
+          "file": "src/rh-budget-workbench.js",
+          "line": 198,
+          "note": "Lot 25 : sélecteur de lien et aperçu du brouillon, résultats relus sur l’exécution sélectionnée ; aucune modification des mouvements réels."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145029",
+        "SCR-20261015-145007"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-005",
+        "RH-BUD-006"
+      ],
+      "acceptance": [
+        "Une copie conserve la provenance et crée une hypothèse indépendante avec un nouvel identifiant.",
+        "Un remplacement référence le poste ou contrat remplacé, sa date de début et l’éventuelle période de chevauchement.",
+        "Une période de vacance et un remplacement ne produisent pas deux économies incompatibles sur le même poste.",
+        "Une embauche peut référencer par UUID exact un départ de la même version ; auto-référence, cible ambiguë ou de type incorrect et plusieurs embauches actives sur un même départ sont refusées. L’unicité des repères de poste actifs reste protégée.",
+        "La date de départ reste le dernier jour payé et le premier jour hors rémunération son lendemain ; la date d’embauche reste son premier jour payé. Vacance, continuité, chevauchement et fin de remplacement avant couverture sont explicitement distingués en jours civils, sans date inventée.",
+        "Le lien ne recopie aucun salaire, service, contrat, présence dans la base, activation ou ajustement. Les mouvements inactifs, différences de service ou contrat et dates ou montants inconnus conservent leurs avertissements.",
+        "Le regroupement des résultats relit exclusivement les mouvements de inputSnapshot et leurs contributions de la même exécution enregistrée. Aucun coût ou économie de vacance n’est ajouté aux totaux et les groupes non exclusifs partageant un départ ne sont pas additionnés.",
+        "Contribution absente, ambiguë ou incomplète et mois conservé absent ferment le coût complet du groupe ; les parts connues et exclusions individuelles restent distinctes sans reconstruire les chiffres historiques ou compléter 2027.",
+        "Un ancien client qui omet le lien sur un mouvement existant le conserve ; null explicite délie. La copie de version conserve ses liens internes, tandis que la copie isolée d’un mouvement lié devient inactive et explicitement déliée.",
+        "Les valeurs calculées v5 sont strictement identiques avec ou sans lien documentaire ; l’empreinte des entrées peut changer et rendre une ancienne exécution périmée pour le brouillon sans réécrire son contenu, ses empreintes, références ou ajustements."
+      ],
+      "questions": [
+        "Faut-il un poste budgétaire stable distinct du contrat qui l’occupe ?",
+        "Quels remplacements peuvent comporter une période de tuilage ou plusieurs titulaires ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-008",
+      "title": "Départs prévisionnels et coûts associés",
+      "description": "Projeter dates de sortie, économies récurrentes, indemnités et autres coûts ponctuels sans les confondre avec les départs réalisés.",
+      "family": "Mouvements budgétaires",
+      "priority": "P0",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Lots 7 à 10 du 16/10 : départs prévisionnels en brut ou coût déjà chargé, reprise documentaire T4, soldes séparés, présence dans les bases et ajustements conservés sans double déduction. Lot 13 : répertoire et calendrier des départs d’une exécution figée, avec distinction dernier jour rémunéré / sortie projetée le lendemain, mouvements non datés et coûts mensuels conservés complets ou partiels. Une date ou un montant inconnu ne devient pas zéro ; aucune économie globale n’est déduite du seul nombre de sorties. Le calcul légal automatique des indemnités reste hors périmètre ; la recette et la publication du lot 13 sont à constater séparément.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2679,
+          "note": "Validation et enregistrement des paramètres du plan ciblé."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2741,
+          "note": "Projection mensuelle du plan de départs existant, avec avertissements pour éléments non chiffrés."
+        },
+        {
+          "file": "src/rh-budget-movements.js",
+          "line": 5,
+          "note": "Lot 7 : mouvements budgétaires versionnés, sans modification des sources et ajustements actifs."
+        },
+        {
+          "file": "src/rh-budget-t4.js",
+          "line": 1,
+          "note": "Lot 8 : reprise T4 en coût chargé, avec conservation des ajustements et contrôle des inconnues ; implémentation locale."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 1,
+          "note": "Lot 8 : reprise T4 en coût chargé, avec conservation des ajustements et contrôle des inconnues ; implémentation locale."
+        },
+        {
+          "file": "src/rh-budget-plan-engine.js",
+          "line": 157,
+          "note": "Lot 13 : sortie projetée au lendemain du dernier jour rémunéré ; dates inconnues conservées au répertoire."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144931",
+        "SCR-20261015-144945",
+        "SCR-20261015-144954",
+        "SCR-20261015-145007"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-004",
+        "RH-BUD-014",
+        "RH-BUD-015"
+      ],
+      "acceptance": [
+        "Une sortie projetée précise contrat, date, motif, coût récurrent de référence et éléments ponctuels distincts.",
+        "Une indemnité ou cotisation inconnue reste à chiffrer et empêche de présenter le coût total comme complet.",
+        "Les règles de cotisations et d’indemnités sont sourcées, datées et modifiables ; aucun taux légal n’est figé dans le code.",
+        "Un départ réel confirmé et le départ prévu correspondant ne sont pas comptabilisés deux fois."
+      ],
+      "questions": [
+        "Quelles conventions de date de sortie et de dernier jour rémunéré retenir ?",
+        "Quels éléments doivent être saisis par la Finance ou les RH et quels éléments peuvent être calculés après validation des règles ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-009",
+      "title": "Événements individuels de rémunération",
+      "description": "Saisir augmentations, primes, variable et autres événements avec date, assiette, durée et calendrier de versement.",
+      "family": "Mouvements budgétaires",
+      "priority": "P1",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Le plan ciblé comporte des références de primes individuelles et des compléments saisis. Il ne gère pas encore un catalogue général d’événements de rémunération. Lot 26 : événements datés de salaire mensuel temps plein et de quotité, actifs ou inactifs, sur une embauche en brut de la simulation. Les valeurs sont des remplacements absolus récurrents à partir du jour choisi ; un champ absent conserve sa valeur précédente et null demeure inconnu. Le taux de charges propre au mouvement et son coût ponctuel initial sont conservés ; les hypothèses globales du socle ne sont pas appliquées une seconde fois au mouvement. Les primes et variables individuelles générales restent à construire. Lot 28 : versements mensuels facultatifs des seules embauches simulées brutes, distincts des événements récurrents. Une prime brute est un montant final de poste sans nouveau prorata ; un coût employeur ponctuel est déjà chargé. Mois, activation, montant et confirmation d’absence des autres couches sont explicites. Le moteur v8 conserve les inconnus, les anciennes exécutions et les bases manquantes de 2027. Les paiements hors présence connue, le variable en pourcentage et les salariés déjà inclus dans le socle restent hors de ce périmètre. Publication et conservation se constatent séparément. Lot 35 prépare le prérequis des bases individuelles : coûts chargés documentaires, provenance et inclusion mensuelle T4 contrôlées, montants déclarés et part non ventilée séparés. Dates et montants absents restent inconnus. Le registre ne modifie pas les événements, mouvements, hypothèses, économies ou totaux du budget. Le rattachement général aux contrats validés et la composition financière exclusive du socle restent à développer. Lot 36 : composition financière exclusive d’un seul mois prévisionnel vide hors T4, à partir des postes choisis et d’un reste non ventilé explicite. Le socle matérialisé conserve les ajustements ; sélection, coûts et population sont figés dans une preuve versionnée v10. Une source modifiée ferme le socle et exige une recomposition explicite. Aucune reconduction T4 vers 2027 ni donnée RH validée par cette simulation. Les liens généraux aux contrats et personnes et les événements sur les salariés déjà inclus restent incomplets. Lot 37 : rattachement documentaire explicite d’une base à une personne et son contrat PayFit confirmés dans la référence active de septembre 2026, avec preuve d’identifiants, révisions, empreintes et motif conservés. La création est reconstruite côté serveur et conditionnée atomiquement au contexte encore actif ; un lien ancien reste lisible sans devenir courant. Aucun salaire, coût, date, quotité, service, présence future ou validation de base n’est déduit. Les autres mois et les règles individuelles générales restent incomplets.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2687,
+          "note": "Gestion de compléments individuels de primes avec signalement des montants inconnus."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2688,
+          "note": "Distinction de références historiques et de montants manuels dans le périmètre ciblé."
+        },
+        {
+          "file": "src/rh-budget-event-preview.js",
+          "line": 25,
+          "note": "Lot 26 : aperçu du mouvement et du budget, inconnus explicites et limites de conservation."
+        },
+        {
+          "file": "src/rh-budget-event-preview.js",
+          "line": 101,
+          "note": "Lot 26 : application de la seule liste events, après contrôle de l’aperçu et du brouillon exact."
+        },
+        {
+          "file": "src/rh-budget-events-workbench.js",
+          "line": 20,
+          "note": "Lot 26 : préparation, contrôles, aperçu et application explicite, sans enregistrement ni calcul automatiques."
+        },
+        {
+          "file": "src/rh-budget-payments.js",
+          "line": 17,
+          "note": "Lot 28 : Validation des versements, périodes, natures, confirmations et identifiants."
+        },
+        {
+          "file": "src/rh-budget-individual-bases.js",
+          "line": 132,
+          "note": "Lot 35 : rapprochement documentaire mensuel, preuves d’inclusion et montants inconnus, sans addition au budget."
+        },
+        {
+          "file": "src/rh-budget-individual-bases-workbench.js",
+          "line": 28,
+          "note": "Lot 35 : préparer, filtrer, prévisualiser, appliquer au brouillon et exporter ; enregistrement séparé."
+        },
+        {
+          "file": "src/rh-budget-base-composition.js",
+          "line": 1,
+          "note": "Lot 36 : composition exclusive, preuve conservée, contrôle de péremption et inconnues sans report T4."
+        },
+        {
+          "file": "src/rh-budget-base-composition-workbench.js",
+          "line": 1,
+          "note": "Lot 36 : préparation par mois, aperçu financier, application explicite et export complet ; ancien socle protégé."
+        },
+        {
+          "file": "src/rh-budget-individual-links.js",
+          "line": 1,
+          "note": "Lot 37 : catalogue confirmé, choix exact personne/contrat, preuve documentaire conservée et états courant/ancien/indisponible sans effet financier."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 311,
+          "note": "Lot 37 : aperçu privé et rattachement reconstruit depuis le répertoire confirmé, avec garde atomique et conservation des anciennes preuves."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144922",
+        "SCR-20261015-145029",
+        "SCR-20261015-145059"
+      ],
+      "evidenceLevel": "menu",
+      "dependencies": [
+        "RH-BUD-004",
+        "RH-BUD-014",
+        "RH-BUD-015"
+      ],
+      "acceptance": [
+        "Chaque événement précise le contrat, la rubrique, l’assiette, l’unité et les dates d’effet ou de paiement.",
+        "Le moteur distingue effet récurrent, versement ponctuel et effet report sur l’exercice suivant.",
+        "Les interactions entre événements individuels et augmentations globales suivent une priorité explicite et vérifiable.",
+        "Un événement indique UUID, date d’effet, motif, activation et au moins un nouveau salaire mensuel temps plein en centimes ou une quotité en points de base. Les champs absents conservent l’état précédent, null signale une inconnue et zéro salaire reste explicite.",
+        "Deux événements actifs ne peuvent changer le même champ le même jour ; deux champs différents le même jour sont possibles. Les dates connues restent dans la période prévisionnelle et la présence du mouvement.",
+        "La préparation locale expose un aperçu avant/après puis une application au brouillon ; un enregistrement et une exécution séparés sont requis. Un aperçu périmé ou altéré est refusé sans mutation.",
+        "Une collection payments facultative conserve UUID, mois de versement ou null, nature gross_bonus ou employer_cost, montant final en centimes ou null, activation, confirmation supplémentaire et justification. Les nouvelles lignes sont désactivées et non confirmées.",
+        "La prime brute ajoute au brut récurrent le montant final prévu pour le poste, sans nouvelle quotité ou prorata ; les charges propres sont arrondies une seule fois sur le brut total. Le coût ponctuel déjà chargé reçoit zéro taux supplémentaire et le coût historique initial reste conservé.",
+        "Le mois connu appartient au prévisionnel et aux mois de présence connus. Un mois ou montant inconnu, ou une confirmation manquante, laisse la composante et le coût complet concernés incomplets ; le zéro explicite reste distinct.",
+        "Une seule ligne active par embauche, mois connu et nature évite les doubles versements. Les UUID sont uniques entre mouvements, événements et versements sans distinction de casse."
+      ],
+      "questions": [
+        "Quels événements doivent être disponibles dans le premier lot ?",
+        "Le variable doit-il être budgété selon acquisition, paiement ou deux lectures séparées ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-010",
+      "title": "Matrice mensuelle des hypothèses globales",
+      "description": "Gérer hypothèses de gestion par mois, population et scénario : politique salariale, variable, primes et paramètres de projection.",
+      "family": "Hypothèses et moteur",
+      "priority": "P0",
+      "phase": "R1",
+      "status": "partial",
+      "coverage": "Lot 14 du 16/10 : préparation groupée des trois hypothèses existantes (évolution relative à la base brute mensuelle, prime brute du mois et taux estimé de charges), avec période, proposition commune, grille mensuelle modifiable et aperçu des cellules et coûts locaux avant/après. Le mode par défaut complète les cellules vides ; le remplacement est explicite et une proposition vide conserve la valeur, y compris zéro déjà saisi. Les notes sont conservées et le motif ajouté aux seuls mois modifiés. Réalisé, bases brutes, lignes chargées T4, ajustements et mouvements restent inchangés. Les populations, constantes légales et paramètres par société ne sont pas couverts ; la recette et la publication du lot 14 restent à constater.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1795,
+          "note": "Structure existante de base salariale et de taux mensuels sur un horizon fixé."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1813,
+          "note": "Validation et persistance des taux mensuels du simulateur ciblé."
+        },
+        {
+          "file": "src/rh-budget-engine.js",
+          "line": 3,
+          "note": "Lot 6 : versions et calculs budgétaires agrégés, indépendants des KPI et paramètres RH actifs."
+        },
+        {
+          "file": "src/rh-budget-global.js",
+          "line": 122,
+          "note": "Lot 14 : propositions mensuelles clairsemées, exclusions chargées et projection locale des coûts avec le moteur existant."
+        },
+        {
+          "file": "src/rh-budget-global-workbench.js",
+          "line": 16,
+          "note": "Lot 14 : période, report de paramètres communs, grille mensuelle et aperçu avant application au brouillon."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145059",
+        "SCR-20261015-145047"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-001",
+        "RH-BUD-002"
+      ],
+      "acceptance": [
+        "Chaque cellule possède unité, mois, périmètre, source et règle de propagation.",
+        "Les paramètres de gestion et les constantes légales sont identifiés séparément ; ces dernières ont version, date d’effet et référence vérifiable.",
+        "Modifier une hypothèse d’un scénario ne change pas les mois réalisés verrouillés ni les autres versions."
+      ],
+      "questions": [
+        "Quelles hypothèses globales doivent être actives dès le premier moteur RH ?",
+        "Quelles règles d’assiette et de cumul retenir pour les augmentations générales et individuelles ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-011",
+      "title": "Surcharges d’hypothèses par société",
+      "description": "Définir les exceptions d’une société aux hypothèses globales, sans duplication ambiguë des paramètres.",
+      "family": "Hypothèses et moteur",
+      "priority": "P1",
+      "phase": "R1",
+      "status": "planned",
+      "coverage": "L’entrée Hypothèses par Société est visible dans les menus de démonstration ; aucune matrice correspondante ni priorité de surcharge n’est montrée ou établie dans Clair.",
+      "codeEvidence": [],
+      "screens": [
+        "SCR-20261015-144922",
+        "SCR-20261015-142136"
+      ],
+      "evidenceLevel": "menu",
+      "dependencies": [
+        "RH-BUD-003",
+        "RH-BUD-010"
+      ],
+      "acceptance": [
+        "Une cellule hérite d’une hypothèse globale ou porte une surcharge explicite avec sa provenance.",
+        "Effacer une surcharge rétablit l’héritage sans créer de valeur nulle implicite.",
+        "Le résultat permet de consulter la valeur effective et la règle de priorité appliquée."
+      ],
+      "questions": [
+        "Le premier périmètre couvre-t-il plusieurs sociétés ou une seule société française ?",
+        "Quelles hypothèses sont surchargeables et quelles exceptions sont interdites ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-012",
+      "title": "Enveloppes budgétaires par service",
+      "description": "Saisir une enveloppe par service et période, comparer sa consommation et expliciter son articulation avec les événements détaillés.",
+      "family": "Construction du budget",
+      "priority": "P1",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Lot 15 du 16/10 : registre d’enveloppes par service et mois, avec montant employeur déjà chargé, activation et deux modes explicites. Un plafond contrôle les seules embauches choisies du même service sans ajouter leur coût ; sans lien ou consommation complète, le disponible reste inconnu. Un complément net sans lien est ajouté une seule fois après confirmation qu’il est absent des bases, primes globales et mouvements. Une ligne active par service/mois, données manquantes explicites, aperçu local puis sauvegarde et calcul v5 distincts. Le socle global n’est pas ventilé et les bases 2027 restent inconnues. Les plafonds ne constituent pas un budget complet de service ; recette intégrée et publication à constater. Lot 27 : l’unicité est étendue au service, mois et rubrique pour permettre des contrôles de composantes disjointes ; la méthode historique sans rubrique et les compléments nets restent conservés.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1651,
+          "note": "La clé de planification distingue service et population."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1674,
+          "note": "Saisie de prévisions par périmètre ; elle ne constitue pas un budget ventilé validé."
+        },
+        {
+          "file": "src/rh-budget-envelopes.js",
+          "line": 22,
+          "note": "Lot 15 : registre de service/mois, modes, limites et liens d’embauches contrôlés."
+        },
+        {
+          "file": "src/rh-budget-envelopes.js",
+          "line": 73,
+          "note": "Lot 15 : plafonds non additifs et compléments nets chargés séparés, avec inconnues conservées."
+        },
+        {
+          "file": "src/rh-budget-envelopes-workbench.js",
+          "line": 28,
+          "note": "Lot 15 : préparation locale d’enveloppes, aperçu et application au brouillon avant sauvegarde."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144922",
+        "SCR-20261015-142136"
+      ],
+      "evidenceLevel": "menu",
+      "dependencies": [
+        "RH-BUD-003",
+        "RH-BUD-010",
+        "RH-BUD-014"
+      ],
+      "acceptance": [
+        "Une enveloppe précise période, service, unité, nature de coût et version.",
+        "Les événements détaillés consomment ou complètent l’enveloppe selon une règle affichée, sans double comptage.",
+        "Un écart entre total des enveloppes et budget global est visible et réconciliable."
+      ],
+      "questions": [
+        "Les enveloppes représentent-elles un plafond, une cible ou un montant additionnel ?",
+        "Faut-il une mensualisation saisie, saisonnalisée ou calculée depuis les événements ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-013",
+      "title": "Enveloppes par rubrique de rémunération",
+      "description": "Prévoir des enveloppes de primes, variable, rémunération ou cotisations avec périmètre et calendrier explicites.",
+      "family": "Construction du budget",
+      "priority": "P1",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Lot 27 : plafonds mensuels par rubrique de gestion — brut, charges employeur ou coût ponctuel employeur — pour les seules embauches prévisionnelles explicitement liées du même service. La consommation relit la composante déjà calculée, y compris après événements datés, sans nouvelle charge ni ventilation du socle agrégé. Les composantes disjointes peuvent être contrôlées séparément ; un plafond de coût total qui recouvre ces mêmes embauches au même mois est refusé. Une composante connue reste contrôlable même si le coût employeur total est inconnu. Les enveloppes et compléments nets existants sont conservés ; les compléments sont réservés au coût total déjà chargé. Préparation locale, aperçu puis application, sauvegarde et calcul restent distincts. Les enveloppes générales de primes, variable, répartition individuelle et budgets complets par service restent à construire. La publication privée et la conservation réelles se constatent séparément. Lot 28 : les plafonds relisent les composantes finales des embauches après versements, sans ajout distinct de la prime ou du coût ponctuel déjà présent dans ces composantes.",
+      "codeEvidence": [
+        {
+          "file": "src/rh-budget-envelopes.js",
+          "line": 22,
+          "note": "Lot 27 : Rubriques, cellules uniques et contrôle des chevauchements de consommation."
+        },
+        {
+          "file": "src/rh-budget-envelopes.js",
+          "line": 73,
+          "note": "Lot 27 : Composantes déjà calculées, inconnus explicites et aucun coût de plafond ajouté."
+        },
+        {
+          "file": "src/rh-budget-envelope-preview.js",
+          "line": 36,
+          "note": "Lot 27 : Aperçu cohérent avec la sauvegarde, conservation de la rubrique omise."
+        },
+        {
+          "file": "src/rh-budget-envelopes-workbench.js",
+          "line": 28,
+          "note": "Lot 27 : Choix de rubrique, préparation et consommation affichée avec son disponible."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144922",
+        "SCR-20261015-142136"
+      ],
+      "evidenceLevel": "menu",
+      "dependencies": [
+        "RH-BUD-010",
+        "RH-BUD-012",
+        "RH-BUD-014"
+      ],
+      "acceptance": [
+        "Une enveloppe possède rubrique, période, périmètre, unité et règle de mensualisation.",
+        "Une enveloppe et les événements individuels d’une même rubrique sont rapprochés pour éviter leur addition automatique.",
+        "Les montants non affectés sont affichés comme non ventilés et non répartis arbitrairement entre salariés.",
+        "Le champ rubric est facultatif pour les enveloppes historiques : son absence conserve la méthode de coût total et ne normalise pas les anciennes entrées ou sorties. Les valeurs prises en charge sont total, gross, charges et one_off.",
+        "Un plafond consomme exclusivement le costCents, grossCents, chargesCents ou otherCostCents déjà conservé des embauches liées selon la rubrique choisie. Il ne modifie aucun montant budgétaire, même en cas de dépassement.",
+        "Une embauche du même mois peut consommer des plafonds de composantes disjointes ; un plafond de total et un plafond de composante qui se recouvrent sont refusés, ainsi que deux plafonds actifs du même service, mois et rubrique.",
+        "Les inconnus, liens absents, mouvements inactifs, plafonds nuls et dépassements restent explicites. La consommation d’une composante connue ne transforme pas un coût complet inconnu en résultat valide.",
+        "Les compléments nets restent limités au coût employeur total et exigent leur confirmation habituelle ; aucun montant déjà chargé n’est présenté comme un brut ou ne reçoit un nouveau taux.",
+        "Le menu Enveloppes par rubrique ouvre le même outil opérationnel, avec un choix de rubrique par plafond. La préparation non appliquée reste protégée et les exports mentionnent la rubrique, la période, le périmètre et l’unité."
+      ],
+      "questions": [
+        "Quelles rubriques doivent disposer d’enveloppes et qui en est responsable ?",
+        "Faut-il répartir une enveloppe uniquement après validation ou conserver une part globale non ventilée ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-014",
+      "title": "Moteur déterministe de rubriques RH",
+      "description": "Calculer rémunération, cotisations estimées et coûts par mois à partir de paramètres et formules versionnés, explicables et testables.",
+      "family": "Hypothèses et moteur",
+      "priority": "P0",
+      "phase": "R1",
+      "status": "partial",
+      "coverage": "Lot 8 du 16/10, implémenté et testé localement : le moteur déterministe v3 ajoute des mouvements en coût chargé, sans seconde quotité ni taux, et conserve un coût total calculable sans inventer sa ventilation brute/charges. Les modes bruts antérieurs et les arrondis exacts restent conservés. Une inconnue reste explicite, notamment après le T4. Les rubriques de paie et règles légales générales restent hors de ce périmètre. Lot 26 : moteur v6 de simulation de gestion, segmentation en jours civils et somme exacte des fractions avant un seul arrondi du brut du mois, puis un seul calcul des charges propres au mouvement. Les segments et événements appliqués restent explicables dans le résultat figé ; aucune couche de coût additionnelle ne double leur contribution. Sans événement actif, le chemin de calcul antérieur est conservé. Lot 28 : versements mensuels facultatifs des seules embauches simulées brutes, distincts des événements récurrents. Une prime brute est un montant final de poste sans nouveau prorata ; un coût employeur ponctuel est déjà chargé. Mois, activation, montant et confirmation d’absence des autres couches sont explicites. Le moteur v8 conserve les inconnus, les anciennes exécutions et les bases manquantes de 2027. Les paiements hors présence connue, le variable en pourcentage et les salariés déjà inclus dans le socle restent hors de ce périmètre. Publication et conservation se constatent séparément.",
+      "codeEvidence": [
+        {
+          "file": "src/engine.js",
+          "line": 88,
+          "note": "Évaluateur contrôlé avec détection des références inconnues et cycles, hors moteur RH dédié."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1450,
+          "note": "Agrégation des champs de paie existants et indicateurs dérivés spécialisés."
+        },
+        {
+          "file": "src/rh-budget-engine.js",
+          "line": 3,
+          "note": "Lot 6 : versions et calculs budgétaires agrégés, indépendants des KPI et paramètres RH actifs."
+        },
+        {
+          "file": "src/rh-budget-movements.js",
+          "line": 5,
+          "note": "Lot 8 : reprise T4 en coût chargé, avec conservation des ajustements et contrôle des inconnues ; implémentation locale."
+        },
+        {
+          "file": "src/rh-budget-events.js",
+          "line": 74,
+          "note": "Lot 26 : somme des fractions civiles exactes, un seul arrondi brut puis charges propres et ponctuel unique."
+        },
+        {
+          "file": "src/rh-budget-payments.js",
+          "line": 70,
+          "note": "Lot 28 : Chaîne unique de brut et charges, ponctuel déjà chargé et inconnus conservés."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145059",
+        "SCR-20261015-145120",
+        "SCR-20261015-145007"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-002",
+        "RH-BUD-004",
+        "RH-BUD-010",
+        "RH-BUD-015"
+      ],
+      "acceptance": [
+        "À sources, paramètres et version de règles identiques, le moteur restitue les mêmes résultats et arrondis.",
+        "Chaque rubrique expose son unité, son assiette, ses dépendances, sa formule et sa version.",
+        "Une donnée manquante, un cycle ou une formule invalide produit un état explicite et jamais un résultat de substitution silencieux.",
+        "Les règles légales et taux de cotisations sont sourcés et datés ; un brut isolé ne devient pas un coût employeur vérifié.",
+        "Le brut mensuel d’une embauche avec événements est la somme exacte de ses fractions salaire temps plein × quotité × jours de segment / jours du mois, arrondie une fois au centime. Les charges sont arrondies une fois sur ce brut ; le coût ponctuel initial intervient une seule fois.",
+        "Les coûts du mouvement et les coûts complets du budget sont présentés séparément. Une contribution connue ne complète pas une base 2027 inconnue ; aucun total complet artificiel n’est produit.",
+        "À salaire récurrent de 1 centime, prime brute de 1 centime et charges propres de 50 %, le brut total vaut 2 centimes et les charges valent 1 centime, avec un seul arrondi commun. Les détails de versement ne sont pas ajoutés une seconde fois aux coûts agrégés."
+      ],
+      "questions": [
+        "Quel périmètre de simulation est suffisant sans reproduire un logiciel de paie ?",
+        "Quel niveau d’arrondi retenir par contrat, rubrique, mois et total ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-015",
+      "title": "Proratas, calendrier et définitions des ETP",
+      "description": "Traiter présence partielle, quotité, dates, absences et calendriers de versement en distinguant les différents indicateurs d’effectif et d’ETP.",
+      "family": "Hypothèses et moteur",
+      "priority": "P0",
+      "phase": "R1",
+      "status": "partial",
+      "coverage": "Les mouvements budgétaires utilisent des jours civils réels et des dates rémunérées inclusives, sans modifier les ETP réalisés validés, méthodes historiques ou ajustements. Les coûts T4 déjà chargés restent à leur quotité réelle sans nouveau taux ni multiplicateur. Lot 13 : calendrier des débuts et fins de présence et des sorties au lendemain du dernier jour payé, avec changements de mois ou d’année explicites ; les coûts sont lus dans l’exécution conservée, sans nouveau calcul d’ETP ou d’effectif total. Les calendriers légaux de paie et conventions générales d’absence restent à définir ; la recette et la publication du lot 13 sont à constater séparément. Lot 26 : dates d’effet inclusives, présence de l’embauche et segments sur des mois de 28, 29, 30 ou 31 jours, y compris changement d’année. Dates ou valeurs inconnues ferment le coût complet des mois concernés ; les ETP réels activés restent inchangés.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1567,
+          "note": "Calcul des ETP de période, moyenne et ratios avec contrôle des mois connus."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2681,
+          "note": "Prorata de date de départ limité au calendrier du plan existant."
+        },
+        {
+          "file": "src/rh-budget-movements.js",
+          "line": 5,
+          "note": "Lot 8 : reprise T4 en coût chargé, avec conservation des ajustements et contrôle des inconnues ; implémentation locale."
+        },
+        {
+          "file": "src/rh-budget-plan-engine.js",
+          "line": 21,
+          "note": "Lot 13 : lendemain civil exact, y compris aux changements de mois et d’année ; aucun nouvel ETP."
+        },
+        {
+          "file": "src/rh-budget-events.js",
+          "line": 74,
+          "note": "Lot 26 : segments de présence et changements datés inclusifs, sans modification des ETP réels."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144830",
+        "SCR-20261015-144754",
+        "SCR-20261015-145029",
+        "SCR-20261015-145142"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-002",
+        "RH-BUD-004"
+      ],
+      "acceptance": [
+        "L’effectif présent, inscrit en fin de mois, ETP contractuel, ETP moyen et ETP d’activité ont des définitions distinctes.",
+        "Entrées et sorties en cours de mois, temps partiel et mois de longueur différente sont couverts par des cas de référence.",
+        "Les ETP d’une année sont moyennés selon la définition retenue, sans être additionnés comme une dépense.",
+        "La convention de jours et le calendrier de versement sont visibles dans le résultat.",
+        "Tout ETP calculé précise la source de temps ou de quotité, le dénominateur, l’unité, la période et la convention retenus ; temps payé, temps effectif et quotité contractuelle ne sont pas confondus.",
+        "L’effet commence le jour choisi inclus, respecte premier et dernier jours payés, février bissextile et changement d’année. Le résultat conserve les bornes, jours, assiettes, quotités, taux et fractions exactes des segments."
+      ],
+      "questions": [
+        "Quelles conventions de prorata valider pour chaque type d’événement ?",
+        "Quelles absences et suspensions modifient coût, capacité et présence dans le premier périmètre ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-016",
+      "title": "Exécutions de calcul et traitement des erreurs",
+      "description": "Créer une exécution identifiable reliée à ses entrées et règles ; signaler calcul en cours, résultat valide, incomplet, échoué ou obsolète.",
+      "family": "Hypothèses et moteur",
+      "priority": "P0",
+      "phase": "R1",
+      "status": "present",
+      "coverage": "Lot 8 du 16/10, implémenté et testé localement : les exécutions v3 figent aussi les mouvements chargés, leurs composantes connues ou manquantes et le mois du solde. Les versions et exécutions v1/v2 restent lisibles avec leurs empreintes historiques. Révisions concurrentes et changements des paramètres source refusés ; taille de résultat bornée. Aucun changement aux KPI actifs ou aux ajustements existants. La production doit être vérifiée séparément. Lot 25 : les liens documentaires conservés dans les mouvements participent à l’empreinte des entrées, sans nouveau moteur financier, calcul ou normalisation des exécutions v1–v5. Les regroupements sont relus à partir de chaque instantané figé. Lot 26 : nouvelles exécutions v6 ; les entrées, empreintes et résultats v1–v5 ne sont ni migrés ni recalculés. La sauvegarde depuis un ancien client qui omet events conserve les événements du mouvement par UUID exact ; [] demande leur suppression explicite. Les gardes propriétaire, révision, source et taille restent appliquées. Lot 27 : nouvelles exécutions v7 et contrôles par rubrique ; les branches d’empreintes v1–v6 et résultats figés restent inchangés. Un client qui omet rubric sur une enveloppe existante conserve sa sélection par UUID exact, sans élargissement implicite au coût total. Lot 28 : exécutions v8 avec versements facultatifs ; snapshots et empreintes v1 à v7 conservés, omission du nouveau champ par un ancien client protégée. Lot 35 : nouvelles empreintes v9 incluant le registre documentaire facultatif ; branches v1–v8 conservées, absence du champ dans une sauvegarde ancienne préservée, anciennes exécutions relues sans recalcul.",
+      "codeEvidence": [
+        {
+          "file": "src/engine.js",
+          "line": 361,
+          "note": "Calcul financier avec listes d’erreurs et d’avertissements, sans registre d’exécutions RH."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 1,
+          "note": "Lot 8 : reprise T4 en coût chargé, avec conservation des ajustements et contrôle des inconnues ; implémentation locale."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 35,
+          "note": "Lot 26 : empreinte courante v6 avec couches préexistantes et événements, anciennes branches inchangées. Lot 27 : Méthode v7 et conservation des branches historiques v1–v6."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 154,
+          "note": "Lot 28 : Conservation du champ payments omis par un ancien client sur un UUID retenu."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 36,
+          "note": "Lot 35 : empreinte v9 et conservation des branches historiques v1–v8."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145007",
+        "SCR-20261015-145047",
+        "SCR-20261015-144931"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-011",
+        "RH-BUD-014",
+        "RH-BUD-015",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "Une exécution enregistre version, référence, paramètres, règles, date et statut.",
+        "Un résultat devient obsolète lorsque ses entrées changent et ne reste pas présenté comme résultat courant.",
+        "Les erreurs identifient le champ, contrat, rubrique ou période concerné, sans exposer de secrets.",
+        "Un calcul incomplet conserve les montants connus tout en signalant ce qui empêche la validation du total.",
+        "Les versions et exécutions v1–v5 conservent leurs octets et leurs empreintes historiques lors de la livraison v6 ; aucune lecture n’enregistre ni ne recalcule.",
+        "Un ancien client omettant les événements d’un mouvement existant les conserve. Une copie de mouvement reçoit des événements avec nouveaux UUID, désactivés, sans réactiver une simulation.",
+        "L’aperçu et la sauvegarde appliquent la même conservation du champ rubric omis ; un total explicite est contrôlé contre les chevauchements de la liste entière. Aucun ancien résultat n’est recalculé lors de sa lecture.",
+        "Une sauvegarde ancienne omettant payments conserve la collection du mouvement retenu par UUID ; une liste vide la retire explicitement. Les snapshots sans ce champ et les résultats v1 à v7 restent inchangés."
+      ],
+      "questions": [
+        "Quels volumes et délais de calcul cibles retenir ?",
+        "Quels résultats partiels sont consultables et quels contrôles bloquent la validation ?"
+      ],
+      "deliveryEvidence": {
+        "scope": "Exécutions privées et reproductibles de simulation budgétaire RH de gestion : entrées, référence, règles, auteur, date, états complets ou incomplets et obsolescence, erreurs contextualisées, lectures historiques v1 à v8 et sauvegardes compatibles avec les clients antérieurs. Aucune nouvelle activation ou exécution de données réelles ne découle de cette clôture.",
+        "verifiedAt": "2026-10-17",
+        "publishedVersion": 49,
+        "commit": "4087023ef562a24ffffdded798ae2318ea8f90d6",
+        "criteria": [
+          {
+            "index": 1,
+            "textHash": "8f0c60ea366ecb60c729a929008938c0c60c58031da53e793ad97478a64d5d62",
+            "tests": [
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "save and run provide reproducible cents, stale previous run and immutable prior versions"
+              },
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "unknown hypothesis cells stay null, incomplete runs retain exact source inputs and extourne once"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "textHash": "d68467e2c42ef13fdd5360c6d3823d62ba37a74edfdee35deabc4b4dfca7b35a",
+            "tests": [
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "save and run provide reproducible cents, stale previous run and immutable prior versions"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "textHash": "3db8526acedb24ada382b8c7aa17e82cb32639e83970c101b641423ec3f28b35",
+            "tests": [
+              {
+                "file": "tests/rh-budget-comparison.test.mjs",
+                "check": "missing movement amounts retain their saved person and field context, including pay leave and date"
+              },
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "corrupted stored version and run snapshots fail closed; storage errors remain generic"
+              }
+            ]
+          },
+          {
+            "index": 4,
+            "textHash": "74d988df3250a089cea9e97eb870574713be71ae72fa6f520824cbda40970391",
+            "tests": [
+              {
+                "file": "tests/rh-budget-engine.test.mjs",
+                "check": "missing charges preserves a computable gross but no invented cost"
+              },
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "unknown hypothesis cells stay null, incomplete runs retain exact source inputs and extourne once"
+              }
+            ]
+          },
+          {
+            "index": 5,
+            "textHash": "e053bbc276b62752f6b67baf53bf69aed9adf3119657f664c61566e7e5790dc4",
+            "tests": [
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "immutable v1 snapshots and runs retain their original input hashing and remain addressable after the engine upgrade"
+              },
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "immutable v2 through v5 rows keep historical hashes and exact snapshots without injecting missing replacement fields"
+              },
+              {
+                "file": "tests/rh-budget-payments-api.test.mjs",
+                "check": "historical v1–v7 snapshot and run bytes retain their own hashes and never acquire payments"
+              }
+            ]
+          },
+          {
+            "index": 6,
+            "textHash": "fcd72f94296638cadd2935ff909ae297fd1c0db948ec360e8fec3cb19137f8f8",
+            "tests": [
+              {
+                "file": "tests/rh-budget-api.test.mjs",
+                "check": "v6 events are sealed in hashes and runs while an older client preserves both omitted layers by movement ID"
+              },
+              {
+                "file": "tests/rh-budget-bulk.test.mjs",
+                "check": "cloning an eventful hire gives every copied event a new inactive identity while retained events stay exact"
+              }
+            ]
+          },
+          {
+            "index": 7,
+            "textHash": "3afbe118562e86bcd139e860422dba63248a01f95a85c9b342e8032515ac1dba",
+            "tests": [
+              {
+                "file": "tests/rh-budget-rubric-preview.test.mjs",
+                "check": "omitted component rubric is preserved before preview, no-op detection and application just like an older API client"
+              },
+              {
+                "file": "tests/rh-budget-envelopes-api.test.mjs",
+                "check": "disjoint rubric ceilings survive old clients and invalid widening, null, additional components and overlaps reject atomically"
+              },
+              {
+                "file": "tests/rh-budget-envelopes-api.test.mjs",
+                "check": "v7 preserves an omitted retained rubric by exact envelope ID while explicit total can widen a single ceiling"
+              }
+            ]
+          },
+          {
+            "index": 8,
+            "textHash": "16daebc8d8b19e4331506f1cf066d544215e5536192954e7464450cca36e7ad2",
+            "tests": [
+              {
+                "file": "tests/rh-budget-payments-api.test.mjs",
+                "check": "old client omission preserves payments, events and links while explicit empty payments clears only payments"
+              },
+              {
+                "file": "tests/rh-budget-payments-api.test.mjs",
+                "check": "historical v1–v7 snapshot and run bytes retain their own hashes and never acquire payments"
+              }
+            ]
+          }
+        ],
+        "limits": [
+          "Le moteur courant v8 est un moteur de simulation de gestion ; cette capacité ne certifie aucune paie ni règle légale.",
+          "Une exécution incomplète conserve ses données manquantes et ne devient pas un budget validé.",
+          "Les sources, ajustements, références et exécutions réelles conservées restent inchangés ; les autres capacités encore partielles conservent leurs limites."
+        ]
+      }
+    },
+    {
+      "id": "RH-BUD-017",
+      "title": "Explorateur mensuel multidimensionnel",
+      "description": "Analyser effectifs, ETP, entrées, sorties et coûts par version, mois et axes disponibles avec graphiques et tableau communs.",
+      "family": "Analyse et restitution",
+      "priority": "P1",
+      "phase": "R3",
+      "status": "partial",
+      "coverage": "Le rapport historique conserve ses agrégations et le lot 11 compare les coûts employeur agrégés de trois lectures figées. Lot 13 : explorateur des mouvements d’une exécution conservée, filtré par période, service, contrat, type, activation et recherche ; calendrier mensuel, répertoire, mouvements non datés, détails et répartitions cohérents. Les coûts complets et composantes connues restent distincts. La ventilation concerne les seuls mouvements, sans allocation du socle global ni nouveau calcul d’ETP ou d’effectif total. Les autres axes et métriques restent à généraliser ; la recette et la publication du lot 13 sont à constater séparément. Lot 22 : ventilation de la liste mensuelle confirmée par service et type documentaire de contrat, axes inversables, contrats distincts et personnes calculées par union dans chaque cellule, marge et total. Les ETP contractuels activés gardent leur complétude, part connue, exclusions et inconnus ; les catégories non documentées et les cellules vides restent explicites. Ce pivot limité ne ventile aucun socle financier, salaire ou temps et ne généralise pas les axes ou mois absents. Recette intégrée et publication du lot 22 à constater séparément. Lot 24 : export JSON du pivot filtré avec axes, mesure présentée, marges par union, contrats constitutifs et couvertures ETP conservées. Lot 38 : répartition mensuelle des seuls coûts du registre individuel par service et contrat datés, avec période et filtres communs aux groupes et au détail. Chaque poste-mois est compté une seule fois ; part connue, inconnu, zéro et jeu vide restent distincts. Les repères statiques et le socle global ne sont pas ventilés par défaut. Ce périmètre documentaire ne devient pas un effectif ou une couverture totale du budget. Lot 39 : filtres par codes des six axes et regroupements documentaires distincts ; les variantes de libellé d’un même code sont conservées sans créer de doublon de coût. Les axes inconnus restent identifiables ; le socle, les ajustements et mouvements restent hors de cette répartition.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1451,
+          "note": "Modèle RH par mois et service avec comparaison historique sur le périmètre existant."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 2981,
+          "note": "Cellules d’effectifs mensuelles filtrées par service et contrat."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 40,
+          "note": "Lot 11 : filtres de lectures, années et période ; restitution mensuelle ou cumulée du coût employeur agrégé."
+        },
+        {
+          "file": "src/rh-budget-plan-engine.js",
+          "line": 181,
+          "note": "Lot 13 : période et filtres communs au répertoire, calendrier et groupes d’impacts des mouvements."
+        },
+        {
+          "file": "src/rh-budget-plan.js",
+          "line": 14,
+          "note": "Lot 13 : lecture d’une exécution conservée dans l’espace calendrier et répertoire."
+        },
+        {
+          "file": "src/rh-pivot-engine.js",
+          "line": 68,
+          "note": "Lot 22 : cellules, marges et total général calculés depuis les mêmes contrats filtrés, personnes par union propre à chaque périmètre et ETP avec complétude et exclusions ; transposition des axes sans changement des lignes."
+        },
+        {
+          "file": "src/rh-budget-assignments.js",
+          "line": 146,
+          "note": "Lot 38 : mêmes observations filtrées pour groupes et détail des coûts documentaires, sans ventilation du socle ni prorata."
+        },
+        {
+          "file": "src/rh-budget-assignments.js",
+          "line": 132,
+          "note": "Lot 39 : groupes par codes datés, variantes de libellé conservées et une seule inclusion du coût poste-mois, avec filtres communs."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144914",
+        "SCR-20261015-144901",
+        "SCR-20261015-144838",
+        "SCR-20261015-144830",
+        "SCR-20261015-144809",
+        "SCR-20261015-144754"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-003",
+        "RH-BUD-014",
+        "RH-BUD-016"
+      ],
+      "acceptance": [
+        "Changer d’axe conserve le total et affiche les valeurs sans dimension dans une catégorie identifiable.",
+        "La mesure choisie adapte unité, définition et agrégation ; graphique, tableau et infobulle correspondent.",
+        "Les mois sans source restent manquants et les filtres s’appliquent à toutes les restitutions du même écran.",
+        "Les ventilations non justifiées par les sources restent indisponibles, notamment pour les compléments du journal PayFit global.",
+        "Le pivot mensuel limité croise service et type de contrat de la liste confirmée ; cellules, marges, total et détail proviennent des mêmes lignes filtrées, avec axes inversables sans changement de périmètre.",
+        "Les personnes du pivot sont des unions distinctes et les ETP activés gardent inconnus, exclus, part connue et cellules vides séparés ; aucune somme de temps, rémunération individuelle ou allocation du socle financier n’est déduite de cette ventilation."
+      ],
+      "questions": [
+        "Quels axes et graphiques doivent être disponibles au premier lot ?",
+        "Quel sens métier donner au sous-ensemble de population aperçu dans la démonstration ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-018",
+      "title": "Comparaison de trois versions et années",
+      "description": "Comparer sur une période commune réel, révisé et budget, avec écarts absolus et relatifs et lecture mensuelle ou cumulée.",
+      "family": "Analyse et restitution",
+      "priority": "P1",
+      "phase": "R3",
+      "status": "partial",
+      "coverage": "Lot 11 du 16/10 : comparaison de trois lectures au maximum, chacune liée à une exécution budgétaire conservée ou au réalisé de sa référence figée, avec année, révision, référence et moteur explicites. Le coût employeur en EUR propose les écarts B − A et C − B, mensuels ou cumulés. Le coût complet reste distinct des composantes connues ; une base nulle ou une donnée manquante ne produit pas un faux pourcentage. Les données 2027 ne sont pas complétées automatiquement. Les autres métriques, axes et exercices décalés restent à généraliser ; la production doit être vérifiée séparément. Lot 29 : sous-pont documentaire par UUID des embauches brutes, issu des instantanés et composantes conservés, sans nouveau calcul budgétaire. Les primes, charges communes, ponctuels initiaux et versements chargés sont détaillés avec états et résiduels. Ses mois comparables et son périmètre sont propres aux embauches ; ils ne complètent pas une base globale inconnue, notamment en 2027. Les effets causaux salaire, quotité et présence ne sont pas reconstitués. Publication et conservation à constater dans les reçus du lot.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1685,
+          "note": "Comparaison RH avec un budget global seulement."
+        },
+        {
+          "file": "src/engine.js",
+          "line": 391,
+          "note": "Sélection du budget de comparaison dans le moteur financier, distinct du RH."
+        },
+        {
+          "file": "src/rh-budget-comparison-engine.js",
+          "line": 291,
+          "note": "Lot 11 : comparaison pure de deux ou trois lectures figées, axe commun et distinction complet/composantes connues."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 38,
+          "note": "Lot 11 : choix des versions et exécutions, réalisé figé ou résultat conservé, année et provenance explicites."
+        },
+        {
+          "file": "src/rh-budget-comparison-engine.js",
+          "line": 307,
+          "note": "Lot 29 : Sous-pont des embauches indépendant des composantes du pont global."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145113",
+        "SCR-20261015-145120",
+        "SCR-20261015-145131"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-001",
+        "RH-BUD-002",
+        "RH-BUD-017"
+      ],
+      "acceptance": [
+        "Trois versions et leurs périodes sont affichées explicitement, avec un sens de soustraction visible.",
+        "Les comparaisons utilisent le même périmètre et la même définition de rubrique ; les différences de couverture sont signalées.",
+        "Une base nulle ou manquante ne produit pas de pourcentage trompeur.",
+        "Les mois réels et prévisionnels et les lectures source/ajustée restent identifiables dans chaque colonne."
+      ],
+      "questions": [
+        "Quelles comparaisons doivent être proposées par défaut ?",
+        "Comment aligner les exercices décalés, périodes incomplètes et horizons différents ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-019",
+      "title": "Détail individuel des écarts",
+      "description": "Ouvrir les contributions par salarié, contrat ou poste projeté d’un écart agrégé en conservant le contexte de comparaison.",
+      "family": "Analyse et restitution",
+      "priority": "P1",
+      "phase": "R3",
+      "status": "partial",
+      "coverage": "Lot 11 du 16/10 : ouverture du détail d’un écart de coût entre lectures figées, avec référence ou socle agrégé, ajustements conservés, postes des mouvements identifiés et résiduel non ventilé. Les origines et montants connus restent distincts des données absentes. Ce détail limité ne constitue pas un explorateur général salarié/contrat ni une ventilation individuelle du journal global. Les contrôles d’accès restent ceux des budgets privés ; la recette intégrée et la publication doivent être constatées séparément. Lot 29 : sous-pont documentaire par UUID des embauches brutes, issu des instantanés et composantes conservés, sans nouveau calcul budgétaire. Les primes, charges communes, ponctuels initiaux et versements chargés sont détaillés avec états et résiduels. Ses mois comparables et son périmètre sont propres aux embauches ; ils ne complètent pas une base globale inconnue, notamment en 2027. Les effets causaux salaire, quotité et présence ne sont pas reconstitués. Publication et conservation à constater dans les reçus du lot.",
+      "codeEvidence": [
+        {
+          "file": "src/rh-budget-comparison-engine.js",
+          "line": 84,
+          "note": "Lot 11 : composantes des mouvements et repères des postes issus des entrées conservées, sans ventilation inventée du socle global."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 61,
+          "note": "Lot 11 : détail de l’écart et de ses origines, limité aux composantes et mouvements disponibles."
+        },
+        {
+          "file": "src/rh-budget-hire-bridge.js",
+          "line": 148,
+          "note": "Lot 29 : Rapprochement documentaire des identités, périodes, états et filtres."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145131"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-004",
+        "RH-BUD-018"
+      ],
+      "acceptance": [
+        "La somme des contributions et des lignes non ventilées explique l’agrégat ouvert.",
+        "Une absence dans une version est distinguée d’un montant nul et les entrées, sorties ou changements restent reconnaissables.",
+        "Le détail conserve rubrique, versions, périodes, filtres et nature de lecture, et respecte les droits individuels.",
+        "Le rapprochement des embauches utilise uniquement des UUID stables et uniques, sans distinction de casse. Un même nom ou repère ne fusionne jamais deux UUID distincts ; une ambiguïté d’identité est bloquante.",
+        "Les états absent du registre, inactif, détail manquant, montant inconnu et montant nul restent distincts. Le zéro de contribution d’une absence n’est admis que sur un mois prévisionnel conservé et un registre exploitable.",
+        "Service et contrat filtrent les postes satisfaisant les deux critères sur un même côté A ou B. Le détail garde ses affectations, son compteur, ses totaux sélectionnés et la part hors filtre ; le pont global ne change pas."
+      ],
+      "questions": [
+        "Quelle granularité et quels identifiants sont disponibles pour rapprocher les versions ?",
+        "Quels profils peuvent consulter et exporter le détail individuel ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-020",
+      "title": "Cascade explicative exacte des variations",
+      "description": "Décomposer un écart en contributions explicites : population constante, entrées, sorties, quotité, rémunération, report et autres effets documentés.",
+      "family": "Analyse et restitution",
+      "priority": "P1",
+      "phase": "R3",
+      "status": "partial",
+      "coverage": "Lot 11 du 16/10 : pont de composantes disponibles entre lectures figées, en centimes, distinguant socle global, ajustements, mouvements identifiés, coûts ponctuels et résiduel non ventilé. Les sous-totaux connus ne sont pas additionnés une seconde fois. Les manques et décompositions indisponibles des anciens moteurs restent visibles. Ce périmètre ne livre pas une cascade individuelle générale des effets volume, salaire, quotité et report. Les ponts spécialisés antérieurs de Studio RH sont conservés ; la recette et la publication restent à constater. Lot 29 : sous-pont documentaire par UUID des embauches brutes, issu des instantanés et composantes conservés, sans nouveau calcul budgétaire. Les primes, charges communes, ponctuels initiaux et versements chargés sont détaillés avec états et résiduels. Ses mois comparables et son périmètre sont propres aux embauches ; ils ne complètent pas une base globale inconnue, notamment en 2027. Les effets causaux salaire, quotité et présence ne sont pas reconstitués. Publication et conservation à constater dans les reçus du lot.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1824,
+          "note": "Décomposition existante du volume et du coût unitaire avec résiduel exact."
+        },
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1854,
+          "note": "Rendu d’un pont de contributions spécialisées."
+        },
+        {
+          "file": "src/rh/payfit-overlay.js",
+          "line": 149,
+          "note": "Ajout de lignes séparées de rapprochement API et d’ajustements aux cohortes."
+        },
+        {
+          "file": "src/rh-budget-comparison-engine.js",
+          "line": 150,
+          "note": "Lot 11 : résiduel explicite entre coût sélectionné et composantes disponibles."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 51,
+          "note": "Lot 11 : pont graphique des variations de coût et tableau des contributions."
+        },
+        {
+          "file": "src/rh-budget-hire-bridge.js",
+          "line": 148,
+          "note": "Lot 29 : Lecture exacte des composantes conservées et résiduels sans recalcul."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145142",
+        "SCR-20261015-145131"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-005",
+        "RH-BUD-006",
+        "RH-BUD-008",
+        "RH-BUD-009",
+        "RH-BUD-018",
+        "RH-BUD-019"
+      ],
+      "acceptance": [
+        "Le départ additionné aux contributions égale exactement l’arrivée selon la précision de calcul validée.",
+        "L’ordre des effets et la gestion des interactions sont documentés et testés pour éviter le double comptage.",
+        "Les effets non expliqués sont visibles et le détail justifie chaque contribution.",
+        "Les montants de rapprochement et ajustements non ventilés restent séparés des effets attribués à des personnes.",
+        "Le sous-pont rapproche brut récurrent, primes brutes, charges totales, coût ponctuel initial et versements employeur conservés, puis affiche un résiduel explicite. Les charges communes au salaire et aux primes ne sont pas calculées séparément.",
+        "Les relations des composantes avec le brut, les ponctuels et le coût conservés sont contrôlées avant de déclarer le mouvement expliqué. Aucun moteur budgétaire ni contrefactuel salaire–quotité–présence n’est appelé.",
+        "Un coût d’embauche connu dans un mois au socle global inconnu peut être comparé sur le seul périmètre des embauches, avec périodes et états propres, sans valider le budget complet ni modifier ses exclusions."
+      ],
+      "questions": [
+        "Quelle méthode de décomposition et quel ordre des effets doivent être validés ?",
+        "Comment présenter les interactions et résiduels lorsqu’une donnée individuelle manque ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-021",
+      "title": "Saisie en masse, copie, remplissage et import",
+      "description": "Préparer des modifications groupées contrôlées avec aperçu du périmètre, validations et retour arrière.",
+      "family": "Construction du budget",
+      "priority": "P1",
+      "phase": "R2",
+      "status": "partial",
+      "coverage": "Les lots 12 et 14 préparent les mouvements CSV/copies et trois hypothèses globales, avec aperçu avant application locale puis sauvegarde explicite. Lot 15 du 16/10 : préparation isolée d’une liste d’enveloppes de service, validation de la liste entière, contrôles par ligne et coûts mensuels avant/après v5. Les aperçus périmés ou modifiés sont refusés ; l’application modifie seulement les enveloppes du brouillon. Référence, bases, ajustements, mouvements et preuves restent conservés, sans remplissage automatique de 2027. Les enveloppes par rubrique et les événements individuels génériques restent à construire ; recette et publication du lot 15 à constater. Lot 27 : préparation des plafonds par rubrique, avec conservation de la sélection omise par un ancien client, aperçu cohérent avec la sauvegarde et garde de préparation non appliquée ; aucune mutation du réalisé. Lot 28 : versements mensuels facultatifs des seules embauches simulées brutes, distincts des événements récurrents. Une prime brute est un montant final de poste sans nouveau prorata ; un coût employeur ponctuel est déjà chargé. Mois, activation, montant et confirmation d’absence des autres couches sont explicites. Le moteur v8 conserve les inconnus, les anciennes exécutions et les bases manquantes de 2027. Les paiements hors présence connue, le variable en pourcentage et les salariés déjà inclus dans le socle restent hors de ce périmètre. Publication et conservation se constatent séparément.",
+      "codeEvidence": [
+        {
+          "file": "src/rh-budget-bulk.js",
+          "line": 182,
+          "note": "Lot 12 : ajout entier au brouillon après contrôle de l’aperçu, des doublons et des limites."
+        },
+        {
+          "file": "src/rh-budget-bulk-workbench.js",
+          "line": 20,
+          "note": "Lot 12 : fichier ou collage CSV, prévisualisation, copie et ajout explicite au brouillon sans sauvegarde implicite."
+        },
+        {
+          "file": "src/rh-budget-global.js",
+          "line": 125,
+          "note": "Lot 14 : revalidation de l’aperçu et application entière des seuls champs et mois explicitement modifiés."
+        },
+        {
+          "file": "src/rh-budget-envelope-preview.js",
+          "line": 78,
+          "note": "Lot 15 : revalidation entière de l’aperçu et application de la seule liste d’enveloppes au brouillon."
+        },
+        {
+          "file": "src/rh-budget-payment-preview.js",
+          "line": 113,
+          "note": "Lot 28 : Préparation isolée et application après contrôle du brouillon et de l’aperçu."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145059",
+        "SCR-20261015-145007",
+        "SCR-20261015-144931"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-005",
+        "RH-BUD-006",
+        "RH-BUD-010",
+        "RH-BUD-012",
+        "RH-BUD-013",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "Avant application, un aperçu montre les lignes visées, champs modifiés, dates et erreurs.",
+        "Les doublons et réimportations sont détectés grâce à des identifiants et une clé d’opération définis.",
+        "Une opération échouée n’applique pas un sous-ensemble silencieux ; les corrections et annulations sont traçables.",
+        "La copie ou le remplissage ne modifie pas le réalisé verrouillé ni une autre version.",
+        "La préparation des versements est isolée, contrôlée et prévisualisée ; l’application ne change que payments de l’embauche ciblée. Elle conserve les autres couches et impose sauvegarde puis calcul explicites."
+      ],
+      "questions": [
+        "Quels formats et volumes d’import RH faut-il prendre en charge ?",
+        "Quelles actions groupées nécessitent une revue avant validation ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-022",
+      "title": "Exports contextuels de résultats calculés",
+      "description": "Exporter les résultats affichés avec leur version, exécution, référence, périmètre et lecture, en distinguant exports calculés et fichiers source.",
+      "family": "Analyse et restitution",
+      "priority": "P1",
+      "phase": "R3",
+      "status": "partial",
+      "coverage": "Les exports d’exécution et de comparaison conservent leurs entrées, références, moteurs et lectures historiques. Lot 13 : CSV et JSON du calendrier et du répertoire filtrés, avec exécution, révision, période, filtres, événements datés ou non datés, coûts complets ou composantes connues et contrôles. Les exports utilisent le même résultat que la consultation ; les valeurs absentes ne deviennent pas zéro et les répartitions portent seulement sur les mouvements. Les classeurs Excel généraux et exports des autres analyses restent à compléter ; la recette et la publication du lot 13 sont à constater séparément. Lot 24 : exports JSON contextuels des fiches filtrées, listes mensuelle et annuelle, rubriques DSN, pointage, pivot et arborescence. Les fichiers reproduisent le jeu effectivement filtré, sa période, ses unités/grains, ses révisions/empreintes et ses statuts de données, sans élargir une sélection affichée au-delà des lignes filtrées. Les lignes et résumés sont rapprochés des helpers de consultation puis projetés par champs autorisés. Les mois non validés, temps observés, types DSN non validés et ETP inconnus ou exclus gardent leurs statuts ; aucun coût ni indicateur supplémentaire n’est calculé. Téléchargement JSON local seulement, avec limite de taille sans troncature, sans endpoint ou diffusion externe. La recette et la publication du lot 24 se constatent séparément ; les classeurs Excel généraux restent hors de ce lot. Lot 26 : exports JSON des événements du brouillon et de l’exécution conservée ; CSV des événements et segments figés, avec unité, date, assiette, quotité, taux propre et fraction de brut exacte. Les valeurs inconnues restent explicites et l’export historique ne relit pas les propositions locales. Lot 27 : les exports de préparation et d’exécution précisent la rubrique de contrôle, sa consommation et son unité, en distinguant composante et coût complet. Les anciennes enveloppes sans rubrique restent identifiées comme contrôle du coût total. Lot 28 : détail JSON/CSV des versements, mois, nature, unité, activation et confirmation, séparé des totaux qui en portent déjà le coût. Lot 29 : exports du sous-pont d’embauches et du détail de comparaison ouvert, avec filtres locaux, provenance, états, période et unité ; les composantes ne sont pas additionnées une seconde fois au coût global. Lot 38 : exports JSON séparés de la préparation entière et de la lecture documentaire filtrée des affectations, avec contexte et projection explicite. Le résultat relit le même helper et conserve mois, axes inconnus, parts connues et limites ; aucune source ou affectation réelle supplémentaire n’est activée. Lot 39 : exports de préparation et de lecture des axes enrichis avec codes, libellés historiques, regroupement choisi, filtres et inconnus, à partir du même résultat que l’écran. Les autres sources et montants ne sont pas recalculés.",
+      "codeEvidence": [
+        {
+          "file": "src/rh/source-report.html",
+          "line": 1773,
+          "note": "Export de planification incluant période, périmètre, unité et nature du résultat."
+        },
+        {
+          "file": "src/rh/payfit-overlay.js",
+          "line": 176,
+          "note": "Export spécifique distinguant versements source et ajustements de gestion."
+        },
+        {
+          "file": "src/rh-budget-workbench.js",
+          "line": 318,
+          "note": "Exports du calcul sélectionné avec instantané des entrées et provenance figée ; le CSV distingue les coûts déjà chargés, les composantes connues et les manques."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 63,
+          "note": "Lot 11 : dossier JSON du résultat et de la sélection de comparaison."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 75,
+          "note": "Lot 11 : export CSV des lectures, montants filtrés, écarts, décomposition et manques."
+        },
+        {
+          "file": "src/rh-budget-plan.js",
+          "line": 49,
+          "note": "Lot 13 : export CSV contextuel du calendrier et des coûts de mouvements conservés."
+        },
+        {
+          "file": "src/rh-context-export.js",
+          "line": 172,
+          "note": "Lot 24 : export contextuel contrôlé contre les lignes filtrées, projection imbriquée autorisée et statuts conservés."
+        },
+        {
+          "file": "src/rh-context-export.js",
+          "line": 193,
+          "note": "Lot 24 : téléchargement JSON local des seuls artefacts construits, sans réseau, écriture métier ni diffusion."
+        },
+        {
+          "file": "src/rh-budget-workbench.js",
+          "line": 249,
+          "note": "Lot 26 : événements et segments consultés dans le seul instantané de l’exécution sélectionnée."
+        },
+        {
+          "file": "src/rh-budget-envelopes-workbench.js",
+          "line": 57,
+          "note": "Lot 27 : Export de préparation précisant unité, rubrique et périmètre de consommation."
+        },
+        {
+          "file": "src/rh-budget-workbench.js",
+          "line": 319,
+          "note": "Lot 28 : Détails des versements exportés avec leur assiette sans seconde addition aux coûts."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 68,
+          "note": "Lot 29 : Exports de la comparaison et du détail ouvert avec périmètre et filtres."
+        },
+        {
+          "file": "src/rh-budget-assignments-workbench.js",
+          "line": 68,
+          "note": "Lot 38 : exports locaux distincts de préparation et lecture filtrée, avec contexte et champs autorisés."
+        },
+        {
+          "file": "src/rh-budget-assignments-workbench.js",
+          "line": 67,
+          "note": "Lot 39 : contexte des exports conservant les axes de regroupement, filtres et lecture documentaire sans diffusion externe."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145142",
+        "SCR-20261015-145131",
+        "SCR-20261015-145120",
+        "SCR-20261015-145113",
+        "SCR-20261015-144754"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-017",
+        "RH-BUD-018",
+        "RH-BUD-020",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "Chaque export précise scénario, version, exécution, arrêté, période, filtres, unité et lecture source ou ajustée.",
+        "Les valeurs exportées se rapprochent du résultat calculé affiché et les montants manquants ne deviennent pas zéro.",
+        "Le fichier source fourni et l’export calculé sont nommés et présentés distinctement.",
+        "Les champs texte exportés sont neutralisés contre une interprétation en formule et les données individuelles suivent les droits du lecteur.",
+        "Chaque export des lectures collaborateurs, listes, rubriques, pointage, pivot et arborescence reprend exactement le jeu filtré affiché, contrôlé contre le helper de la vue ou les filtres de l’annuaire, sans ajout ou omission de ligne.",
+        "Le fichier conserve la vue, période, filtres, révisions, empreintes, sources autorisées, grain, unités, couverture et limites ; une sélection de détail facultative décrit la présentation sans élargir les lignes filtrées exportées.",
+        "Les projections sont des listes de champs explicites à chaque niveau : aucune DSN brute, clé, token, sel, identifiant social ou champ supplémentaire injecté dans un DTO ne doit être exporté.",
+        "Une lecture indisponible, bloquée, périmée ou contradictoire, une période invalide ou une sortie filtrée altérée refuse l’export. Un jeu filtré vide confirmé reste vide sans ETP, montant ou temps nul inventé.",
+        "Les temps observés restent non validés, les types de rémunération DSN gardent leurs statuts et sommes par type, les états ETP et les mois non validés restent distincts. Aucun total intertypes, annuel d’ETP ou nouveau calcul de paie n’est ajouté.",
+        "Le téléchargement JSON s’exécute localement, sans envoi ni requête réseau ; il respecte une limite de taille sans fichier tronqué et ne modifie aucune source, préférence, activation, KPI, budget ou calcul enregistré.",
+        "Les exports des événements et segments relisent exclusivement le même instantané et résultat que la consultation ; ils ne reconstruisent pas les coûts historiques avec la méthode courante.",
+        "Les exports des plafonds par rubrique reprennent la composante et le périmètre réellement contrôlés, sans présenter la consommation brute ou de charges comme un nouveau coût à additionner.",
+        "Les exports JSON et CSV reproduisent le détail de comparaison ouvert et le sous-pont filtré des embauches avec ses mois, états, composantes et empreintes ; l’ancien détail des origines est également conservé."
+      ],
+      "questions": [
+        "Quels formats sont prioritaires : CSV, classeur calculé ou PDF de synthèse ?",
+        "Quelle durée de conservation et quel périmètre de diffusion appliquer aux exports individuels ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-023",
+      "title": "Contrôles, traçabilité, revue et droits",
+      "description": "Contrôler cohérence des données et calculs, conserver les changements et organiser les droits de lecture, édition et validation.",
+      "family": "Gouvernance et contrôles",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Les contrôles de propriétaire, révisions, empreintes et preuves T4 restent en place. Lot 15 du 16/10 : champ enveloppes optionnel, schéma borné, liens d’embauches contrôlés, confirmation explicite des compléments nets, aperçu rattaché au brouillon exact et sauvegarde conservant les enveloppes si un ancien client omet le champ. Les empreintes v1 à v4 restent inchangées ; v5 conserve sa couche distincte. Copies, préparations globales/CSV, calendrier et comparaisons conservent leurs périmètres propres, sans réaffectation du socle global. Les droits d’équipe et le workflow RH–Finance restent à construire ; recette intégrée et publication du lot 15 à constater. Lot 28 : contrôles d’identifiants, limites, mois, confirmations, aperçus et gardes de préparation des versements dans le périmètre privé existant. Lot 29 : consultation sans mutation, contrôle d’unicité des UUID et distinction des sociétés, des mois absents, des mouvements inactifs et des montants inconnus.",
+      "codeEvidence": [
+        {
+          "file": "src/rh-state-api.js",
+          "line": 66,
+          "note": "Identité vérifiée requise pour accéder aux préférences RH du propriétaire."
+        },
+        {
+          "file": "src/rh-state-api.js",
+          "line": 95,
+          "note": "Écriture conditionnée à la révision attendue avec détection de conflit."
+        },
+        {
+          "file": "src/engine.js",
+          "line": 147,
+          "note": "Contrôles de structure et de cohérence du modèle financier, à compléter pour le RH."
+        },
+        {
+          "file": "src/rh-validated-api.js",
+          "line": 259,
+          "note": "Qualification de gestion historisée séparément de l’activation, liée aux empreintes et révisions exactes."
+        },
+        {
+          "file": "src/rh-etp-engine.js",
+          "line": 133,
+          "note": "Quotités et contrats de fin de mois documentés, sans activation des temps ni moyennes."
+        },
+        {
+          "file": "src/rh-etp-api.js",
+          "line": 118,
+          "note": "Activation ETP versionnée indépendante des ajustements, KPI DSN et qualification N/S."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 1,
+          "note": "Lot 8 : reprise T4 en coût chargé, avec conservation des ajustements et contrôle des inconnues ; implémentation locale."
+        },
+        {
+          "file": "src/rh-budget-comparison.js",
+          "line": 32,
+          "note": "Lot 11 : lecture GET des budgets et exécutions du propriétaire, sans action d’écriture dans la comparaison."
+        },
+        {
+          "file": "src/rh-budget-bulk.js",
+          "line": 31,
+          "note": "Lot 12 : contrôle préalable des tailles du brouillon et de la demande de sauvegarde existante."
+        },
+        {
+          "file": "tests/rh-budget-bulk-api.test.mjs",
+          "line": 31,
+          "note": "Lot 12 : refus atomique d’une provenance T4 forgée sur un nouvel identifiant de mouvement."
+        },
+        {
+          "file": "src/rh-budget-plan-engine.js",
+          "line": 35,
+          "note": "Lot 13 : contrôle du registre et du détail mensuel appartenant à la même exécution conservée."
+        },
+        {
+          "file": "src/rh-budget-plan.js",
+          "line": 25,
+          "note": "Lot 13 : lectures GET des versions et exécutions, sans nouvel endpoint d’écriture."
+        },
+        {
+          "file": "src/rh-budget-global.js",
+          "line": 19,
+          "note": "Lot 14 : contrôle des limites de taille de la version et de la sauvegarde existante."
+        },
+        {
+          "file": "src/rh-budget-global.js",
+          "line": 35,
+          "note": "Lot 14 : empreinte du contenu de l’aperçu, associée au brouillon exact avant application."
+        },
+        {
+          "file": "src/rh-budget-envelope-preview.js",
+          "line": 12,
+          "note": "Lot 15 : contrôle de l’intégrité et de la péremption de l’aperçu local."
+        },
+        {
+          "file": "src/rh-budget-api.js",
+          "line": 35,
+          "note": "Lot 15 : couche enveloppes propre au moteur v5, avec conservation des conventions d’empreinte historiques."
+        },
+        {
+          "file": "src/rh-budget-payments-workbench.js",
+          "line": 20,
+          "note": "Lot 28 : Préparation des versements protégée et confirmation documentaire explicite."
+        },
+        {
+          "file": "src/rh-budget-hire-bridge.js",
+          "line": 148,
+          "note": "Lot 29 : Validation du périmètre et conservation des identités et inconnus."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144922",
+        "SCR-20261015-142136",
+        "SCR-20261015-144931",
+        "SCR-20261015-145007"
+      ],
+      "evidenceLevel": "menu",
+      "dependencies": [
+        "RH-BUD-001",
+        "RH-BUD-002"
+      ],
+      "acceptance": [
+        "Chaque modification budgétaire trace auteur, date, ancienne valeur, nouvelle valeur, version et motif selon les droits définis.",
+        "Les contrôles détectent références inconnues, doublons, dates incohérentes, chevauchements, rubriques manquantes et écarts de rapprochement.",
+        "Un état enregistré, calculé, revu ou validé est explicite ; une pastille de couleur seule ne constitue pas une approbation.",
+        "Les permissions sont vérifiées côté serveur et un conflit de révision ne peut pas écraser silencieusement une saisie récente."
+      ],
+      "questions": [
+        "Quels rôles de préparation, revue et validation faut-il attribuer ?",
+        "Quels contrôles sont bloquants et quelles dérogations doivent être motivées ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-024",
+      "title": "BDESE — extension de reporting social",
+      "description": "Prévoir un espace distinct de reporting social avec indicateurs, chapitres, sources et pièces, après validation de son périmètre applicable.",
+      "family": "Extensions",
+      "priority": "P2",
+      "phase": "R4",
+      "status": "planned",
+      "coverage": "Un catalogue de chapitres BDESE est montré dans la démonstration. Aucun dispositif BDESE complet et validé n’est établi dans Clair ; il reste hors du moteur budgétaire initial.",
+      "codeEvidence": [],
+      "screens": [
+        "SCR-20261015-145155",
+        "SCR-20261015-144922",
+        "SCR-20261015-142136"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-004",
+        "RH-BUD-017",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "Chaque indicateur retenu possède définition, unité, période, source et état renseigné, calculé, non applicable ou manquant.",
+        "Les pièces sont reliées aux indicateurs et chapitres avec droits et versions.",
+        "Le périmètre et les règles applicables sont vérifiés sur des références officielles avant de présenter le module comme conforme."
+      ],
+      "questions": [
+        "Quel périmètre de reporting social retenir pour MiiMOSA ?",
+        "Quelles pièces, périodes et habilitations doivent être couvertes ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-025",
+      "title": "Index égalité femmes-hommes — extension",
+      "description": "Prévoir un module séparé dont le périmètre, les populations et les règles seront validés avant tout calcul ou qualification réglementaire.",
+      "family": "Extensions",
+      "priority": "P2",
+      "phase": "R4",
+      "status": "planned",
+      "coverage": "L’index égalité apparaît uniquement comme entrée de menu dans les captures ; aucun écran de calcul ni résultat n’est démontré.",
+      "codeEvidence": [],
+      "screens": [
+        "SCR-20261015-144922",
+        "SCR-20261015-142136"
+      ],
+      "evidenceLevel": "menu",
+      "dependencies": [
+        "RH-BUD-004",
+        "RH-BUD-017",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "Le module affiche la période, la population, la méthode et les sources de règles utilisées.",
+        "Une donnée manquante ou un groupe non calculable reste explicite et ne reçoit pas de score inventé.",
+        "La conformité et l’applicabilité sont vérifiées indépendamment des captures avant activation."
+      ],
+      "questions": [
+        "Quelles obligations et méthodes seront applicables au périmètre et à la période visés ?",
+        "Quelles données détaillées et règles de confidentialité sont disponibles pour les groupes analysés ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-026",
+      "title": "Agent modélisateur local sur Mac",
+      "description": "Rappeler la section 10 du cahier des charges : un agent propose structures, hypothèses et formules, simule sur une copie et soumet les variantes à validation humaine.",
+      "family": "Extensions",
+      "priority": "P2",
+      "phase": "R4",
+      "status": "planned",
+      "coverage": "Exigence future confirmée dans le cahier des charges et sa reprise dans Clair. Aucune IA de modélisation n’est activée par ce catalogue ; le choix technique local sur Mac reste à étudier.",
+      "codeEvidence": [
+        {
+          "file": "docs/reprise-dashboard-rh-20261014.md",
+          "line": 13,
+          "note": "Rappel du cadrage : exigence de la future app, sans demande de développement immédiat."
+        }
+      ],
+      "screens": [],
+      "evidenceLevel": "extension",
+      "dependencies": [
+        "RH-BUD-001",
+        "RH-BUD-014",
+        "RH-BUD-016",
+        "RH-BUD-018",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "La proposition expose dimensions, paramètres, unités, dates, formules, sources et informations manquantes dans une fiche modifiable.",
+        "Les simulations utilisent le moteur commun sur une copie et conservent les montants vérifiés et le réalisé.",
+        "Aucun salaire, coût de sortie ou taux de charges manquant n’est inventé ; toute modification partagée requiert la validation humaine prévue par les habilitations.",
+        "L’IA est prévue localement sur le Mac ; tout service externe demande un accord explicite sur le périmètre de données transmis."
+      ],
+      "questions": [
+        "Quel moteur local, quelles ressources Mac et quel niveau d’autonomie étudier lors de la conception ?",
+        "Comment distinguer le rôle du modélisateur, qui prépare le modèle, et celui de l’analyste, qui explique les résultats ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-027",
+      "title": "Outils périphériques à qualifier : Tree-View, pointage, pivot et Publisher",
+      "description": "Conserver ces entrées dans un périmètre à clarifier, sans leur attribuer une fonction métier non démontrée.",
+      "family": "Extensions",
+      "priority": "P2",
+      "phase": "R4",
+      "status": "partial",
+      "coverage": "Lot 21 : l’entrée Pointage des Salariés reçoit dans Clair une définition de consultation mensuelle en lecture seule, pour les contrats et personnes confirmés de septembre 2026. Temps effectif et payé PayFit, activités DSN avec type, unité, période et rémunération parente, quotités observées et ETP contractuel activé restent distincts. Les comparaisons numériques réutilisent les gardes existantes : paire horaire unique du même contrat et mois entier, sans addition, conversion ou déduplication implicite. Une égalité ne valide jamais les temps ; autres mois, manques, ambiguïtés et catégories non exclusives restent explicites. Service et type de contrat exigent un classement ETP activé et concordant. La vue ne crée ni badgeage quotidien, saisie d’heures, motif d’absence, heure supplémentaire ou nouvel ETP. Lot 22 : pivot mensuel en lecture seule de la liste confirmée de septembre, service × type documentaire de contrat, avec axes inversables, contrats distincts, personnes recomptées par union dans chaque cellule, marge et total, et ETP contractuel activé. ETP complet, part connue, inconnu, exclu, somme non calculable, cellule vide et zéro activé restent distincts ; les catégories inconnues ne fusionnent pas avec un libellé métier. Détail des contrats constitutifs, sources et liens de fiches, sans mesure financière ou temps agrégés. Lot 22 publié en privé en version 43, avec recette de conservation. Lot 23 : Tree-View documentaire par service puis type de contrat, mêmes contrats et sources que le pivot, filtres concordants, branches au clavier et détail des contrats constitutifs. Les compteurs de personnes et ETP gardent les unions et états du pivot ; une classification absente reste une catégorie distincte. Aucun lien de management n’est inventé, et aucun autre mois ne reprend septembre. Publisher, organigramme managérial et historique général restent à qualifier et développer. La recette et la publication du lot 23 se constatent séparément.",
+      "codeEvidence": [
+        {
+          "file": "src/rh-attendance-engine.js",
+          "line": 40,
+          "note": "Lot 21 : projection mensuelle des contrats confirmés, vérification des empreintes et occurrences source DSN/API, réutilisation de la revue de temps existante avec valeurs et classifications ETP séparées ; aucune validation de temps ou conversion."
+        },
+        {
+          "file": "src/rh-attendance-api.js",
+          "line": 7,
+          "note": "Lot 21 : GET privé propriétaire borné au mois demandé, assemblage des lectures mensuelles et références conservées ; autres mois structurellement indisponibles, sans appel PayFit distant ni écriture métier."
+        },
+        {
+          "file": "src/rh-attendance-workbench.js",
+          "line": 14,
+          "note": "Lot 21 : pointage mensuel filtré en lecture seule, temps observés, unités, périodes, écarts numériques non validés, ETP activé distinct et détails de source ; anciennes données fermées lors des changements de mois ou erreurs, sans export supplémentaire."
+        },
+        {
+          "file": "src/rh-pivot-engine.js",
+          "line": 41,
+          "note": "Lot 22 : projection de la liste mensuelle confirmée, classification et ETP activés concordants, inconnus explicites, sans temps ou mesure financière ; identifiants et couverture contrôlés."
+        },
+        {
+          "file": "src/rh-pivot-api.js",
+          "line": 7,
+          "note": "Lot 22 : GET privé propriétaire strictement borné au mois, réutilisation de la lecture mensuelle en mémoire ; autres mois indisponibles sans report de septembre, aucune nouvelle source ou écriture métier."
+        },
+        {
+          "file": "src/rh-pivot-workbench.js",
+          "line": 14,
+          "note": "Lot 22 : pivot avec axes inversables, choix contrats/personnes/ETP, marges et détail des contrats constitutifs ; statuts et preuves visibles, fermeture des données périmées en erreur ou changement de mois, sans export supplémentaire."
+        },
+        {
+          "file": "src/rh-tree-engine.js",
+          "line": 22,
+          "note": "Lot 23 : projection documentaire du pivot validé, sans relation managériale ; inconnus et données actives conservés."
+        },
+        {
+          "file": "src/rh-tree-engine.js",
+          "line": 31,
+          "note": "Lot 23 : branches déterministes et totaux par union des mêmes contrats filtrés ; aucun contrat omis ou dupliqué."
+        },
+        {
+          "file": "src/rh-tree-api.js",
+          "line": 7,
+          "note": "Lot 23 : GET privé propriétaire borné au mois, réutilisation en mémoire du pivot sans fetch ni écriture."
+        },
+        {
+          "file": "src/rh-tree-workbench.js",
+          "line": 12,
+          "note": "Lot 23 : branches documentaires dépliables au clavier, sélection des contrats et preuves, fermeture des mois invalides et lectures périmées."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-144922",
+        "SCR-20261015-142136"
+      ],
+      "evidenceLevel": "menu",
+      "dependencies": [
+        "RH-BUD-004",
+        "RH-BUD-017",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "Chaque outil reçoit une définition métier, un utilisateur cible et un résultat attendu avant d’entrer en développement.",
+        "Les fonctions prévues sont distinguées des outils opérationnels et ne déclenchent aucune publication ou pointage implicite.",
+        "Tout outil retenu précise ses données, droits, contrôles et critères de recette avant activation.",
+        "Le sous-outil Pointage est une consultation de temps mensuels conservés pour septembre 2026, aux identités et contrats confirmés ; aucun badgeage quotidien, formulaire de saisie ou approbation de feuilles de temps n’est déduit des menus de démonstration.",
+        "L’accès privé GET vérifie propriétaire, mois unique et contexte actif concordant avant la lecture ; un mois différent, vide ou invalide et une erreur de relecture ne réutilisent aucune identité, mesure, classification ou empreinte de septembre.",
+        "Une ligne par contrat conserve des personnes distinctes, les occurrences d’activités DSN et de temps API, leurs unités, périodes et sources ; temps payé et effectif, quotité et ETP restent séparés, et les manques ne deviennent pas zéro.",
+        "Les deux écarts signés API moins activité DSN sont calculés uniquement par les gardes existantes : lien cohérent, source complète, activité 01/rémunération 002 unique en heures sur le mois entier et ligne API horaire unique du même contrat et mois. Égalité, différence, valeur manquante et non-comparabilité ne valident aucun temps.",
+        "Activités ou lignes API multiples, périodes partielles et unités différentes restent visibles sans addition, déduplication, conversion ou prorata implicites. Aucune absence, heure supplémentaire, présence ou nouvelle valeur ETP n’est déduite des différences ; les catégories de contrôle peuvent se recouper.",
+        "Recherche et filtres service/contrat utilisent les mêmes lignes et une classification ETP activée et concordante ; sa provenance reste distincte des temps. Les dossiers DSN seuls restent une couverture sans contrat API fictif, et la consultation ne modifie aucune source, préférence, activation, budget, qualification ou ajustement.",
+        "Le pivot est limité à la liste mensuelle confirmée de septembre 2026, avec recherche, service et type documentaire de contrat ; les autres mois et contextes indisponibles ne reprennent aucune donnée, classification ou ETP de septembre.",
+        "Les cellules service × contrat et les axes inversés utilisent les mêmes contrats. Les marges et le total de personnes sont recalculés par union des identifiants, sans addition des comptes de personnes des sous-groupes ni fusion des homonymes.",
+        "Une classification exige son instantané ETP activé et concordant ; une dimension inconnue possède sa catégorie propre et ne fusionne pas avec un texte métier de même libellé. Une dimension documentée reste distincte de l’autre dimension manquante.",
+        "Chaque cellule et marge distingue ETP activé complet, part connue, inconnu, exclusion intégrale, somme non calculable, absence de contrat et zéro explicitement activé ; aucune valeur manquante ou exclue ne devient zéro.",
+        "Le détail de cellule, marge ou total contient les contrats constitutifs et leurs preuves, avec accès à la fiche confirmée ; couverture DSN seule ou profil sans contrat ne crée aucune ligne fictive. Recherche, filtres et agrégats partagent le même périmètre.",
+        "Le pivot privé GET ne produit aucune mesure financière ou de temps et ne calcule aucun nouvel ETP. Changement de mois, réponse retardée ou erreur ferme les anciennes données, sans appel PayFit distant, activation, export supplémentaire ou modification des sources, préférences, KPI, budgets et ajustements.",
+        "L’arborescence documentaire organise les contrats confirmés du mois par service puis type de contrat ; chaque contrat appartient à une seule feuille et le parcours ne prétend pas exposer une hiérarchie de managers.",
+        "Les compteurs de personnes de chaque service, type et ensemble filtré sont calculés par union ; une personne avec plusieurs contrats reste une seule personne dans chaque périmètre concerné.",
+        "Classification inconnue, ETP activé complet ou partiel, exclu, vide et zéro validé restent distincts ; aucune affectation ni quotité n’est inventée pour compléter une branche.",
+        "Les filtres et recherches définissent les branches et leurs détails sur le même jeu de lignes. Déplier ou replier une branche change uniquement la présentation ; les sources et liens de fiche restent ceux des contrats sélectionnés.",
+        "Le GET propriétaire réutilise le pivot validé, sans appel PayFit, écriture ou migration ; un contexte bloqué, un autre mois ou une requête invalide ferme les données précédentes."
+      ],
+      "questions": [
+        "Tree-View désigne-t-il un organigramme, un arbre de dimensions ou une autre navigation ?",
+        "Pointage et Publisher répondent-ils à un besoin MiiMOSA identifié, et avec quelle portée de diffusion ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-028",
+      "title": "Multidevise — extension après le socle France en EUR",
+      "description": "Prévoir une séparation des valeurs en devise locale et de consolidation, tout en donnant priorité au périmètre français en euros.",
+      "family": "Extensions",
+      "priority": "P2",
+      "phase": "R4",
+      "status": "planned",
+      "coverage": "La démonstration affiche un sélecteur et une restriction de devise, sans conversion vérifiée. Le moteur financier actuel est explicitement en euros ; aucune capacité RH multidevise complète n’est établie.",
+      "codeEvidence": [
+        {
+          "file": "src/engine.js",
+          "line": 2,
+          "note": "Convention actuelle du moteur financier : montants en euros ; ce n’est pas une conversion RH."
+        }
+      ],
+      "screens": [
+        "SCR-20261015-145113",
+        "SCR-20261015-145059",
+        "SCR-20261015-144754",
+        "SCR-20261015-144914"
+      ],
+      "evidenceLevel": "screen",
+      "dependencies": [
+        "RH-BUD-010",
+        "RH-BUD-011",
+        "RH-BUD-014",
+        "RH-BUD-018"
+      ],
+      "acceptance": [
+        "Le socle initial conserve une devise EUR explicite sans conversion fictive.",
+        "Toute conversion future précise devise source et cible, taux, date, provenance et convention d’arrondi.",
+        "Les écarts d’activité, de population et de change restent séparables et les totaux convertis se rapprochent de leurs composantes."
+      ],
+      "questions": [
+        "Le besoin réel couvre-t-il des contrats ou sociétés dans une autre devise que l’euro ?",
+        "Quelle source de taux et quelle convention budgétaire ou de consolidation retenir ultérieurement ?"
+      ]
+    },
+    {
+      "id": "RH-BUD-029",
+      "title": "Import DSN : reprise historique et corrections",
+      "description": "Prévoir l’import contrôlé de fichiers DSN pour alimenter les sources historiques du référentiel RH, en distinguant déclarations, corrections et ajustements de gestion.",
+      "family": "Sources RH",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Import privé natif P25V01/P26V01 livré avec aperçu, empreinte, conservation transactionnelle et export normalisé ; reprise réelle des 21 DSN janvier 2025 à septembre 2026 vérifiée. Le second lot reprojecte les originaux sans les modifier, sélectionne corrections/fractions et bloque les chaînes ambiguës ou incomplètes avant agrégation complète. La correction dsn-v2 distingue matricule .019 et NTT .020. Validation NEODeS exhaustive et activation KPI restent hors de cette livraison. La projection de rapprochement v2 restitue le nom d’usage et le brut DSN type 001 peut alimenter ses propres cartes après revue complète, sans remplacer le journal comptable. Le lot 32 prépare la différence documentaire avant conservation, avec réprojection des originaux de même mois, sélection existante des corrections/fractions, identités exactes, multisets de rémunérations/activités, sommes techniques séparées et rapprochement PayFit non évalué ; aucune nouvelle référence ni KPI activé. Le lot 33 ajoute un registre des périodes documentées et la relecture privée d’une révision de rapprochement avec ses sources et décisions propres. Cette relecture n’est pas un résultat historique figé et ne valide aucun mois supplémentaire ni base budgétaire individuelle.",
+      "codeEvidence": [
+        {
+          "file": "src/dsn-parser.js",
+          "line": 173,
+          "note": "Extraction limitée de la DSN native avec pseudonymisation serveur."
+        },
+        {
+          "file": "src/rh-sources-api.js",
+          "line": 70,
+          "note": "Contrôles de doublon et de correction avant conservation indépendante."
+        },
+        {
+          "file": "src/rh-reference-api.js",
+          "line": 197,
+          "note": "Référence brouillon versionnée et décisions manuelles, séparées des sources et KPI."
+        },
+        {
+          "file": "src/rh-reference-engine.js",
+          "line": 249,
+          "note": "Propositions et comparaisons DSN–PayFit sans activation implicite."
+        },
+        {
+          "file": "src/rh-validated-api.js",
+          "line": 259,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-validated-engine.js",
+          "line": 111,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-dsn-preflight-engine.js",
+          "line": 123,
+          "note": "Lot 32 : Pré-import différentiel par identités DSN et grains exacts, sans validation des correspondances PayFit."
+        },
+        {
+          "file": "src/rh-dsn-preflight-api.js",
+          "line": 99,
+          "note": "Lot 32 : Lecture propriétaire, révision et originaux vérifiés ; aperçu sans écriture ni appel PayFit."
+        },
+        {
+          "file": "src/rh-dsn-preflight-workbench.js",
+          "line": 32,
+          "note": "Lot 32 : Aperçu, filtres et exports contextuels avant conservation distincte."
+        },
+        {
+          "file": "src/rh-reference-history-engine.js",
+          "line": 152,
+          "note": "Lot 33 : relecture des entrées d’une révision choisie, avec empreinte et méthode prises en charge ; pas de résultat historique sérialisé ni activation."
+        },
+        {
+          "file": "src/rh-reference-history-api.js",
+          "line": 73,
+          "note": "Lot 33 : registre annuel et lectures de révisions privées en SELECT seulement, sans substitution de source courante."
+        },
+        {
+          "file": "src/rh-reference-history-workbench.js",
+          "line": 23,
+          "note": "Lot 33 : périodes, choix de révision et exports contextuels privés ; les mois non validés restent explicites."
+        }
+      ],
+      "screens": [],
+      "evidenceLevel": "extension",
+      "dependencies": [
+        "RH-BUD-002",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "Les formats, conteneurs, encodages et versions NEODeS acceptés sont documentés ; la version est reconnue dans le contenu et une version non supportée est rejetée avec un diagnostic.",
+        "La prévisualisation affiche établissement et SIRET, période principale, nature et type de déclaration, fraction éventuelle et numéro d’ordre avant toute incorporation.",
+        "Les déclarations normales et annule et remplace sont reliées ; une correction remplace la lecture effective concernée sans effacer le fichier antérieur ni additionner les deux déclarations.",
+        "L’empreinte du fichier, son identité déclarative et les enregistrements déjà connus empêchent les doublons et réimportations ; le traitement d’un lot rejoué est reproductible.",
+        "La prévisualisation présente créations, modifications, conflits, contrats non rapprochés et contrôles de total. La validation est atomique ; un échec ne laisse aucun import partiel actif.",
+        "Rémunérations, activités et régularisations conservent leur période de rattachement et leur provenance ; une correction rétroactive ne réécrit pas silencieusement une référence figée.",
+        "Sources DSN, rapprochements et ajustements utilisateur restent séparés. Un fichier importé ne constitue pas à lui seul une preuve de dépôt ou d’acceptation par les organismes."
+      ],
+      "questions": [
+        "Quels mois, établissements ou SIRET et fractions doivent être couverts lors de la reprise historique ?",
+        "Quelle durée de conservation retenir pour les fichiers bruts, corrections et traces d’import validées ?"
+      ],
+      "sourceLinks": [
+        {
+          "label": "Norme NEODeS et documentation technique DSN",
+          "url": "https://www.net-entreprises.fr/declaration/norme-et-documentation-dsn/"
+        },
+        {
+          "label": "Cahier technique DSN 2026",
+          "url": "https://www.net-entreprises.fr/media/documentation/dsn-cahier-technique-2026.1.pdf"
+        }
+      ]
+    },
+    {
+      "id": "RH-BUD-030",
+      "title": "Lecture API PayFit des collaborateurs",
+      "description": "Prévoir une lecture serveur des collaborateurs et leur rapprochement par identifiant source, distinct des contrats et des hypothèses de postes.",
+      "family": "Sources RH",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "present",
+      "coverage": "Lecteur serveur vérifié sur MiiMOSA : photographie de 209 collaborateurs au 15 octobre 2026 conservée, sans assimilation à l’effectif actif. Revue DSN/API et brouillon de correspondances manuelles disponibles. Chaque confirmation est documentée ; les propositions et homonymes ne sont jamais fusionnés automatiquement. Validation métier et alimentation de nouveaux indicateurs restent à terminer. Les liens vérifiés servent désormais à l’activation des personnes déclarées DSN de septembre, distinctes de l’effectif actif de la photographie API. Le lot 31 ajoute une comparaison documentaire des versions de contenu PayFit déjà conservées, par identifiants exacts et champs avant/après, avec provenance et exports filtrés. Une seconde version manquante reste explicite ; aucune nouvelle lecture PayFit ni activation réelle n’est effectuée.",
+      "codeEvidence": [
+        {
+          "file": "src/payfit-people-api.js",
+          "line": 179,
+          "note": "Normalisation par liste de champs, sans NIR, date de naissance ni banque."
+        },
+        {
+          "file": "src/rh-sources-api.js",
+          "line": 135,
+          "note": "Sources indépendantes des préférences et des KPI existants."
+        },
+        {
+          "file": "src/rh-reference-api.js",
+          "line": 197,
+          "note": "Référence brouillon versionnée et décisions manuelles, séparées des sources et KPI."
+        },
+        {
+          "file": "src/rh-reference-engine.js",
+          "line": 249,
+          "note": "Propositions et comparaisons DSN–PayFit sans activation implicite."
+        },
+        {
+          "file": "src/rh-validated-api.js",
+          "line": 259,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-validated-engine.js",
+          "line": 111,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-source-diff-api.js",
+          "line": 53,
+          "note": "Lot 31 : Lecture privée des seules sources sélectionnées et contrôles de provenance."
+        }
+      ],
+      "screens": [],
+      "evidenceLevel": "extension",
+      "dependencies": [
+        "RH-BUD-002",
+        "RH-BUD-023"
+      ],
+      "acceptance": [
+        "La lecture parcourt nextPageToken jusqu’à complétude, respecte maxResults et son maximum documenté de 50, et détecte page répétée ou boucle de pagination.",
+        "L’identifiant collaborateur PayFit constitue la clé source stable ; nom, matricule et email ne suffisent pas seuls à fusionner deux personnes ou à créer une correspondance automatique.",
+        "Une réembauche ne crée pas automatiquement une nouvelle personne ; les contrats restent distincts et un collaborateur sans contrat n’est pas compté automatiquement comme salarié présent.",
+        "Chaque extraction est horodatée, rattachée à la société, aux champs lus et à une empreinte ; l’état courant n’est pas présenté comme une photographie historique.",
+        "Avant activation future, un accord ciblé précise société, champs, périmètre et droit collaborators:read ; aucun scope bancaire, de sécurité sociale ou autre donnée supplémentaire n’est ajouté par défaut.",
+        "Les secrets restent côté serveur ; le connecteur utilise seulement les routes GET prévues, ne réalise aucune écriture PayFit et ne journalise aucun secret.",
+        "Les erreurs d’authentification, de droits, de pagination, de délai et de limitation de débit sont explicites ; les reprises sont bornées et une extraction incomplète n’est pas validée comme complète."
+      ],
+      "questions": [
+        "Quels collaborateurs, sociétés et champs sont nécessaires au périmètre initial de rapprochement ?",
+        "Quelle durée de conservation et quelle règle de résolution retenir pour les doublons ou changements d’identité signalés ?"
+      ],
+      "sourceLinks": [
+        {
+          "label": "PayFit — Liste des collaborateurs",
+          "url": "https://developers.payfit.io/reference/get_collaborators"
+        },
+        {
+          "label": "PayFit — Contrat OpenAPI public",
+          "url": "https://developers.payfit.io/openapi/partner-api.json"
+        }
+      ],
+      "deliveryEvidence": {
+        "scope": "Lecture serveur privée des collaborateurs PayFit de la société autorisée : pagination complète et bornée, identifiants source stables, champs autorisés, photographie datée et empreinte, rapprochements explicites, droits ciblés et secrets serveur. La photographie réelle conservée compte 209 lignes au 15 octobre 2026 et ne constitue pas un effectif actif ou historique.",
+        "verifiedAt": "2026-10-17",
+        "publishedVersion": 49,
+        "commit": "4087023ef562a24ffffdded798ae2318ea8f90d6",
+        "criteria": [
+          {
+            "index": 1,
+            "textHash": "71640b77a9a075e500002aa6aa004192d3bc916c906c5a4ecef6b5eb79d18167",
+            "tests": [
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "pagination tokens are opaque query parameters, normalized hashes ignore row/page order and raw PII"
+              },
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "repeated tokens or row IDs fail closed without exposing a partial dataset"
+              },
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "row and call budgets reject oversized collections without partial success"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "textHash": "340817a37e3281a85953047e405345d3878529021a2a7a4a7aec2963004c5998",
+            "tests": [
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "collaborators output is whitelisted, stable, current and never persisted"
+              },
+              {
+                "file": "tests/rh-reference-engine.test.mjs",
+                "check": "exact employee number and dates only suggest links; reference stays a separate draft"
+              },
+              {
+                "file": "tests/rh-reference-engine.test.mjs",
+                "check": "duplicate normalized names remain ambiguous and are never merged"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "textHash": "32e71e34cf9cafe2c3fc22a4cd300ccf2056dc927ca9fb065cdf04a102b4e57d",
+            "tests": [
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "rehires and simultaneous contracts are not merged by collaborator identity"
+              },
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "collaborators output is whitelisted, stable, current and never persisted"
+              }
+            ]
+          },
+          {
+            "index": 4,
+            "textHash": "502b798871b30c846ea78218d11bbc915dff503ceddde8f482d8878d917d16ef",
+            "tests": [
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "collaborators output is whitelisted, stable, current and never persisted"
+              },
+              {
+                "file": "tests/rh-sources-api.test.mjs",
+                "check": "API retention rereads verified upstream and refuses forged, changed or fixture payloads"
+              }
+            ]
+          },
+          {
+            "index": 5,
+            "textHash": "5018aa673652b2c92bd4a2d9c346e0bdbb520e13f29a2b787ef74a3d0a07e872",
+            "tests": [
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "inactive, malformed and missing scopes stop before data endpoints"
+              },
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "company identity, France and report SIREN are verified before fetching personal data"
+              }
+            ]
+          },
+          {
+            "index": 6,
+            "textHash": "65f36d9931589656e6bb6e26d5eca21acc5c877c480757cca1e8c199981db3e8",
+            "tests": [
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "unknown routes, methods, identity and Origin are rejected before networking"
+              },
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "HTTP and native failures never log or reflect private bodies, keys or error messages"
+              }
+            ]
+          },
+          {
+            "index": 7,
+            "textHash": "8480130e238d4cbfea1bfe7850e05f0c5065b4e2f54b51b5597ede880054dcbc",
+            "tests": [
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "429 exposes only a bounded retry delay, without retrying or returning upstream errors"
+              },
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "deadline covers fetch and body streaming, including fixture implementations"
+              },
+              {
+                "file": "tests/payfit-people-api.test.mjs",
+                "check": "repeated tokens or row IDs fail closed without exposing a partial dataset"
+              }
+            ]
+          }
+        ],
+        "limits": [
+          "Les collaborateurs de la photographie API ne sont pas automatiquement des salariés présents ; les contrats et périodes restent distincts.",
+          "Aucun rapprochement automatique par nom, matricule ou email et aucune photographie actuelle transformée en historique.",
+          "Cette capacité de lecture ne valide ni temps, quotités, ETP ou nouveaux KPI ; leurs états restent ceux des revues et activations propres.",
+          "Seuls les droits de lecture déjà autorisés sont utilisés ; aucune écriture PayFit, nouvelle permission ou diffusion externe."
+        ]
+      }
+    },
+    {
+      "id": "RH-BUD-031",
+      "title": "Lecture API PayFit des contrats et quotités",
+      "description": "Prévoir la lecture des contrats français, de leurs liens aux collaborateurs et, après accord ciblé, des informations horaires et quotités nécessaires.",
+      "family": "Sources RH",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Lecteur contrats français et quotités vérifié : photographie de 38 lignes du 15 octobre 2026 conservée avec dates/statuts, quotité API à échelle 1 et horaires distincts. La revue propose des contrats de la personne confirmée et compare les champs source. Les états API actuels ne reconstituent pas l’historique. La référence active et son activation KPI restent à valider. Les contrats déclarés DSN vérifiés de septembre peuvent être activés ; les quotités et ETP restent dans leurs conventions antérieures. Un onglet Temps & quotités qualifie désormais unités, périodes, doublons et valeurs absentes ; les égalités et différences observées ne valident aucun temps ni ETP. Les ETP contractuels de gestion au 30 septembre 2026 peuvent être validés et activés séparément, avec classement CSV/DSN vérifié, services et apprentissage, sans remplacer les ETP d’activité ni moyens historiques. Les écarts horaires non documentés restent non validés. Le lot 31 ajoute une comparaison documentaire des versions de contenu PayFit déjà conservées, par identifiants exacts et champs avant/après, avec provenance et exports filtrés. Une seconde version manquante reste explicite ; aucune nouvelle lecture PayFit ni activation réelle n’est effectuée.",
+      "codeEvidence": [
+        {
+          "file": "src/payfit-people-api.js",
+          "line": 179,
+          "note": "Contrats, dates, quotité et informations horaires conservés distinctement."
+        },
+        {
+          "file": "src/payfit-people-api.js",
+          "line": 223,
+          "note": "Pagination bornée et contrôles de complétude des pages reçues."
+        },
+        {
+          "file": "src/rh-reference-api.js",
+          "line": 197,
+          "note": "Référence brouillon versionnée et décisions manuelles, séparées des sources et KPI."
+        },
+        {
+          "file": "src/rh-reference-engine.js",
+          "line": 249,
+          "note": "Propositions et comparaisons DSN–PayFit sans activation implicite."
+        },
+        {
+          "file": "src/rh-validated-api.js",
+          "line": 259,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-validated-engine.js",
+          "line": 111,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-time-review.js",
+          "line": 20,
+          "note": "Contrôles numériques conservateurs des temps et quotités, sans conversion ni modification des KPI."
+        },
+        {
+          "file": "src/rh-etp-engine.js",
+          "line": 133,
+          "note": "Quotités et contrats de fin de mois documentés, sans activation des temps ni moyennes."
+        },
+        {
+          "file": "src/rh-etp-api.js",
+          "line": 118,
+          "note": "Activation ETP versionnée indépendante des ajustements, KPI DSN et qualification N/S."
+        },
+        {
+          "file": "src/rh-source-diff-engine.js",
+          "line": 120,
+          "note": "Lot 31 : Comparaison documentaire des versions de contenu conservées, sans écriture ni validation des mesures."
+        },
+        {
+          "file": "src/rh-source-diff-api.js",
+          "line": 53,
+          "note": "Lot 31 : Lecture privée des seules sources sélectionnées et contrôles de provenance."
+        }
+      ],
+      "screens": [],
+      "evidenceLevel": "extension",
+      "dependencies": [
+        "RH-BUD-002",
+        "RH-BUD-023",
+        "RH-BUD-030"
+      ],
+      "acceptance": [
+        "La pagination est complète et contrôlée ; companyId, contractId et collaboratorId sont rapprochés sans fusionner contrats successifs, simultanés ou réembauches.",
+        "Les états actif, archivé et en préparation sont distingués ; un contrat en préparation n’est pas assimilé à un contrat réalisé et les options d’inclusion sont explicites.",
+        "Les dates inconnues restent inconnues ; un statut archivé ne permet pas d’inventer une date de fin ou une quotité antérieure.",
+        "Quotité, heures hebdomadaires et modalité de temps de travail portent leurs unités et conventions ; la valeur de temps plein et l’échelle de quotité sont contrôlées sans division arbitraire par cent.",
+        "Des photographies datées et leurs différences sont conservées. La couverture documentée des contrats archivés est affichée et aucune reconstitution historique complète n’est promise à partir du seul état courant.",
+        "Avant activation future, un accord ciblé couvre contracts:read et, si nécessaire, contracts:time-information:read ; seuls les champs utiles sont conservés, sans activer les droits de sécurité sociale ou d’assurance par défaut.",
+        "Les secrets restent côté serveur, aucune écriture PayFit n’est réalisée, et les délais, tailles, erreurs et limitations de débit sont traités par des reprises bornées sans valider un jeu incomplet."
+      ],
+      "questions": [
+        "Quelles périodes et catégories de contrats archivés doivent être reprises et quelles lacunes resteront hors couverture API ?",
+        "Quelle règle de rapprochement et de revue retenir lorsque contrats API, DSN et autres pièces divergent ?"
+      ],
+      "sourceLinks": [
+        {
+          "label": "PayFit — Contrats français",
+          "url": "https://developers.payfit.io/reference/get_contracts_fr"
+        },
+        {
+          "label": "PayFit — Contrat OpenAPI public",
+          "url": "https://developers.payfit.io/openapi/partner-api.json"
+        }
+      ]
+    },
+    {
+      "id": "RH-BUD-032",
+      "title": "Lecture API PayFit du temps travaillé et payé",
+      "description": "Prévoir une lecture mensuelle par contrat des temps effectifs et payés, avec leurs unités, périodes et révisions, comme source distincte de la quotité contractuelle.",
+      "family": "Sources RH",
+      "priority": "P0",
+      "phase": "R0",
+      "status": "partial",
+      "coverage": "Lecteur temps vérifié sur septembre 2026 : 23 lignes contractuelles conservées. Le second lot expose les temps payé/effectif et les activités DSN avec unités et périodes de rattachement, via les contrats examinés. Il signale les lignes sans lien confirmé et les conventions non comparables. Aucun ETP dérivé ni nouvel indicateur actif ; revue métier et contrôles de montants restent à terminer. La revue des identités ne valide pas les temps : unités, définitions et valeurs manquantes demandent encore une qualification distincte, sans nouvel ETP. Un onglet Temps & quotités qualifie désormais unités, périodes, doublons et valeurs absentes ; les égalités et différences observées ne valident aucun temps ni ETP. Les ETP contractuels de gestion au 30 septembre 2026 peuvent être validés et activés séparément, avec classement CSV/DSN vérifié, services et apprentissage, sans remplacer les ETP d’activité ni moyens historiques. Les écarts horaires non documentés restent non validés. Le lot 31 ajoute une comparaison documentaire des versions de contenu PayFit déjà conservées, par identifiants exacts et champs avant/après, avec provenance et exports filtrés. Une seconde version manquante reste explicite ; aucune nouvelle lecture PayFit ni activation réelle n’est effectuée.",
+      "codeEvidence": [
+        {
+          "file": "src/payfit-people-api.js",
+          "line": 179,
+          "note": "Mesures de temps effectif et payé sans conversion ni zéro fabriqué."
+        },
+        {
+          "file": "src/payfit-people-api.js",
+          "line": 258,
+          "note": "Lecture seule et contrôles serveur avant appel PayFit."
+        },
+        {
+          "file": "src/rh-reference-api.js",
+          "line": 197,
+          "note": "Référence brouillon versionnée et décisions manuelles, séparées des sources et KPI."
+        },
+        {
+          "file": "src/rh-reference-engine.js",
+          "line": 249,
+          "note": "Propositions et comparaisons DSN–PayFit sans activation implicite."
+        },
+        {
+          "file": "src/rh-validated-api.js",
+          "line": 259,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-validated-engine.js",
+          "line": 111,
+          "note": "Indicateurs DSN de septembre vérifiés, avec activation traçable ; ajustements, journal comptable et ETP préservés."
+        },
+        {
+          "file": "src/rh-time-review.js",
+          "line": 20,
+          "note": "Contrôles numériques conservateurs des temps et quotités, sans conversion ni modification des KPI."
+        },
+        {
+          "file": "src/rh-etp-engine.js",
+          "line": 133,
+          "note": "Quotités et contrats de fin de mois documentés, sans activation des temps ni moyennes."
+        },
+        {
+          "file": "src/rh-etp-api.js",
+          "line": 118,
+          "note": "Activation ETP versionnée indépendante des ajustements, KPI DSN et qualification N/S."
+        },
+        {
+          "file": "src/rh-source-diff-engine.js",
+          "line": 120,
+          "note": "Lot 31 : Comparaison documentaire des versions de contenu conservées, sans écriture ni validation des mesures."
+        },
+        {
+          "file": "src/rh-source-diff-api.js",
+          "line": 53,
+          "note": "Lot 31 : Lecture privée des seules sources sélectionnées et contrôles de provenance."
+        }
+      ],
+      "screens": [],
+      "evidenceLevel": "extension",
+      "dependencies": [
+        "RH-BUD-002",
+        "RH-BUD-023",
+        "RH-BUD-031"
+      ],
+      "acceptance": [
+        "Chaque extraction identifie société et période de paie demandée au format YYYYMM, traite toute la pagination et relie chaque ligne à contractId ; les limites de pages et répétitions sont contrôlées.",
+        "effectiveWorkedTime, payedWorkedTime et workTimeUnit sont conservés séparément ; l’unité documentée hours ou days reste associée à chaque mesure.",
+        "Valeur nulle, champ absent et zéro sont distingués ; jours et heures ne sont pas additionnés sans conversion explicitement documentée.",
+        "Temps effectif, temps payé, quotité contractuelle et ETP sont des mesures distinctes ; aucune conversion en ETP n’est effectuée sans définition, dénominateur et convention de période validés.",
+        "Une nouvelle lecture d’un mois passé crée une révision identifiable ; toute correction rétroactive est prévisualisée avant incorporation et ne modifie pas silencieusement le réalisé figé.",
+        "La disponibilité historique, les contrats non rapprochés et périodes sans données restent visibles sans extrapolation ; un lot mensuel incomplet ne reçoit pas le statut complet.",
+        "Avant activation future, un accord ciblé précise société, mois et droit time:read ; secrets serveur, routes GET seulement, aucune écriture, délais et tailles bornés et traitement explicite des erreurs et limitations de débit."
+      ],
+      "questions": [
+        "Quels mois et établissements ou sociétés doivent être couverts par la première reprise des temps ?",
+        "Quelle durée d’historisation et quelle procédure de revue retenir pour les corrections mensuelles rétroactives ?"
+      ],
+      "sourceLinks": [
+        {
+          "label": "PayFit — Temps travaillé par contrat",
+          "url": "https://developers.payfit.io/reference/get_contracts_worked_time"
+        },
+        {
+          "label": "PayFit — Contrat OpenAPI public",
+          "url": "https://developers.payfit.io/openapi/partner-api.json"
+        }
+      ]
+    }
+  ]
+}

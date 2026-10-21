@@ -1,0 +1,141 @@
+import { expect, test, type Page } from "@playwright/test";
+import { TOTP } from "otpauth";
+
+// Acceptation du module 0 : connexion, création d'espace, menu figé, accès croisé refusé, rôle lecteur.
+// Comptes jetables à adresses fictives ; aucune donnée réelle.
+const run = Date.now().toString(36);
+const PASSWORD = "Fictif-Test-2026!";
+const users = {
+  admin: { name: "Admin Test", email: `admin-${run}@test.invalid` },
+  outsider: { name: "Externe Test", email: `externe-${run}@test.invalid` },
+  reader: { name: "Lecteur Test", email: `lecteur-${run}@test.invalid` },
+};
+const CAPTURES = process.env.CAPTURES_DIR ?? "captures";
+const MENU = ["Données", "Collaborateurs", "KPI RH", "Masse salariale", "Hypothèses budgétaires", "Reporting social"];
+
+let slug = "";
+let totpSecret = "";
+
+async function signUp(page: Page, u: { name: string; email: string }) {
+  await page.goto("/inscription");
+  await page.getByLabel("Nom").fill(u.name);
+  await page.getByLabel("E-mail").fill(u.email);
+  await page.getByLabel(/Mot de passe/).fill(PASSWORD);
+  await page.getByRole("button", { name: "Créer le compte" }).click();
+  await expect(page).toHaveURL(/\/espaces$/);
+}
+
+function totpCode() {
+  return new TOTP({ secret: totpSecret, digits: 6, period: 30 }).generate();
+}
+
+test.describe.serial("Module 0 — socle", () => {
+  test("un administrateur crée un espace, active le TOTP et voit le menu figé", async ({ page }) => {
+    await signUp(page, users.admin);
+    await expect(page.getByTestId("no-workspace")).toBeVisible();
+    await page.getByLabel(/Nom de l'espace/).fill(`Structure fictive ${run}`);
+    await page.getByRole("button", { name: "Créer l'espace" }).click();
+
+    // Administrateur sans TOTP : configuration imposée avant d'entrer dans l'espace.
+    await expect(page).toHaveURL(/\/securite\?retour=/);
+    const pendingSlug = decodeURIComponent(page.url().split("retour=")[1]).split("/")[2];
+    const pending = await (await page.request.get(`/api/espaces/${pendingSlug}`)).json();
+    expect(pending.role).toBe("admin");
+    const blocked = await page.request.post("/api/auth/organization/invite-member", {
+      data: { organizationId: pending.workspace.id, email: `y-${run}@test.invalid`, role: "reader" },
+    });
+    expect(blocked.status()).toBe(403);
+    await page.getByLabel("Mot de passe").fill(PASSWORD);
+    await page.getByRole("button", { name: "Configurer" }).click();
+    totpSecret = (await page.getByTestId("totp-secret").textContent())!.trim();
+    await page.getByLabel("Code à 6 chiffres").fill(totpCode());
+    await page.getByRole("button", { name: "Activer" }).click();
+    await expect(page.getByTestId("totp-enabled")).toBeVisible();
+    await page.getByRole("button", { name: "Continuer" }).click();
+
+    await expect(page).toHaveURL(/\/e\/[a-z0-9-]+\/donnees$/);
+    slug = page.url().match(/\/e\/([a-z0-9-]+)\//)![1];
+    const menu = page.getByTestId("main-menu");
+    await expect(menu.getByRole("link")).toHaveText(MENU);
+    await expect(menu.getByText("Studio RH", { exact: true })).toBeVisible();
+    await page.screenshot({ path: `${CAPTURES}/01-espace-menu-fige.png`, fullPage: true });
+
+    for (const label of MENU.slice(1)) {
+      await menu.getByRole("link", { name: label }).click();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(label);
+      await expect(page.getByTestId("placeholder")).toBeVisible();
+    }
+  });
+
+  test("un second utilisateur ne voit pas l'espace (liste, URL directe, API)", async ({ page }) => {
+    await signUp(page, users.outsider);
+    await expect(page.getByTestId("no-workspace")).toBeVisible();
+
+    const res = await page.goto(`/e/${slug}/donnees`);
+    expect(res?.status()).toBe(404);
+    await expect(page.getByText("Page introuvable")).toBeVisible();
+    await expect(page.getByTestId("main-menu")).toHaveCount(0);
+    await page.screenshot({ path: `${CAPTURES}/02-acces-croise-refuse.png`, fullPage: true });
+
+    const api = await page.request.get(`/api/espaces/${slug}`);
+    expect(api.status()).toBe(403);
+    const anonymous = await page.request.get(`/api/espaces/${slug}`, { headers: { cookie: "" } });
+    expect([401, 403]).toContain(anonymous.status());
+  });
+
+  test("invitation d'un lecteur, qui ne peut pas modifier l'espace", async ({ browser }) => {
+    // L'administrateur se reconnecte avec son code TOTP et invite un lecteur.
+    const adminCtx = await browser.newContext();
+    const admin = await adminCtx.newPage();
+    await admin.goto("/connexion");
+    await admin.getByLabel("E-mail").fill(users.admin.email);
+    await admin.getByLabel("Mot de passe").fill(PASSWORD);
+    await admin.getByRole("button", { name: "Se connecter" }).click();
+    await expect(admin).toHaveURL(/\/connexion\/totp/);
+    await admin.getByLabel("Code").fill(totpCode());
+    await admin.getByRole("button", { name: "Vérifier" }).click();
+    await expect(admin).toHaveURL(/\/espaces$/);
+
+    await admin.goto(`/e/${slug}/membres`);
+    await admin.getByLabel("E-mail").fill(users.reader.email);
+    await admin.getByLabel("Rôle").selectOption("reader");
+    await admin.getByRole("button", { name: "Inviter" }).click();
+    const link = admin.getByTestId("invitation-link").first();
+    await expect(link).toBeVisible();
+    const invitationPath = new URL((await link.textContent())!.trim()).pathname;
+    await admin.screenshot({ path: `${CAPTURES}/03-membres-invitation.png`, fullPage: true });
+
+    const readerCtx = await browser.newContext();
+    const reader = await readerCtx.newPage();
+    await signUp(reader, users.reader);
+    await reader.goto(invitationPath);
+    await reader.getByRole("button", { name: "Accepter l'invitation" }).click();
+    await expect(reader).toHaveURL(new RegExp(`/e/${slug}/donnees$`));
+    await expect(reader.getByTestId("main-menu").getByRole("link")).toHaveText(MENU);
+
+    // Interface : aucun contrôle d'administration.
+    await reader.goto(`/e/${slug}/membres`);
+    await expect(reader.getByTestId("member-list")).toContainText(users.admin.email);
+    await expect(reader.getByRole("button", { name: "Inviter" })).toHaveCount(0);
+    await expect(reader.getByRole("button", { name: "Renommer" })).toHaveCount(0);
+
+    // API : modification refusée côté serveur.
+    const info = await (await reader.request.get(`/api/espaces/${slug}`)).json();
+    expect(info.workspace.id).toBeTruthy();
+    expect(info.role).toBe("reader");
+    const rename = await reader.request.post("/api/auth/organization/update", {
+      data: { organizationId: info.workspace.id, data: { name: "Renommage interdit" } },
+    });
+    expect(rename.status()).toBe(403);
+    const invite = await reader.request.post("/api/auth/organization/invite-member", {
+      data: { organizationId: info.workspace.id, email: `x-${run}@test.invalid`, role: "reader" },
+    });
+    expect(invite.status()).toBe(403);
+    await expect((await reader.request.get(`/api/espaces/${slug}`)).json()).resolves.toMatchObject({
+      workspace: { name: `Structure fictive ${run}` },
+    });
+
+    await adminCtx.close();
+    await readerCtx.close();
+  });
+});

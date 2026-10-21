@@ -1,0 +1,52 @@
+/* Clair overview type and control scale, shared with Studio RH. Screen only. */
+@media screen {
+  :root {
+    --clair-type-page:42px;
+    --clair-type-panel:19px;
+    --clair-type-section:17px;
+    --clair-type-subheading:15px;
+    --clair-type-body:14px;
+    --clair-type-description:12px;
+    --clair-type-copy:11px;
+    --clair-type-kpi:37px;
+    --clair-type-label:11px;
+    --clair-type-note:10px;
+    --clair-type-control:11px;
+    --clair-type-filter-label:10px;
+    --clair-type-table-head:10px;
+    --clair-type-table-cell:11px;
+    --clair-type-form:12px;
+    --clair-type-form-label:11px;
+    --clair-type-chart:10px;
+    --clair-type-legend:9px;
+    --clair-type-secondary:26px;
+    --clair-button-pad-x:15px;
+    --clair-button-pad-y:11px;
+    --clair-filter-pad-x:11px;
+    --clair-filter-pad-y:9px;
+  }
+}
+@media screen and (min-width:1600px) {
+  :root { --clair-type-kpi:43px; }
+}
+@media screen and (max-width:1190px) {
+  :root { --clair-type-page:36px;--clair-type-kpi:31px;--clair-button-pad-x:12px;--clair-button-pad-y:10px; }
+}
+@media screen and (max-width:960px) {
+  :root { --clair-type-page:32px;--clair-type-kpi:27px; }
+}
+@media screen and (max-width:720px) {
+  :root {
+    --clair-type-page:34px;
+    --clair-type-panel:17px;
+    --clair-type-description:11px;
+    --clair-type-kpi:31px;
+    --clair-type-label:10px;
+    --clair-type-note:9px;
+    --clair-type-filter-label:9px;
+    --clair-type-legend:8px;
+    --clair-type-secondary:22px;
+    --clair-filter-pad-x:8px;
+    --clair-filter-pad-y:8px;
+  }
+}
