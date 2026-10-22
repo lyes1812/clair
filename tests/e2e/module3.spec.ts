@@ -160,8 +160,9 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(tile("headcount-avg").locator("dd")).toHaveText("6,92");
   await expect(tile("headcount-avg-n1")).toContainText("6,50");
   await expect(tile("turnover").locator("dd")).toHaveText("14,46 %");
-  await expect(tile("turnover-n1")).toContainText("53,85 %");
-  await expect(tile("turnover-delta")).toContainText("−39,39 pts");
+  // N-1 (octobre 2024 → septembre 2025) : six entrées le 01/10/2024, premier jour déposé ⇒ continuité non vérifiable ⇒ n.d.
+  await expect(tile("turnover-n1")).toContainText("contrats continus non vérifiables");
+  await expect(tile("turnover-delta")).toContainText("n.d.");
   await expect(tile("absenteeism").locator("dd")).toHaveText("n.d. — arrêts non extraits de la DSN");
   await expect(page.getByTestId("kpi-monthly-table").locator("tr[data-month='2025-12'] td[data-col='theoretical']")).toHaveText("217 j");
   // Jours théoriques de la période : exacts même quand l'absentéisme est n.d. (2 510 j sur octobre 2025 → septembre 2026).

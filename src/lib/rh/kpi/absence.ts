@@ -104,6 +104,13 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
     const slices: AbsenceSlice[] = [];
     const excluded: AbsenceExcluded[] = [];
     const uncertainIds = new Set<string>();
+    const undated: { a: (typeof absences.rows)[number]; contractKey: string; possible: SlotKey[]; known: string; which: string }[] = [];
+    const personContracts = new Map<string, ContractDraft[]>();
+    for (const k of data.contracts) {
+      if (!k.personKey || k.startDate === null || k.nature === null || !opts.natures.includes(k.nature) || !inEst(scope.establishments, k.establishmentId)) continue;
+      if (k.startDate > me || (k.endDate !== null && k.endDate < ms)) continue;
+      personContracts.set(k.personKey, [...(personContracts.get(k.personKey) ?? []), k]);
+    }
     let outside = 0;
     const setOf = (m: Map<string, Set<SlotKey>>, k: string) => {
       let s = m.get(k);
@@ -143,18 +150,45 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
           reach,
           params.dayBasis,
         );
-        if (!r.slots.length && !r.uncertain.length) {
-          const known = sd === null && ed === null ? "dates de début et de fin non renseignées" : sd === null ? `date de début non renseignée, fin le ${formatDate(ed)}` : `date de fin non renseignée, début le ${formatDate(sd)}`;
+        const possible = [...new Set([...r.slots, ...r.uncertain])];
+        const known = sd === null && ed === null ? "dates de début et de fin non renseignées" : sd === null ? `date de début non renseignée, fin le ${formatDate(ed)}` : `date de fin non renseignée, début le ${formatDate(sd)}`;
+        if (!possible.length) {
           const label = `aucune demi-journée comptée possible dans la période du contrat (${known})`;
           excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: 0 });
           continue;
         }
-        return { month, kind: "nd", nd: kpiNd("absence-date-nd", `absence ${a.id} : date de ${sd === null ? "début" : "fin"} non renseignée dans PayFit`) };
+        if (a.status === null) {
+          // Jamais comptée : des dates inconnues ne font qu'élargir ses demi-journées incertaines.
+          possible.forEach((x) => setOf(doubt, c.contractKey).add(x));
+          uncertainIds.add(a.id);
+          excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "status-nd", label: `statut non renseigné : non comptée (${known})`, uncertain: possible.length });
+          continue;
+        }
+        // Décidé après la boucle : n.d. seulement si une demi-journée possible n'est pas déjà comptée par une absence datée.
+        undated.push({ a, contractKey: c.contractKey, possible, known, which: sd === null && ed === null ? "début et de fin" : sd === null ? "début" : "fin" });
+        continue;
       }
       const clip = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };
       const inMonth = eachDay(max(sd, ms), min(ed, me)).filter((d) => params.dayBasis === "calendar" || isWeekday(d));
-      const outsideContract = inMonth.filter((d) => d < c.startDate! || (c.endDate !== null && d > c.endDate)).length;
+      const outsideDays = inMonth.filter((d) => d < c.startDate! || (c.endDate !== null && d > c.endDate));
+      const outsideContract = outsideDays.length;
       outside += outsideContract;
+      // Jours hors du contrat de l'absence mais sous un autre contrat compté de la même personne (ex. CDD puis CDI) : ces jours
+      // sont au dénominateur de l'autre contrat ; l'absence n'y est pas rattachée par PayFit ⇒ demi-journées incertaines (« ≥ »).
+      const otherNotes: string[] = [];
+      if (outsideContract && c.personKey) {
+        const outsideSet = new Set(outsideDays);
+        for (const c2 of personContracts.get(c.personKey) ?? []) {
+          if (c2.contractKey === c.contractKey) continue;
+          const clip2 = { from: max(ms, c2.startDate!), to: min(me, c2.endDate ?? me) };
+          const s2 = absenceSlots({ start: { date: sd, moment: a.start.moment }, end: { date: ed, moment: a.end.moment } }, clip2, params.dayBasis);
+          const onOther = [...new Set([...s2.slots, ...s2.uncertain])].filter((x) => outsideSet.has(x.slice(0, 10)));
+          if (!onOther.length) continue;
+          onOther.forEach((x) => setOf(doubt, c2.contractKey).add(x));
+          uncertainIds.add(a.id);
+          otherNotes.push(`${onOther.length} demi-journée(s) sous le contrat ${c2.externalId} de la même personne : non rattachées par PayFit, incertaines`);
+        }
+      }
       if (a.status === null) {
         // Créneaux que l'absence pourrait couvrir, moments compris : comptés comme incertains, jamais comme absents.
         const p = absenceSlots({ start: { date: sd, moment: a.start.moment }, end: { date: ed, moment: a.end.moment } }, clip, params.dayBasis);
@@ -185,8 +219,13 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
         overlap: s.slots.length - added.length,
         uncertain: s.uncertain.length,
         outsideContract,
-        notes: s.notes,
+        notes: [...s.notes, ...otherNotes],
       });
+    }
+    for (const x of undated) {
+      const u = union.get(x.contractKey) ?? new Set<SlotKey>();
+      if (x.possible.some((sl) => !u.has(sl))) return { month, kind: "nd", nd: kpiNd("absence-date-nd", `absence ${x.a.id} : date de ${x.which} non renseignée dans PayFit`) };
+      excluded.push({ absenceId: x.a.id, contractId: x.a.contractId, type: x.a.type, status: x.a.status, why: "date-nd-covered", label: `${x.known} : toutes ses demi-journées possibles sont déjà comptées par d'autres absences`, uncertain: 0 });
     }
     let num = 0;
     for (const u of union.values()) num += u.size;

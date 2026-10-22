@@ -67,14 +67,14 @@ export type Average =
   | { kind: "nd"; unit: "etp" | "persons"; nd: KpiNd; months: MonthValue[] };
 
 // Turnover
-export type EventWhy = "counted" | "out-of-scope" | "future" | "neutralized" | "excluded-nature";
+export type EventWhy = "counted" | "out-of-scope" | "future" | "neutralized" | "excluded-nature" | "continuity-unknown";
 export type EventContribution = { row: EventRow; why: EventWhy; label: string; partner: { contractKey: string; date: string } | null };
 export type MonthMovements = { month: string; entries: Count; exits: Count; events: EventContribution[] };
 export type TurnoverBase =
   | { kind: "average"; average: Extract<Average, { kind: "exact" }> }
   | { kind: "start"; date: string; persons: number; contractKeys: string[] };
 export type Turnover =
-  | { kind: "exact"; formula: TurnoverFormula; ratio: Ratio; entries: number; exits: number; base: TurnoverBase; months: MonthMovements[]; qualifiers: string[] }
+  | { kind: "exact"; formula: TurnoverFormula; ratio: Ratio; entries: number | null; exits: number; base: TurnoverBase; months: MonthMovements[]; qualifiers: string[] } // entries null : non exactes (variante sorties ÷ début seulement)
   | { kind: "nd"; formula: TurnoverFormula; nd: KpiNd; months: MonthMovements[] };
 
 // Absentéisme (en demi-journées)
@@ -105,7 +105,7 @@ export type AbsenceExcluded = {
   contractId: string;
   type: string;
   status: string | null;
-  why: "type" | "status" | "status-nd" | "contract-out-of-scope";
+  why: "type" | "status" | "status-nd" | "contract-out-of-scope" | "date-nd-covered";
   label: string;
   uncertain: number;
 };

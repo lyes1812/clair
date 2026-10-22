@@ -1,7 +1,7 @@
 import { addDays, formatDate, monthStart } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
-import { headcountAt, monthlyList, monthRanges, type Count, type EventRow } from "@/lib/rh/headcount";
-import type { EventDraft } from "@/lib/rh/referential/types";
+import { gateAt, headcountAt, monthlyList, monthRanges, payfitExactFrom, type Count, type EventRow } from "@/lib/rh/headcount";
+import { nd, type EventDraft } from "@/lib/rh/referential/types";
 import { headcountAverage } from "./average";
 import { ratio } from "./fraction";
 import { memo } from "./memo";
@@ -43,6 +43,21 @@ function continuityPartners(input: KpiInput): Map<string, { event: EventDraft; c
   });
 }
 
+// Contrats continus : le partenaire possible d'un mouvement (la veille d'une entrée, le lendemain d'une sortie) est-il connu ?
+// DSN : le mois de ce jour doit être couvert par des déclarations complètes (tous établissements : le contrat suivant peut être
+// déclaré par un autre SIRET). PayFit : un contrat terminé avant la date de lecture − 12 mois peut manquer ; les contrats à
+// venir sont renvoyés. Sans cette connaissance, neutraliser ou compter serait une supposition.
+function neighbourKnown(data: KpiInput["data"], kind: "entry" | "exit", date: string): boolean {
+  const day = addDays(date, kind === "entry" ? -1 : 1);
+  if (data.build.source === "payfit") {
+    if (kind === "exit") return true;
+    const from = payfitExactFrom(data);
+    return from === null ? !data.coverage.some((c) => c.presenceStatus === "lower_bound") : day >= from;
+  }
+  const g = gateAt(data, day);
+  return g.nd === null && g.coverage.every((c) => c.presenceStatus === "complete");
+}
+
 // Mouvements d'un mois après les règles du turnover (natures, date de référence, contrats continus, natures de sortie exclues).
 export function monthMovements(input: KpiInput, month: string): MonthMovements {
   return memo(input, `mv:${month}`, () => {
@@ -52,21 +67,34 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
     const ref = data.build.referenceDate;
     const partners = continuityPartners(input);
     const partnerOf = (r: EventRow) => partners.get(eventKey(r.event)) ?? null;
+    const externalOf = new Map(data.contracts.map((c) => [c.contractKey, c.externalId]));
     const events: EventContribution[] = [...ml.entries, ...ml.exits].map((r) => {
       const partner = partnerOf(r);
       const p = partner ? { contractKey: partner.event.contractKey, date: partner.event.date } : null;
       if (!r.inScope) return { row: r, why: "out-of-scope", label: "hors natures comptées", partner: p };
       if (ref && r.event.date > ref) return { row: r, why: "future", label: "postérieur à la date de référence", partner: p };
       if (params.neutralizeContinuity && partner?.counted) {
-        return { row: r, why: "neutralized", label: `contrat continu neutralisé (avec ${partner.event.contractKey.split(":")[1] ?? partner.event.contractKey} le ${formatDate(partner.event.date)})`, partner: p };
+        return { row: r, why: "neutralized", label: `contrat continu neutralisé (avec ${externalOf.get(partner.event.contractKey) ?? partner.event.contractKey} le ${formatDate(partner.event.date)})`, partner: p };
+      }
+      if (params.neutralizeContinuity && !partner && r.event.personKey !== null && !neighbourKnown(data, r.event.kind, r.event.date)) {
+        const day = formatDate(addDays(r.event.date, r.event.kind === "entry" ? -1 : 1));
+        return { row: r, why: "continuity-unknown", label: `continuité non vérifiable : le ${day} n'est pas couvert par la source (contrat ${r.event.kind === "entry" ? "précédent" : "suivant"} inconnu)`, partner: p };
       }
       if (r.event.kind === "exit" && r.event.nature !== null && params.excludedExitNatures.includes(r.event.nature)) {
         return { row: r, why: "excluded-nature", label: `sortie exclue : nature ${contractNatureLabel(r.event.nature)} (Paramètres)`, partner: p };
       }
       return { row: r, why: "counted", label: "compté", partner: p };
     });
-    const count = (c: Count, kind: "entry" | "exit"): Count =>
-      c.kind === "nd" ? c : { kind: c.kind, value: events.filter((x) => x.why === "counted" && x.row.event.kind === kind).length, qualifiers: c.qualifiers };
+    const count = (c: Count, kind: "entry" | "exit"): Count => {
+      if (c.kind === "nd") return c;
+      const unknown = events.filter((x) => x.why === "continuity-unknown" && x.row.event.kind === kind);
+      if (unknown.length) {
+        const what = kind === "entry" ? "entrées" : "sorties";
+        const list = unknown.map((x) => `${x.row.contract.externalId} le ${formatDate(x.row.event.date)}`).join(", ");
+        return { kind: "nd", nd: nd("coverage-incomplete", `${what} de ${month} : contrats continus non vérifiables (${list}) — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés`) };
+      }
+      return { kind: c.kind, value: events.filter((x) => x.why === "counted" && x.row.event.kind === kind).length, qualifiers: c.qualifiers };
+    };
     return { month, entries: count(ml.entriesCount, "entry"), exits: count(ml.exitsCount, "exit"), events };
   });
 }
@@ -78,7 +106,9 @@ export function turnover(input: KpiInput, w: Window): Turnover {
     const g = checkWindow(input.data, w);
     if (g) return { kind: "nd", formula, nd: g, months: [] };
     const months = w.months.map((m) => monthMovements(input, m));
-    const ndMonths = months.filter((m) => m.entries.kind === "nd" || m.exits.kind === "nd");
+    // La variante « sorties ÷ effectif au premier jour » n'utilise pas les entrées : seules les sorties doivent être exactes.
+    const usesEntries = formula === "half_sum";
+    const ndMonths = months.filter((m) => (usesEntries && m.entries.kind === "nd") || m.exits.kind === "nd");
     if (ndMonths.length) {
       const first = ndMonths[0];
       const which = first.exits.kind === "nd" ? first.exits : first.entries;
@@ -86,13 +116,14 @@ export function turnover(input: KpiInput, w: Window): Turnover {
       const reason = which.kind === "nd" ? which.nd.reason : "n.d.";
       return { kind: "nd", formula, months, nd: kpiNd("month-nd", `${monthRanges(ndMonths.map((m) => m.month))} : ${label} n.d. — ${reason}`, { months: ndMonths.map((m) => m.month) }) };
     }
-    const lowMonths = months.filter((m) => m.entries.kind === "lower_bound" || m.exits.kind === "lower_bound");
+    const lowMonths = months.filter((m) => (usesEntries && m.entries.kind === "lower_bound") || m.exits.kind === "lower_bound");
     if (lowMonths.length) {
       const first = lowMonths[0];
       const q = (first.entries.kind === "lower_bound" ? first.entries.qualifiers : first.exits.kind === "lower_bound" ? first.exits.qualifiers : [])[0];
       return { kind: "nd", formula, months, nd: kpiNd("month-lower-bound", `${monthRanges(lowMonths.map((m) => m.month))} : mouvements en borne basse${q ? ` (${q})` : ""}`, { months: lowMonths.map((m) => m.month) }) };
     }
-    const E = months.reduce((s, m) => s + (m.entries.kind === "nd" ? 0 : m.entries.value), 0);
+    // Entrées : total publié seulement si tous les mois sont exacts (la variante « sorties ÷ début » peut s'en passer).
+    const E = months.every((m) => m.entries.kind === "exact") ? months.reduce((s, m) => s + (m.entries.kind === "exact" ? m.entries.value : 0), 0) : null;
     const S = months.reduce((s, m) => s + (m.exits.kind === "nd" ? 0 : m.exits.value), 0);
     const neutralized = months.flatMap((m) => m.events).filter((e) => e.why === "neutralized").length;
     const excluded = months.flatMap((m) => m.events).filter((e) => e.why === "excluded-nature");
@@ -104,7 +135,7 @@ export function turnover(input: KpiInput, w: Window): Turnover {
       if (avg.kind === "nd") return { kind: "nd", formula, months, nd: avg.nd };
       if (avg.ratio.num === 0) return { kind: "nd", formula, months, nd: kpiNd("denominator-zero", "effectif moyen nul sur la période") };
       const n = w.months.length;
-      return { kind: "exact", formula, ratio: ratio(n * (E + S), 2 * avg.ratio.num), entries: E, exits: S, base: { kind: "average", average: avg }, months, qualifiers };
+      return { kind: "exact", formula, ratio: ratio(n * (E! + S), 2 * avg.ratio.num), entries: E!, exits: S, base: { kind: "average", average: avg }, months, qualifiers };
     }
     const date = monthStart(w.from);
     const h0 = headcountAt(input.data, date, countedOpts(input));

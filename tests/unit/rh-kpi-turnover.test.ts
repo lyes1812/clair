@@ -6,21 +6,25 @@ import { same } from "@/lib/rh/kpi/fraction";
 import { civilWindow, rollingWindow } from "@/lib/rh/kpi/period";
 import { monthMovements, turnover } from "@/lib/rh/kpi/turnover";
 import type { Turnover } from "@/lib/rh/kpi/types";
-import { PAYFIT_EDGES, payfitEdgeFetch } from "./helpers/edge-cases";
+import { NIR, PAYFIT_EDGES, payfitEdgeFetch, type DsnDeclarationSpec, type DsnPerson } from "./helpers/edge-cases";
 import { DSN_ABSENCES, fixtureAbsences, kpiInput } from "./helpers/kpi";
-import { dsnFixtureBuild, payfitBuild, payfitFixtureBuild } from "./helpers/rh";
+import { dsnBuild, dsnFixtureBuild, edgeFiles, payfitBuild, payfitFixtureBuild } from "./helpers/rh";
 
 const isRatio = (t: Turnover, num: number, den: number) => t.kind === "exact" && same(t.ratio, { num, den });
 
 describe("turnover — DSN (24 mois)", () => {
   const data = dsnFixtureBuild();
-  it("D4 : 12/83 = 14,46 % ; N-1 7/13 = 53,85 % ; écart −42500/1079 points", () => {
+  it("D4 : 12/83 = 14,46 % ; N-1 n.d. (six entrées le 01/10/2024, premier jour couvert : continuité non vérifiable) ; sans neutralisation N-1 7/13 et écart −42500/1079 points", () => {
     const cmp = compareWindows(kpiInput(data, DSN_ABSENCES), rollingWindow("2026-09"), turnover, (t) => t.ratio, "points");
     expect(isRatio(cmp.current, 12, 83)).toBe(true);
     expect(cmp.current).toMatchObject({ entries: 1, exits: 1 });
-    expect(isRatio(cmp.previous, 7, 13)).toBe(true);
-    expect(cmp.previous).toMatchObject({ entries: 7, exits: 0 });
-    expect(cmp.delta.kind === "exact" && same(cmp.delta.value, { num: -42500, den: 1079 })).toBe(true);
+    expect(cmp.previous).toMatchObject({ kind: "nd", nd: { code: "month-nd", months: ["2024-10"], reason: expect.stringContaining("contrats continus non vérifiables") } });
+    expect(cmp.delta).toMatchObject({ kind: "nd", nd: { code: "previous-nd" } });
+    const off = compareWindows(kpiInput(data, DSN_ABSENCES, { neutralizeContinuity: false }), rollingWindow("2026-09"), turnover, (t) => t.ratio, "points");
+    expect(isRatio(off.current, 12, 83)).toBe(true);
+    expect(isRatio(off.previous, 7, 13)).toBe(true);
+    expect(off.previous).toMatchObject({ entries: 7, exits: 0 });
+    expect(off.delta.kind === "exact" && same(off.delta.value, { num: -42500, den: 1079 })).toBe(true);
   });
   it("D5 : variantes — fins de CDD exclues 6/83 ; sorties ÷ effectif de début 1/7, N-1 0/6 ; les deux 0/7", () => {
     const w = rollingWindow("2026-09");
@@ -191,5 +195,53 @@ describe("turnover — sortie de nature comptée prioritaire quand un stage fini
     const t = turnover(input, rollingWindow("2026-01"));
     expect(isRatio(t, 0, 48)).toBe(true);
     expect(t).toMatchObject({ entries: 0, exits: 0 });
+  });
+});
+
+describe("turnover — contrats continus aux bords de la couverture DSN (jour voisin non déposé)", () => {
+  // A : CDD K-A1 jusqu'au 30/09/2025 puis CDI K-A2 dès le 01/10/2025 ; B : CDI stable. 2 personnes × 12 mois : Σ = 24.
+  const right = (month: string): DsnDeclarationSpec => {
+    const people: DsnPerson[] = [{ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] }];
+    const a: DsnPerson["contracts"] = [];
+    if (month <= "2025-09") a.push({ number: "K-A1", start: "2024-03-01", nature: "02", gross: "1500.00", ...(month === "2025-09" ? { end: "2025-09-30", endReason: "031" } : {}) });
+    if (month >= "2025-10") a.push({ number: "K-A2", start: "2025-10-01", nature: "01", gross: "1500.00" });
+    people.push({ nir: NIR.a, employeeNumber: "A", contracts: a });
+    return { month, people };
+  };
+  // C : CDD K-C1 jusqu'au 30/09/2024 puis CDI K-C2 dès le 01/10/2024 ; B : CDI stable.
+  const left = (month: string): DsnDeclarationSpec => {
+    const people: DsnPerson[] = [{ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] }];
+    const c: DsnPerson["contracts"] = [];
+    if (month <= "2024-09") c.push({ number: "K-C1", start: "2024-03-01", nature: "02", gross: "1500.00", ...(month === "2024-09" ? { end: "2024-09-30", endReason: "031" } : {}) });
+    if (month >= "2024-10") c.push({ number: "K-C2", start: "2024-10-01", nature: "01", gross: "1500.00" });
+    people.push({ nir: NIR.c, employeeNumber: "C", contracts: c });
+    return { month, people };
+  };
+  const w = rollingWindow("2025-09");
+  it("sortie le dernier jour du dernier mois déposé : n.d. (jamais deux valeurs « exactes ») ; octobre déposé : neutralisée, 0/48 ; sans neutralisation : 12/48", () => {
+    const before = dsnBuild(edgeFiles(monthRange("2024-10", "2025-09").map(right)));
+    const t = turnover(kpiInput(before, DSN_ABSENCES), w);
+    expect(t).toMatchObject({ kind: "nd", nd: { code: "month-nd", months: ["2025-09"], reason: expect.stringContaining("K-A1 le 30/09/2025") } });
+    expect(monthMovements(kpiInput(before, DSN_ABSENCES), "2025-09").events.map((e) => e.why)).toEqual(["continuity-unknown"]);
+    expect(isRatio(turnover(kpiInput(before, DSN_ABSENCES, { neutralizeContinuity: false }), w), 12, 48)).toBe(true);
+    // La variante « sorties ÷ effectif au premier jour » dépend aussi de cette sortie : n.d.
+    expect(turnover(kpiInput(before, DSN_ABSENCES, { turnoverFormula: "exits_over_start" }), w).kind).toBe("nd");
+    const after = dsnBuild(edgeFiles(monthRange("2024-10", "2025-10").map(right)));
+    const t2 = turnover(kpiInput(after, DSN_ABSENCES), w);
+    expect(isRatio(t2, 0, 48)).toBe(true);
+    const exit = monthMovements(kpiInput(after, DSN_ABSENCES), "2025-09").events[0];
+    expect(exit.why).toBe("neutralized");
+    expect(exit.label).toBe("contrat continu neutralisé (avec K-A2 le 01/10/2025)");
+  });
+  it("entrée le premier jour du premier mois déposé : n.d. ; septembre 2024 déposé : neutralisée, 0/48 ; sans neutralisation : 12/48", () => {
+    const first = dsnBuild(edgeFiles(monthRange("2024-10", "2025-09").map(left)));
+    expect(turnover(kpiInput(first, DSN_ABSENCES), w)).toMatchObject({ kind: "nd", nd: { months: ["2024-10"], reason: expect.stringContaining("K-C2 le 01/10/2024") } });
+    expect(isRatio(turnover(kpiInput(first, DSN_ABSENCES, { neutralizeContinuity: false }), w), 12, 48)).toBe(true);
+    // Les entrées n'interviennent pas dans « sorties ÷ effectif au premier jour » : 0 sortie ÷ 2 personnes, exact ; total des entrées non publié.
+    const start = turnover(kpiInput(first, DSN_ABSENCES, { turnoverFormula: "exits_over_start" }), w);
+    expect(isRatio(start, 0, 2)).toBe(true);
+    expect(start).toMatchObject({ entries: null, exits: 0 });
+    const withSept = dsnBuild(edgeFiles(monthRange("2024-09", "2025-09").map(left)));
+    expect(isRatio(turnover(kpiInput(withSept, DSN_ABSENCES), w), 0, 48)).toBe(true);
   });
 });

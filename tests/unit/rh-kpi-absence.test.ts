@@ -6,6 +6,7 @@ import { same } from "@/lib/rh/kpi/fraction";
 import { rollingWindow } from "@/lib/rh/kpi/period";
 import type { AbsenteeismMonth, KpiInput } from "@/lib/rh/kpi/types";
 import { nd } from "@/lib/rh/referential/types";
+import { payfitEdgeFetch } from "./helpers/edge-cases";
 import { absence, DSN_ABSENCES, fixtureAbsences, kpiInput, readAbsences } from "./helpers/kpi";
 import { dsnFixtureBuild, payfitBuild, payfitFixtureBuild } from "./helpers/rh";
 
@@ -202,5 +203,46 @@ describe("jours théoriques d'une fenêtre (indépendants des absences)", async 
     const t = theoreticalWindow(input, rollingWindow("2026-09"));
     expect(t).toMatchObject({ kind: "nd", nd: { code: "month-nd", months: ["2025-10"] } });
     if (t.kind === "nd") expect(t.nd.reason).toBe(`2025-10 : ${(theoreticalMonth(input, "2025-10") as { nd: { reason: string } }).nd.reason}`);
+  });
+});
+
+describe("absentéisme — dates inconnues couvertes, statut nul sans date, jours sous un autre contrat de la personne", async () => {
+  // C-A : CDI depuis 2024 ; P-C : CDD C-C1 jusqu'au 15/03/2025 puis CDI C-C2 dès le 16/03/2025. Lecture du 31/01/2026.
+  // Mai 2025 : C-A 31 j + C-C2 31 j = 62 j = 124 demi-journées. Mars 2025 : C-A 31 + C-C1 15 + C-C2 16 = 62 j = 124.
+  const edge = {
+    collaborators: [{ id: "P-A" }, { id: "P-C" }],
+    contracts: [
+      { contractId: "C-A", collaboratorId: "P-A", startDate: "2024-01-01", endDate: null, natureContratDsn: "01" },
+      { contractId: "C-C1", collaboratorId: "P-C", startDate: "2024-06-01", endDate: "2025-03-15", natureContratDsn: "02" },
+      { contractId: "C-C2", collaboratorId: "P-C", startDate: "2025-03-16", endDate: null, natureContratDsn: "01" },
+    ],
+  };
+  const MONTHS = monthRange("2024-10", "2026-01");
+  const data = await payfitBuild("cle-fictive-edge-1234", payfitEdgeFetch("cle-fictive-edge-1234", edge as never), MONTHS, new Date("2026-01-31T08:00:00Z"));
+  const run = (rows: Parameters<typeof readAbsences>[0], month: string) => absenteeismMonth(kpiInput(data, readAbsences(rows, MONTHS)), month);
+  const A = absence("A", "C-A", "2025-05-01", "beginning-of-day", "2025-05-31", "end-of-day");
+  it("date inconnue mais toutes les demi-journées possibles déjà comptées : exact, absence listée", () => {
+    expect(r(run([A], "2025-05"))).toBe("exact:62/124");
+    const both = run([A, absence("B", "C-A", null, null, "2025-05-10", "end-of-day")], "2025-05");
+    expect(r(both)).toBe("exact:62/124");
+    if (both.kind !== "nd") expect(both.excluded).toMatchObject([{ absenceId: "B", why: "date-nd-covered" }]);
+    // B sans fin, commencée le 20/05, A du 15/05 au 10/06 : 20 → 31/05 déjà comptés ⇒ 17 j = 34 demi-journées, exact.
+    expect(r(run([absence("A", "C-A", "2025-05-15", "beginning-of-day", "2025-06-10", "end-of-day"), absence("B", "C-A", "2025-05-20", "beginning-of-day", null, null)], "2025-05"))).toBe("exact:34/124");
+    // Une demi-journée possible non couverte ⇒ n.d.
+    expect(r(run([absence("B", "C-A", null, null, "2025-05-10", "end-of-day")], "2025-05"))).toBe("absence-date-nd");
+  });
+  it("statut nul et date inconnue : jamais comptée ⇒ « ≥ » (20 demi-journées incertaines), exact si couvertes", () => {
+    const b = run([absence("B", "C-A", null, null, "2025-05-10", "end-of-day", { status: null })], "2025-05");
+    expect(r(b)).toBe("lower_bound:0/124");
+    if (b.kind !== "nd") expect(b.qualifiers.join(" ")).toContain("20 demi-journée(s) incertaine(s)");
+    expect(r(run([A, absence("B", "C-A", null, null, "2025-05-10", "end-of-day", { status: null })], "2025-05"))).toBe("exact:62/124");
+  });
+  it("jours d'absence sous le contrat suivant de la même personne : « ≥ », jamais exact par omission", () => {
+    // Absence rattachée à C-C1 du 10 au 20/03/2025 : 10 → 15 comptés (12 demi-journées) ; 16 → 20 sous C-C2 : incertains.
+    const m = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day")], "2025-03");
+    expect(r(m)).toBe("lower_bound:12/124");
+    if (m.kind !== "nd") expect(m.slices[0].notes.join(" ")).toContain("10 demi-journée(s) sous le contrat C-C2 de la même personne");
+    // Une absence rattachée à C-C2 qui couvre ces jours lève l'incertitude.
+    expect(r(run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day"), absence("Y", "C-C2", "2025-03-16", "beginning-of-day", "2025-03-20", "end-of-day")], "2025-03"))).toBe("exact:22/124");
   });
 });
