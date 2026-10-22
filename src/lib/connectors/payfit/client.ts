@@ -29,8 +29,8 @@ const WORKING_TIME_MODALITIES = new Set([
   "forfait_sans_reference_horaire",
 ]);
 const CONTRACT_STATUSES = new Set(["ACTIVE", "ARCHIVED", "PENDING"]);
-const ABSENCE_STATUSES = new Set(["approved", "pending_approval", "declined", "cancelled", "pending_cancellation"]);
-const ABSENCE_MOMENTS = new Set(["beginning-of-day", "middle-of-day", "end-of-day"]);
+export const ABSENCE_STATUSES = new Set(["approved", "pending_approval", "declined", "cancelled", "pending_cancellation"]);
+export const ABSENCE_MOMENTS = new Set(["beginning-of-day", "middle-of-day", "end-of-day"]);
 
 export type PayFitIdentity = { companyId: string; scopes: string[] };
 export type PayFitCompany = { id: string; name: string; country: string | null; identificationNumber: string | null };

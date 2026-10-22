@@ -93,7 +93,9 @@ export const PAYFIT_EDGES: Record<string, PayFitEdgeCase> = {
 export type DsnPerson = {
   nir?: string; ntt?: string; family?: string; given?: string; employeeNumber?: string;
   contracts: {
-    number: string; start: string; end?: string; endReason?: string; nature?: string; quota?: string; reference?: string; gross?: string;
+    number: string; start: string; end?: string; endReason?: string; nature?: string; quota?: string; gross?: string;
+    // Quotités : unité S21.G00.40.011 (défaut 10 = heures), référence .012 (null = rubrique non émise), modalité .014 (non émise par défaut).
+    unit?: string; reference?: string | null; modality?: string;
     // Activités (S21.G00.53) émises après la rémunération ; type 01 = travail rémunéré, unité 10 = heures.
     activities?: { type?: string; unit?: string; measure: string }[];
   }[];
@@ -130,9 +132,10 @@ export function dsnText(spec: DsnDeclarationSpec): string {
       r("S21.G00.40.001", ddmmyyyy(c.start));
       r("S21.G00.40.007", c.nature ?? "01");
       r("S21.G00.40.009", c.number);
-      r("S21.G00.40.011", "10");
-      r("S21.G00.40.012", c.reference ?? "151.67");
+      r("S21.G00.40.011", c.unit ?? "10");
+      if (c.reference !== null) r("S21.G00.40.012", c.reference ?? "151.67");
       r("S21.G00.40.013", c.quota ?? "151.67");
+      if (c.modality) r("S21.G00.40.014", c.modality);
       if (c.end) {
         r("S21.G00.62.001", ddmmyyyy(c.end));
         if (c.endReason) r("S21.G00.62.002", c.endReason);

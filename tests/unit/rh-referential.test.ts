@@ -19,6 +19,9 @@ const { importDsnFiles } = await import("@/lib/dsn/import");
 const { fixtureDsnBytes } = await import("@/lib/dsn/fixture");
 const { ensureRhBuild, loadRhBuild, loadAbsences } = await import("@/lib/rh/referential/store");
 const { headcountAt } = await import("@/lib/rh/headcount");
+const { activePayFitSync, loadAbsencesOfSync, loadAbsenceTypes } = await import("@/lib/rh/referential/store");
+const { getKpiSettings, setKpiSettings, KPI_DEFAULTS, KPI_KEYS } = await import("@/lib/rh-kpi-settings");
+const { setSetting } = await import("@/lib/settings");
 const { chooseSourceMode, resolveSource } = await import("@/lib/sources");
 
 // Base de test migrée, rôle non superutilisateur : la RLS est réelle.
@@ -161,6 +164,39 @@ describe("référentiel Collaborateurs en base", () => {
     expect(after.map((b) => b.id).sort()).toEqual(before.map((b) => b.id).sort());
     await chooseSourceMode(A, "rh", "auto", actor);
     expect((await resolveSource(A, "rh")).modeSetAt).toBeNull();
+  });
+
+  it("KPI : absences de la lecture active, types avec leur nombre ; invisibles depuis l'espace B", async () => {
+    const active = await activePayFitSync(A);
+    expect(active?.id).toBe((await sync.activeSync(A, "payfit"))!.id);
+    const rows = await loadAbsencesOfSync(A, active!.id);
+    expect(rows.map((r) => r.id)).toEqual(["TEST-A-ABSENCE-1", "TEST-A-ABSENCE-3", "TEST-A-ABSENCE-2"]);
+    expect(await loadAbsenceTypes(A, active!.id)).toEqual([
+      { type: "test_maternity", count: 1 },
+      { type: "test_paid_leave", count: 1 },
+      { type: "test_sickness", count: 1 },
+    ]);
+    expect(await loadAbsencesOfSync(B, active!.id)).toEqual([]);
+  });
+
+  it("KPI : paramètres de l'espace — défauts, écriture des seules clés changées, valeur illisible signalée, B inchangé", async () => {
+    const before = await getKpiSettings(A);
+    expect(before.values).toEqual(KPI_DEFAULTS);
+    expect(Object.values(before.origins).every((o) => o.origin === "default")).toBe(true);
+    const written = await setKpiSettings(A, { ...KPI_DEFAULTS, absenceTypes: ["test_sickness", "test_maternity"], dayBasis: "weekdays" }, actor);
+    expect(written.sort()).toEqual(["absenceTypes", "dayBasis"]);
+    const after = await getKpiSettings(A);
+    expect(after.values.absenceTypes).toEqual(["test_maternity", "test_sickness"]);
+    expect(after.origins.absenceTypes.origin).toBe("setting");
+    expect(after.origins.capAtOne.origin).toBe("default");
+    expect(await setKpiSettings(A, after.values, actor)).toEqual([]);
+    await setSetting(A, KPI_KEYS.etpDecimals, 5, actor);
+    const broken = await getKpiSettings(A);
+    expect(broken.invalid).toEqual(["etpDecimals"]);
+    expect(broken.origins.etpDecimals).toMatchObject({ origin: "invalid", raw: 5 });
+    expect((await getKpiSettings(B)).values).toEqual(KPI_DEFAULTS);
+    await setKpiSettings(A, KPI_DEFAULTS, actor);
+    expect((await getKpiSettings(A)).invalid).toEqual([]);
   });
 
   it("isolation : l'espace B n'a rien, ne voit rien et ne peut rien écrire pour A", async () => {

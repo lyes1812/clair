@@ -1,0 +1,152 @@
+import { describe, expect, it } from "vitest";
+import { monthRange } from "@/lib/connectors/months";
+import { createFixtureFetch } from "@/lib/connectors/payfit/fixture";
+import { absenteeism, absenteeismMonth, absenceTypeChoices, theoreticalMonth } from "@/lib/rh/kpi/absence";
+import { same } from "@/lib/rh/kpi/fraction";
+import { rollingWindow } from "@/lib/rh/kpi/period";
+import type { AbsenteeismMonth, KpiInput } from "@/lib/rh/kpi/types";
+import { nd } from "@/lib/rh/referential/types";
+import { absence, DSN_ABSENCES, fixtureAbsences, kpiInput, readAbsences } from "./helpers/kpi";
+import { dsnFixtureBuild, payfitBuild, payfitFixtureBuild } from "./helpers/rh";
+
+// Jours en demi-journées : 30 demi-journées = 15 j. Mars 2026 : 7 contrats × 31 j = 217 j = 434 demi-journées.
+const r = (m: AbsenteeismMonth) => (m.kind === "nd" ? m.nd.code : `${m.kind}:${m.ratio.num}/${m.ratio.den}`);
+
+describe("absentéisme — PayFit, lecture du 21/10/2026, absences du transport fictif", async () => {
+  const data = await payfitFixtureBuild();
+  const abs = await fixtureAbsences();
+  const input = kpiInput(data, abs);
+  it("P6 : mois exacts — 2025-11 60/420 ; 2025-12 30/434 (ABS-2 du 01 au 15 = 15 j) ; 2026-01 0/372 ; 2026-02 0/364", () => {
+    expect(r(absenteeismMonth(input, "2025-11"))).toBe("exact:60/420");
+    const dec = absenteeismMonth(input, "2025-12");
+    expect(r(dec)).toBe("exact:30/434");
+    if (dec.kind !== "nd") expect(dec.slices).toMatchObject([{ absenceId: "TEST-A-ABSENCE-2", half: 30, from: "2025-12-01", to: "2025-12-31" }]);
+    expect(r(absenteeismMonth(input, "2026-01"))).toBe("exact:0/372");
+    expect(r(absenteeismMonth(input, "2026-02"))).toBe("exact:0/364");
+    expect(r(absenteeismMonth(input, "2026-03"))).toBe("exact:0/434");
+  });
+  it("P6w : base lundi–vendredi — 2025-11 40/280 ; 2025-12 22/322", () => {
+    const w = kpiInput(data, abs, { dayBasis: "weekdays" });
+    expect(r(absenteeismMonth(w, "2025-11"))).toBe("exact:40/280");
+    expect(r(absenteeismMonth(w, "2025-12"))).toBe("exact:22/322");
+  });
+  it("P6n : mois en borne basse, après la référence, période contenant 2025-10, types non choisis, maladie seule", () => {
+    expect(r(absenteeismMonth(input, "2025-10"))).toBe("month-lower-bound");
+    expect(r(absenteeismMonth(input, "2026-10"))).toBe("after-reference");
+    expect(absenteeism(input, rollingWindow("2026-09"))).toMatchObject({ kind: "nd", nd: { code: "month-lower-bound", months: ["2025-10"] } });
+    expect(r(absenteeismMonth(kpiInput(data, abs, { absenceTypes: [] }), "2025-11"))).toBe("absence-types-unset");
+    const sick = absenteeismMonth(kpiInput(data, abs, { absenceTypes: ["test_sickness"] }), "2025-11");
+    expect(r(sick)).toBe("exact:0/420");
+    if (sick.kind !== "nd") expect(sick.excluded).toMatchObject([{ absenceId: "TEST-A-ABSENCE-2", why: "type", label: "type test_maternity non choisi" }]);
+  });
+  it("P7 : jours théoriques — 2025-12 = 217 j (7 × 31) ; 2026-02 = 182 j (004 du 15 au 28)", () => {
+    const dec = theoreticalMonth(input, "2025-12");
+    expect(dec.kind === "exact" && dec.half).toBe(434);
+    const feb = theoreticalMonth(input, "2026-02");
+    expect(feb.kind === "exact" && feb.half).toBe(364);
+    expect(feb.kind === "exact" && feb.contributions.find((c) => c.externalId.endsWith("004"))).toMatchObject({ from: "2026-02-15", to: "2026-02-28", days: 14 });
+  });
+  it("types présents dans la lecture, avec leur nombre", () => {
+    expect(absenceTypeChoices(kpiInput(data, abs, { absenceTypes: ["test_sickness", "ancien_type"] }))).toEqual([
+      { type: "ancien_type", count: 0, chosen: true, inRead: false },
+      { type: "test_maternity", count: 1, chosen: false, inRead: true },
+      { type: "test_paid_leave", count: 1, chosen: false, inRead: true },
+      { type: "test_sickness", count: 1, chosen: true, inRead: true },
+    ]);
+  });
+});
+
+describe("absentéisme — DSN et lecture de fin de mois", () => {
+  it("D7 : DSN ⇒ n.d. « arrêts non extraits », même sans type choisi ; jours théoriques calculés", () => {
+    const input = kpiInput(dsnFixtureBuild(), DSN_ABSENCES, { absenceTypes: [] });
+    expect(r(absenteeismMonth(input, "2025-12"))).toBe("not-extracted");
+    expect(absenteeism(input, rollingWindow("2026-09"))).toMatchObject({ kind: "nd", nd: { code: "not-extracted", reason: "arrêts non extraits de la DSN" } });
+    const t = theoreticalMonth(input, "2025-12");
+    expect(t.kind === "exact" && t.half).toBe(434);
+  });
+  it("Q4 : lecture du 31/01/2026 — 116/2465 sur 12 mois ; maternité seule 106/2465 ; lundi–vendredi 86/1757 ; mois", async () => {
+    const q = await payfitBuild("fixture-A-1", createFixtureFetch("fixture-A-1"), monthRange("2024-10", "2026-01"), new Date("2026-01-31T08:00:00Z"));
+    const abs = await fixtureAbsences("fixture-A-1", monthRange("2024-10", "2026-01"));
+    const w = rollingWindow("2026-01");
+    const all = absenteeism(kpiInput(q, abs), w);
+    expect(all.kind === "exact" && same(all.ratio, { num: 116, den: 2465 })).toBe(true);
+    const mat = absenteeism(kpiInput(q, abs, { absenceTypes: ["test_maternity"] }), w);
+    expect(mat.kind === "exact" && same(mat.ratio, { num: 106, den: 2465 })).toBe(true);
+    const wd = absenteeism(kpiInput(q, abs, { dayBasis: "weekdays" }), w);
+    expect(wd.kind === "exact" && same(wd.ratio, { num: 86, den: 1757 })).toBe(true);
+    const month = (m: string) => absenteeismMonth(kpiInput(q, abs), m);
+    for (const [m, num, den] of [["2025-03", 5, 186], ["2025-08", 5, 217], ["2025-09", 30, 210], ["2025-10", 31, 217], ["2025-12", 15, 217], ["2026-01", 0, 186]] as const) {
+      const x = month(m);
+      expect(x.kind === "exact" && same(x.ratio, { num, den }), m).toBe(true);
+    }
+  });
+});
+
+describe("absentéisme — cas construits (contrat 005, mars 2026)", async () => {
+  const data = await payfitFixtureBuild();
+  const run = (rows: Parameters<typeof readAbsences>[0], month = "2026-03", over = {}): AbsenteeismMonth => absenteeismMonth(kpiInput(data, readAbsences(rows), over), month);
+  it("A1–A4 : demi-journées, deux matinées le même jour = 0,5 j, matin + après-midi = 1 j", () => {
+    expect(r(run([absence("a", "005", "2026-03-02", "middle-of-day", "2026-03-04", "middle-of-day")]))).toBe("exact:4/434");
+    expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "middle-of-day")]))).toBe("exact:1/434");
+    const twice = run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "middle-of-day"), absence("b", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "middle-of-day")]);
+    expect(r(twice)).toBe("exact:1/434");
+    if (twice.kind !== "nd") expect(twice.slices.find((s) => s.absenceId === "b")).toMatchObject({ half: 0, overlap: 1 });
+    expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "middle-of-day"), absence("b", "005", "2026-03-02", "middle-of-day", "2026-03-02", "end-of-day")]))).toBe("exact:2/434");
+  });
+  it("A5–A8 : union de chevauchements, base, découpage par mois", () => {
+    const rows = [absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-06", "end-of-day"), absence("b", "005", "2026-03-04", "beginning-of-day", "2026-03-10", "end-of-day")];
+    expect(r(run(rows))).toBe("exact:18/434");
+    expect(r(run(rows, "2026-03", { dayBasis: "weekdays" }))).toBe("exact:14/308");
+    expect(r(run([absence("a", "005", "2026-03-06", "beginning-of-day", "2026-03-09", "end-of-day")]))).toBe("exact:8/434");
+    expect(r(run([absence("a", "005", "2026-03-07", "beginning-of-day", "2026-03-08", "end-of-day")], "2026-03", { dayBasis: "weekdays" }))).toBe("exact:0/308");
+    const across = [absence("a", "005", "2026-03-30", "beginning-of-day", "2026-04-02", "end-of-day")];
+    expect(r(run(across, "2026-03"))).toBe("exact:4/434");
+    expect(r(run(across, "2026-04"))).toBe("exact:4/420");
+  });
+  it("A9–A10 : absence bornée à la période du contrat, jours hors contrat signalés", () => {
+    const end = [absence("a", "003", "2025-12-29", "beginning-of-day", "2026-01-05", "end-of-day")];
+    expect(r(run(end, "2025-12"))).toBe("exact:6/434");
+    const jan = run(end, "2026-01");
+    expect(r(jan)).toBe("exact:0/372");
+    if (jan.kind !== "nd") expect(jan.slices[0].outsideContract).toBe(5);
+    if (jan.kind !== "nd") expect(run(end, "2026-01", { dayBasis: "weekdays" }).kind !== "nd" && (run(end, "2026-01", { dayBasis: "weekdays" }) as Extract<AbsenteeismMonth, { slices: unknown }>).slices[0].outsideContract).toBe(3);
+    const start = [absence("a", "004", "2026-02-10", "beginning-of-day", "2026-02-20", "end-of-day")];
+    expect(r(run(start, "2026-02"))).toBe("exact:12/364");
+    expect(r(run(start, "2026-02", { dayBasis: "weekdays" }))).toBe("exact:10/260");
+    const feb = run(start, "2026-02");
+    if (feb.kind !== "nd") expect(feb.slices[0].outsideContract).toBe(5);
+  });
+  it("A11–A14 : moments incertains ⇒ « ≥ » ; couverts par une autre absence ⇒ exact", () => {
+    const nul = run([absence("a", "005", "2026-03-02", null, "2026-03-04", "end-of-day")]);
+    expect(r(nul)).toBe("lower_bound:4/434");
+    if (nul.kind !== "nd") expect(nul.qualifiers.join(" ")).toContain("2 demi-journée(s) incertaine(s)");
+    expect(r(run([absence("a", "005", "2026-03-02", "end-of-day", "2026-03-04", "end-of-day")]))).toBe("lower_bound:4/434");
+    expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-04", "beginning-of-day")]))).toBe("lower_bound:4/434");
+    expect(r(run([absence("a", "005", "2026-03-02", "middle-of-day", "2026-03-02", "middle-of-day")]))).toBe("lower_bound:0/434");
+    expect(r(run([absence("a", "005", "2026-03-02", null, "2026-03-04", "end-of-day"), absence("b", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "end-of-day")]))).toBe("exact:6/434");
+  });
+  it("A15–A16 : statuts et types", () => {
+    const pending = run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "end-of-day", { status: "pending_approval" })]);
+    expect(r(pending)).toBe("exact:0/434");
+    if (pending.kind !== "nd") expect(pending.excluded[0].label).toBe("statut en attente d'approbation non retenu");
+    expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "end-of-day", { status: null })]))).toBe("lower_bound:0/434");
+    expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "end-of-day", { status: "pending_approval" })], "2026-03", { absenceStatuses: ["approved", "pending_approval"] }))).toBe("exact:2/434");
+    expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "end-of-day", { type: "test_other" })]))).toBe("exact:0/434");
+  });
+  it("A17–A18 : contrat inconnu ⇒ mois n.d. ; date absente ⇒ mois touchés n.d., jamais de fin supposée", () => {
+    const ghost = [absence("a", "TEST-A-CONTRACT-999", "2026-03-02", "beginning-of-day", "2026-03-03", "end-of-day")];
+    expect(r(run(ghost, "2026-03"))).toBe("absence-unknown-contract");
+    expect(r(run(ghost, "2026-04"))).toBe("exact:0/420");
+    const noStart = [absence("a", "005", null, null, "2026-03-04", "end-of-day")];
+    expect(r(run(noStart, "2026-02"))).toBe("absence-date-nd");
+    expect(r(run(noStart, "2026-03"))).toBe("absence-date-nd");
+    expect(r(run(noStart, "2026-04"))).toBe("exact:0/420");
+  });
+  it("A19–A20 : ordre des gardes et absences non lues", () => {
+    const mk = (absences: KpiInput["absences"]) => kpiInput(data, absences);
+    const outOfScope = mk(readAbsences([], monthRange("2025-11", "2026-08")));
+    expect(r(absenteeismMonth(outOfScope, "2026-09"))).toBe("month-out-of-scope");
+    expect(r(absenteeismMonth(outOfScope, "2026-10"))).toBe("after-reference");
+    expect(r(absenteeismMonth(mk({ status: "unavailable", nd: nd("scope-missing", "accès refusé par le fournisseur pour cette clé") }), "2026-03"))).toBe("absences-unavailable");
+  });
+});

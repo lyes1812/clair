@@ -192,3 +192,31 @@ export type RhBuildData = {
 export type RhBuildResult = RhBuildData & { build: BuildHeader };
 
 export const nd = (code: MissingCode, reason: string): FieldNd => ({ code, reason });
+
+// Absence PayFit telle que conservée dans source_record (collection « absences ») ; aucune durée n'est fournie.
+export type AbsenceRow = {
+  id: string;
+  contractId: string;
+  type: string;
+  status: string | null;
+  start: { date: string | null; moment: string | null };
+  end: { date: string | null; moment: string | null };
+};
+
+// Lecture tolérante d'un enregistrement « absences » : un champ inattendu devient null, jamais une valeur inventée.
+export function absenceRowOf(key: string, data: Record<string, unknown>): AbsenceRow {
+  const bound = (v: unknown) => {
+    const o = (v ?? {}) as Record<string, unknown>;
+    return { date: typeof o.date === "string" ? o.date : null, moment: typeof o.moment === "string" ? o.moment : null };
+  };
+  return {
+    id: key,
+    contractId: String(data.contractId ?? ""),
+    type: String(data.type ?? "n.d."),
+    status: typeof data.status === "string" ? data.status : null,
+    start: bound(data.start),
+    end: bound(data.end),
+  };
+}
+
+export const absenceOrder = (a: AbsenceRow, b: AbsenceRow) => (a.start.date ?? "").localeCompare(b.start.date ?? "") || a.id.localeCompare(b.id);

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { addMonthsToDate } from "../../src/lib/dates";
 import { fixtureDsnBytes } from "../../src/lib/dsn/fixture";
 import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
 
@@ -48,7 +49,10 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   const refText = (await page.getByTestId("rh-build-info").textContent())!.match(/date de référence (\d{2})\/(\d{2})\/(\d{4})/)!;
   const refMonth = `${refText[3]}-${refText[2]}`;
   const windowStart = months("2024-01", refMonth).at(-13)!; // mois de référence − 12
-  const lower = (m: string) => m <= windowStart;
+  const lower = (m: string) => m <= windowStart; // entrées et sorties du mois incomplètes
+  // Effectif à une date : exact dès la date de lecture − 12 mois (au jour près).
+  const cutoff = addMonthsToDate(`${refText[3]}-${refText[2]}-${refText[1]}`, -12);
+  const lowerAt = (date: string) => date < cutoff;
   const exitsCovered2025 = months("2025-01", "2025-12").filter((m) => !lower(m)).length;
   expect(lower("2025-04")).toBe(true); // vrai tant que la lecture a lieu avant mai 2026 + 12 mois
   // Avril 2025 — 7 personnes (borne basse), 1 entrée (002).
@@ -64,7 +68,7 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   await page.screenshot({ path: `${CAPTURES}/2-01-mois.png`, fullPage: true });
 
   await page.goto(`${collab}?mois=2025-12`);
-  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText(lower("2025-12") ? "≥ 7" : "7");
+  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText(lowerAt("2025-12-31") ? "≥ 7" : "7");
   if (lower("2025-12")) await expect(page.getByTestId("exits-count").locator("dd")).toContainText("n.d.");
   else await expect(page.getByTestId("exits-count").locator("dd")).toHaveText("1");
   await expect(page.getByTestId("collab-monthly-table").locator("tr[data-contract='TEST-A-CONTRACT-003']")).toContainText("sorti le 31/12/2025");
@@ -90,7 +94,7 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   // Année 2025 : 7 lignes, 6 au 01/01, 7 au 31/12.
   await page.goto(`${collab}/annee?annee=2025`);
   await expect(page.getByTestId("year-jan1").locator("dd")).toHaveText("≥ 6");
-  await expect(page.getByTestId("year-dec31").locator("dd")).toHaveText(lower("2025-12") ? "≥ 7" : "7");
+  await expect(page.getByTestId("year-dec31").locator("dd")).toHaveText(lowerAt("2025-12-31") ? "≥ 7" : "7");
   await expect(page.getByTestId("year-entries").locator("dd")).toHaveText("≥ 1");
   // Sorties connues seulement sur les mois postérieurs au mois charnière.
   if (exitsCovered2025 > 0) {

@@ -7,7 +7,9 @@ import { recordEvent } from "@/lib/events";
 import { buildFromDsn } from "./build-dsn";
 import { buildFromPayFit } from "./build-payfit";
 import { RH_BUILDER_VERSION, rhInputsHash } from "./hash";
-import type { RhBuildData, RhBuildResult, RhSource } from "./types";
+import { absenceOrder, absenceRowOf, type AbsenceRow, type RhBuildData, type RhBuildResult, type RhSource } from "./types";
+
+export type { AbsenceRow };
 
 // Persistance du référentiel Collaborateurs (§ 5) : un build « current » par (espace, source), reconstruit quand
 // l'empreinte des entrées (lectures appliquées, déclarations retenues) ou la version des règles change.
@@ -17,14 +19,6 @@ export type RhBuildState =
   | { kind: "unavailable"; build: RhBuildRow; reason: string } // F5 : collection contracts indisponible
   | { kind: "none"; reason: string }; // aucune lecture appliquée pour cette source
 
-export type AbsenceRow = {
-  id: string;
-  contractId: string;
-  type: string;
-  status: string | null;
-  start: { date: string | null; moment: string | null };
-  end: { date: string | null; moment: string | null };
-};
 
 type Tx = Parameters<Parameters<typeof withWorkspace>[1]>[0];
 type SyncRow = typeof sourceSync.$inferSelect;
@@ -183,18 +177,41 @@ export async function loadAbsences(workspaceId: string, syncId: string, contract
       .where(and(eq(sourceRecord.syncId, syncId), eq(sourceRecord.collection, "absences"), inArray(sql`${sourceRecord.data}->>'contractId'`, contractIds)))
       .orderBy(sourceRecord.recordKey),
   );
-  const bound = (v: unknown) => {
-    const o = (v ?? {}) as Record<string, unknown>;
-    return { date: typeof o.date === "string" ? o.date : null, moment: typeof o.moment === "string" ? o.moment : null };
-  };
-  return rows
-    .map((r) => ({
-      id: r.key,
-      contractId: String(r.data.contractId ?? ""),
-      type: String(r.data.type ?? "n.d."),
-      status: typeof r.data.status === "string" ? r.data.status : null,
-      start: bound(r.data.start),
-      end: bound(r.data.end),
-    }))
-    .sort((a, b) => (a.start.date ?? "").localeCompare(b.start.date ?? "") || a.id.localeCompare(b.id));
+  return rows.map((r) => absenceRowOf(r.key, r.data)).sort(absenceOrder);
+}
+
+// KPI : toutes les absences d'une lecture (absentéisme), et leurs types avec leur nombre (Paramètres).
+export async function loadAbsencesOfSync(workspaceId: string, syncId: string): Promise<AbsenceRow[]> {
+  const rows = await withWorkspace(workspaceId, (tx) =>
+    tx
+      .select({ key: sourceRecord.recordKey, data: sourceRecord.data })
+      .from(sourceRecord)
+      .where(and(eq(sourceRecord.syncId, syncId), eq(sourceRecord.collection, "absences")))
+      .orderBy(sourceRecord.recordKey),
+  );
+  return rows.map((r) => absenceRowOf(r.key, r.data)).sort(absenceOrder);
+}
+
+export async function loadAbsenceTypes(workspaceId: string, syncId: string): Promise<{ type: string; count: number }[]> {
+  const rows = await withWorkspace(workspaceId, (tx) =>
+    tx
+      .select({ type: sql<string>`${sourceRecord.data}->>'type'`, count: sql<number>`count(*)::int` })
+      .from(sourceRecord)
+      .where(and(eq(sourceRecord.syncId, syncId), eq(sourceRecord.collection, "absences")))
+      .groupBy(sql`${sourceRecord.data}->>'type'`)
+      .orderBy(sql`${sourceRecord.data}->>'type'`),
+  );
+  return rows.filter((r) => typeof r.type === "string").map((r) => ({ type: r.type, count: r.count }));
+}
+
+export async function activePayFitSync(workspaceId: string): Promise<{ id: string; startedAt: Date } | null> {
+  const [row] = await withWorkspace(workspaceId, (tx) =>
+    tx
+      .select({ id: sourceSync.id, startedAt: sourceSync.startedAt })
+      .from(sourceSync)
+      .where(and(eq(sourceSync.provider, "payfit"), eq(sourceSync.status, "applied")))
+      .orderBy(desc(sourceSync.decidedAt))
+      .limit(1),
+  );
+  return row ?? null;
 }

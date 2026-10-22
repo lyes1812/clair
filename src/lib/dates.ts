@@ -26,6 +26,13 @@ export function addMonths(month: string, n: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+// Date décalée de n mois, jour ramené au dernier jour du mois cible si besoin (31/03 − 1 mois = 28/02 ou 29/02).
+export function addMonthsToDate(date: string, n: number): string {
+  const month = addMonths(date.slice(0, 7), n);
+  const day = Math.min(Number(date.slice(8, 10)), Number(monthEnd(month).slice(8, 10)));
+  return `${month}-${String(day).padStart(2, "0")}`;
+}
+
 export function addDays(date: string, n: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);

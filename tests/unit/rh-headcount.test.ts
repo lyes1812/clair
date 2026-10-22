@@ -81,6 +81,17 @@ describe("règles d'effectif — PayFit, qualificatifs", () => {
     expect(ml.exitsCount).toMatchObject({ kind: "nd" });
     expect(movements(payfitData, "2024-10", "2025-09", OPTS).notes).toHaveLength(12);
   });
+  it("B4 au jour près : effectif exact dès la date de lecture − 12 mois (21/10/2025), même dans le mois charnière en borne basse", () => {
+    expect(headcountAt(payfitData, "2025-10-20", OPTS).kind).toBe("lower_bound");
+    expect(exact(headcountAt(payfitData, "2025-10-21", OPTS))).toMatchObject({ kind: "exact", persons: 7 });
+    expect(exact(headcountAt(payfitData, "2025-10-31", OPTS))).toMatchObject({ kind: "exact", persons: 7, contracts: 7 });
+    const oct = monthlyList(payfitData, "2025-10", OPTS);
+    expect(oct.headcountEnd.kind).toBe("exact");
+    expect(oct.headcountStart.kind).toBe("lower_bound");
+    expect(oct.presentAnyDay.kind).toBe("lower_bound");
+    expect(oct.entriesCount.kind).toBe("lower_bound");
+    expect(oct.exitsCount.kind).toBe("nd");
+  });
   it("mois 2026-10 (mois de la lecture) : effectif fin de mois n.d., effectif au 21/10 exact, mouvements « au moins » ; 2026-11 : après la référence", () => {
     expect(headcountAt(payfitData, "2026-10-31", OPTS)).toMatchObject({ kind: "nd", nd: { code: "after-reference" } });
     expect(exact(headcountAt(payfitData, "2026-10-21", OPTS))).toMatchObject({ persons: 7 });

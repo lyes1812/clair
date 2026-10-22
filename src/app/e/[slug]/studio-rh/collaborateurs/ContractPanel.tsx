@@ -1,5 +1,6 @@
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate } from "@/lib/dates";
+import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import { MODALITY_LABELS, quotaUnitLabel } from "@/lib/dsn/labels";
 import type { ContractDraft, ContractMonthDraft, EventDraft, PersonDraft, RhBuildData } from "@/lib/rh/referential/types";
 import type { AbsenceRow } from "@/lib/rh/referential/store";
@@ -7,8 +8,8 @@ import { END_STATUS_LABELS, EVENT_FLAG_LABELS, fmtNumber, MONTH_FLAG_LABELS, tim
 import { EndCell, Field, FlagTags, Nature, personHref, Prov, ProvenanceDetails } from "./components";
 
 // Fiche d'un contrat : identité, fin, attributs à la date de lecture (PayFit), table par mois, événements, absences.
-const ABSENCE_STATUS: Record<string, string> = { approved: "approuvée", pending_approval: "en attente d'approbation", declined: "refusée", cancelled: "annulée", pending_cancellation: "annulation en attente" };
-const MOMENT: Record<string, string> = { "beginning-of-day": "début de journée", "middle-of-day": "mi-journée", "end-of-day": "fin de journée" };
+const ABSENCE_STATUS = ABSENCE_STATUS_LABELS;
+const MOMENT = ABSENCE_MOMENT_LABELS;
 
 export function ContractPanel({ c, data, slug, person, months, events, absences }: { c: ContractDraft; data: RhBuildData; slug: string; person: PersonDraft | null; months: ContractMonthDraft[]; events: EventDraft[]; absences: AbsenceRow[] | null }) {
   const isPayfit = data.build.source === "payfit";

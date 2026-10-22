@@ -1,4 +1,4 @@
-import { addMonths, formatDate, isActiveOn, monthEnd, monthOf, monthStart, monthsBetween, overlapsMonth } from "@/lib/dates";
+import { addMonths, addMonthsToDate, formatDate, isActiveOn, monthEnd, monthOf, monthStart, monthsBetween, overlapsMonth } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { PAYFIT_ARCHIVED_RETENTION_MONTHS } from "./referential/build-payfit";
 import { nd, type ContractDraft, type ContractMonthDraft, type CoverageDraft, type EventDraft, type FieldNd, type FindingDraft, type PersonDraft, type RhBuildData } from "./referential/types";
@@ -106,6 +106,18 @@ function index(data: RhBuildData): Index {
 }
 
 const inEst = (establishments: string[] | undefined, id: string | null) => !establishments || (id !== null && establishments.includes(id));
+
+// PayFit (hypothèse B4, confirmée sur le compte pilote) : un contrat présent à la date D ne peut manquer que s'il a pris fin
+// plus de `rétention` mois avant la lecture ; l'effectif à D est donc exact dès que D ≥ date de lecture − rétention, même
+// dans un mois dont la couverture est en borne basse (ses entrées et sorties, elles, restent incomplètes).
+export function payfitExactFrom(data: RhBuildData): string | null {
+  if (data.build.source !== "payfit" || PAYFIT_ARCHIVED_RETENTION_MONTHS === null || !data.build.referenceDate) return null;
+  return addMonthsToDate(data.build.referenceDate, -PAYFIT_ARCHIVED_RETENTION_MONTHS);
+}
+const exactAt = (data: RhBuildData, date: string) => {
+  const from = payfitExactFrom(data);
+  return from !== null && date >= from;
+};
 
 export function coverageAt(data: RhBuildData, month: string, establishments?: string[]): CoverageDraft[] {
   return data.coverage.filter((c) => c.month === month && inEst(establishments, c.establishmentId));
@@ -216,7 +228,7 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
   }
   const M = monthOf(date);
   const declaredAfterEnd = new Set((index(data).declared.get(M) ?? []).filter((m) => m.flags.includes("declared_after_end") && inEst(opts.establishments, m.establishmentId)).map((m) => m.contractKey)).size;
-  const lower = g.coverage.filter((c) => c.presenceStatus === "lower_bound");
+  const lower = exactAt(data, date) ? [] : g.coverage.filter((c) => c.presenceStatus === "lower_bound");
   return {
     kind: lower.length ? "lower_bound" : "exact",
     persons: persons.size,
@@ -300,7 +312,7 @@ export function monthlyList(data: RhBuildData, month: string, opts: HeadcountOpt
       seen.add(c.contractKey);
       if (c.personKey) persons.add(c.personKey);
     }
-    const lower = g.coverage.filter((c) => c.presenceStatus === "lower_bound");
+    const lower = exactAt(data, monthStart(month)) ? [] : g.coverage.filter((c) => c.presenceStatus === "lower_bound");
     presentAnyDay = { kind: lower.length ? "lower_bound" : "exact", persons: persons.size, contracts: seen.size, qualifiers: lower.map((c) => c.presenceReason ?? "borne basse") };
   }
   const entries = monthCount(data, month, "entry", opts);
@@ -391,7 +403,7 @@ function mergePresence(list: Presence[], none: string): Presence {
 }
 
 // Plages de mois contiguës (« 2025-01 → 2025-03, 2025-07 ») : jamais une plage reconstituée entre deux mois isolés.
-function monthRanges(months: string[]): string {
+export function monthRanges(months: string[]): string {
   const out: string[] = [];
   let start: string | null = null;
   let prev: string | null = null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, formatDate, formatMonth, isActiveOn, isIsoDate, monthEnd, monthsBetween, overlapsMonth } from "@/lib/dates";
+import { addMonths, addMonthsToDate, formatDate, formatMonth, isActiveOn, isIsoDate, monthEnd, monthsBetween, overlapsMonth } from "@/lib/dates";
 
 describe("dates calendaires", () => {
   it("valide les dates réelles seulement", () => {
@@ -48,5 +48,15 @@ describe("formats français", () => {
     expect(formatDate("2025-04-10")).toBe("10/04/2025");
     expect(formatDate(null)).toBe("n.d.");
     expect(formatMonth("2025-04")).toBe("Avril 2025");
+  });
+});
+
+describe("décalage d'une date en mois", () => {
+  it("garde le jour, ou le ramène au dernier jour du mois cible", () => {
+    expect(addMonthsToDate("2026-10-21", -12)).toBe("2025-10-21");
+    expect(addMonthsToDate("2026-03-31", -1)).toBe("2026-02-28");
+    expect(addMonthsToDate("2024-03-31", -1)).toBe("2024-02-29");
+    expect(addMonthsToDate("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonthsToDate("2025-12-15", 1)).toBe("2026-01-15");
   });
 });
