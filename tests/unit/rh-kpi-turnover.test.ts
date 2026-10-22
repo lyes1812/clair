@@ -115,3 +115,33 @@ describe("turnover — couple un pour un (une sortie, deux entrées le lendemain
     expect(monthMovements(input, "2025-06").events.map((e) => `${e.row.contract.externalId}:${e.why}`)).toEqual(["C-A:neutralized"]);
   });
 });
+
+describe("turnover — appariement indépendant des filtres (C-B en CDD, C-C en CDI, lecture du 31/01/2026)", async () => {
+  // La sortie CDI C-A s'apparie à l'entrée de même nature C-C, quels que soient les filtres ; C-B (CDD) est une vraie entrée.
+  // Sans filtre : E = 1 (C-B), 12/48. CDI : P-Y + P-X = 2 personnes × 12 mois, E = 0 ⇒ 0/48. CDD : P-X de 2025-07 à 2026-01
+  // (7 mois, Σ = 7), E = 1 ⇒ 12/14 = 6/7. Les deux vues filtrées s'additionnent à la vue complète (0 + 1 = 1 entrée).
+  const edge = {
+    collaborators: [{ id: "P-X" }, { id: "P-Y" }],
+    contracts: [
+      { contractId: "C-A", collaboratorId: "P-X", startDate: "2024-06-01", endDate: "2025-06-30", natureContratDsn: "01" },
+      { contractId: "C-B", collaboratorId: "P-X", startDate: "2025-07-01", endDate: null, natureContratDsn: "02" },
+      { contractId: "C-C", collaboratorId: "P-X", startDate: "2025-07-01", endDate: null, natureContratDsn: "01" },
+      { contractId: "C-Y", collaboratorId: "P-Y", startDate: "2024-01-01", endDate: null, natureContratDsn: "01" },
+    ],
+  };
+  const data = await payfitBuild("cle-fictive-edge-1234", payfitEdgeFetch("cle-fictive-edge-1234", edge as never), monthRange("2024-10", "2026-01"), new Date("2026-01-31T08:00:00Z"));
+  const w = rollingWindow("2026-01");
+  const july = (scope = {}) => monthMovements(kpiInput(data, DSN_ABSENCES, {}, scope), "2025-07").events.map((e) => `${e.row.contract.externalId}:${e.why}`).sort();
+  it("même couple dans toutes les vues ; totaux cohérents", () => {
+    expect(july()).toEqual(["C-B:counted", "C-C:neutralized"]);
+    expect(july({ nature: "01" })).toEqual(["C-B:out-of-scope", "C-C:neutralized"]);
+    expect(july({ nature: "02" })).toEqual(["C-B:counted", "C-C:out-of-scope"]);
+    const all = turnover(kpiInput(data, DSN_ABSENCES), w);
+    expect(isRatio(all, 12, 48)).toBe(true);
+    expect(all).toMatchObject({ entries: 1, exits: 0 });
+    expect(isRatio(turnover(kpiInput(data, DSN_ABSENCES, {}, { nature: "01" }), w), 0, 48)).toBe(true);
+    const cdd = turnover(kpiInput(data, DSN_ABSENCES, {}, { nature: "02" }), w);
+    expect(isRatio(cdd, 12, 14)).toBe(true);
+    expect(cdd).toMatchObject({ entries: 1, exits: 0 });
+  });
+});

@@ -169,6 +169,12 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   expect(footTheoretical.replace(/\s/g, " "), [...footTheoretical].map((c) => c.charCodeAt(0).toString(16)).join(" ")).toBe("2 510 j");
   await page.goto(`${kpi}?detail=absenteeism&mois=2026-13#kpi-detail`);
   await expect(page.getByTestId("kpi-param-notice")).toContainText("paramètre ignoré : mois=2026-13 (format AAAA-MM attendu)");
+  // Le détail de la période trace les jours théoriques même si l'absentéisme est n.d.
+  await expect(page.getByTestId("kpi-detail-months").locator("tbody tr")).toHaveCount(12);
+  const thTotal = (await page.getByTestId("kpi-detail-theoretical-total").textContent())!.replace(/\s/g, " ");
+  expect(thTotal).toContain("Σ jours théoriques = 2 510 j");
+  await page.goto(`${kpi}?detail=etp-end#kpi-detail`);
+  await expect(page.getByTestId("kpi-param-notice")).toContainText("paramètre ignoré : detail=etp-end (mois requis pour ce détail)");
 
   // Année civile 2025.
   await page.goto(`${kpi}?mode=civil&annee=2025`);

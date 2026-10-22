@@ -133,6 +133,8 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       if (sd === null || ed === null) {
         // Date de borne inconnue : seuls les mois de la période du contrat peuvent être touchés (les créneaux y sont bornés).
         if (month < monthOf(c.startDate) || (c.endDate !== null && month > monthOf(c.endDate))) continue;
+        // Au jour près : la borne connue place l'absence entièrement hors de la période du contrat.
+        if ((ed !== null && ed < c.startDate) || (sd !== null && c.endDate !== null && sd > c.endDate)) continue;
         return { month, kind: "nd", nd: kpiNd("absence-date-nd", `absence ${a.id} : date de ${sd === null ? "début" : "fin"} non renseignée dans PayFit`) };
       }
       const clip = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };

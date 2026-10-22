@@ -154,6 +154,8 @@ describe("absentéisme — cas construits (contrat 005, mars 2026)", async () =>
     const noStart = [absence("a", "004", null, null, "2026-02-20", "end-of-day")];
     expect(r(run(noStart, "2026-01"))).toBe("exact:0/372");
     expect(r(run(noStart, "2026-02"))).toBe("absence-date-nd");
+    // Au jour près : une absence sans début qui finit le 10/02/2026, avant le début de 004 (15/02), ne touche aucun jour compté.
+    expect(r(run([absence("a", "004", null, null, "2026-02-10", "end-of-day")], "2026-02"))).toBe("exact:0/364");
   });
   it("A17–A18 : contrat inconnu ⇒ mois n.d. ; date absente ⇒ mois touchés n.d., jamais de fin supposée", () => {
     const ghost = [absence("a", "TEST-A-CONTRACT-999", "2026-03-02", "beginning-of-day", "2026-03-03", "end-of-day")];

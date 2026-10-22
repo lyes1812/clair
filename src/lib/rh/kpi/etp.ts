@@ -14,17 +14,20 @@ const to4 = (x: number) => Math.round(x * 1e4);
 const fr4 = (etp4: number) => (etp4 / 1e4).toLocaleString("fr-FR", { maximumFractionDigits: 4 });
 const frNum = (x: number) => x.toLocaleString("fr-FR", { maximumFractionDigits: 4 });
 
+// ⌊a ÷ b⌋ pour b > 0 (la division BigInt tronque vers zéro, ce qui fausserait l'arrondi d'une valeur négative).
+const floorDiv = (a: bigint, b: bigint) => (a >= 0n ? a / b : -((-a + b - 1n) / b));
+
 export function etp4FromQuotas(contractQuota: number, referenceQuota: number, decimals: 2 | 3 | 4): number {
   const cq4 = BigInt(to4(contractQuota));
   const rq4 = BigInt(to4(referenceQuota));
-  const units = (2n * cq4 * pow10(decimals) + rq4) / (2n * rq4);
+  const units = floorDiv(2n * cq4 * pow10(decimals) + rq4, 2n * rq4);
   return Number(units * pow10(4 - decimals));
 }
 
 export function etp4FromFte(fte: number, decimals: 2 | 3 | 4): number {
   const x4 = BigInt(to4(fte));
   const step = pow10(4 - decimals);
-  return Number(((2n * x4 + step) / (2n * step)) * step);
+  return Number(floorDiv(2n * x4 + step, 2n * step) * step);
 }
 
 const refOf = (c: ContractDraft): ContractRef => ({ contractKey: c.contractKey, externalId: c.externalId, personKey: c.personKey, establishmentId: c.establishmentId, nature: c.nature });
@@ -75,10 +78,11 @@ function dsnEtp(input: KpiInput, c: ContractDraft, month: string): EtpContributi
     return { ...base, kind: "missing", nd: kpiNd("quota-inconsistent", `quotités divergentes entre SIRET ${r.establishmentId} (${r.contractQuota ?? "n.d."}/${r.referenceQuota ?? "n.d."}) et ${other.establishmentId} (${other.contractQuota ?? "n.d."}/${other.referenceQuota ?? "n.d."}) en ${month}`) };
   }
   const checks: string[] = [];
-  const readable = r.contractQuota !== null && r.referenceQuota !== null && r.referenceQuota > 0;
+  const readable = r.contractQuota !== null && r.contractQuota >= 0 && r.referenceQuota !== null && r.referenceQuota > 0;
   const ratioText = readable ? frNum(Number(etp4FromQuotas(r.contractQuota!, r.referenceQuota!, 4)) / 1e4) : null;
   if (r.modality === null) checks.push("modalité S21.G00.40.014 absente : rapport des quotités");
   if (fullTimeIsOne && r.modality === "10") {
+    if (r.contractQuota !== null && r.contractQuota < 0) checks.push(`quotité du contrat négative (S21.G00.40.013 = ${frNum(r.contractQuota)}) : 1 retenu par la modalité temps plein (Paramètres)`);
     if (ratioText !== null && etp4FromQuotas(r.contractQuota!, r.referenceQuota!, 4) !== 10000) checks.push(`modalité temps plein (S21.G00.40.014 = 10), rapport ${ratioText} : 1 retenu (Paramètres)`);
     return { ...base, kind: "etp", etp4: 10000, basis: "dsn_full_time_modality", checks, provenance: r.provenance.modality ?? null };
   }

@@ -529,28 +529,45 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
 }
 
 export function AbsenteeismWindowDetail({ v, theoretical, detailHref }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string }) {
+  // Une ligne par mois : jours théoriques (toujours calculés s'ils le peuvent) et absences (n.d. avec la raison de la période
+  // quand l'absentéisme s'arrête avant le calcul mensuel : arrêts DSN non extraits, types non choisis, absences non lues).
+  const abs = new Map(v.months.map((m) => [m.month, m]));
   const th = new Map(theoretical.months.map((m) => [m.month, m]));
+  const months = [...new Set([...theoretical.months.map((m) => m.month), ...v.months.map((m) => m.month)])].sort();
+  const absNd = (m: string): Shown => ({ text: `n.d. — ${v.kind === "nd" && !abs.has(m) ? v.nd.reason : "absentéisme du mois non calculé"}`, kind: "nd" });
+  const thNd: Shown = { text: `n.d. — ${theoretical.kind === "nd" ? theoretical.nd.reason : "jours théoriques du mois non calculés"}`, kind: "nd" };
   return (
     <>
-      {v.months.length > 0 && (
+      {months.length > 0 && (
         <div className="table-wrap">
           <table className="data-table" data-testid="kpi-detail-months">
             <thead><tr><th>Mois</th><th className="num">Jours d'absence</th><th className="num">Jours théoriques</th><th className="num">Absentéisme</th></tr></thead>
             <tbody>
-              {v.months.map((m) => (
-                <tr key={m.month} data-month={m.month}>
-                  <td>{m.month}</td>
-                  <Cell col="absence-days" shown={absenceDaysShown(m)} href={detailHref("absenteeism", m.month)} />
-                  <Cell col="theoretical" shown={th.has(m.month) ? theoreticalShown(th.get(m.month)!) : { text: "n.d. — jours théoriques non calculés", kind: "nd" }} href={detailHref("theoretical", m.month)} />
-                  <Cell col="absenteeism" shown={absenteeismShown(m)} href={detailHref("absenteeism", m.month)} />
-                </tr>
-              ))}
+              {months.map((m) => {
+                const a = abs.get(m);
+                const t = th.get(m);
+                return (
+                  <tr key={m} data-month={m}>
+                    <td>{m}</td>
+                    <Cell col="absence-days" shown={a ? absenceDaysShown(a) : absNd(m)} href={detailHref("absenteeism", m)} />
+                    <Cell col="theoretical" shown={t ? theoreticalShown(t) : thNd} href={detailHref("theoretical", m)} />
+                    <Cell col="absenteeism" shown={a ? absenteeismShown(a) : absNd(m)} href={detailHref("absenteeism", m)} />
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
+      {theoretical.kind === "nd" ? (
+        <p className="nd" data-testid="kpi-detail-theoretical-total">Σ jours théoriques : n.d. — {theoretical.nd.reason}</p>
+      ) : (
+        <p className="desc" data-testid="kpi-detail-theoretical-total">
+          <strong>Σ jours théoriques = {fmtHalfDays(theoretical.half)}</strong> ({theoretical.months.length} mois, contrats comptés présents, {theoretical.half} demi-journées)
+        </p>
+      )}
       {v.kind === "nd" ? (
-        <Total nd>n.d. — {v.nd.reason}</Total>
+        <Total nd>Absentéisme : n.d. — {v.nd.reason}</Total>
       ) : (
         <Total>
           {v.kind === "lower_bound" ? "≥ " : ""}

@@ -3,7 +3,7 @@ import { monthRange } from "@/lib/connectors/months";
 import { createFixtureFetch } from "@/lib/connectors/payfit/fixture";
 import { etpAverage, headcountAverage } from "@/lib/rh/kpi/average";
 import { compareWindows, etpValue } from "@/lib/rh/kpi/compare";
-import { etpMonthEnd } from "@/lib/rh/kpi/etp";
+import { etp4FromFte, etp4FromQuotas, etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { same } from "@/lib/rh/kpi/fraction";
 import { civilWindow, monthWindow, rollingWindow } from "@/lib/rh/kpi/period";
 import type { EtpMonthEnd } from "@/lib/rh/kpi/types";
@@ -140,6 +140,15 @@ describe("Quotités construites (cas E)", () => {
     const two = etpOf([decl([{ number: "K-1", start: "2025-01-01", reference: null, gross: "1000.00" }, { number: "K-2", start: "2025-01-01", gross: "1000.00" }])]);
     expect(e4(two)).toBe("lower_bound:10000");
     expect(two.missing.map((m) => m.externalId)).toEqual(["K-1"]);
+  });
+  it("E3c : modalité temps plein et quotité négative ⇒ 1 retenu, signalé ; arrondi ⌊⌋ exact pour une valeur négative", () => {
+    const e = etpOf([one({ modality: "10", quota: "-75.84" })]);
+    expect(e4(e)).toBe("exact:10000");
+    if (e.kind !== "nd") expect(e.contributions[0].checks.join(" ")).toContain("quotité du contrat négative (S21.G00.40.013 = -75,84) : 1 retenu");
+    // ⌊(2 × −10000 + 1) ÷ 2⌋ = −10000 ; ⌊(2 × −5000 + 100) ÷ 200⌋ × 100 = −5000 ; ⌊(2 × −758350 × 10⁴ + 1516700) ÷ 3033400⌋ = −5000.
+    expect(etp4FromFte(-1, 4)).toBe(-10000);
+    expect(etp4FromFte(-0.5, 2)).toBe(-5000);
+    expect(etp4FromQuotas(-75.835, 151.67, 4)).toBe(-5000);
   });
   it("E3b : quotité négative (S21.G00.40.013 = -75,84) ⇒ contrat n.d., jamais soustrait ; avec un autre contrat ⇒ « ≥ 1 »", () => {
     const alone = etpOf([one({ quota: "-75.84" })]);

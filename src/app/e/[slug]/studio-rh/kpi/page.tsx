@@ -149,14 +149,24 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const input: KpiInput = { ...ctx.input, scope: { establishments: etab ? [etab] : undefined, nature: nature || undefined } };
   const dash = kpiDashboard(input, w);
 
+  // detail et mois : un détail de mois exige un mois valide de la fenêtre ou de son N-1 ; un détail de période n'en prend pas ;
+  // l'absentéisme accepte les deux. Tout paramètre écarté est signalé avec sa raison.
   const rawDetail = one(sp.detail);
   const rawMois = one(sp.mois);
   const detailId = (KPI_DETAIL_IDS as string[]).includes(rawDetail) ? (rawDetail as KpiDetailId) : null;
   if (rawDetail && !detailId) ignore("detail", rawDetail, "détail inconnu");
   const moisOk = isMonth(rawMois);
   if (rawMois && !moisOk) ignore("mois", rawMois, "format AAAA-MM attendu");
-  const detail = detailId ? kpiDetail(input, w, detailId, moisOk ? rawMois : null) : null;
-  if (detailId && !detail && (moisOk || !rawMois)) ignore("mois", rawMois || "(absent)", "hors de la période affichée et de son N-1");
+  const windowDetail = detailId === "etp-avg" || detailId === "headcount-avg" || detailId === "turnover";
+  const monthDetail = detailId !== null && !windowDetail && detailId !== "absenteeism";
+  let detail: ReturnType<typeof kpiDetail> = null;
+  if (detailId && monthDetail && !moisOk) {
+    ignore("detail", rawDetail, rawMois ? "mois invalide : détail non affiché" : "mois requis pour ce détail");
+  } else if (detailId) {
+    if (windowDetail && moisOk) ignore("mois", rawMois, "sans objet pour un détail de période");
+    detail = kpiDetail(input, w, detailId, moisOk && !windowDetail ? rawMois : null);
+    if (!detail) ignore("mois", rawMois, "hors de la période affichée et de son N-1");
+  } else if (moisOk) ignore("mois", rawMois, "aucun détail demandé");
 
   const query = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
