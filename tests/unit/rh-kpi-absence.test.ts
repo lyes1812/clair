@@ -290,3 +290,16 @@ describe("absentéisme — contrat sans date de début ou sans collaborateur : r
     if (m.kind !== "nd") expect(m.qualifiers.join(" ")).toContain("6 jour(s) d'absence hors contrat d'un contrat sans collaborateur");
   });
 });
+
+describe("absentéisme d'une période : mois sans contrat compté (0 ÷ 0) neutres", () => {
+  it("lecture du 31/01/2026, filtre CDD : janvier 2026 sans CDD ne rend pas la période n.d. ; 5 j ÷ 334 j", async () => {
+    // CDD 003 du 01/10/2024 au 31/12/2025. Fenêtre février 2025 → janvier 2026 : 003 présent de février à décembre 2025,
+    // 28 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31 + 30 + 31 = 334 j ; ABS-3 (congés) du 04 au 08/08/2025 = 5 j ⇒ 10/668 = 5/334.
+    const q = await payfitBuild("fixture-A-1", createFixtureFetch("fixture-A-1"), monthRange("2024-10", "2026-01"), new Date("2026-01-31T08:00:00Z"));
+    const abs = await fixtureAbsences("fixture-A-1", monthRange("2024-10", "2026-01"));
+    const input = kpiInput(q, abs, {}, { nature: "02" });
+    expect(absenteeismMonth(input, "2026-01")).toMatchObject({ kind: "nd", nd: { code: "denominator-zero" } });
+    const p = absenteeism(input, rollingWindow("2026-01"));
+    expect(p.kind === "exact" && same(p.ratio, { num: 5, den: 334 })).toBe(true);
+  });
+});

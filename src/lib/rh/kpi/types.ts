@@ -27,7 +27,8 @@ export type AbsenceInput =
   | { status: "unavailable"; nd: FieldNd } // PayFit : collection absences non lue
   | { status: "not-extracted"; nd: FieldNd }; // DSN
 export type KpiScope = { establishments?: string[]; nature?: string };
-export type KpiInput = { data: RhBuildData; absences: AbsenceInput; params: KpiParams; scope: KpiScope };
+// openMonths : mois dont la paie n'est pas clôturée à la lecture (PayFit, statut de paie lu) ; ils ne sont pas clos.
+export type KpiInput = { data: RhBuildData; absences: AbsenceInput; params: KpiParams; scope: KpiScope; openMonths?: string[] };
 
 export type KpiNdCode =
   | MissingCode

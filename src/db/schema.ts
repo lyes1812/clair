@@ -312,7 +312,7 @@ export const rhContract = pgTable(
     endStatus: text("end_status").$type<EndStatus>().notNull(), // known | none_cdi | none_other_nature | none_nature_nd | unpositioned | disappeared
     nature: text("nature"),
     statusSource: text("status_source"), // PayFit ACTIVE/ARCHIVED/PENDING : affiché, jamais compté
-    fteAtRead: qty("fte_at_read"),
+    fteAtRead: numeric("fte_at_read", { mode: "number" }), // sans échelle fixe : quotité PayFit exacte, arrondie une seule fois par les KPI
     weeklyHoursAtRead: qty("weekly_hours_at_read"),
     isFullTimeAtRead: boolean("is_full_time_at_read"),
     modalityAtRead: text("modality_at_read"),

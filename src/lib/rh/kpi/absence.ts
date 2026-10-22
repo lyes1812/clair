@@ -60,7 +60,7 @@ export function theoreticalMonth(input: KpiInput, month: string): TheoreticalMon
 
 export function theoreticalWindow(input: KpiInput, w: Window): TheoreticalWindow {
   return memo(input, `th-w:${w.from}:${w.to}`, () => {
-    const g = checkWindow(input.data, w);
+    const g = checkWindow(input.data, w, input.openMonths);
     if (g) return { kind: "nd", nd: g, months: [] };
     const months = w.months.map((m) => theoreticalMonth(input, m));
     const nds = months.filter((m): m is Extract<TheoreticalMonth, { kind: "nd" }> => m.kind === "nd");
@@ -259,29 +259,42 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
     }
     // Trace par absence : demi-journées incertaines restantes après l'union (celles qui font le « ≥ »), débordements et
     // jours hors contrat d'un contrat sans collaborateur.
-    const traceOf = (id: string): { uncertain: number; notes: string[] } => {
-      const seen = new Set<string>();
+    // Chaque demi-journée incertaine restante est attribuée à la première absence (ordre de lecture) qui la rend incertaine :
+    // la colonne « Incertaines » s'additionne au total « ≥ ».
+    const attributed = new Set<string>();
+    const traces = new Map<string, { uncertain: number; notes: string[] }>();
+    for (const [id, list] of doubtOf) {
       const byVia = new Map<string, { open: number; closed: number }>();
       let open = 0;
-      for (const d of doubtOf.get(id) ?? []) {
+      const seen = new Set<string>();
+      for (const d of list) {
         const k = `${d.contractKey}|${d.slot}`;
         if (seen.has(k)) continue;
         seen.add(k);
         const isOpen = !(union.get(d.contractKey)?.has(d.slot) ?? false);
-        if (isOpen) open += 1;
+        const mine = isOpen && !attributed.has(k);
+        if (mine) {
+          attributed.add(k);
+          open += 1;
+        }
         if (d.via) {
           const v = byVia.get(d.via) ?? { open: 0, closed: 0 };
-          if (isOpen) v.open += 1;
-          else v.closed += 1;
+          if (mine) v.open += 1;
+          else if (!isOpen) v.closed += 1;
           byVia.set(d.via, v);
         }
       }
-      const notes = [...byVia].map(([via, v]) =>
-        v.open ? `${v.open} demi-journée(s) incertaine(s) sous le contrat ${via} de la même personne (non rattachées par PayFit)${v.closed ? ` ; ${v.closed} déjà comptée(s) par d'autres absences` : ""}` : `${v.closed} demi-journée(s) sous le contrat ${via} déjà comptée(s) par d'autres absences`,
-      );
+      const notes = [...byVia]
+        .filter(([, v]) => v.open || v.closed)
+        .map(([via, v]) =>
+          v.open ? `${v.open} demi-journée(s) incertaine(s) sous le contrat ${via} de la même personne (non rattachées par PayFit)${v.closed ? ` ; ${v.closed} déjà comptée(s) par d'autres absences` : ""}` : `${v.closed} demi-journée(s) sous le contrat ${via} déjà comptée(s) par d'autres absences`,
+        );
+      traces.set(id, { uncertain: open, notes });
+    }
+    const traceOf = (id: string): { uncertain: number; notes: string[] } => {
+      const t = traces.get(id) ?? { uncertain: 0, notes: [] };
       const o = orphanOf.get(id);
-      if (o) notes.push(`${o} jour(s) hors contrat, collaborateur du contrat inconnu : rattachement non vérifiable (« ≥ »)`);
-      return { uncertain: open, notes };
+      return { uncertain: t.uncertain, notes: o ? [...t.notes, `${o} jour(s) hors contrat, collaborateur du contrat inconnu : rattachement non vérifiable (« ≥ »)`] : t.notes };
     };
     for (const sl of slices) {
       const tr = traceOf(sl.absenceId);
@@ -315,20 +328,23 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
 
 export function absenteeism(input: KpiInput, w: Window): Absenteeism {
   return memo(input, `abs-w:${w.from}:${w.to}`, () => {
-    const g = checkWindow(input.data, w);
+    const g = checkWindow(input.data, w, input.openMonths);
     if (g) return { kind: "nd", nd: g, months: [] };
     const guard = absenceGuard(input);
     if (guard) return { kind: "nd", nd: guard, months: [] };
     const months = w.months.map((m) => absenteeismMonth(input, m));
-    const nds = months.filter((m): m is Extract<AbsenteeismMonth, { kind: "nd" }> => m.kind === "nd");
+    // Un mois sans aucun contrat compté (0 jour théorique) apporte 0 ÷ 0 à la somme : il ne rend pas la période n.d.
+    const empty = (m: AbsenteeismMonth) => m.kind === "nd" && m.nd.code === "denominator-zero";
+    const nds = months.filter((m): m is Extract<AbsenteeismMonth, { kind: "nd" }> => m.kind === "nd" && !empty(m));
     if (nds.length) {
       const allLower = nds.every((m) => m.nd.code === "month-lower-bound");
       const list = nds.map((m) => m.month);
       return { kind: "nd", months, nd: kpiNd(allLower ? "month-lower-bound" : "month-nd", periodReason(list, nds[0].month, nds[0].nd.reason), { months: list }) };
     }
-    const exact = months as Extract<AbsenteeismMonth, { kind: "exact" | "lower_bound" }>[];
+    const exact = months.filter((m): m is Extract<AbsenteeismMonth, { kind: "exact" | "lower_bound" }> => m.kind !== "nd");
     const num = exact.reduce((s, m) => s + m.ratio.num, 0);
     const den = exact.reduce((s, m) => s + m.ratio.den, 0);
+    if (den === 0) return { kind: "nd", months, nd: kpiNd("denominator-zero", "aucun contrat compté présent sur la période") };
     const lower = exact.filter((m) => m.kind === "lower_bound");
     const qualifiers = lower.length ? [`mois en borne basse : ${monthRanges(lower.map((m) => m.month))}`] : [];
     return { kind: lower.length ? "lower_bound" : "exact", ratio: ratio(num, den), months, qualifiers };

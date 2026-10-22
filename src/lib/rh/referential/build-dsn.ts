@@ -66,20 +66,6 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
     declarationKeys: r.status === "blocked" ? [] : r.selected.map((d) => d.key),
     provenance: {},
   }));
-  // Mois manquants : de la première déclaration du SIRET jusqu'au dernier mois vu tous établissements confondus,
-  // pour qu'un établissement qui cesse de déclarer rende le total n.d. plutôt qu'exact sans lui (C5). Décision par
-  // défaut : un établissement qui apparaît plus tard n'est pas réputé manquant avant sa première déclaration.
-  const monthsBySiret = new Map<string, string[]>();
-  for (const r of input.coverage) monthsBySiret.set(r.siret, [...(monthsBySiret.get(r.siret) ?? []), r.month]);
-  const globalLast = [...input.coverage.map((r) => r.month)].sort().pop() ?? null;
-  for (const [siret, ms] of monthsBySiret) {
-    const sorted = [...ms].sort();
-    for (const M of monthsBetween(sorted[0], globalLast ?? sorted[sorted.length - 1])) {
-      if (covStatus.has(`${siret}|${M}`)) continue;
-      covStatus.set(`${siret}|${M}`, "missing" as CoverageRow["status"]);
-      coverage.push({ establishmentId: siret, month: M, presenceStatus: "missing", presenceReason: `aucune déclaration appliquée pour ${M} (SIRET ${siret})`, timeStatus: "paid_only", timeReason: "temps travaillé non porté par la DSN", declarationKeys: [], provenance: {} });
-    }
-  }
   const completeMonths = [...new Set(input.coverage.filter((r) => r.status === "complete").map((r) => r.month))].sort();
   const presenceFrom = completeMonths[0] ?? null;
   const presenceTo = completeMonths[completeMonths.length - 1] ?? null;
@@ -185,6 +171,43 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
     const contractId = str(r.data.contractId);
     if (!decl || !contractId) continue;
     occByContract.set(contractId, [...(occByContract.get(contractId) ?? []), { decl, rec: r }]);
+  }
+  // Mois manquants : de la première déclaration du SIRET jusqu'au dernier mois vu tous établissements confondus,
+  // pour qu'un établissement qui cesse de déclarer rende le total n.d. plutôt qu'exact sans lui (C5). Décision par
+  // défaut : un établissement qui apparaît plus tard n'est pas réputé manquant avant sa première déclaration.
+  // Établissement fermé (déménagement, fermeture d'un site) : au-delà de son dernier mois déclaré L, il n'est pas réputé
+  // manquant si chacun des contrats qu'il déclare en L se termine au plus tard en L, ou est déclaré en L + 1 par un autre
+  // SIRET (transfert). Sinon ses mois suivants restent « manquants » (n.d.).
+  const contractsIn = new Map<string, { contractId: string; endDate: string | null }[]>();
+  const declaredBy = new Map<string, Set<string>>();
+  for (const [contractId, occs] of occByContract) {
+    for (const o of occs) {
+      const k = `${o.decl.siret}|${o.decl.month}`;
+      contractsIn.set(k, [...(contractsIn.get(k) ?? []), { contractId, endDate: str(o.rec.data.endDate) }]);
+      const d = `${contractId}|${o.decl.month}`;
+      declaredBy.set(d, (declaredBy.get(d) ?? new Set<string>()).add(o.decl.siret));
+    }
+  }
+  const monthsBySiret = new Map<string, string[]>();
+  for (const r of input.coverage) monthsBySiret.set(r.siret, [...(monthsBySiret.get(r.siret) ?? []), r.month]);
+  const globalLast = [...input.coverage.map((r) => r.month)].sort().pop() ?? null;
+  for (const [siret, ms] of monthsBySiret) {
+    const sorted = [...ms].sort();
+    const L = sorted[sorted.length - 1];
+    const closed =
+      globalLast !== null &&
+      L < globalLast &&
+      covStatus.get(`${siret}|${L}`) === "complete" &&
+      (contractsIn.get(`${siret}|${L}`) ?? []).every((c) => (c.endDate !== null && c.endDate <= monthEnd(L)) || [...(declaredBy.get(`${c.contractId}|${addMonths(L, 1)}`) ?? [])].some((x) => x !== siret));
+    if (closed) {
+      findings.push(finding("establishment-closed", { month: addMonths(L, 1), message: `SIRET ${siret} : plus de déclaration après ${L} ; ses contrats y sont terminés ou déclarés par un autre établissement le mois suivant : établissement réputé fermé` }));
+      continue;
+    }
+    for (const M of monthsBetween(sorted[0], globalLast ?? L)) {
+      if (covStatus.has(`${siret}|${M}`)) continue;
+      covStatus.set(`${siret}|${M}`, "missing" as CoverageRow["status"]);
+      coverage.push({ establishmentId: siret, month: M, presenceStatus: "missing", presenceReason: `aucune déclaration appliquée pour ${M} (SIRET ${siret})`, timeStatus: "paid_only", timeReason: "temps travaillé non porté par la DSN", declarationKeys: [], provenance: {} });
+    }
   }
   const remunerations = new Map<string, number>(); // `${declKey}|${contractId}` → nombre de blocs 51
   const activities = new Map<string, { unit: string | null; measure: number; rec: Rec }[]>();

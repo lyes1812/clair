@@ -1,0 +1,1 @@
+ALTER TABLE "rh_contract" ALTER COLUMN "fte_at_read" SET DATA TYPE numeric;

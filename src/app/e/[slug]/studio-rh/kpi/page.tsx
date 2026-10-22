@@ -5,9 +5,9 @@ import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
 import { coverageAt, gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
 import { KPI_DETAIL_IDS, kpiDashboard, kpiDetail } from "@/lib/rh/kpi/dashboard";
-import { fmtDelta, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
-import { civilWindow, closedMonths, defaultYear, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
-import type { Compared, KpiDetailId, KpiInput, Window } from "@/lib/rh/kpi/types";
+import { fmtDelta, fmtFraction, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
+import { civilWindow, closedMonths, defaultYear, lastClosedMonth, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
+import type { Compared, KpiDetailId, KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
 import { loadKpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { RhBuildData } from "@/lib/rh/referential/types";
@@ -98,8 +98,9 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const ctx = await loadKpiContext(slug, {});
   if (!ctx.input) return <KpiHeader ctx={ctx} closedMonth={null} />;
   const data = ctx.input.data;
-  const closed = closedMonths(data);
-  const last = closed.at(-1) ?? null;
+  const open = ctx.input.openMonths ?? [];
+  const closed = closedMonths(data, open);
+  const last = lastClosedMonth(data, open);
 
   if (ctx.settings.invalid.length) {
     return (
@@ -134,9 +135,9 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const rawFin = one(sp.fin);
   const fin = closed.includes(rawFin) ? rawFin : last;
   if (rawFin && rawFin !== fin) ignore("fin", rawFin, "hors des mois clos");
-  const years = selectableYears(data);
+  const years = selectableYears(data, open);
   const rawYear = one(sp.annee);
-  const year = years.some((y) => String(y.year) === rawYear) ? Number(rawYear) : defaultYear(data)!;
+  const year = years.some((y) => String(y.year) === rawYear) ? Number(rawYear) : defaultYear(data, open)!;
   if (rawYear && String(year) !== rawYear) ignore("annee", rawYear, "hors des années couvertes");
   const rawEtab = one(sp.etab);
   const etab = ctx.collab.establishments.some((e) => e.id === rawEtab) ? rawEtab : "";
@@ -215,6 +216,15 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const absParams = `types : ${s.absenceTypes.length ? s.absenceTypes.join(", ") : "aucun"} · statuts : ${s.absenceStatuses.map((x) => ABSENCE_STATUS_LABELS[x] ?? x).join(", ")} · ${s.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"} (${changed(["absenceTypes", "absenceStatuses", "dayBasis"])})`;
 
   const t = dash.tiles;
+  // Calcul de l'écart en fractions exactes (valeur − N-1 ; × 100 pour les taux) : l'écart affiché se retrace sans arrondi.
+  const deltaCalc = <T,>(c: Compared<T>, value: (x: T) => Ratio | null, points = false): string | undefined => {
+    if (c.delta.kind !== "exact") return undefined;
+    const a = value(c.current);
+    const b = value(c.previous);
+    if (!a || !b) return undefined;
+    const d = fmtFraction(c.delta.value);
+    return points ? `(${fmtFraction(a)} − ${fmtFraction(b)}) × 100 = ${d}` : `${fmtFraction(a)} − ${fmtFraction(b)} = ${d}`;
+  };
   const n1 = <T,>(c: Compared<T>, shown: Shown) => `N-1 (${c.previousWindow.label}) : ${shown.text}`;
   const pw = dash.previousWindow;
   const lowerMonths = new Set(data.coverage.filter((c) => c.presenceStatus === "lower_bound").map((c) => c.month));
@@ -324,6 +334,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             title={etpTitle(t.etpEnd.current)}
             n1={n1(t.etpEnd, etpShown(t.etpEnd.previous))}
             delta={fmtDelta(t.etpEnd.delta)}
+            deltaCalc={deltaCalc(t.etpEnd, (e) => (e.kind === "nd" ? null : { num: e.etp4, den: 10000 }))}
             params={etpParams}
             qualifiers={t.etpEnd.current.kind === "nd" ? [] : t.etpEnd.current.qualifiers}
             def="etp-month-end"
@@ -337,6 +348,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             title={ratioTitle(t.etpAverage.current)}
             n1={n1(t.etpAverage, averageShown(t.etpAverage.previous))}
             delta={fmtDelta(t.etpAverage.delta)}
+            deltaCalc={deltaCalc(t.etpAverage, (a) => (a.kind === "exact" ? a.ratio : null))}
             params={etpParams}
             qualifiers={t.etpAverage.current.kind === "nd" ? [] : t.etpAverage.current.qualifiers}
             def="etp-average"
@@ -350,6 +362,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             title={ratioTitle(t.headcountAverage.current)}
             n1={n1(t.headcountAverage, averageShown(t.headcountAverage.previous))}
             delta={fmtDelta(t.headcountAverage.delta)}
+            deltaCalc={deltaCalc(t.headcountAverage, (a) => (a.kind === "exact" ? a.ratio : null))}
             params={hcParams}
             def="headcount-average"
             detail={detailHref("headcount-avg", null)}
@@ -362,6 +375,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             title={ratioTitle(toCur)}
             n1={n1(t.turnover, turnoverShown(t.turnover.previous))}
             delta={fmtDelta(t.turnover.delta)}
+            deltaCalc={deltaCalc(t.turnover, (x) => (x.kind === "exact" ? x.ratio : null), true)}
             params={toParams}
             qualifiers={toCur.kind === "exact" ? toCur.qualifiers : []}
             def="turnover"
@@ -375,6 +389,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             title={ratioTitle(absCur)}
             n1={n1(t.absenteeism, absenteeismShown(t.absenteeism.previous))}
             delta={fmtDelta(t.absenteeism.delta)}
+            deltaCalc={deltaCalc(t.absenteeism, (x) => (x.kind === "nd" ? null : x.ratio), true)}
             params={absParams}
             qualifiers={absCur.kind === "nd" ? [] : absCur.qualifiers}
             def="absenteeism"
@@ -385,7 +400,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
               <span className="tile-foot" data-testid="kpi-absence-types">
                 types comptés : {chosenTypes.length ? chosenTypes.map((x) => `${x.type} (${x.count})`).join(", ") : "aucun"} — types présents non comptés :{" "}
                 {otherTypes.length ? otherTypes.map((x) => `${x.type} (${x.count})`).join(", ") : "aucun"}
-                {missingTypes.length > 0 && <> — absents de la lecture : {missingTypes.map((x) => x.type).join(", ")}</>} · <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
+                {missingTypes.length > 0 && <> — absents de la lecture : {missingTypes.map((x) => x.type).join(", ")}</>} (entre parenthèses : nombre d'absences dans toute la lecture, tous mois et tous contrats) ·{" "}
+                <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
               </span>
             )}
           </KpiTile>

@@ -30,7 +30,7 @@ function average(input: KpiInput, w: Window, unit: "etp" | "persons", values: Mo
 
 export function etpAverage(input: KpiInput, w: Window): Average {
   return memo(input, `etp-avg:${w.from}:${w.to}`, () => {
-    const g = checkWindow(input.data, w);
+    const g = checkWindow(input.data, w, input.openMonths);
     if (g) return { kind: "nd", unit: "etp", nd: g, months: [] };
     const values: MonthValue[] = w.months.map((m) => {
       const e = etpMonthEnd(input, m);
@@ -42,7 +42,7 @@ export function etpAverage(input: KpiInput, w: Window): Average {
 
 export function headcountAverage(input: KpiInput, w: Window): Average {
   return memo(input, `hc-avg:${w.from}:${w.to}`, () => {
-    const g = checkWindow(input.data, w);
+    const g = checkWindow(input.data, w, input.openMonths);
     if (g) return { kind: "nd", unit: "persons", nd: g, months: [] };
     const opts = countedOpts(input);
     const values: MonthValue[] = w.months.map((m) => {

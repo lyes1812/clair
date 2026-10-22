@@ -1,6 +1,6 @@
 import { formatDate } from "@/lib/dates";
 import { getKpiSettings, type KpiSettings } from "@/lib/rh-kpi-settings";
-import { loadAbsencesOfSync, loadAbsenceTypes } from "./referential/store";
+import { loadAbsencesOfSync, loadAbsenceTypes, loadPayrollOpenMonths } from "./referential/store";
 import { nd } from "./referential/types";
 import type { AbsenceInput, KpiInput, KpiScope } from "./kpi/types";
 import { loadCollabContext, type CollabContext } from "./view";
@@ -27,6 +27,7 @@ export async function loadKpiContext(slug: string, scope: KpiScope): Promise<Kpi
       readTypes = await loadAbsenceTypes(collab.workspace.id, inputs.syncId);
     }
   }
-  const input: KpiInput = { data: d, absences, params: { ...settings.values, natures: collab.natures.codes }, scope };
+  const openMonths = d.build.inputs.source === "payfit" ? await loadPayrollOpenMonths(collab.workspace.id, d.build.inputs.syncId) : [];
+  const input: KpiInput = { data: d, absences, params: { ...settings.values, natures: collab.natures.codes }, scope, openMonths };
   return { collab, settings, input, readTypes };
 }

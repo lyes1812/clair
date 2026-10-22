@@ -204,6 +204,17 @@ export async function loadAbsenceTypes(workspaceId: string, syncId: string): Pro
   return rows.filter((r) => typeof r.type === "string").map((r) => ({ type: r.type, count: r.count }));
 }
 
+// Mois dont la paie n'est pas clôturée à la lecture (statut de paie PayFit « not_completed ») ; un mois sans statut lu n'y figure pas.
+export async function loadPayrollOpenMonths(workspaceId: string, syncId: string): Promise<string[]> {
+  const rows = await withWorkspace(workspaceId, (tx) =>
+    tx
+      .select({ month: sql<string>`${sourceRecord.data}->>'month'` })
+      .from(sourceRecord)
+      .where(and(eq(sourceRecord.syncId, syncId), eq(sourceRecord.collection, "payroll_status"), sql`${sourceRecord.data}->>'status' = 'not_completed'`)),
+  );
+  return rows.map((r) => r.month).filter((m): m is string => typeof m === "string").sort();
+}
+
 export async function activePayFitSync(workspaceId: string): Promise<{ id: string; startedAt: Date } | null> {
   const [row] = await withWorkspace(workspaceId, (tx) =>
     tx

@@ -6,14 +6,23 @@ import { kpiNd, type KpiInput, type KpiNd, type Window } from "./types";
 // Mois clos et fenêtres : un mois est clos si son dernier jour est antérieur ou égal à la date de référence. Aucune horloge.
 const lower = (month: string) => formatMonth(month).toLowerCase();
 
-export function closedMonths(data: RhBuildData): string[] {
+// open : mois dont la paie n'est pas clôturée à la lecture (PayFit) ; ils ne sont pas clos même si leur dernier jour est passé.
+export function closedMonths(data: RhBuildData, open: string[] = []): string[] {
   const { referenceDate: ref, presenceFrom, presenceTo } = data.build;
   if (!ref || !presenceFrom || !presenceTo) return [];
-  return monthsBetween(presenceFrom, presenceTo).filter((m) => monthEnd(m) <= ref);
+  return monthsBetween(presenceFrom, presenceTo).filter((m) => monthEnd(m) <= ref && !open.includes(m));
 }
 
-export function lastClosedMonth(data: RhBuildData): string | null {
-  return closedMonths(data).at(-1) ?? null;
+// Dernier mois clos retenu par défaut. DSN : le dernier mois clos complet pour tous les établissements connus (un
+// établissement qui dépose plus tôt que les autres ne fait pas avancer la fenêtre par défaut sur un mois incomplet).
+export function lastClosedMonth(data: RhBuildData, open: string[] = []): string | null {
+  const closed = closedMonths(data, open);
+  if (data.build.source !== "dsn") return closed.at(-1) ?? null;
+  for (let i = closed.length - 1; i >= 0; i--) {
+    const cov = data.coverage.filter((c) => c.month === closed[i]);
+    if (cov.length && cov.every((c) => c.presenceStatus === "complete")) return closed[i];
+  }
+  return closed.at(-1) ?? null;
 }
 
 export function monthWindow(month: string): Window {
@@ -35,7 +44,9 @@ export function previousWindow(w: Window): Window {
   return rollingWindow(addMonths(w.to, -12));
 }
 
-export function checkWindow(data: RhBuildData, w: Window): KpiNd | null {
+export function checkWindow(data: RhBuildData, w: Window, open: string[] = []): KpiNd | null {
+  const unpaid = w.months.filter((m) => open.includes(m));
+  if (unpaid.length) return kpiNd("period-not-closed", `paie non clôturée à la lecture (PayFit) : ${unpaid.join(", ")} n'est pas clos`, { months: unpaid });
   const last = lastClosedMonth(data);
   if (!last) return kpiNd("month-not-covered", "aucun mois clos dans la source retenue");
   if (w.to > last) {
@@ -45,19 +56,19 @@ export function checkWindow(data: RhBuildData, w: Window): KpiNd | null {
   return null;
 }
 
-export function selectableYears(data: RhBuildData): { year: number; closed: boolean }[] {
+export function selectableYears(data: RhBuildData, open: string[] = []): { year: number; closed: boolean }[] {
   const { referenceDate: ref, presenceFrom, presenceTo } = data.build;
   if (!ref || !presenceFrom || !presenceTo) return [];
   const out: { year: number; closed: boolean }[] = [];
-  for (let y = Number(presenceFrom.slice(0, 4)); y <= Number(presenceTo.slice(0, 4)); y++) out.push({ year: y, closed: monthEnd(`${y}-12`) <= ref });
+  for (let y = Number(presenceFrom.slice(0, 4)); y <= Number(presenceTo.slice(0, 4)); y++) out.push({ year: y, closed: monthEnd(`${y}-12`) <= ref && !open.includes(`${y}-12`) });
   return out;
 }
 
 // Dernière année civile close ; à défaut, l'année du dernier mois clos.
-export function defaultYear(data: RhBuildData): number | null {
-  const closed = selectableYears(data).filter((y) => y.closed);
+export function defaultYear(data: RhBuildData, open: string[] = []): number | null {
+  const closed = selectableYears(data, open).filter((y) => y.closed);
   if (closed.length) return closed[closed.length - 1].year;
-  const last = lastClosedMonth(data);
+  const last = lastClosedMonth(data, open);
   return last ? Number(last.slice(0, 4)) : null;
 }
 

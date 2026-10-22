@@ -2,7 +2,7 @@ import { canonicalJson, sha256 } from "@/lib/crypto";
 import type { RhSource } from "./types";
 
 // Version des règles de construction : tout changement de règle force une reconstruction après déploiement.
-export const RH_BUILDER_VERSION = 4; // 3 : revue 2d (mois charnière, lignes de temps hors période ou sans contrat, fractions, couverture multi-SIRET) ; 4 : nature DSN des événements = nature déclarée à l'entrée et à la sortie
+export const RH_BUILDER_VERSION = 5; // 3 : revue 2d (mois charnière, lignes de temps hors période ou sans contrat, fractions, couverture multi-SIRET) ; 4 : nature DSN des événements = nature déclarée à l'entrée et à la sortie ; 5 : établissement DSN fermé (plus de déclaration, contrats terminés ou transférés) non réputé manquant
 
 // Empreinte des entrées d'un référentiel : lectures appliquées (identifiant + contenu) et, pour la DSN, les
 // paires (dépôt, déclaration) retenues ; indépendante de l'ordre.

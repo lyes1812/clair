@@ -5,6 +5,7 @@ export const FINDING_LABELS: Record<string, { case: string; label: string; sever
   "simultaneous-contracts": { case: "A1", label: "Contrats simultanés pour une même personne", severity: "info" },
   rehire: { case: "A2", label: "Réembauche : nouveau contrat après une fin", severity: "info" },
   "continuity-same-person": { case: "A3", label: "Contrat continu (fin J, début J+1, même personne)", severity: "info" },
+  "establishment-closed": { case: "C5 bis", label: "Établissement réputé fermé : plus de déclaration, contrats terminés ou transférés", severity: "info" },
   "identity-change": { case: "A4", label: "Même contrat sous deux identifiants de personne : NTT→NIR ou NIR corrigé ? à vérifier", severity: "check" },
   "ntt-identity": { case: "A4", label: "Personne identifiée par un identifiant temporaire (NTT)", severity: "info" },
   "person-without-contract": { case: "B5/C8", label: "Personne sans contrat connu", severity: "info" },

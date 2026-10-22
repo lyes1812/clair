@@ -107,7 +107,7 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
 // la raison du premier mois n.d. ; indépendant de la formule du turnover.
 export function windowMovements(input: KpiInput, w: Window): { entries: MovementTotal; exits: MovementTotal } {
   return memo(input, `mv-w:${w.from}:${w.to}`, () => {
-    const g = checkWindow(input.data, w);
+    const g = checkWindow(input.data, w, input.openMonths);
     if (g) return { entries: { kind: "nd", nd: g }, exits: { kind: "nd", nd: g } };
     const months = w.months.map((m) => monthMovements(input, m));
     const total = (pick: (m: MonthMovements) => Count): MovementTotal => {
@@ -131,7 +131,7 @@ export function windowMovements(input: KpiInput, w: Window): { entries: Movement
 export function turnover(input: KpiInput, w: Window): Turnover {
   return memo(input, `to:${w.from}:${w.to}`, () => {
     const formula = input.params.turnoverFormula;
-    const g = checkWindow(input.data, w);
+    const g = checkWindow(input.data, w, input.openMonths);
     if (g) return { kind: "nd", formula, nd: g, months: [] };
     const months = w.months.map((m) => monthMovements(input, m));
     // La variante « sorties ÷ effectif au premier jour » n'utilise pas les entrées : seules les sorties doivent être exactes.

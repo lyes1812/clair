@@ -25,7 +25,7 @@ export function kpiDashboard(input: KpiInput, w: Window): KpiDashboard {
     };
   });
   return {
-    closedMonth: lastClosedMonth(input.data),
+    closedMonth: lastClosedMonth(input.data, input.openMonths),
     window: w,
     previousWindow: previousWindow(w),
     params: input.params,

@@ -70,6 +70,9 @@ export function KpiHeader({ ctx, closedMonth, children }: { ctx: KpiContext; clo
         {ctx.collab.data && (
           <p className="desc" data-testid="kpi-closed-month">
             Dernier mois clos : {closedMonth ? <strong>{closedMonth}</strong> : <span className="nd">n.d. — aucun mois clos à la date de référence</span>}
+            {(ctx.input?.openMonths ?? []).length > 0 && (
+              <span data-testid="kpi-payroll-open"> · paie non clôturée à la lecture : {ctx.input!.openMonths!.join(", ")} (mois non clos)</span>
+            )}
           </p>
         )}
       </div>
@@ -121,6 +124,7 @@ export function KpiTile(props: {
   title?: string;
   n1: string;
   delta: string;
+  deltaCalc?: string;
   params: string;
   qualifiers?: string[];
   def: string;
@@ -128,14 +132,17 @@ export function KpiTile(props: {
   detailN1: string;
   children?: ReactNode;
 }) {
-  const { id, label, shown, title, n1, delta, params, qualifiers = [], def, detail, detailN1, children } = props;
+  const { id, label, shown, title, n1, delta, deltaCalc, params, qualifiers = [], def, detail, detailN1, children } = props;
   return (
     <div data-testid={`kpi-tile-${id}`}>
       <dt>{label}</dt>
       <dd className={cls(shown)} title={title}>{shown.text}</dd>
       {[...new Set(qualifiers)].map((q) => <span key={q} className="tile-foot">{q}</span>)}
       <span className="tile-foot" data-testid={`kpi-tile-${id}-n1`}>{n1}</span>
-      <span className="tile-foot" data-testid={`kpi-tile-${id}-delta`}>écart : {delta}</span>
+      <span className="tile-foot" data-testid={`kpi-tile-${id}-delta`}>
+        écart : {delta}
+        {deltaCalc ? <span data-testid={`kpi-tile-${id}-delta-calc`}> ({deltaCalc})</span> : null}
+      </span>
       <span className="tile-foot" data-testid={`kpi-tile-${id}-params`}>{params}</span>
       {children}
       <span className="tile-foot">

@@ -71,6 +71,13 @@
       "when": 1792628251209,
       "tag": "0009_rh_numeric",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792665516063,
+      "tag": "0010_rh_fte_precision",
+      "breakpoints": true
     }
   ]
 }

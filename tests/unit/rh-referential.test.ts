@@ -199,6 +199,36 @@ describe("référentiel Collaborateurs en base", () => {
     expect((await getKpiSettings(A)).invalid).toEqual([]);
   });
 
+  it("quotité PayFit stockée sans perte : relue de la base, 21/39 arrondi une seule fois à 3 décimales = 0,538", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/rh/referential/build-payfit")>("@/lib/rh/referential/build-payfit");
+    vi.mocked(buildFromPayFit).mockImplementationOnce((input) => {
+      const r = actual.buildFromPayFit(input);
+      const c = r.contracts.find((x) => x.externalId === "TEST-A-CONTRACT-002")!;
+      c.fteAtRead = 21 / 39;
+      c.isFullTimeAtRead = false;
+      return r;
+    });
+    const { rebuildRh } = await import("@/lib/rh/referential/store");
+    const stale = () => withWorkspace(A, (tx) => tx.update(rhBuild).set({ builderVersion: 0 }).where(sql`${rhBuild.status} = 'current' and ${rhBuild.source} = 'payfit'`));
+    await stale(); // version périmée ⇒ reconstruction réelle par le constructeur (enveloppé ci-dessus)
+    const row = await rebuildRh(A, "payfit", actor);
+    const data = await loadRhBuild(A, row.id);
+    expect(data.contracts.find((x) => x.externalId === "TEST-A-CONTRACT-002")?.fteAtRead).toBe(21 / 39);
+    const { etpMonthEnd } = await import("@/lib/rh/kpi/etp");
+    const e = etpMonthEnd({ data, absences: { status: "not-extracted", nd: { code: "not-extracted", reason: "" } }, params: { ...KPI_DEFAULTS, etpDecimals: 3, natures: ["01", "02"] }, scope: {} }, "2026-09");
+    expect(e.kind !== "nd" && e.contributions.find((x) => x.externalId === "TEST-A-CONTRACT-002")?.etp4).toBe(5380);
+    await stale();
+    await rebuildRh(A, "payfit", actor); // référentiel de la fixture rétabli pour les tests suivants
+  });
+
+  it("statut de paie : aucun mois non clôturé dans la lecture fictive (toutes les paies « completed »)", async () => {
+    const { loadPayrollOpenMonths } = await import("@/lib/rh/referential/store");
+    const active = await activePayFitSync(A);
+    expect(active).not.toBeNull();
+    expect(await loadPayrollOpenMonths(A, active!.id)).toEqual([]);
+    expect(await loadPayrollOpenMonths(B, active!.id)).toEqual([]); // RLS : B ne lit rien de A
+  });
+
   it("isolation : l'espace B n'a rien, ne voit rien et ne peut rien écrire pour A", async () => {
     expect(await ensureRhBuild(B, "payfit", actor)).toMatchObject({ kind: "none" });
     expect(await withWorkspace(B, (tx) => tx.select().from(rhPerson))).toHaveLength(0);

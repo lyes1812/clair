@@ -149,3 +149,14 @@ describe("déterminisme : aucune horloge dans le moteur KPI (S4)", () => {
     expect(out.trim()).toBe("");
   });
 });
+
+describe("PayFit : un mois dont la paie n'est pas clôturée à la lecture n'est pas clos", () => {
+  it("paie de septembre 2026 non clôturée ⇒ dernier mois clos août 2026 ; fenêtre finissant en septembre n.d.", async () => {
+    const data = await payfitFixtureBuild();
+    expect(lastClosedMonth(data)).toBe("2026-09");
+    expect(lastClosedMonth(data, ["2026-09"])).toBe("2026-08");
+    expect(closedMonths(data, ["2026-09"]).includes("2026-09")).toBe(false);
+    expect(checkWindow(data, rollingWindow("2026-09"), ["2026-09"])).toMatchObject({ code: "period-not-closed", reason: expect.stringContaining("paie non clôturée à la lecture (PayFit) : 2026-09") });
+    expect(checkWindow(data, rollingWindow("2026-08"), ["2026-09"])).toBeNull();
+  });
+});

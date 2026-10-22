@@ -232,7 +232,6 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
     else persons.add(r.contract.personKey);
   }
   const M = monthOf(date);
-  const declaredAfterEnd = new Set((index(data).declared.get(M) ?? []).filter((m) => m.flags.includes("declared_after_end") && inEst(opts.establishments, m.establishmentId)).map((m) => m.contractKey)).size;
   const lower = exactAt(data, date) ? [] : g.coverage.filter((c) => c.presenceStatus === "lower_bound");
   // Contrat déclaré ce mois-ci après sa fin (DSN, natures comptées) : hors effectif et compté à part. Cas courant d'un versement
   // après le départ (régularisation, prime) ; une rupture annulée n'est connue qu'au dépôt d'une nouvelle fin (limite écrite).
@@ -248,7 +247,7 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
     allContracts: rows.length,
     byNature,
     outOfScope: { byNature: outByNature, withoutPerson, unpositioned: data.contracts.filter((c) => c.startDate === null).length },
-    declaredAfterEnd,
+    declaredAfterEnd: afterEnd.length,
     declaredAfterEndKeys: afterEnd,
     contractKeys: counted.map((r) => r.contract.contractKey).sort(),
     qualifiers: [
@@ -287,7 +286,7 @@ function monthCount(data: RhBuildData, month: string, kind: "entry" | "exit", op
     return { rows, count: { kind: "lower_bound", value, qualifiers: ["borne basse (PayFit)"] } };
   }
   const bad = cov.filter((c) => c.presenceStatus !== "complete");
-  if (bad.length) return { rows, count: { kind: "lower_bound", value, qualifiers: ["mois non couvert : un contrat commencé et fini dans le mois serait invisible"] } };
+  if (bad.length) return { rows, count: { kind: "lower_bound", value, qualifiers: [`au moins les mouvements connus : ${bad.map((c) => c.presenceReason ?? `mois ${c.presenceStatus} (SIRET ${c.establishmentId})`).join(" ")}`] } };
   // Mois de la date de référence non écoulé : le total du mois n'est pas connaissable.
   if (ref && monthOf(ref) === month && ref < monthEnd(month)) return { rows, count: { kind: "lower_bound", value, qualifiers: [`mois en cours à la date de référence : connu jusqu'au ${formatDate(ref)}`] } };
   return { rows, count: { kind: "exact", value, qualifiers: [] } };
