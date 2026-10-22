@@ -2,13 +2,14 @@ import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { servicesOf, shiftYear, windowPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
-import { comptaGap, CONGES_PREFIX, labelTotals, operatingRevenue, provisionMonth, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
+import { comptaGap, labelTotals, operatingRevenue, provisionMonth, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 
 const lowerMonth = (m: string) => formatMonth(m).toLowerCase();
 const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
 const pct = (a: number, b: number) => (b === 0 ? "n.d. (N-1 nul)" : b < 0 ? "n.d. (N-1 négatif)" : `${a - b > 0 ? "+" : ""}${fmtPercent({ num: a - b, den: b })}`);
 const rubricLabel = (id: RubricId | "non-classe") => (id === "non-classe" ? "Comptes 63/64 non classés" : (RUBRICS.find((r) => r.id === id)?.label ?? id));
+const ERR = "lecture de la comptabilité en erreur (détail dans les journaux du serveur) : rechargez la page ou vérifiez la source comptable dans Données";
 const BRUT: RubricId[] = ["salaires", "primes", "stages", "indemnites"];
 // Raisons des n.d. d'un tableau, listées sous le tableau (jamais seulement en infobulle).
 const ndReasons = (reasons: (string | null | undefined)[]) => {
@@ -117,7 +118,7 @@ export function PaieComptaView(props: {
   fullInput: JournalInput;
   months: string[];
   serviceFiltered: boolean;
-  compta: { source: "pennylane" | "fec" | null; reason: string; lines: ComptaLine[]; months: string[]; nd: Record<string, string> };
+  compta: { source: "pennylane" | "fec" | null; reason: string; lines: ComptaLine[]; months: string[]; nd: Record<string, string>; error: boolean };
 }) {
   const { slug, input, fullInput, months, serviceFiltered, compta } = props;
   const last = months.at(-1)!;
@@ -129,11 +130,14 @@ export function PaieComptaView(props: {
     const v = x.kind === "nd" ? null : pick(x);
     return v === null ? "n.d." : formatEuros(v);
   };
-  // Raisons des n.d. de la provision : mois n.d., ou part sans aucune ligne de dotation dans le mois.
-  const why = (x: ProvisionMonth, m: string) =>
-    x.kind === "nd"
-      ? `${m} : ${x.reason}`
-      : [x.conges === null ? `${m} : congés payés — aucune ligne ${CONGES_PREFIX} « Mois courant »` : null, x.charges === null ? `${m} : charges sociales — aucune ligne hors ${CONGES_PREFIX} « Mois courant »` : null].filter(Boolean).join(" ; ") || null;
+  // Raisons des n.d. de la provision : mois n.d., ou part (congés, charges) n.d. — le total l'est alors aussi.
+  const why = (x: ProvisionMonth, m: string) => (x.kind === "nd" ? `${m} : ${x.reason}` : x.missing.length ? `${m} : ${x.missing.join(" ; ")}` : null);
+  const totalOf = (x: ProvisionMonth) => (x.kind === "value" ? x.total : null);
+  const gapOf = (a: ProvisionMonth, b: ProvisionMonth) => {
+    const ta = totalOf(a);
+    const tb = totalOf(b);
+    return ta === null || tb === null ? "n.d." : signed(ta - tb);
+  };
   const services = fullInput.serviceAxis ? servicesOf(fullInput, [last, shiftYear(last, -1)]) : [];
   const recon = serviceFiltered ? null : compta.source ? reconcile(fullInput, compta.lines, compta.months, months, compta.nd) : null;
   const masse = windowPayroll(fullInput, months);
@@ -146,9 +150,9 @@ export function PaieComptaView(props: {
         <dl className="facts">
           <div data-testid="pc-tile-provision">
             <dt>Provision fin {lowerMonth(last)}</dt>
-            <dd className={cur.kind === "nd" ? "nd" : undefined}>{cur.kind === "nd" ? `n.d. — ${cur.reason}` : formatEuros(cur.total)}</dd>
-            <span className="tile-foot">congés payés {show(cur, (v) => v.conges)} + charges sociales {show(cur, (v) => v.charges)}{cur.kind === "value" && why(cur, last) ? ` (${why(cur, last)})` : ""}</span>
-            <span className="tile-foot" data-testid="pc-tile-provision-n1">fin {lowerMonth(shiftYear(last, -1))} : {n1.kind === "nd" ? `n.d. — ${n1.reason}` : formatEuros(n1.total)}{cur.kind === "value" && n1.kind === "value" ? ` · ${signed(cur.total - n1.total)}` : ""}</span>
+            <dd className={totalOf(cur) === null ? "nd" : undefined}>{totalOf(cur) === null ? `n.d. — ${why(cur, last)}` : formatEuros(totalOf(cur)!)}</dd>
+            <span className="tile-foot">congés payés {show(cur, (v) => v.conges)} + charges sociales {show(cur, (v) => v.charges)}</span>
+            <span className="tile-foot" data-testid="pc-tile-provision-n1">fin {lowerMonth(shiftYear(last, -1))} : {totalOf(n1) === null ? `n.d. — ${why(n1, shiftYear(last, -1))}` : formatEuros(totalOf(n1)!)}{totalOf(cur) !== null && totalOf(n1) !== null ? ` · ${gapOf(cur, n1)}` : ""}</span>
             <span className="tile-foot"><a href="#def-provision">Définition</a></span>
           </div>
         </dl>
@@ -166,7 +170,7 @@ export function PaieComptaView(props: {
                     <td className="num">{show(a, (v) => v.charges)}</td>
                     <td className="num" data-col="total">{show(a, (v) => v.total)}</td>
                     <td className="num" data-col="total-n1">{show(b, (v) => v.total)}</td>
-                    <td className="num">{a.kind === "value" && b.kind === "value" ? signed(a.total - b.total) : "n.d."}</td>
+                    <td className="num">{gapOf(a, b)}</td>
                   </tr>
                 );
               })}
@@ -189,7 +193,7 @@ export function PaieComptaView(props: {
                       <td className="num">{show(a, (v) => v.charges)}</td>
                       <td className="num" data-col="total">{show(a, (v) => v.total)}</td>
                       <td className="num">{show(b, (v) => v.total)}</td>
-                      <td className="num">{a.kind === "value" && b.kind === "value" ? signed(a.total - b.total) : "n.d."}</td>
+                      <td className="num">{gapOf(a, b)}</td>
                     </tr>
                   );
                 })}
@@ -204,6 +208,8 @@ export function PaieComptaView(props: {
         <h2>Rapprochement avec la comptabilité <span className="desc">— comptes 63 et 64 du journal de paie et de la comptabilité, mêmes mois, même grille</span></h2>
         {serviceFiltered ? (
           <p className="desc">Disponible sur le total entreprise (sans filtre Service) : la comptabilité ne porte pas le code analytique du journal de paie.</p>
+        ) : compta.error ? (
+          <p className="nd" data-testid="pc-recon-nd">n.d. — {ERR}</p>
         ) : !compta.source ? (
           <p className="nd" data-testid="pc-recon-nd">n.d. — aucune source comptable retenue ({compta.reason}) : connectez Pennylane ou déposez un FEC dans <a href={`/e/${slug}/donnees`}>Données</a>.</p>
         ) : recon?.kind === "nd" ? (
@@ -251,7 +257,7 @@ export function PaieComptaView(props: {
             : masse.kind === "nd"
               ? `n.d. — ${masse.nd.reason}`
               : produits === null
-                ? `n.d. — ${compta.source ? gap : `aucune source comptable retenue (${compta.reason}) : produits d'exploitation 70 à 75`}`
+                ? `n.d. — ${compta.error ? ERR : compta.source ? gap : `aucune source comptable retenue (${compta.reason}) : produits d'exploitation 70 à 75`}`
                 : produits <= 0
                   ? "n.d. — aucun produit d'exploitation (comptes 70 à 75) sur la période"
                   : `${fmtPercent({ num: masse.masse, den: produits })} — masse chargée ${formatEuros(masse.masse)} ÷ produits d'exploitation ${formatEuros(produits)}`}

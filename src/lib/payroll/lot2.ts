@@ -31,10 +31,13 @@ export function labelTotals(input: JournalInput, months: string[]): LabelTotal[]
 // --- Provision de congés payés à fin de mois (méthode PayFit d'extourne mensuelle) : chaque mois, la provision du mois
 // passé est reprise et le stock du mois est doté. Stock fin de mois = solde des lignes de dotation « Mois courant » des
 // comptes de la rubrique « Provisions de congés payés » : 6412 = congés payés, autres préfixes = charges sociales.
-// Une part sans aucune ligne dans le mois (toute l'entreprise) est n.d. (null), jamais 0.
+// Une part (congés ou charges) sans ligne de dotation dans le mois, ou non ventilée sur l'axe quand un service est
+// filtré, est n.d. (null) avec sa raison ; le total est alors n.d. aussi, jamais complété par un 0.
 export const PROVISION_MARKER = "mois courant";
 export const CONGES_PREFIX = "6412";
-export type ProvisionMonth = { month: string; kind: "value"; conges: number | null; charges: number | null; total: number } | { month: string; kind: "nd"; reason: string };
+export type ProvisionMonth =
+  | { month: string; kind: "value"; conges: number | null; charges: number | null; total: number | null; missing: string[] }
+  | { month: string; kind: "nd"; reason: string };
 export function provisionMonth(input: JournalInput, month: string): ProvisionMonth {
   // Mêmes contrôles que la synthèse : mois lu, journal renvoyé, aucune ligne sans montant (dans le service filtré).
   const base = monthPayroll(input, month);
@@ -43,19 +46,24 @@ export function provisionMonth(input: JournalInput, month: string): ProvisionMon
   const lines = input.lines.filter((l) => l.month === month && classify(l.accountId, rubrics).rubric?.id === "provisions-cp");
   const dotation = lines.filter((l) => norm(l.accountName).includes(PROVISION_MARKER));
   if (!dotation.length) return { month, kind: "nd", reason: lines.length ? `aucune ligne de dotation « Mois courant » en ${month} (méthode de provision non reconnue)` : `aucune ligne de provision de congés payés en ${month}` };
-  if (input.serviceFilter && dotation.every((l) => serviceOf(l, input.serviceAxis) === null)) {
-    return { month, kind: "nd", reason: `lignes de provision ${month} sans code analytique ${input.serviceAxis ?? ""} : provision non ventilée par service` };
-  }
-  let conges = 0;
-  let charges = 0;
-  for (const l of dotation) {
-    if (!inService(input, l)) continue;
-    if (l.accountId.startsWith(CONGES_PREFIX)) conges += balance(l);
-    else charges += balance(l);
-  }
-  const hasConges = dotation.some((l) => l.accountId.startsWith(CONGES_PREFIX));
-  const hasCharges = dotation.some((l) => !l.accountId.startsWith(CONGES_PREFIX));
-  return { month, kind: "value", conges: hasConges ? conges : null, charges: hasCharges ? charges : null, total: conges + charges };
+  const f = input.serviceFilter;
+  const missing: string[] = [];
+  const part = (name: string, accounts: string, pick: (l: LedgerLine) => boolean): number | null => {
+    const all = dotation.filter(pick);
+    if (!all.length) {
+      missing.push(`${name} : aucune ligne ${accounts} « Mois courant » en ${month}`);
+      return null;
+    }
+    // Service nommé et aucune ligne de la part ne porte l'axe : la part n'est pas ventilée (tout est « Non ventilé »).
+    if (f && f.value !== null && all.every((l) => serviceOf(l, input.serviceAxis) === null)) {
+      missing.push(`${name} : lignes ${month} sans code analytique ${input.serviceAxis ?? ""}, non ventilées par service`);
+      return null;
+    }
+    return all.filter((l) => inService(input, l)).reduce((s, l) => s + balance(l), 0);
+  };
+  const conges = part("congés payés", CONGES_PREFIX, (l) => l.accountId.startsWith(CONGES_PREFIX));
+  const charges = part("charges sociales", `hors ${CONGES_PREFIX}`, (l) => !l.accountId.startsWith(CONGES_PREFIX));
+  return { month, kind: "value", conges, charges, total: conges !== null && charges !== null ? conges + charges : null, missing };
 }
 
 // --- Rapprochement avec la comptabilité (FEC ou API Pennylane) : mêmes rubriques (même grille), mêmes mois.
@@ -69,8 +77,9 @@ const payrollKey = (accountId: string, grid: AccountGrid): RubricId | "non-class
 };
 
 // Mois comptables exploitables. Pennylane : mois de la lecture, sauf ceux non terminés à la date de lecture.
-// FEC : mois des exercices déposés (première → dernière écriture) ; un mois couvert par deux fichiers est en double, le
-// dernier mois d'un FEC arrêté avant la clôture de l'exercice est incomplet. Les mois écartés sont n.d. avec leur raison.
+// FEC : mois des exercices déposés (première → dernière écriture) ; un mois couvert par deux fichiers est en double, un
+// mois postérieur à la clôture ou le dernier mois d'un FEC arrêté en cours de mois (clôture inconnue ou postérieure) est
+// incomplet. Les mois écartés sont n.d. avec leur raison.
 export type ComptaCoverage = { months: string[]; nd: Record<string, string> };
 export function pennylaneCoverage(scope: string[], readOn: string): ComptaCoverage {
   const nd: Record<string, string> = {};
@@ -84,13 +93,28 @@ export function pennylaneCoverage(scope: string[], readOn: string): ComptaCovera
 export function fecCoverage(exercises: { filename: string; firstDate: string; lastDate: string; closingDate: string | null }[]): ComptaCoverage {
   const nd: Record<string, string> = {};
   const files = new Map<string, string[]>();
+  const afterClosing = new Map<string, string>();
   for (const e of exercises) {
     const lastMonth = e.lastDate.slice(0, 7);
-    if (e.closingDate && e.lastDate < e.closingDate && e.lastDate < monthBounds(lastMonth).end) nd[lastMonth] = `FEC ${e.filename} arrêté au ${e.lastDate} (exercice clos le ${e.closingDate}) : mois incomplet`;
-    for (const m of monthRange(e.firstDate.slice(0, 7), lastMonth)) files.set(m, [...(files.get(m) ?? []), e.filename]);
+    const endOfMonth = e.lastDate === monthBounds(lastMonth).end;
+    if (!endOfMonth && !e.closingDate) nd[lastMonth] = `FEC ${e.filename} : dernière écriture au ${e.lastDate}, date de clôture inconnue (nom de fichier hors norme) : mois peut-être incomplet`;
+    else if (!endOfMonth && e.closingDate && e.lastDate < e.closingDate) nd[lastMonth] = `FEC ${e.filename} arrêté au ${e.lastDate} (exercice clos le ${e.closingDate}) : mois incomplet`;
+    for (const m of monthRange(e.firstDate.slice(0, 7), lastMonth)) {
+      files.set(m, [...(files.get(m) ?? []), e.filename]);
+      if (e.closingDate && m > e.closingDate.slice(0, 7)) afterClosing.set(m, `FEC ${e.filename} : écritures postérieures à la clôture du ${e.closingDate}`);
+    }
   }
   for (const [m, f] of files) if (f.length > 1) nd[m] = `FEC en double (${f.join(", ")})`;
+  for (const [m, r] of afterClosing) nd[m] = r;
   return { months: [...files.keys()].filter((m) => !nd[m]).sort(), nd };
+}
+
+// Un mois couvert sans aucune écriture de classe 6 ou 7 lue n'est pas saisi : n.d., jamais 0.
+export function withEntries(cov: ComptaCoverage, lines: ComptaLine[]): ComptaCoverage {
+  const has = new Set(lines.map((l) => l.month));
+  const nd = { ...cov.nd };
+  for (const m of cov.months) if (!has.has(m)) nd[m] = "aucune écriture de charges ou de produits (classes 6 et 7) lue pour ce mois";
+  return { months: cov.months.filter((m) => has.has(m)), nd };
 }
 
 // Mois de la période sans comptabilité exploitable, regroupés par raison (non lue, FEC en double, mois incomplet…).

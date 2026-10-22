@@ -211,7 +211,7 @@ describe("source DSN : brut déclaré (type 001) d'une période (cas écrits à 
 });
 
 describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (cas écrits à la main)", async () => {
-  const { labelTotals, provisionMonth, reconcile, operatingRevenue, comptaGap, fecCoverage, pennylaneCoverage } = await import("@/lib/payroll/lot2");
+  const { labelTotals, provisionMonth, reconcile, operatingRevenue, comptaGap, fecCoverage, pennylaneCoverage, withEntries } = await import("@/lib/payroll/lot2");
   const named = (month: string, accountId: string, name: string, debit: number | null, credit: number | null): LedgerLine => ({ ...line(month, accountId, debit, credit, "C1"), accountName: name });
   const lines = [
     named("2026-06", "641100", "Salaires, appointements", 300000, null),
@@ -237,7 +237,7 @@ describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (
     expect(t.reduce((s, x) => s + x.cents, 0)).toBe((monthPayroll(input, "2026-06") as { brut: number }).brut);
   });
   it("provision fin juin : lignes « Mois courant » seulement — congés 475,89 € (478,47 − 2,58) + charges 190,36 € (191,39 − 1,03) = 666,25 €", () => {
-    expect(provisionMonth(input, "2026-06")).toEqual({ month: "2026-06", kind: "value", conges: 47589, charges: 19036, total: 66625 });
+    expect(provisionMonth(input, "2026-06")).toEqual({ month: "2026-06", kind: "value", conges: 47589, charges: 19036, total: 66625, missing: [] });
     expect(provisionMonth(input, "2026-07")).toMatchObject({ kind: "nd", reason: expect.stringContaining("aucune ligne de provision") });
     expect(provisionMonth(input, "2026-08")).toMatchObject({ kind: "nd" });
   });
@@ -267,11 +267,16 @@ describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (
     expect(provisionMonth(bad, "2026-06")).toMatchObject({ kind: "nd", reason: expect.stringContaining("sans montant") });
     expect(reconcile(bad, [], ["2026-06"], ["2026-06"])).toMatchObject({ kind: "nd", reason: expect.stringContaining("sans montant") });
   });
-  it("part sans ligne de dotation : n.d. (null), pas 0 ; provision sans code analytique : n.d. par service", () => {
+  it("part sans ligne de dotation : n.d. (null) et total n.d., pas 0", () => {
     const onlyCharges = journal([named("2026-06", "641100", "Salaires", 100000, null), named("2026-06", "648500", "Provisions charges CP - Mois courant", 4000, null)], ["2026-06"]);
-    expect(provisionMonth(onlyCharges, "2026-06")).toEqual({ month: "2026-06", kind: "value", conges: null, charges: 4000, total: 4000 });
-    const svc = { ...onlyCharges, serviceAxis: "Service", serviceFilter: { value: "TECH" } };
-    expect(provisionMonth(svc, "2026-06")).toMatchObject({ kind: "nd", reason: expect.stringContaining("non ventilée par service") });
+    expect(provisionMonth(onlyCharges, "2026-06")).toEqual({ month: "2026-06", kind: "value", conges: null, charges: 4000, total: null, missing: ["congés payés : aucune ligne 6412 « Mois courant » en 2026-06"] });
+  });
+  it("par service, part par part : congés codés TECH 400 € / SALES 300 €, charges 280 € sans code → TECH charges n.d., Non ventilé = 280 €", () => {
+    const svcLine = (accountId: string, name: string, debit: number, svc: string | null): LedgerLine => ({ ...named("2026-06", accountId, name, debit, null), analytic: svc ? [{ type: "Service", code: svc, value: svc }] : [] });
+    const j = { ...journal([svcLine("641100", "Salaires", 100000, "TECH"), svcLine("641200", "Prov CP - Mois courant", 40000, "TECH"), svcLine("641200", "Prov CP - Mois courant", 30000, "SALES"), svcLine("648500", "Prov charges CP - Mois courant", 28000, null)], ["2026-06"]), serviceAxis: "Service" };
+    expect(provisionMonth({ ...j, serviceFilter: { value: "TECH" } }, "2026-06")).toMatchObject({ kind: "value", conges: 40000, charges: null, total: null, missing: [expect.stringContaining("non ventilées par service")] });
+    expect(provisionMonth({ ...j, serviceFilter: { value: null } }, "2026-06")).toMatchObject({ kind: "value", conges: 0, charges: 28000, total: 28000, missing: [] });
+    expect(provisionMonth(j, "2026-06")).toMatchObject({ total: 98000 });
   });
   it("libellés regroupés sans accents ni casse : « Prime d'été » (mars) et « Prime d'ete » (juin) = une seule famille de 120,00 €", () => {
     const j = journal([named("2026-03", "641300", "Prime d'été", 5000, null), named("2026-06", "641300", "Prime d'ete", 7000, null)], ["2026-03", "2026-06"]);
@@ -279,7 +284,7 @@ describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (
     expect(t.map((x) => [x.label, x.cents])).toEqual([["Prime d'été", 12000]]);
     expect(labelTotals(j, ["2026-06"])[0].key).toBe(t[0].key);
   });
-  it("couverture comptable : FEC en double et FEC arrêté en cours de mois n.d. ; Pennylane lu avant la fin du mois n.d.", () => {
+  it("couverture comptable : FEC en double, arrêté en cours de mois, clôture inconnue ou écritures après clôture n.d. ; Pennylane lu avant la fin du mois ou mois sans écriture n.d.", () => {
     const c = fecCoverage([
       { filename: "A.txt", firstDate: "2025-01-01", lastDate: "2025-12-31", closingDate: "2025-12-31" },
       { filename: "B.txt", firstDate: "2025-11-01", lastDate: "2025-12-31", closingDate: null },
@@ -292,6 +297,13 @@ describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (
     const p = pennylaneCoverage(["2026-09", "2026-10"], "2026-10-22");
     expect(p).toEqual({ months: ["2026-09"], nd: { "2026-10": "mois non terminé à la lecture Pennylane du 2026-10-22" } });
     expect(pennylaneCoverage(["2026-09"], "2026-09-30").months).toEqual([]);
+    const noClose = fecCoverage([{ filename: "FEC_2026.txt", firstDate: "2026-01-02", lastDate: "2026-03-15", closingDate: null }]);
+    expect(noClose.months).toEqual(["2026-01", "2026-02"]);
+    expect(noClose.nd["2026-03"]).toContain("date de clôture inconnue");
+    const after = fecCoverage([{ filename: "123456789FEC20251231.txt", firstDate: "2025-01-01", lastDate: "2026-01-05", closingDate: "2025-12-31" }]);
+    expect(after.months).toEqual(monthRange("2025-01", "2025-12"));
+    expect(after.nd["2026-01"]).toContain("postérieures à la clôture du 2025-12-31");
+    expect(withEntries({ months: ["2026-08", "2026-09"], nd: {} }, [{ month: "2026-08", accountId: "641100", debitCents: 100, creditCents: null }])).toEqual({ months: ["2026-08"], nd: { "2026-09": "aucune écriture de charges ou de produits (classes 6 et 7) lue pour ce mois" } });
   });
 });
 
@@ -311,7 +323,7 @@ describe("lot 2 sur le journal PayFit fictif (primes et provision fictives)", as
     expect(fam.map((t) => [t.label, t.cents])).toEqual([["Primes de vacances", 93650], ["Primes sur objectif", 561900]]);
   });
   it("provision fin septembre 2026 : 14 % du brut du mois (18 730,00 €) = 1 873,00 + 749,20 = 2 622,20 € ; fin septembre 2025 : 2 251,20 €", () => {
-    expect(provisionMonth(input, "2026-09")).toEqual({ month: "2026-09", kind: "value", conges: 187300, charges: 74920, total: 262220 });
+    expect(provisionMonth(input, "2026-09")).toEqual({ month: "2026-09", kind: "value", conges: 187300, charges: 74920, total: 262220, missing: [] });
     expect(provisionMonth(input, "2025-09")).toMatchObject({ kind: "value", total: 225120 });
   });
 });
