@@ -186,3 +186,17 @@ describe("services sur le journal PayFit fictif (Service fictif A : 003, 006 ; B
     expect(windowPayroll(withService(input, "TEST-SVC-B"), monthRange("2026-01", "2026-09"))).toMatchObject({ kind: "value", paidContractMonths: 25 });
   });
 });
+
+describe("source DSN : brut déclaré (type 001) d'une période (cas écrits à la main)", async () => {
+  const { dsnBrutWindow } = await import("@/lib/payroll/dsn");
+  const m = (month: string, status: "complete" | "incomplete" | "blocked", byType: Record<string, number>) => [month, { month, status, sirets: ["S1"], byType, messages: [] }] as const;
+  const dsn = new Map([m("2026-01", "complete", { "001": 300000, "002": 280000 }), m("2026-02", "incomplete", { "001": 250000 }), m("2026-03", "blocked", { "001": 1 }), m("2026-04", "complete", { "002": 10 })]);
+  it("janvier + février = 5 500,00 € (type 002 jamais additionné) ; février incomplet signalé", () => {
+    expect(dsnBrutWindow(dsn, ["2026-01", "2026-02"])).toEqual({ kind: "value", brutCents: 550000, incompleteMonths: ["2026-02"] });
+  });
+  it("mois bloqué, sans type 001 ou non déposé : n.d. avec le mois nommé, jamais zéro", () => {
+    expect(dsnBrutWindow(dsn, ["2026-01", "2026-03"])).toMatchObject({ kind: "nd", months: ["2026-03"] });
+    expect(dsnBrutWindow(dsn, ["2026-04"])).toMatchObject({ kind: "nd", months: ["2026-04"], reason: expect.stringContaining("type 001") });
+    expect(dsnBrutWindow(dsn, ["2026-05"])).toMatchObject({ kind: "nd", months: ["2026-05"] });
+  });
+});

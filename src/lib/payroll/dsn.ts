@@ -41,3 +41,24 @@ export async function dsnRemunerationsByMonth(workspaceId: string): Promise<Map<
   }
   return out;
 }
+
+// Brut déclaré (type 001) d'une période : n.d. si un mois n'a pas de déclaration retenue, est bloqué ou n'a pas de
+// rémunération de type 001 ; un mois incomplet (établissement manquant) est compté et signalé.
+export type DsnWindow =
+  | { kind: "value"; brutCents: number; incompleteMonths: string[] }
+  | { kind: "nd"; reason: string; months: string[] };
+export function dsnBrutWindow(byMonth: Map<string, DsnMonth>, months: string[]): DsnWindow {
+  const missing: string[] = [];
+  const reasons: string[] = [];
+  let sum = 0;
+  for (const m of months) {
+    const d = byMonth.get(m);
+    if (!d) { missing.push(m); reasons.push(`${m} : aucune DSN retenue`); continue; }
+    if (d.status === "blocked") { missing.push(m); reasons.push(`${m} : déclaration bloquée`); continue; }
+    const b = d.byType["001"];
+    if (b === undefined) { missing.push(m); reasons.push(`${m} : aucune rémunération de type 001`); continue; }
+    sum += b;
+  }
+  if (missing.length) return { kind: "nd", reason: reasons.join(" ; "), months: missing };
+  return { kind: "value", brutCents: sum, incompleteMonths: months.filter((m) => byMonth.get(m)?.status === "incomplete") };
+}

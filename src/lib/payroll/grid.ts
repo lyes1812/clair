@@ -17,7 +17,7 @@ export const RUBRICS: Omit<Rubric, "prefixes">[] = [
   { id: "autres-charges", label: "Autres charges de personnel", role: "hors-masse" },
 ];
 
-// Défaut proposé, recoupé le 22/10/2026 avec le tableau de bord de Lyes sur le journal PayFit du pilote (cotisations
+// Défaut validé par Lyes le 22/10/2026 (6414/6417 gardés dans le brut), recoupé avec son tableau de bord sur le journal PayFit du pilote (cotisations
 // 645 + 63 et primes 6413 hors stages égaux à l'euro) : brut 641 (primes 6413, gratifications de stage 64137, indemnités
 // et avantages 6414/6417), cotisations patronales 645 et taxes et contributions 63 ; provisions 6412/6485 et autres
 // charges (titres-restaurant 6476…) hors masse.

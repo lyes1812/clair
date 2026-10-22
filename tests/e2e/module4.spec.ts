@@ -21,7 +21,7 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
 
   // Sans lecture PayFit : n.d. explicite.
   await page.goto(ms);
-  await expect(page.getByTestId("ms-nd")).toContainText("aucune lecture PayFit appliquée");
+  await expect(page.getByTestId("ms-nd")).toContainText("aucune source RH retenue");
 
   await page.goto(`/e/${slug}/donnees/payfit`);
   await page.getByLabel("Clé API PayFit").fill("fixture-A-1");
@@ -103,9 +103,26 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   expect(await txt(page.getByTestId("ms-monthly-foot").locator("td[data-col='dsn-ecart']"))).toBe("0,00 €");
   await page.getByTestId("ms-monthly-table").screenshot({ path: `${CAPTURES}/4-03-controle-dsn.png` });
 
+  // Source RH = DSN (choix du client) : brut déclaré type 001, masse chargée n.d. avec sa raison.
+  await page.goto(`/e/${slug}/donnees`);
+  const choice = page.getByTestId("source-choice-rh");
+  await choice.getByLabel("Règle").selectOption("files");
+  await choice.getByRole("button", { name: "Appliquer" }).click();
+  await expect(page.getByTestId("source-chosen-rh")).toContainText("Fichiers DSN");
+  await page.goto(ms);
+  await expect(page.getByTestId("ms-source")).toContainText("DSN déposées");
+  expect(await txt(tile("brut").locator("dd"))).toBe("160 770,00 €");
+  expect(await txt(page.getByTestId("ms-tile-brut-n1"))).toContain("N-1 : 132 760,00 €");
+  await expect(tile("masse").locator("dd")).toContainText("n.d. — cotisations patronales non portées salarié par salarié par la DSN");
+  await page.screenshot({ path: `${CAPTURES}/4-04-source-dsn.png`, fullPage: true });
+  await page.goto(`/e/${slug}/donnees`);
+  await page.getByTestId("source-choice-rh").getByLabel("Règle").selectOption("api");
+  await page.getByTestId("source-choice-rh").getByRole("button", { name: "Appliquer" }).click();
+  await expect(page.getByTestId("source-chosen-rh")).toContainText("PayFit");
+
   // Grille de comptes : défaut proposé visible, modifiable par l'administrateur ; définitions dans l'écran.
   await page.goto(`/e/${slug}/parametres`);
-  await expect(page.getByTestId("setting-payroll-origin")).toContainText("Valeur par défaut proposée");
+  await expect(page.getByTestId("setting-payroll-origin")).toContainText("Valeur par défaut validée le 22/10/2026");
   await expect(page.getByTestId("setting-payroll-axis-origin")).toContainText("seul axe analytique présent");
   await page.getByTestId("setting-payroll-primes").fill("6413, 6418");
   await page.getByTestId("setting-payroll-save").click();

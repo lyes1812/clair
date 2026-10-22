@@ -102,7 +102,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
         </p>
         <p className="desc" data-testid="setting-payroll-origin">
           {payroll.origin === "default"
-            ? "Valeur par défaut proposée, reprise de ton script d'actualisation PayFit (641 brut dont 6413 primes, 645 cotisations, 6412/6485 provisions hors masse), à confirmer."
+            ? "Valeur par défaut validée le 22/10/2026 : 641 brut (dont primes 6413, gratifications de stage 64137, indemnités et avantages 6414/6417), cotisations 645 et taxes 63, provisions 6412/6485 et autres charges 646-648 hors masse."
             : `Modifié le ${payroll.updatedAt ? dateTimeFmt.format(payroll.updatedAt) : "n.d."} par un administrateur.`}
         </p>
         <PayrollGridForm slug={slug} rows={gridRubrics(payroll.grid)} disabled={!isAdmin} />

@@ -9,6 +9,7 @@ import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { Composition, eurosOf, monthShort, TrendChart } from "./components";
+import { DsnView } from "./DsnView";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,14 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const sp = await searchParams;
   const ctx = await loadPayrollContext(slug);
   const base = `/e/${slug}/studio-rh/masse-salariale`;
-  const gridOrigin = ctx.grid.origin === "default" ? "défaut proposé (grille de ton script PayFit), à confirmer" : `modifiée le ${ctx.grid.updatedAt ? dateTimeFmt.format(ctx.grid.updatedAt) : "n.d."}`;
+  if (ctx.source === "dsn") {
+    return (
+      <Header>
+        <DsnView slug={slug} dsn={ctx.dsn} sp={{ annee: one(sp.annee), de: one(sp.de), a: one(sp.a) }} />
+      </Header>
+    );
+  }
+  const gridOrigin = ctx.grid.origin === "default" ? "valeur par défaut validée le 22/10/2026" : `modifiée le ${ctx.grid.updatedAt ? dateTimeFmt.format(ctx.grid.updatedAt) : "n.d."}`;
   const sourceLine = ctx.read ? (
     <p className="desc" data-testid="ms-source">
       Source : journal comptable de paie PayFit — lecture du {dateTimeFmt.format(ctx.read.startedAt)} · mois lus {ctx.read.months[0] ?? "n.d."} → {ctx.read.months.at(-1) ?? "n.d."} · grille de comptes : {gridOrigin} (
@@ -56,7 +64,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         {sourceLine}
         <section className="placeholder" data-testid="ms-nd">
           <h3>n.d. — {ctx.unavailable}</h3>
-          <p className="muted">La masse salariale réelle est lue dans le journal comptable de paie PayFit. <a href={`/e/${slug}/donnees`}>Données</a></p>
+          <p className="muted">La masse salariale réelle suit la source RH retenue : journal comptable de paie PayFit (API) ou DSN déposées. <a href={`/e/${slug}/donnees`}>Données</a></p>
         </section>
       </Header>
     );
