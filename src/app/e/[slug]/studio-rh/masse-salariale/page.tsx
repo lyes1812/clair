@@ -11,6 +11,7 @@ import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { Composition, eurosOf, monthShort, TrendChart } from "./components";
 import { DsnView } from "./DsnView";
+import { FixeVariableView, PaieComptaView } from "./Lot2Views";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +91,11 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
   // Service (code analytique de l'axe choisi) : « __nv__ » = lignes sans code de l'axe (non ventilé).
   const NV = "__nv__";
+  // Onglets de l'écran (sous-vues de Masse salariale, pas des entrées de menu).
+  const VUES = { synthese: "Synthèse", "fixe-variable": "Fixe & variable", "paie-compta": "Paie & comptabilité" } as const;
+  const rawVue = one(sp.vue);
+  const vue: keyof typeof VUES = rawVue in VUES ? (rawVue as keyof typeof VUES) : "synthese";
+  if (rawVue && !(rawVue in VUES)) ignore("vue", rawVue, "vues : synthese, fixe-variable, paie-compta");
   const rawService = one(sp.service);
   const knownServices = ctx.service.axis ? servicesOf(fullInput, fullInput.months) : [];
   const serviceValue: string | null | undefined = !rawService ? undefined : rawService === NV && knownServices.includes(null) ? null : knownServices.includes(rawService) ? rawService : undefined;
@@ -133,7 +139,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const unclassified = new Map<string, { name: string | null; cents: number }>();
   for (const r of cur.months) if (r.kind === "value") for (const a of r.unclassified) unclassified.set(a.accountId, { name: a.accountName, cents: (unclassified.get(a.accountId)?.cents ?? 0) + a.balanceCents });
   const svcParam = serviceValue === undefined ? "" : `&service=${encodeURIComponent(serviceValue ?? NV)}`;
-  const q = (y: number, de: string, a: string, extra = "", svc = svcParam) => `${base}?annee=${y}&de=${de}&a=${a}${svc}${extra}`;
+  const vueParam = vue === "synthese" ? "" : `&vue=${vue}`;
+  const q = (y: number, de: string, a: string, extra = "", svc = svcParam, v = vueParam) => `${base}?annee=${y}&de=${de}&a=${a}${svc}${v}${extra}`;
   // Table par service (toujours sur tout le journal) : la somme des services, non ventilé compris, égale le total.
   const serviceRows = ctx.service.axis
     ? servicesOf(fullInput, [...months, ...prevMonths]).map((v) => {
@@ -166,7 +173,13 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         <p key={n} className="notice" data-testid="ms-param-notice">{n}</p>
       ))}
 
+      <nav className="tabs" aria-label="Vues" data-testid="ms-tabs">
+        {(Object.keys(VUES) as (keyof typeof VUES)[]).map((v) => (
+          <a key={v} href={q(year, from, to, "", svcParam, v === "synthese" ? "" : `&vue=${v}`)} aria-current={v === vue ? "page" : undefined}>{VUES[v]}</a>
+        ))}
+      </nav>
       <form method="get" className="filters" data-testid="ms-filters">
+        {vue !== "synthese" && <input type="hidden" name="vue" value={vue} />}
         <div className="field-row">
           <label htmlFor="annee">Année</label>
           <select className="select" id="annee" name="annee" defaultValue={String(year)}>
@@ -206,6 +219,10 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         {cur.kind === "value" && cur.openMonths.length > 0 && <> · paie non clôturée à la lecture : {cur.openMonths.join(", ")} (montants provisoires)</>}
       </p>
 
+      {vue === "fixe-variable" && <FixeVariableView input={input} months={months} prevMonths={prevMonths} />}
+      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} compta={ctx.compta} />}
+      {vue === "synthese" && (
+        <>
       <section className="panel">
         <h2>Vue d'ensemble — {label(months)}</h2>
         <dl className="facts">
@@ -408,6 +425,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
             </div>
           )}
         </section>
+      )}
+
+        </>
       )}
 
       <details className="panel" data-testid="ms-definitions" id="definitions">

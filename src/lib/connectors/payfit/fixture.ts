@@ -172,8 +172,29 @@ export function createFixtureFetch(apiKey: string): FetchLike {
           const base = { operationDate: date, analyticCodes: [{ type: "Service", code: `TEST-SVC-${svc}`, value: `Service fictif ${svc}` }], employeeFullName: null, contractId: p.contractId };
           const out = [];
           if (p.grossMinor !== null) {
-            out.push({ ...base, accountId: "641100", accountName: "Salaires et appointements", debit: euros(p.grossMinor), credit: null });
+            // Primes fictives (le brut total ne change pas) : 10 % « Primes sur objectif » en mars, juin, septembre et
+            // décembre, 5 % « Primes de vacances » en juin ; le reste en « Salaires, appointements ».
+            const mm = month.slice(5, 7);
+            const objectif = ["03", "06", "09", "12"].includes(mm) ? p.grossMinor / 10 : 0;
+            const vacances = mm === "06" ? p.grossMinor / 20 : 0;
+            out.push({ ...base, accountId: "641100", accountName: "Salaires et appointements", debit: euros(p.grossMinor - objectif - vacances), credit: null });
+            if (objectif) out.push({ ...base, accountId: "641300", accountName: "Primes sur objectif", debit: euros(objectif), credit: null });
+            if (vacances) out.push({ ...base, accountId: "641300", accountName: "Primes de vacances", debit: euros(vacances), credit: null });
             out.push({ ...base, accountId: "421000", accountName: "Personnel - rémunérations dues", debit: null, credit: euros(p.grossMinor) });
+            // Provision fictive de congés payés (hors masse), méthode PayFit : dotation du stock du mois (« Mois courant »,
+            // 10 % du brut et 4 % de charges) et reprise du stock du mois passé (« Mois passé »).
+            out.push({ ...base, accountId: "641200", accountName: "Provisions pour conges payes - Mois courant", debit: euros(p.grossMinor / 10), credit: null });
+            out.push({ ...base, accountId: "428200", accountName: "Provisions pour conges payes - Mois courant", debit: null, credit: euros(p.grossMinor / 10) });
+            out.push({ ...base, accountId: "648500", accountName: "Provisions pour charges sociales sur conges payes - Mois courant", debit: euros(p.grossMinor / 25), credit: null });
+            out.push({ ...base, accountId: "438200", accountName: "Provisions pour charges sociales sur conges payes - Mois courant", debit: null, credit: euros(p.grossMinor / 25) });
+            const prevMonth = (() => { const [y, m2] = month.split("-").map(Number); return m2 === 1 ? `${y - 1}-12` : `${y}-${String(m2 - 1).padStart(2, "0")}`; })();
+            const before = ph.periods.find((x) => x.month === prevMonth && x.contractId === p.contractId);
+            if (before && before.grossMinor !== null) {
+              out.push({ ...base, accountId: "641200", accountName: "Provisions pour conges payes - Mois passé", debit: null, credit: euros(before.grossMinor / 10) });
+              out.push({ ...base, accountId: "428200", accountName: "Provisions pour conges payes - Mois passé", debit: euros(before.grossMinor / 10), credit: null });
+              out.push({ ...base, accountId: "648500", accountName: "Provisions pour charges sociales sur conges payes - Mois passé", debit: null, credit: euros(before.grossMinor / 25) });
+              out.push({ ...base, accountId: "438200", accountName: "Provisions pour charges sociales sur conges payes - Mois passé", debit: euros(before.grossMinor / 25), credit: null });
+            }
           }
           if (p.employerChargesMinor !== null) {
             out.push({ ...base, accountId: "645100", accountName: "Cotisations patronales", debit: euros(p.employerChargesMinor), credit: null });

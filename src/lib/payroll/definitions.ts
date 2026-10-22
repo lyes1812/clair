@@ -37,6 +37,21 @@ export const PAYROLL_DEFINITIONS: { id: string; title: string; text: string }[] 
     text: "Paramètre de l'espace (Paramètres › Masse salariale). Un compte est classé dans la rubrique dont un préfixe est le plus long. Un compte de classe 63 ou 64 sans rubrique est signalé « non classé » et n'entre pas dans la masse.",
   },
   {
+    id: "fixe-variable",
+    title: "Fixe et variable",
+    text: "Fixe = rubrique « Salaires et appointements » (salaires et congés payés). Variable = rubriques « Primes » et « Indemnités et avantages ». Les familles de primes et les libellés sont ceux des lignes du journal PayFit (ex. « Primes sur objectif », « Primes de vacances »), regroupés par rubrique de la grille de comptes ; la somme des libellés égale le brut. Les indemnités de rupture conventionnelle et compensatrices de congés payés ne sont pas distinguées par le journal (compte 6414 commun).",
+  },
+  {
+    id: "provision",
+    title: "Provision de congés payés",
+    text: "Ce que l'entreprise doit en congés payés à la fin du mois, charges sociales comprises. PayFit reprend chaque mois la provision du mois passé et dote le stock du mois : la provision fin de mois est le solde des lignes de dotation « Mois courant » de la rubrique « Provisions de congés payés » (comptes 6412 pour les congés, autres comptes de la rubrique pour les charges sociales). Sans ligne de dotation reconnue : n.d.",
+  },
+  {
+    id: "rapprochement",
+    title: "Rapprochement avec la comptabilité",
+    text: "Comptes 63 et 64 du journal de paie PayFit comparés aux mêmes comptes de la comptabilité retenue dans Données (FEC déposés ou API Pennylane), classés par la même grille de comptes, pour les mêmes mois (date d'écriture pour la comptabilité). Écart = journal − comptabilité. Un mois non lu d'un côté ou de l'autre rend le rapprochement n.d. Ratio masse salariale ÷ produits d'exploitation : masse chargée du journal ÷ solde créditeur des comptes 70 à 75.",
+  },
+  {
     id: "service",
     title: "Service et coût par personne-mois",
     text:

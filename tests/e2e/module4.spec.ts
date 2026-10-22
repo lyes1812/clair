@@ -120,6 +120,48 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   await page.getByTestId("source-choice-rh").getByRole("button", { name: "Appliquer" }).click();
   await expect(page.getByTestId("source-chosen-rh")).toContainText("PayFit");
 
+  // Lot 2 — Fixe & variable : brut par libellé de paie PayFit fictif ; primes = 10 % du brut en mars, juin, septembre
+  // (« Primes sur objectif ») + 5 % en juin (« Primes de vacances »).
+  await page.goto(ms);
+  await page.getByTestId("ms-tabs").getByRole("link", { name: "Fixe & variable" }).click();
+  await expect(page.getByTestId("fv-labels")).toBeVisible();
+  expect(await txt(page.getByTestId("fv-tile-fixe").locator("dd"))).toBe("154 214,50 €");
+  expect(await txt(page.getByTestId("fv-tile-primes").locator("dd"))).toBe("6 555,50 €");
+  expect(await txt(page.getByTestId("fv-tile-primes"))).toContain("N-1 : 4 954,00 €");
+  const lbl = (l: string) => page.getByTestId("fv-labels").locator(`tr[data-label='${l}'] td[data-col='n']`);
+  expect(await txt(lbl("Primes sur objectif"))).toBe("5 619,00 €");
+  expect(await txt(lbl("Primes de vacances"))).toBe("936,50 €");
+  expect(await txt(page.getByTestId("fv-labels-total").locator("td[data-col='n']"))).toBe("160 770,00 €");
+  await expect(page.getByTestId("fv-non-recurrents")).toContainText("non distingués par le journal PayFit");
+  await page.screenshot({ path: `${CAPTURES}/4-05-fixe-variable.png`, fullPage: true });
+
+  // Paie & comptabilité : provision CP fin septembre 2026 = 10 % + 4 % du brut de septembre ; sans comptabilité, n.d.
+  await page.getByTestId("ms-tabs").getByRole("link", { name: "Paie & comptabilité" }).click();
+  expect(await txt(page.getByTestId("pc-tile-provision").locator("dd"))).toBe("2 622,20 €");
+  expect(await txt(page.getByTestId("pc-tile-provision-n1"))).toContain("2 251,20 €");
+  await expect(page.getByTestId("pc-recon-nd")).toContainText("aucune source comptable retenue");
+  await expect(page.getByTestId("pc-ratio-value")).toContainText("n.d. — aucune source comptable retenue");
+  // Avec Pennylane fictif (641100 = brut total, pas de compte 6413 ni de provision) : l'écart sort rubrique par rubrique.
+  await page.goto(`/e/${slug}/donnees/pennylane`);
+  await page.getByLabel("Clé API Pennylane").fill("fixture-pl-A-1");
+  await page.getByRole("button", { name: "Vérifier et enregistrer" }).click();
+  await expect(page.getByRole("status")).toContainText("Connexion vérifiée");
+  await page.getByLabel("Du mois").fill("2026-01");
+  await page.getByLabel("Au mois").fill("2026-09");
+  await page.getByRole("button", { name: "Synchroniser" }).click();
+  await expect(page.getByTestId("sync-status")).toHaveText("Aperçu à valider", { timeout: 90_000 });
+  await page.getByRole("button", { name: "Appliquer cette lecture" }).click();
+  await expect(page.getByTestId("sync-status")).toHaveText("Appliquée (active)");
+  await page.goto(`${ms}?vue=paie-compta`);
+  const ecart = (r: string) => page.getByTestId("pc-recon-rubrics").locator(`tr[data-rubric='${r}'] td[data-col='ecart']`);
+  expect(await txt(ecart("salaires"))).toBe("-6 555,50 €");
+  expect(await txt(ecart("primes"))).toBe("+6 555,50 €");
+  expect(await txt(ecart("cotisations"))).toBe("0,00 €");
+  expect(await txt(ecart("provisions-cp"))).toBe("+546,00 €");
+  expect(await txt(page.getByTestId("pc-recon-total").locator("td[data-col='ecart']"))).toBe("+546,00 €");
+  await expect(page.getByTestId("pc-ratio-value")).toContainText("n.d. — aucun produit d'exploitation");
+  await page.screenshot({ path: `${CAPTURES}/4-06-paie-compta.png`, fullPage: true });
+
   // Grille de comptes : défaut proposé visible, modifiable par l'administrateur ; définitions dans l'écran.
   await page.goto(`/e/${slug}/parametres`);
   await expect(page.getByTestId("setting-payroll-origin")).toContainText("Valeur par défaut validée le 22/10/2026");

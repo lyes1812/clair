@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { sourceRecord } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { activeSync } from "@/lib/connectors/sync";
@@ -8,6 +8,9 @@ import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { loadKpiContext, type KpiContext } from "@/lib/rh/kpi-context";
 import { loadPayrollOpenMonths } from "@/lib/rh/referential/store";
 import { dsnRemunerationsByMonth, type DsnMonth } from "./dsn";
+import type { ComptaLine } from "./lot2";
+import { resolveSource } from "@/lib/sources";
+import { sourceSync } from "@/db/schema";
 import { classify, gridRubrics } from "./grid";
 import { axisOf, NO_TYPE, serviceOf, type Analytic, type EtpMonth, type JournalInput, type LedgerLine } from "./engine";
 
@@ -25,6 +28,7 @@ export type PayrollContext = {
   service: ServiceAxis;
   dsn: Map<string, DsnMonth>; // contrôle : rémunérations DSN des déclarations qui font foi, par mois
   etpQualifiers: string[]; // limites des ETP utilisés (quotités PayFit non historisées, historique brut)
+  compta: ComptaSource; // source comptable retenue (FEC ou API Pennylane) pour le rapprochement
   axisMissing: boolean; // axe enregistré dans Paramètres absent du journal courant
 };
 
@@ -33,7 +37,7 @@ const num = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? 
 export async function loadPayrollContext(slug: string): Promise<PayrollContext> {
   const kpi = await loadKpiContext(slug, {});
   const ws = kpi.collab.workspace.id;
-  const [grid, sync, dsn] = await Promise.all([getPayrollGrid(ws), activeSync(ws, "payfit"), dsnRemunerationsByMonth(ws)]);
+  const [grid, sync, dsn, compta] = await Promise.all([getPayrollGrid(ws), activeSync(ws, "payfit"), dsnRemunerationsByMonth(ws), loadCompta(ws)]);
   // Service d'un contrat pour un mois : celui de ses lignes de journal ce mois-là (null : non ventilé).
   let contractService: Map<string, string | null> | null = null;
   let axisForEtp: string | null = null;
@@ -56,7 +60,7 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
   if (d0?.build.source === "payfit") etpQualifiers.push(`quotités PayFit à la date de lecture (${d0.build.referenceDate ?? "n.d."}), non historisées`);
   const lim = kpi.collab.payfitHistory?.mode === "raw" ? kpi.collab.payfitHistory.limit : null;
   if (lim) etpQualifiers.push(`historique PayFit brut : ETP des mois ${lim.lowerFrom} → ${lim.lowerTo} sans les contrats archivés depuis plus de 12 mois`);
-  const extra = { etpQualifiers, axisMissing: false };
+  const extra = { etpQualifiers, axisMissing: false, compta };
   if (source !== "payfit") return { kpi, source, grid, read: null, unavailable: source === "dsn" ? null : `aucune source RH retenue (${kpi.collab.source.reason}) : connectez PayFit ou déposez des DSN dans Données`, input: null, etp, axes: [], service: none, dsn, ...extra };
   if (!sync) return { kpi, source, grid, read: null, unavailable: "aucune lecture PayFit appliquée : connectez PayFit dans Données", input: null, etp, axes: [], service: none, dsn, ...extra };
   const months = ((sync.scope as { months?: unknown }).months as string[] | undefined) ?? [];
@@ -116,4 +120,33 @@ export async function journalAxes(workspaceId: string): Promise<string[]> {
     tx.execute(sql`select distinct coalesce(nullif(x->>'type', ''), ${NO_TYPE}) t from source_record, jsonb_array_elements(coalesce(data->'analyticCodes', '[]'::jsonb)) x where sync_id = ${sync.id} and collection = 'ledger_lines' order by 1`),
   );
   return (rows.rows as { t: string }[]).map((r) => r.t);
+}
+
+// Comptabilité retenue (Données) : API Pennylane (dernière lecture appliquée) ou FEC (exercices appliqués). Lignes des
+// classes 6 et 7 seulement (charges de personnel et produits d'exploitation), mois = mois de la date d'écriture.
+export type ComptaSource = { source: "pennylane" | "fec" | null; reason: string; lines: ComptaLine[]; months: string[] };
+async function loadCompta(workspaceId: string): Promise<ComptaSource> {
+  const r = await resolveSource(workspaceId, "accounting");
+  const source = r.chosen === "pennylane" || r.chosen === "fec" ? r.chosen : null;
+  if (!source) return { source: null, reason: r.reason, lines: [], months: [] };
+  const syncIds =
+    source === "pennylane"
+      ? [(await activeSync(workspaceId, "pennylane"))?.id].filter((x): x is string => Boolean(x))
+      : (await withWorkspace(workspaceId, (tx) => tx.select({ id: sourceSync.id }).from(sourceSync).where(and(eq(sourceSync.provider, "fec"), eq(sourceSync.status, "applied"))))).map((x) => x.id);
+  if (!syncIds.length) return { source, reason: r.reason, lines: [], months: [] };
+  const rows = await withWorkspace(workspaceId, (tx) =>
+    tx
+      .select({ data: sourceRecord.data })
+      .from(sourceRecord)
+      .where(and(inArray(sourceRecord.syncId, syncIds), eq(sourceRecord.collection, "ledger_lines"), sql`${sourceRecord.data}->>'accountId' ~ '^[67]'`)),
+  );
+  const num = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? v : null);
+  const lines: ComptaLine[] = rows.map((x) => {
+    const d = x.data as Record<string, unknown>;
+    return { month: String(d.month), accountId: String(d.accountId), debitCents: num(d.debitCents), creditCents: num(d.creditCents) };
+  });
+  // Mois couverts : ceux de la lecture Pennylane ; pour le FEC, les mois des exercices déposés (mois portant des écritures).
+  const pl = source === "pennylane" ? await activeSync(workspaceId, "pennylane") : null;
+  const months = pl ? (((pl.scope as { months?: string[] }).months ?? []) as string[]) : [...new Set(lines.map((l) => l.month))].sort();
+  return { source, reason: r.reason, lines, months };
 }

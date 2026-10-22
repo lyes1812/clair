@@ -209,3 +209,78 @@ describe("source DSN : brut déclaré (type 001) d'une période (cas écrits à 
     expect(dsnBrutWindow(dsn, ["2026-05"])).toMatchObject({ kind: "nd", months: ["2026-05"] });
   });
 });
+
+describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (cas écrits à la main)", async () => {
+  const { labelTotals, provisionMonth, reconcile, operatingRevenue } = await import("@/lib/payroll/lot2");
+  const named = (month: string, accountId: string, name: string, debit: number | null, credit: number | null): LedgerLine => ({ ...line(month, accountId, debit, credit, "C1"), accountName: name });
+  const lines = [
+    named("2026-06", "641100", "Salaires, appointements", 300000, null),
+    named("2026-06", "641300", "Primes sur objectif", 30000, null),
+    named("2026-06", "641300", "Primes de vacances", 15000, null),
+    named("2026-06", "641300", "Primes sur objectif", null, 1000), // régularisation
+    named("2026-06", "645100", "Cotisations Urssaf", 120000, null),
+    named("2026-06", "641200", "Provisions pour conges payes - Mois courant", 47847, 258),
+    named("2026-06", "641200", "Provisions pour conges payes - Mois passé", 791, 52172),
+    named("2026-06", "648500", " Provisions pour charges sociales sur congés payés - Mois courant", 19139, 103),
+    named("2026-06", "648500", "Provisions pour charges sociales sur congés payés - Mois passé", 316, 20868),
+    named("2026-06", "428200", "Provisions pour conges payes - Mois courant", null, 47847),
+    named("2026-07", "641100", "Salaires, appointements", 300000, null),
+  ];
+  const input = journal(lines, ["2026-06", "2026-07"]);
+  it("libellés : primes sur objectif 290,00 € (300 − 10), primes de vacances 150,00 €, salaires 3 000,00 € ; la somme égale le brut", () => {
+    const t = labelTotals(input, ["2026-06"]);
+    expect(t.map((x) => [x.rubric, x.label, x.cents])).toEqual([
+      ["primes", "Primes de vacances", 15000],
+      ["primes", "Primes sur objectif", 29000],
+      ["salaires", "Salaires, appointements", 300000],
+    ]);
+    expect(t.reduce((s, x) => s + x.cents, 0)).toBe((monthPayroll(input, "2026-06") as { brut: number }).brut);
+  });
+  it("provision fin juin : lignes « Mois courant » seulement — congés 475,89 € (478,47 − 2,58) + charges 190,36 € (191,39 − 1,03) = 666,25 €", () => {
+    expect(provisionMonth(input, "2026-06")).toEqual({ month: "2026-06", kind: "value", conges: 47589, charges: 19036, total: 66625 });
+    expect(provisionMonth(input, "2026-07")).toMatchObject({ kind: "nd", reason: expect.stringContaining("aucune ligne de provision") });
+    expect(provisionMonth(input, "2026-08")).toMatchObject({ kind: "nd" });
+  });
+  it("rapprochement : la compta porte le brut sur 641100 et les cotisations sur 645100, sans provision ; écarts par rubrique et total = provisions", () => {
+    const compta = [
+      { month: "2026-06", accountId: "641100", debitCents: 344000, creditCents: null },
+      { month: "2026-06", accountId: "645100", debitCents: 120000, creditCents: null },
+      { month: "2026-06", accountId: "706000", debitCents: null, creditCents: 1000000 },
+      { month: "2026-06", accountId: "421000", debitCents: null, creditCents: 344000 },
+    ];
+    const r = reconcile(input, compta, ["2026-06"], ["2026-06"]);
+    expect(r.kind).toBe("value");
+    if (r.kind === "value") {
+      const row = (k: string) => r.rows.find((x) => x.rubric === k);
+      expect(row("salaires")).toMatchObject({ journal: 300000, compta: 344000, ecart: -44000 });
+      expect(row("primes")).toMatchObject({ journal: 44000, compta: 0, ecart: 44000 });
+      expect(row("cotisations")).toMatchObject({ ecart: 0 });
+      // Provisions : (47 847 − 258) + (791 − 52 172) + (19 139 − 103) + (316 − 20 868) = −5 308.
+      expect(row("provisions-cp")).toMatchObject({ journal: -5308, compta: 0, ecart: -5308 });
+      expect(r.ecart).toBe(-5308);
+    }
+    expect(reconcile(input, compta, ["2026-06"], ["2026-06", "2026-07"])).toMatchObject({ kind: "nd", reason: expect.stringContaining("comptabilité non lue pour 2026-07") });
+    expect(operatingRevenue(compta, ["2026-06"])).toBe(1000000);
+  });
+});
+
+describe("lot 2 sur le journal PayFit fictif (primes et provision fictives)", async () => {
+  const { labelTotals, provisionMonth } = await import("@/lib/payroll/lot2");
+  const months = monthRange("2024-10", "2026-09");
+  const read = await readPayFit(createPayFitClient("fixture-A-1", { fetchImpl: createFixtureFetch("fixture-A-1"), minIntervalMs: 0 }), months);
+  const lines: LedgerLine[] = read.records
+    .filter((r) => r.collection === "ledger_lines")
+    .map((r) => ({ key: r.key, month: String(r.data.month), accountId: String(r.data.accountId), accountName: (r.data.accountName as string) ?? null, debitCents: r.data.debitCents as number | null, creditCents: r.data.creditCents as number | null, contractId: (r.data.contractId as string) ?? null, analytic: r.data.analyticCodes as never }));
+  const input = journal(lines, months);
+  it("primes 2026 (janv.–sept.) : objectifs 10 % du brut en mars, juin, septembre (3 × 1 873,00 €) + vacances 5 % en juin (936,50 €) = 6 555,50 € ; 2025 : 4 954,00 €", () => {
+    const w = (from: string, to: string) => windowPayroll(input, monthRange(from, to));
+    expect(w("2026-01", "2026-09")).toMatchObject({ kind: "value", brut: 16077000, byRubric: { primes: 655550 } });
+    expect(w("2025-01", "2025-09")).toMatchObject({ kind: "value", brut: 13276000, byRubric: { primes: 495400 } });
+    const fam = labelTotals(input, monthRange("2026-01", "2026-09")).filter((t) => t.rubric === "primes");
+    expect(fam.map((t) => [t.label, t.cents])).toEqual([["Primes de vacances", 93650], ["Primes sur objectif", 561900]]);
+  });
+  it("provision fin septembre 2026 : 14 % du brut du mois (18 730,00 €) = 1 873,00 + 749,20 = 2 622,20 € ; fin septembre 2025 : 2 251,20 €", () => {
+    expect(provisionMonth(input, "2026-09")).toEqual({ month: "2026-09", kind: "value", conges: 187300, charges: 74920, total: 262220 });
+    expect(provisionMonth(input, "2025-09")).toMatchObject({ kind: "value", total: 225120 });
+  });
+});
