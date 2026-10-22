@@ -2,7 +2,7 @@ import { canonicalJson, sha256 } from "@/lib/crypto";
 import type { RhSource } from "./types";
 
 // Version des règles de construction : tout changement de règle force une reconstruction après déploiement.
-export const RH_BUILDER_VERSION = 1;
+export const RH_BUILDER_VERSION = 2; // 2 : corrections de la revue 2d (mois charnière, lignes de temps hors période, fractions, couverture multi-SIRET)
 
 // Empreinte des entrées d'un référentiel : lectures appliquées (identifiant + contenu) et, pour la DSN, les
 // paires (dépôt, déclaration) retenues ; indépendante de l'ordre.
