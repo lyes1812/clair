@@ -304,6 +304,11 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
     for (const group of byMonthSiret.values()) {
       const o = group[0];
       const M = o.decl.month;
+      // Fractions d'un même mois aux attributs différents : la première fait foi, le désaccord est signalé (C4 bis).
+      const differing = group.slice(1).filter((g) => (["nature", "referenceQuota", "contractQuota", "unit", "modality"] as const).some((f) => (g.rec.data[f] ?? null) !== (o.rec.data[f] ?? null)));
+      if (differing.length) {
+        findings.push(finding("fraction-conflict", { contracts: [contractKey], persons: [personKey], month: M, message: `contrat ${c.externalId} : attributs différents entre les fractions retenues de ${M} (${[o, ...differing].map((g) => g.decl.key).join(", ")}) ; la fraction ${o.decl.fraction ?? "n.d."} fait foi`, detail: { declarationKeys: [o, ...differing].map((g) => g.decl.key) }, provenance: { nature: prov(o, "S21.G00.40.007") } }));
+      }
       const row: ContractMonthDraft = {
         contractKey,
         month: M,

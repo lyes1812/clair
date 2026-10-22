@@ -242,11 +242,30 @@ describe("référentiel PayFit — cas limites", () => {
     expect(b.findings.filter((f) => f.code === "time-missing")).toHaveLength(0);
   });
 
+  it("E1 ter : ligne de temps avant le début du contrat le plus ancien, pour un contrat sans début ou inconnu ⇒ jamais ignorée", async () => {
+    const b = await payfitEdgeBuild({
+      collaborators: [{ id: "P1" }, { id: "P2" }],
+      contracts: [{ contractId: "C1", collaboratorId: "P1", startDate: "2025-06-15", endDate: null }, { contractId: "C-NOSTART", collaboratorId: "P2", startDate: null, endDate: null }],
+      timeByMonth: { "2025-05": [{ contractId: "C1", payed: 20, effective: 20 }, { contractId: "C-NOSTART", payed: 7, effective: 7 }, { contractId: "C-GHOST", payed: 50, effective: 50 }], "2025-06": [{ contractId: "C1", payed: 80, effective: 80 }] },
+    }, ["2025-05", "2025-06", "2025-07"]);
+    expect(b.build.presenceFrom).toBe("2025-06");
+    const before = b.months.find((m) => m.contractKey === "payfit:C1" && m.month === "2025-05")!;
+    expect(before).toMatchObject({ paidTime: 20, presentAnyDay: false, flags: ["time_outside_contract"] });
+    expect(before.provenance.presentAnyDay?.path).toBe("startDate, endDate");
+    expect(b.findings.filter((f) => f.code === "time-outside-contract")).toMatchObject([{ month: "2025-05", contractKeys: ["payfit:C1"] }]);
+    const nostart = b.months.find((m) => m.contractKey === "payfit:C-NOSTART")!;
+    expect(nostart).toMatchObject({ month: "2025-05", paidTime: 7, presentAnyDay: false });
+    const without = b.findings.filter((f) => f.code === "time-without-contract");
+    expect(without.map((f) => f.detail.contractId ?? f.contractKeys[0]).sort()).toEqual(["C-GHOST", "payfit:C-NOSTART"]);
+    expect(without.find((f) => f.detail.contractId === "C-GHOST")).toMatchObject({ month: "2025-05", detail: { paidWorkedTime: 50 }, contractKeys: [] });
+  });
+
   it("entrées malformées : enregistrement sans identifiant ⇒ erreur claire, jamais une clé inventée", async () => {
     const base = await payfitFixtureBuild();
     const sync = { id: "s", startedAt: PAYFIT_STARTED_AT, decidedAt: null, scope: { months: [] }, summary: { collections: base.build.inputs.source === "payfit" ? base.build.inputs.collections : [] }, contentHash: null };
     expect(() => buildFromPayFit({ sync, records: [{ collection: "collaborators", key: "k1", period: null, data: { lastName: "X" } }] })).toThrow(/sans identifiant/);
     expect(() => buildFromPayFit({ sync, records: [{ collection: "contracts", key: "c1", period: null, data: { collaboratorId: "P" } }] })).toThrow(/sans identifiant/);
+    expect(() => buildFromPayFit({ sync, records: [{ collection: "company", key: "co", period: null, data: { name: "X" } }] })).toThrow(/company sans identifiant/);
   });
 
   it("F2/E1 : contrat présent sans ligne de temps dans un mois lu ⇒ constat ; temps négatif conservé et signalé", async () => {

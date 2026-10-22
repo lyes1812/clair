@@ -26,6 +26,8 @@ export const FINDING_LABELS: Record<string, { case: string; label: string; sever
   "negative-time": { case: "E1", label: "Temps négatif (régularisation)", severity: "check" },
   "time-missing": { case: "F2", label: "Contrat présent sans ligne de temps dans un mois lu", severity: "check" },
   "time-outside-contract": { case: "E1 bis", label: "Ligne de temps PayFit hors de la période du contrat (régularisation ?)", severity: "info" },
+  "time-without-contract": { case: "E1 ter", label: "Ligne de temps PayFit sans contrat positionnable (contrat inconnu ou sans date de début)", severity: "check" },
+  "fraction-conflict": { case: "C4 bis", label: "Attributs différents entre deux fractions retenues du même mois : la première fait foi, à vérifier", severity: "check" },
   "lower-bound-window": { case: "B4", label: "Mois antérieurs à la fenêtre de conservation PayFit : effectifs en borne basse", severity: "info" },
 };
 

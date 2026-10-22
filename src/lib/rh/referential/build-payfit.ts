@@ -34,8 +34,9 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
   };
 
   const companyRec = records.find((r) => r.collection === "company");
+  if (companyRec && !str(companyRec.data.id)) throw new Error(`enregistrement company sans identifiant : ${companyRec.key}`);
   const company = companyRec
-    ? { id: String(companyRec.data.id), name: String(companyRec.data.name ?? ""), identificationNumber: str(companyRec.data.identificationNumber) }
+    ? { id: str(companyRec.data.id)!, name: str(companyRec.data.name) ?? "", identificationNumber: str(companyRec.data.identificationNumber) }
     : (sync.summary.company ?? null);
   const establishment = company?.id ?? "payfit";
   const siren = company?.identificationNumber && /^\d{9}$/.test(company.identificationNumber) ? company.identificationNumber : null;
@@ -137,7 +138,13 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
   const windowStart = retention !== null ? addMonths(presenceTo, -retention) : null;
   const timeUnavailable = unavailable("worked_time");
   const timeByKey = new Map<string, SourceRecordInput>();
-  for (const r of records) if (r.collection === "worked_time") timeByKey.set(r.key, r);
+  const timeByContract = new Map<string, SourceRecordInput[]>();
+  for (const r of records) {
+    if (r.collection !== "worked_time") continue;
+    timeByKey.set(r.key, r);
+    const cid = str(r.data.contractId);
+    if (cid) timeByContract.set(cid, [...(timeByContract.get(cid) ?? []), r]);
+  }
   const scopeLabel = scopeMonths.length ? `${scopeMonths[0]} → ${scopeMonths[scopeMonths.length - 1]}` : "aucun";
   let minStart: string | null = null;
 
@@ -353,14 +360,16 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
       }
       months.push(row);
     }
-    // Lignes de temps hors de la période du contrat (régularisation après la fin, temps avant le début) : conservées,
-    // présence fausse, signalées ; jamais ignorées en silence (E1).
-    for (const M of allMonths) {
-      const t = timeByKey.get(`${cid}@${M}`);
-      if (!t || consumedTime.has(t.key) || overlapsMonth(c.startDate, c.endDate, M)) continue;
+    // Lignes de temps hors de la période du contrat (régularisation après la fin, temps avant le début), quel que soit
+    // leur mois : conservées, présence fausse, signalées ; jamais ignorées en silence (E1).
+    for (const t of timeByContract.get(cid) ?? []) {
+      const M = str(t.data.month) ?? t.period ?? "";
+      if (!M || consumedTime.has(t.key) || overlapsMonth(c.startDate, c.endDate, M)) continue;
       const row = emptyMonth(c, M);
       for (const f of ["nature", "referenceQuota", "contractQuota", "quotaUnit", "modality"] as const) row.fieldsNd[f] = notHistorized;
       row.fieldsNd.paymentCount = nd("not-in-source", "PayFit n'expose pas les versements");
+      row.provenance.presentAnyDay = prov("contracts", cid, null, "startDate, endDate");
+      row.provenance.presentMonthEnd = prov("contracts", cid, null, "startDate, endDate");
       row.flags.push("time_outside_contract");
       readTime(row, c, t, M);
       findings.push(finding("time-outside-contract", { contracts: [c.contractKey], persons: c.personKey ? [c.personKey] : [], month: M, message: `ligne de temps PayFit en ${M} pour le contrat ${cid} hors de sa période (${formatDate(c.startDate)} → ${c.endDate ? formatDate(c.endDate) : "sans fin"}) : régularisation ?`, provenance: { paidTime: prov("worked_time", t.key, M, "paidWorkedTime") } }));
@@ -401,6 +410,30 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
       if (c.endDate > referenceDate) exit.flags.push("future");
       if (windowStart !== null && exit.month <= windowStart) exit.flags.push("lower_bound_window");
       events.push(exit);
+    }
+  }
+
+  // Lignes de temps sans contrat positionnable : contrat sans date de début (ligne conservée sur sa fiche) ou identifiant
+  // inconnu de la collection contracts (constat seul) ; jamais ignorées en silence.
+  const known = new Map(contracts.map((c) => [c.externalId, c]));
+  for (const t of records) {
+    if (t.collection !== "worked_time" || consumedTime.has(t.key)) continue;
+    const cid = str(t.data.contractId) ?? "";
+    const M = str(t.data.month) ?? t.period ?? "";
+    const c = known.get(cid);
+    if (!M) continue;
+    if (c && c.startDate === null) {
+      const row = emptyMonth(c, M);
+      for (const f of ["nature", "referenceQuota", "contractQuota", "quotaUnit", "modality"] as const) row.fieldsNd[f] = notHistorized;
+      row.fieldsNd.paymentCount = nd("not-in-source", "PayFit n'expose pas les versements");
+      row.fieldsNd.presentAnyDay = nd("no-start-date", "contrat sans date de début : présence non calculable");
+      row.flags.push("time_outside_contract");
+      readTime(row, c, t, M);
+      months.push(row);
+      findings.push(finding("time-without-contract", { contracts: [c.contractKey], persons: c.personKey ? [c.personKey] : [], month: M, message: `ligne de temps PayFit en ${M} pour le contrat ${cid}, sans date de début : non positionnable`, provenance: { paidTime: prov("worked_time", t.key, M, "paidWorkedTime") } }));
+    } else if (!c) {
+      consumedTime.add(t.key);
+      findings.push(finding("time-without-contract", { month: M, message: `ligne de temps PayFit en ${M} pour un contrat inconnu de la collection contracts (${cid || "identifiant absent"}) : contrat archivé non renvoyé ?`, detail: { contractId: cid, paidWorkedTime: numOrNull(t.data.paidWorkedTime), effectiveWorkedTime: numOrNull(t.data.effectiveWorkedTime) }, provenance: { paidTime: prov("worked_time", t.key, M, "paidWorkedTime") } }));
     }
   }
 

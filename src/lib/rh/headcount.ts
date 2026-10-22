@@ -449,7 +449,9 @@ export function annualList(data: RhBuildData, year: number, opts: HeadcountOpts)
       return p.state === "present" ? { month: M, state: "present", reason: null } : p.state === "nd" ? { month: M, state: "nd", reason: p.nd.reason } : { month: M, state: "absent", reason: p.reason };
     });
     const keys = new Set(contracts.map((c) => c.contractKey));
-    const events = data.events.filter((e) => keys.has(e.contractKey) && e.month.startsWith(`${year}-`)).sort((a, b) => a.date.localeCompare(b.date));
+    // Événements de l'année connus à la date de référence ; les suivants sont dans Mouvements › À venir.
+    const ref = data.build.referenceDate;
+    const events = data.events.filter((e) => keys.has(e.contractKey) && e.month.startsWith(`${year}-`) && (!ref || e.date <= ref)).sort((a, b) => a.date.localeCompare(b.date));
     rows.push({
       person,
       contracts: [...contracts].sort((a, b) => (a.startDate ?? "").localeCompare(b.startDate ?? "") || a.contractKey.localeCompare(b.contractKey)),

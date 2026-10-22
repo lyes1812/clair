@@ -174,6 +174,12 @@ describe("référentiel DSN — cas limites", () => {
     expect(b.months[0]).toMatchObject({ paymentCount: 1, paidTime: 151.67, timeUnit: "10", presentMonthEnd: true });
     expect(b.months[0].fieldsNd.paymentCount).toBeUndefined();
     expect(b.findings.filter((f) => f.code === "fraction-duplicate")).toHaveLength(1);
+    expect(b.findings.filter((f) => f.code === "fraction-conflict")).toHaveLength(0);
+    // Attributs différents entre fractions : la première (ordre, clé) fait foi et le désaccord est signalé.
+    const quota = (fraction: string, q: string) => ({ ...DSN_EDGES.renamed("2025-04", "FICTIF"), fraction, people: [{ nir: NIR.a, employeeNumber: "A", contracts: [{ number: "K-1", start: "2025-01-01", quota: q, gross: "1000.00" }] }] });
+    const conflict = dsnBuild(edgeFiles([quota("12", "151.67"), quota("22", "121.33")]));
+    expect(conflict.months[0].contractQuota).toBe(151.67);
+    expect(conflict.findings.filter((f) => f.code === "fraction-conflict")).toMatchObject([{ month: "2025-04", severity: "check" }]);
   });
 
   it("E2 : somme des activités de type 01, exclusion des autres types, unités mixtes ⇒ n.d., somme sans bruit flottant", () => {

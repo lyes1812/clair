@@ -105,6 +105,13 @@ describe("règles d'effectif — PayFit, qualificatifs", () => {
     expect(stage.monthsCovered).toBe(9); // janvier → septembre 2026 ; octobre (fin de mois après la lecture du 21/10) et après : n.d.
     expect(al.rows.find((r) => r.person.externalId === "P-CDI")!.strip[9]).toMatchObject({ month: "2026-10", state: "nd" });
   });
+  it("liste annuelle : les entrées et sorties d'une personne s'arrêtent à la date de référence (le reste est « à venir »)", async () => {
+    const d = await payfitEdgeBuild({ collaborators: [{ id: "P-C" }], contracts: [{ contractId: "C-C", collaboratorId: "P-C", startDate: "2026-01-01", endDate: "2026-10-28", natureContratDsn: "02" }] });
+    const row = annualList(d, 2026, OPTS).rows[0];
+    expect(row.entries.map((e) => e.date)).toEqual(["2026-01-01"]);
+    expect(row.exits).toEqual([]);
+    expect(movements(d, "2026-01", "2026-10", OPTS).upcoming.map((e) => e.event.date)).toEqual(["2026-10-28"]);
+  });
 });
 
 describe("règles d'effectif — DSN, couverture", () => {
@@ -133,6 +140,7 @@ describe("règles d'effectif — DSN, couverture", () => {
     expect(r.kind !== "nd" && r.bySiret).toEqual({ "00000000000011": { persons: 1, contracts: 2 }, "00000000000029": { persons: 1, contracts: 2 } });
     expect(exact(headcountAt(d, "2025-06-30", { ...OPTS, establishments: ["00000000000029"] }))).toMatchObject({ persons: 1, contracts: 2 });
     expect(annualList(d, 2025, { ...OPTS, establishments: ["00000000000029"] }).rows).toHaveLength(1);
+    expect(annualList(d, 2025, { ...OPTS, establishments: ["00000000000099"] }).rows).toHaveLength(0);
   });
   it("mois incomplet ou bloqué ⇒ n.d. avec le message de couverture, y compris avant le premier mois complet", () => {
     const inc = dsnBuild(edgeFiles([{ ...DSN_EDGES.renamed("2025-04", "FICTIF"), fraction: "12" }, DSN_EDGES.renamed("2025-05", "FICTIF")]));
