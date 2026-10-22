@@ -20,10 +20,14 @@ function continuityPartners(input: KpiInput): Map<string, { event: EventDraft; c
     const opts = countedOpts(input);
     const est = input.scope.establishments;
     const counted = (e: EventDraft) => e.nature !== null && opts.natures.includes(e.nature) && (!est || (e.establishmentId !== null && est.includes(e.establishmentId)));
-    const flagged = input.data.events.filter((e) => e.personKey !== null && e.flags.includes("continuity_same_person"));
-    const entries = flagged.filter((e) => e.kind === "entry");
+    // Entrées marquées « contrat continu » par le référentiel ; sorties candidates : toutes celles de la même personne la veille
+    // (le référentiel ne marque qu'une sortie par entrée, qui n'est pas forcément celle d'une nature comptée).
+    const entries = input.data.events.filter((e) => e.kind === "entry" && e.personKey !== null && e.flags.includes("continuity_same_person"));
+    const eves = new Set(entries.map((e) => `${e.personKey}|${addDays(e.date, -1)}`));
     const natured = (e: EventDraft) => (e.nature !== null && input.params.natures.includes(e.nature) ? 1 : 0);
-    const exits = flagged.filter((e) => e.kind === "exit").sort((a, b) => a.date.localeCompare(b.date) || natured(b) - natured(a) || a.contractKey.localeCompare(b.contractKey));
+    const exits = input.data.events
+      .filter((e) => e.kind === "exit" && e.personKey !== null && eves.has(`${e.personKey}|${e.date}`))
+      .sort((a, b) => a.date.localeCompare(b.date) || natured(b) - natured(a) || a.contractKey.localeCompare(b.contractKey));
     const out = new Map<string, { event: EventDraft; counted: boolean }>();
     for (const x of exits) {
       const next = addDays(x.date, 1);

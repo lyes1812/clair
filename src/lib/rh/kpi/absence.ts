@@ -132,9 +132,8 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       }
       if (sd === null || ed === null) {
         // Date de borne inconnue : seuls les mois de la période du contrat peuvent être touchés (les créneaux y sont bornés).
-        if (month < monthOf(c.startDate) || (c.endDate !== null && month > monthOf(c.endDate))) continue;
-        // Au créneau près : la borne inconnue est remplacée par la borne de la période du contrat dans le mois ; si aucune
-        // demi-journée comptée (ni incertaine) n'est alors atteignable, l'absence est écartée avec sa raison.
+        // Au créneau près : la borne inconnue est remplacée par la borne de la période du contrat dans le mois (vide si le contrat
+        // n'y est pas actif) ; si aucune demi-journée comptée ni incertaine n'est atteignable, l'absence est écartée avec sa raison.
         const reach = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };
         const r = absenceSlots(
           {
@@ -145,7 +144,8 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
           params.dayBasis,
         );
         if (!r.slots.length && !r.uncertain.length) {
-          const label = `aucune demi-journée comptée possible dans la période du contrat (date de ${sd === null ? "début" : "fin"} non renseignée, ${sd === null ? `fin le ${formatDate(ed!)}` : `début le ${formatDate(sd)}`})`;
+          const known = sd === null && ed === null ? "dates de début et de fin non renseignées" : sd === null ? `date de début non renseignée, fin le ${formatDate(ed)}` : `date de fin non renseignée, début le ${formatDate(sd)}`;
+          const label = `aucune demi-journée comptée possible dans la période du contrat (${known})`;
           excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: 0 });
           continue;
         }

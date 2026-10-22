@@ -160,6 +160,15 @@ describe("absentéisme — cas construits (contrat 005, mars 2026)", async () =>
     if (before.kind !== "nd") expect(before.excluded).toMatchObject([{ absenceId: "a", why: "contract-out-of-scope", label: expect.stringContaining("aucune demi-journée comptée possible") }]);
     // Lundi–vendredi : fin le dimanche 15/02/2026, jour de début de 004 ⇒ aucune demi-journée comptée possible ⇒ exact.
     expect(r(run([absence("a", "004", null, null, "2026-02-15", "end-of-day")], "2026-02", { dayBasis: "weekdays" }))).toBe("exact:0/260");
+    // Mois où le contrat n'est pas actif : l'absence est écartée et listée, avec un libellé exact quand les deux dates manquent.
+    const jan = run([absence("a", "004", null, null, "2026-01-20", "end-of-day"), absence("b", "004", null, null, null, null)], "2026-01");
+    expect(r(jan)).toBe("exact:0/372");
+    if (jan.kind !== "nd") {
+      expect(jan.excluded.map((x) => x.label)).toEqual([
+        "aucune demi-journée comptée possible dans la période du contrat (date de début non renseignée, fin le 20/01/2026)",
+        "aucune demi-journée comptée possible dans la période du contrat (dates de début et de fin non renseignées)",
+      ]);
+    }
     // Même borne en calendaire : le dimanche 15/02 est compté ⇒ l'absence peut le toucher ⇒ n.d.
     expect(r(run([absence("a", "004", null, null, "2026-02-15", "end-of-day")], "2026-02"))).toBe("absence-date-nd");
   });
