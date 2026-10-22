@@ -3,7 +3,7 @@ import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { PAYROLL_DEFINITIONS } from "@/lib/payroll/definitions";
-import { costPerEtp, evolution, monthPayroll, shiftYear, windowPayroll, type CostPerEtp, type Evolution, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
+import { costPerEtp, evolution, monthPayroll, servicesOf, shiftYear, windowPayroll, withService, type CostPerEtp, type Evolution, type JournalInput, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
 import { gridRubrics } from "@/lib/payroll/grid";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
@@ -49,8 +49,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       <a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>)
     </p>
   ) : null;
-  const input = ctx.input;
-  if (!input) {
+  const fullInput = ctx.input;
+  if (!fullInput) {
     return (
       <Header>
         {sourceLine}
@@ -62,8 +62,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
     );
   }
 
-  const valueMonths = input.months.filter((m) => monthPayroll(input, m).kind === "value");
-  const closed = valueMonths.filter((m) => !input.openMonths.includes(m));
+  const valueMonths = fullInput.months.filter((m) => monthPayroll(fullInput, m).kind === "value");
+  const closed = valueMonths.filter((m) => !fullInput.openMonths.includes(m));
   const last = closed.at(-1) ?? valueMonths.at(-1) ?? null;
   if (!last) {
     return (
@@ -79,6 +79,14 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   // Période : année, premier et dernier mois (paramètres GET ; une valeur invalide est remplacée et signalée).
   const notices: string[] = [];
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
+  // Service (code analytique de l'axe choisi) : « __nv__ » = lignes sans code de l'axe (non ventilé).
+  const NV = "__nv__";
+  const rawService = one(sp.service);
+  const knownServices = ctx.service.axis ? servicesOf(fullInput, fullInput.months) : [];
+  const serviceValue: string | null | undefined = !rawService ? undefined : rawService === NV && knownServices.includes(null) ? null : knownServices.includes(rawService) ? rawService : undefined;
+  if (rawService && serviceValue === undefined) ignore("service", rawService, ctx.service.axis ? "service absent du journal" : "aucun axe analytique choisi");
+  const input: JournalInput = serviceValue === undefined ? fullInput : withService(fullInput, serviceValue);
+  const serviceLabel = (v: string | null) => (v === null ? "Non ventilé" : v);
   const years = [...new Set(input.months.map((m) => Number(m.slice(0, 4))))].sort();
   const rawYear = one(sp.annee);
   const year = years.includes(Number(rawYear)) ? Number(rawYear) : Number(last.slice(0, 4));
@@ -102,8 +110,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const cur = windowPayroll(input, months);
   const prev = windowPayroll(input, prevMonths);
   const evo = evolution(cur, prev, (w) => w.masse);
-  const etpCur = ctx.etp(months);
-  const etpPrev = ctx.etp(prevMonths);
+  const svcFilter = serviceValue === undefined ? undefined : { value: serviceValue };
+  const etpCur = ctx.etp(months, svcFilter);
+  const etpPrev = ctx.etp(prevMonths, svcFilter);
   const cost = costPerEtp(cur, etpCur);
   const costPrev = costPerEtp(prev, etpPrev);
   const rate = (w: PayrollWindow) => (w.kind === "nd" || w.brut === 0 ? "n.d." : fmtPercent({ num: w.cotisations, den: w.brut }));
@@ -113,7 +122,20 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const detail = detailMonth ? monthPayroll(input, detailMonth) : null;
   const unclassified = new Map<string, { name: string | null; cents: number }>();
   for (const r of cur.months) if (r.kind === "value") for (const a of r.unclassified) unclassified.set(a.accountId, { name: a.accountName, cents: (unclassified.get(a.accountId)?.cents ?? 0) + a.balanceCents });
-  const q = (y: number, de: string, a: string, extra = "") => `${base}?annee=${y}&de=${de}&a=${a}${extra}`;
+  const svcParam = serviceValue === undefined ? "" : `&service=${encodeURIComponent(serviceValue ?? NV)}`;
+  const q = (y: number, de: string, a: string, extra = "", svc = svcParam) => `${base}?annee=${y}&de=${de}&a=${a}${svc}${extra}`;
+  // Table par service (toujours sur tout le journal) : la somme des services, non ventilé compris, égale le total.
+  const serviceRows = ctx.service.axis
+    ? servicesOf(fullInput, [...months, ...prevMonths]).map((v) => {
+        const si = withService(fullInput, v);
+        const c = windowPayroll(si, months);
+        const p = windowPayroll(si, prevMonths);
+        return { value: v, cur: c, prev: p, evo: evolution(c, p, (w) => w.masse) };
+      })
+    : [];
+  const totalCur = windowPayroll(fullInput, months);
+  const masseOf = (w: PayrollWindow) => (w.kind === "value" ? w.masse : -1);
+  serviceRows.sort((a, b) => (a.value === null ? 1 : b.value === null ? -1 : masseOf(b.cur) - masseOf(a.cur)));
   const presets = [
     { label: "Janv.–mars", de: "01", a: "03" },
     { label: "Janv.–juin", de: "01", a: "06" },
@@ -151,6 +173,15 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
             {MM.map((m, i) => <option key={m} value={m}>{MONTH_NAMES[i]}</option>)}
           </select>
         </div>
+        {ctx.service.axis && (
+          <div className="field-row">
+            <label htmlFor="service">Service</label>
+            <select className="select" id="service" name="service" defaultValue={serviceValue === undefined ? "" : (serviceValue ?? NV)}>
+              <option value="">Tous les services</option>
+              {knownServices.map((v) => <option key={v ?? NV} value={v ?? NV}>{serviceLabel(v)}</option>)}
+            </select>
+          </div>
+        )}
         <button className="btn" type="submit">Afficher</button>
         <span className="actions" data-testid="ms-presets">
           {presets.map((p) => (
@@ -159,7 +190,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         </span>
       </form>
       <p className="desc" data-testid="ms-period">
-        <strong>{label(months)}</strong> · comparé à {label(prevMonths)} (mêmes mois)
+        <strong>{label(months)}</strong> · comparé à {label(prevMonths)} (mêmes mois) · {serviceValue === undefined ? "tous les services" : `service ${serviceLabel(serviceValue)}`}
         {cur.kind === "value" && cur.openMonths.length > 0 && <> · paie non clôturée à la lecture : {cur.openMonths.join(", ")} (montants provisoires)</>}
       </p>
 
@@ -212,6 +243,50 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         </p>
       )}
 
+      <section className="panel" data-testid="ms-services">
+        <h2>Services <span className="desc">— coût employeur par service ({ctx.service.axis ? `code analytique « ${ctx.service.axis} » du journal PayFit${ctx.service.origin === "single-axis" ? ", seul axe présent" : ""}` : "aucun axe"}) ; cliquer un service pour filtrer l'écran</span></h2>
+        {!ctx.service.axis ? (
+          <p className="nd" data-testid="ms-services-nd">
+            n.d. — {ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`} · <a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table" data-testid="ms-services-table">
+              <thead>
+                <tr><th>Service</th><th className="num">Coût {year - 1}</th><th className="num">Coût {year}</th><th className="num">Écart €</th><th className="num">Écart %</th><th className="num">Hors primes {year}</th><th className="num">Primes {year}</th><th className="num">Cotisations {year}</th><th className="num">Coût / personne-mois {year}</th><th className="num">Part du coût</th></tr>
+              </thead>
+              <tbody>
+                {serviceRows.map((r) => {
+                  const c = r.cur;
+                  return (
+                    <tr key={r.value ?? NV} data-service={r.value ?? NV}>
+                      <td><a href={q(year, from, to, "", `&service=${encodeURIComponent(r.value ?? NV)}`)}>{serviceLabel(r.value)}</a></td>
+                      <td className="num" data-col="n1">{money(r.prev, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
+                      <td className="num" data-col="n">{money(c, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
+                      <td className="num" data-col="ecart">{r.evo.kind === "value" ? evoEuros(r.evo) : "n.d."}</td>
+                      <td className="num" data-col="ecart-pct">{r.evo.kind === "value" ? evoText(r.evo) : "n.d."}</td>
+                      <td className="num" data-col="hors-primes">{c.kind === "value" ? formatEuros(c.brut - c.byRubric.primes) : "n.d."}</td>
+                      <td className="num" data-col="primes">{c.kind === "value" ? formatEuros(c.byRubric.primes) : "n.d."}</td>
+                      <td className="num" data-col="cotisations">{c.kind === "value" ? formatEuros(c.cotisations) : "n.d."}</td>
+                      <td className="num" data-col="cout-pm">{c.kind === "value" && c.paidContractMonths > 0 ? eurosOf({ num: c.masse, den: c.paidContractMonths }) : "n.d."}</td>
+                      <td className="num" data-col="part">{c.kind === "value" && totalCur.kind === "value" && totalCur.masse > 0 ? fmtPercent({ num: c.masse, den: totalCur.masse }) : "n.d."}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr data-testid="ms-services-total">
+                  <td>Total</td>
+                  <td className="num">{money(windowPayroll(fullInput, prevMonths), (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
+                  <td className="num" data-col="n">{money(totalCur, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
+                  <td colSpan={7} className="tile-foot">Coût = masse chargée (brut + cotisations patronales). Coût / personne-mois = coût ÷ nombre de contrats rémunérés (ligne de brut) chaque mois ; ce n'est pas un coût par ETP.</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </section>
+
       <section className="panel">
         <h2>Mois par mois <span className="desc">— N-1 = même mois un an plus tôt ; cliquer un mois pour le détail par compte</span></h2>
         <div className="table-wrap">
@@ -258,7 +333,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         </div>
         {cur.kind === "value" && (
           <p className="tile-foot" data-testid="ms-hors-masse">
-            Hors masse chargée sur la période : provisions de congés payés {formatEuros(cur.byRubric["provisions-cp"])} · autres charges de personnel {formatEuros(cur.byRubric["autres-charges"])} · taxes sur les salaires {formatEuros(cur.byRubric.taxes)}
+            Dans les cotisations : taxes et contributions sur les salaires {formatEuros(cur.byRubric.taxes)} · dans le brut : gratifications de stage {formatEuros(cur.byRubric.stages)} · hors masse chargée : provisions de congés payés {formatEuros(cur.byRubric["provisions-cp"])}, autres charges de personnel {formatEuros(cur.byRubric["autres-charges"])}
           </p>
         )}
       </section>

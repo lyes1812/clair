@@ -1,13 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { sourceRecord } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { activeSync } from "@/lib/connectors/sync";
 import type { CollectionOutcome } from "@/lib/connectors/types";
-import { getPayrollGrid, type PayrollGrid } from "@/lib/payroll-settings";
+import { getPayrollGrid, getServiceAxis, type PayrollGrid, type ServiceAxis } from "@/lib/payroll-settings";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { loadKpiContext, type KpiContext } from "@/lib/rh/kpi-context";
 import { loadPayrollOpenMonths } from "@/lib/rh/referential/store";
-import type { EtpMonth, JournalInput, LedgerLine } from "./engine";
+import { axisOf, NO_TYPE, serviceOf, type Analytic, type EtpMonth, type JournalInput, type LedgerLine } from "./engine";
 
 // Contexte de l'écran Masse salariale : journal de paie de la lecture PayFit appliquée, grille de comptes de l'espace,
 // ETP fin de mois du module KPI RH (même référentiel que Collaborateurs et KPI RH).
@@ -17,7 +17,9 @@ export type PayrollContext = {
   read: { syncId: string; startedAt: Date; months: string[] } | null;
   unavailable: string | null; // journal non lu (droit refusé, collection absente) : raison affichée
   input: JournalInput | null;
-  etp: (months: string[]) => EtpMonth[];
+  etp: (months: string[], service?: { value: string | null }) => EtpMonth[];
+  axes: string[]; // types de codes analytiques présents dans le journal
+  service: ServiceAxis;
 };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? v : null);
@@ -26,19 +28,28 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
   const kpi = await loadKpiContext(slug, {});
   const ws = kpi.collab.workspace.id;
   const [grid, sync] = await Promise.all([getPayrollGrid(ws), activeSync(ws, "payfit")]);
-  const etp = (months: string[]): EtpMonth[] =>
+  // Service d'un contrat pour un mois : celui de ses lignes de journal ce mois-là (null : non ventilé).
+  let contractService: Map<string, string | null> | null = null;
+  let axisForEtp: string | null = null;
+  const etp = (months: string[], service?: { value: string | null }): EtpMonth[] =>
     months.map((month) => {
       if (!kpi.input) return { month, etp4: null, reason: "référentiel RH indisponible (Collaborateurs)" };
       const e = etpMonthEnd(kpi.input, month);
+      if (e.kind === "exact" && service && contractService) {
+        const etp4 = e.contributions.filter((c) => (contractService!.get(`${month}|${c.externalId}`) ?? null) === service.value).reduce((s, c) => s + c.etp4, 0);
+        return { month, etp4, reason: null };
+      }
+      if (e.kind === "exact" && service && !contractService) return { month, etp4: null, reason: `ETP par service indisponible (axe ${axisForEtp ?? "non choisi"})` };
       if (e.kind === "exact") return { month, etp4: e.etp4, reason: null };
       return { month, etp4: null, reason: e.kind === "nd" ? e.nd.reason : `ETP en borne basse (${e.qualifiers.join(" ; ")})` };
     });
-  if (!sync) return { kpi, grid, read: null, unavailable: "aucune lecture PayFit appliquée : connectez PayFit dans Données", input: null, etp };
+  const none: ServiceAxis = { axis: null, origin: "none", updatedAt: null };
+  if (!sync) return { kpi, grid, read: null, unavailable: "aucune lecture PayFit appliquée : connectez PayFit dans Données", input: null, etp, axes: [], service: none };
   const months = ((sync.scope as { months?: unknown }).months as string[] | undefined) ?? [];
   const read = { syncId: sync.id, startedAt: sync.startedAt, months };
   const outcome = ((sync.summary as { collections?: CollectionOutcome[] }).collections ?? []).find((c) => c.collection === "ledger_lines");
-  if (!outcome) return { kpi, grid, read, unavailable: "journal comptable absent de la lecture PayFit appliquée", input: null, etp };
-  if (outcome.status === "unavailable") return { kpi, grid, read, unavailable: `journal comptable non lu : ${outcome.reason}`, input: null, etp };
+  if (!outcome) return { kpi, grid, read, unavailable: "journal comptable absent de la lecture PayFit appliquée", input: null, etp, axes: [], service: none };
+  if (outcome.status === "unavailable") return { kpi, grid, read, unavailable: `journal comptable non lu : ${outcome.reason}`, input: null, etp, axes: [], service: none };
   const rows = await withWorkspace(ws, (tx) =>
     tx
       .select({ key: sourceRecord.recordKey, data: sourceRecord.data })
@@ -56,8 +67,26 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
       debitCents: num(d.debitCents),
       creditCents: num(d.creditCents),
       contractId: typeof d.contractId === "string" ? d.contractId : null,
+      analytic: Array.isArray(d.analyticCodes) ? (d.analyticCodes as Analytic[]) : [],
     };
   });
+  const axes = [...new Set(lines.flatMap((l) => (l.analytic ?? []).map(axisOf)))].sort();
+  const service = await getServiceAxis(ws, axes);
+  if (service.axis) {
+    axisForEtp = service.axis;
+    contractService = new Map();
+    for (const l of lines) if (l.contractId && !contractService.has(`${l.month}|${l.contractId}`)) contractService.set(`${l.month}|${l.contractId}`, serviceOf(l, service.axis));
+  }
   const openMonths = await loadPayrollOpenMonths(ws, sync.id);
-  return { kpi, grid, read, unavailable: null, input: { lines, months, openMonths, grid: grid.grid }, etp };
+  return { kpi, grid, read, unavailable: null, input: { lines, months, openMonths, grid: grid.grid, serviceAxis: service.axis }, etp, axes, service };
+}
+
+// Axes analytiques présents dans le journal de la lecture PayFit appliquée (Paramètres).
+export async function journalAxes(workspaceId: string): Promise<string[]> {
+  const sync = await activeSync(workspaceId, "payfit");
+  if (!sync) return [];
+  const rows = await withWorkspace(workspaceId, (tx) =>
+    tx.execute(sql`select distinct coalesce(nullif(x->>'type', ''), ${NO_TYPE}) t from source_record, jsonb_array_elements(coalesce(data->'analyticCodes', '[]'::jsonb)) x where sync_id = ${sync.id} and collection = 'ledger_lines' order by 1`),
+  );
+  return (rows.rows as { t: string }[]).map((r) => r.t);
 }

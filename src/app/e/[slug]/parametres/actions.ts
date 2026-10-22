@@ -2,7 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { ABSENCE_STATUSES } from "@/lib/connectors/payfit/client";
 import { getKpiSettings, KPI_PARSERS, setKpiSettings, type KpiSettingValues } from "@/lib/rh-kpi-settings";
-import { setPayrollGrid } from "@/lib/payroll-settings";
+import { setPayrollGrid, setServiceAxis } from "@/lib/payroll-settings";
+import { journalAxes } from "@/lib/payroll/context";
 import { parseGrid, RUBRICS } from "@/lib/payroll/grid";
 import { parsePayfitHistoryMode, setHeadcountNatures, setPayfitHistoryMode } from "@/lib/rh-settings";
 import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
@@ -54,6 +55,19 @@ export async function savePayrollGrid(slug: string, _prev: FormState, formData: 
   }
   revalidatePath(`/e/${slug}`, "layout");
   return { ok: "Grille de comptes enregistrée." };
+}
+
+export async function saveServiceAxis(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  const axis = String(formData.get("serviceAxis") ?? "");
+  if (axis && !(await journalAxes(workspace.id)).includes(axis)) return { error: "Axe absent du journal PayFit appliqué." };
+  try {
+    await setServiceAxis(workspace.id, axis, session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: axis ? "Axe du service enregistré." : "Ventilation par service désactivée." };
 }
 
 // Définitions des KPI : chaque champ passe par son parseur strict ; un type d'absence n'est accepté que s'il figure dans la

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { monthRange } from "@/lib/connectors/months";
 import { createPayFitClient, readPayFit } from "@/lib/connectors/payfit/client";
 import { createFixtureFetch } from "@/lib/connectors/payfit/fixture";
-import { costPerEtp, evolution, monthPayroll, shiftYear, windowPayroll, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
+import { costPerEtp, evolution, monthPayroll, NO_TYPE, serviceOf, servicesOf, shiftYear, windowPayroll, withService, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
 import { classify, DEFAULT_PREFIXES, gridRubrics, parseGrid } from "@/lib/payroll/grid";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { rawPayfitHistory } from "@/lib/rh/raw-history";
@@ -30,11 +30,13 @@ describe("grille de comptes", () => {
     };
     expect(id("641100")).toBe("salaires");
     expect(id("641300")).toBe("primes");
+    expect(id("6413700")).toBe("stages");
     expect(id("641200")).toBe("provisions-cp");
     expect(id("641400")).toBe("indemnites");
     expect(id("645300")).toBe("cotisations");
     expect(id("647600")).toBe("autres-charges");
     expect(id("631100")).toBe("taxes");
+    expect(rubrics.find((r) => r.id === "taxes")!.role).toBe("cotisations");
     expect(id("649000")).toBe("non-classe");
     expect(id("421000")).toBe("contrepartie");
     expect(id("758000")).toBe("contrepartie");
@@ -116,7 +118,7 @@ describe("journal PayFit fictif (profil A, photographie 1) : totaux recalculés 
   const read = await readPayFit(createPayFitClient("fixture-A-1", { fetchImpl: createFixtureFetch("fixture-A-1"), minIntervalMs: 0 }), months);
   const lines: LedgerLine[] = read.records
     .filter((r) => r.collection === "ledger_lines")
-    .map((r) => ({ key: r.key, month: String(r.data.month), accountId: String(r.data.accountId), accountName: (r.data.accountName as string) ?? null, debitCents: r.data.debitCents as number | null, creditCents: r.data.creditCents as number | null, contractId: (r.data.contractId as string) ?? null }));
+    .map((r) => ({ key: r.key, month: String(r.data.month), accountId: String(r.data.accountId), accountName: (r.data.accountName as string) ?? null, debitCents: r.data.debitCents as number | null, creditCents: r.data.creditCents as number | null, contractId: (r.data.contractId as string) ?? null, analytic: r.data.analyticCodes as never }));
   const input = journal(lines, months);
   const range = (from: string, to: string) => monthRange(from, to);
   it("octobre 2024 : brut 13 840,00 €, cotisations 4 390,00 €, masse 18 230,00 € (6 contrats)", () => {
@@ -140,5 +142,47 @@ describe("journal PayFit fictif (profil A, photographie 1) : totaux recalculés 
     });
     expect(costPerEtp(windowPayroll(input, range("2026-01", "2026-09")), etp(range("2026-01", "2026-09")))).toEqual({ kind: "value", costCents: { num: 21126000 * 10000, den: 539000 }, etpMonths4: 539000 });
     expect(costPerEtp(windowPayroll(input, range("2025-01", "2025-09")), etp(range("2025-01", "2025-09")))).toMatchObject({ kind: "value", etpMonths4: 480000 });
+  });
+});
+
+describe("services : code analytique du journal (cas écrits à la main)", () => {
+  const withCode = (l: LedgerLine, type: string | null, code: string | null): LedgerLine => ({ ...l, analytic: [{ type, code, value: null }] });
+  it("service d'une ligne : code de l'axe choisi ; axe sans type ; ligne sans code = non ventilé", () => {
+    expect(serviceOf(withCode(line("2026-01", "641100", 1, null), "Service", "TECH"), "Service")).toBe("TECH");
+    expect(serviceOf(withCode(line("2026-01", "641100", 1, null), null, "TECH"), NO_TYPE)).toBe("TECH");
+    expect(serviceOf(line("2026-01", "641100", 1, null), "Service")).toBeNull();
+  });
+  it("filtre par service : le mois reste lu (0 si le service n'a pas de ligne) et la somme des services égale le total", () => {
+    const input = { ...journal([withCode(line("2026-01", "641100", 1000, null, "C1"), "S", "TECH"), withCode(line("2026-01", "645100", 400, null, "C1"), "S", "TECH"), line("2026-01", "641100", 500, null, "C2")], ["2026-01"]), serviceAxis: "S" };
+    expect(servicesOf(input, ["2026-01"])).toEqual(["TECH", null]);
+    expect(monthPayroll(withService(input, "TECH"), "2026-01")).toMatchObject({ kind: "value", masse: 1400, paidContracts: ["C1"] });
+    expect(monthPayroll(withService(input, null), "2026-01")).toMatchObject({ kind: "value", masse: 500, paidContracts: ["C2"] });
+    expect(monthPayroll(withService(input, "DON"), "2026-01")).toMatchObject({ kind: "value", masse: 0 });
+    expect(monthPayroll(input, "2026-01")).toMatchObject({ kind: "value", masse: 1900 });
+  });
+});
+
+describe("services sur le journal PayFit fictif (Service fictif A : 003, 006 ; B : 001, 004, 007 ; C : 002, 005, 008)", async () => {
+  const months = monthRange("2024-10", "2026-09");
+  const read = await readPayFit(createPayFitClient("fixture-A-1", { fetchImpl: createFixtureFetch("fixture-A-1"), minIntervalMs: 0 }), months);
+  const lines: LedgerLine[] = read.records
+    .filter((r) => r.collection === "ledger_lines")
+    .map((r) => ({ key: r.key, month: String(r.data.month), accountId: String(r.data.accountId), accountName: null, debitCents: r.data.debitCents as number | null, creditCents: r.data.creditCents as number | null, contractId: (r.data.contractId as string) ?? null, analytic: r.data.analyticCodes as never }));
+  const input = { ...journal(lines, months), serviceAxis: "Service" };
+  const masse = (svc: string, from: string, to: string) => {
+    const w = windowPayroll(withService(input, svc), monthRange(from, to));
+    return w.kind === "value" ? w.masse : null;
+  };
+  it("2026 (janv.–sept.) : A 37 800 € (006), B 98 490 € (001, 004 de mars, 007), C 74 970 € (002, 005, 008) ; total 211 260 €", () => {
+    expect(masse("TEST-SVC-A", "2026-01", "2026-09")).toBe(3780000);
+    expect(masse("TEST-SVC-B", "2026-01", "2026-09")).toBe(9849000);
+    expect(masse("TEST-SVC-C", "2026-01", "2026-09")).toBe(7497000);
+    expect(servicesOf(input, monthRange("2026-01", "2026-09"))).toEqual(["TEST-SVC-A", "TEST-SVC-B", "TEST-SVC-C"]);
+  });
+  it("2025 (janv.–sept.) : A 51 300 €, B 58 800 € (001 à zéro en juin), C 63 770 € (002 d'avril, sans juillet) ; B : 25 personnes-mois en 2026", () => {
+    expect(masse("TEST-SVC-A", "2025-01", "2025-09")).toBe(5130000);
+    expect(masse("TEST-SVC-B", "2025-01", "2025-09")).toBe(5880000);
+    expect(masse("TEST-SVC-C", "2025-01", "2025-09")).toBe(6377000);
+    expect(windowPayroll(withService(input, "TEST-SVC-B"), monthRange("2026-01", "2026-09"))).toMatchObject({ kind: "value", paidContractMonths: 25 });
   });
 });

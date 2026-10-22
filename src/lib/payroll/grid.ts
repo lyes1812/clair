@@ -2,30 +2,34 @@
 // Le compte d'une ligne est classé dans la rubrique dont un préfixe est le plus long. Les comptes des classes 63 et 64
 // sans rubrique restent visibles comme « non classés » ; les autres classes (tiers 42/43, produits) sont des contreparties.
 export type RubricRole = "brut" | "cotisations" | "hors-masse";
-export type RubricId = "salaires" | "primes" | "indemnites" | "cotisations" | "provisions-cp" | "autres-charges" | "taxes";
+export type RubricId = "salaires" | "primes" | "stages" | "indemnites" | "cotisations" | "taxes" | "provisions-cp" | "autres-charges";
 export type Rubric = { id: RubricId; label: string; role: RubricRole; prefixes: string[] };
 
 // Rubriques et rôles fixes ; seuls les préfixes sont des paramètres de l'espace.
 export const RUBRICS: Omit<Rubric, "prefixes">[] = [
   { id: "salaires", label: "Salaires et appointements", role: "brut" },
-  { id: "primes", label: "Primes et gratifications", role: "brut" },
+  { id: "primes", label: "Primes", role: "brut" },
+  { id: "stages", label: "Gratifications de stage", role: "brut" },
   { id: "indemnites", label: "Indemnités et avantages", role: "brut" },
   { id: "cotisations", label: "Cotisations patronales", role: "cotisations" },
+  { id: "taxes", label: "Taxes et contributions sur les salaires", role: "cotisations" },
   { id: "provisions-cp", label: "Provisions de congés payés", role: "hors-masse" },
   { id: "autres-charges", label: "Autres charges de personnel", role: "hors-masse" },
-  { id: "taxes", label: "Taxes sur les salaires", role: "hors-masse" },
 ];
 
-// Défaut proposé : grille du script d'actualisation PayFit de Lyes (brut 6411/6413, autres éléments 6414/6417,
-// cotisations 645, provisions 6412/6485, titres-restaurant 6476 et taxes 63 hors masse), élargie aux comptes PCG voisins.
+// Défaut proposé, recoupé le 22/10/2026 avec le tableau de bord de Lyes sur le journal PayFit du pilote (cotisations
+// 645 + 63 et primes 6413 hors stages égaux à l'euro) : brut 641 (primes 6413, gratifications de stage 64137, indemnités
+// et avantages 6414/6417), cotisations patronales 645 et taxes et contributions 63 ; provisions 6412/6485 et autres
+// charges (titres-restaurant 6476…) hors masse.
 export const DEFAULT_PREFIXES: Record<RubricId, string[]> = {
   salaires: ["641"],
   primes: ["6413"],
+  stages: ["64137"],
   indemnites: ["6414", "6417"],
   cotisations: ["645"],
+  taxes: ["63"],
   "provisions-cp": ["6412", "6485"],
   "autres-charges": ["646", "647", "648"],
-  taxes: ["631", "633"],
 };
 export type AccountGrid = Record<RubricId, string[]>;
 

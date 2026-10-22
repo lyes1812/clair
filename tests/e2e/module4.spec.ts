@@ -46,7 +46,21 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   expect(await txt(row("2026-02", "masse"))).toBe("19 530,00 €");
   expect(await txt(row("2026-02", "masse-n1"))).toBe("18 230,00 €");
   expect(await txt(page.getByTestId("ms-monthly-foot").locator("td[data-col='masse']"))).toBe("211 260,00 €");
+  // Services : code analytique « Service » du journal fictif, seul axe présent ; la somme égale le total.
+  const svc = (code: string, col: string) => page.getByTestId("ms-services-table").locator(`tr[data-service='${code}'] td[data-col='${col}']`);
+  await expect(page.getByTestId("ms-services")).toContainText("seul axe présent");
+  expect(await txt(svc("TEST-SVC-B", "n"))).toBe("98 490,00 €");
+  expect(await txt(svc("TEST-SVC-B", "n1"))).toBe("58 800,00 €");
+  expect(await txt(svc("TEST-SVC-A", "n"))).toBe("37 800,00 €");
+  expect(await txt(svc("TEST-SVC-C", "n"))).toBe("74 970,00 €");
+  expect(await txt(svc("TEST-SVC-B", "cout-pm"))).toBe("3 939,60 €");
+  expect(await txt(page.getByTestId("ms-services-total").locator("td[data-col='n']"))).toBe("211 260,00 €");
   await page.screenshot({ path: `${CAPTURES}/4-01-masse-salariale.png`, fullPage: true });
+  // Filtre Service B : toute la page sur le service.
+  await page.getByTestId("ms-services-table").locator("tr[data-service='TEST-SVC-B'] a").click();
+  await expect(page.getByTestId("ms-period")).toContainText("service TEST-SVC-B");
+  expect(await txt(tile("masse").locator("dd"))).toBe("98 490,00 €");
+  await page.goto(ms);
 
   // Détail par compte de janvier 2026 : 641100 et 645100, contreparties exclues.
   await page.getByTestId("ms-monthly-table").locator("tr[data-month='2026-01'] a").first().click();
@@ -69,12 +83,13 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   // Grille de comptes : défaut proposé visible, modifiable par l'administrateur ; définitions dans l'écran.
   await page.goto(`/e/${slug}/parametres`);
   await expect(page.getByTestId("setting-payroll-origin")).toContainText("Valeur par défaut proposée");
+  await expect(page.getByTestId("setting-payroll-axis-origin")).toContainText("seul axe analytique présent");
   await page.getByTestId("setting-payroll-primes").fill("6413, 6418");
   await page.getByTestId("setting-payroll-save").click();
   await expect(page.getByTestId("setting-payroll").getByRole("status")).toContainText("Grille de comptes enregistrée");
   await page.reload();
   await expect(page.getByTestId("setting-payroll-origin")).toContainText("Modifié le");
   await page.goto(ms);
-  await expect(page.getByTestId("ms-grid")).toContainText("Primes et gratifications (brut) : 6413, 6418");
+  await expect(page.getByTestId("ms-grid")).toContainText("Primes (brut) : 6413, 6418");
   expect(await txt(tile("masse").locator("dd"))).toBe("211 260,00 €");
 });

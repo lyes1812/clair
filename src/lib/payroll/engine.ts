@@ -3,13 +3,27 @@ import { classify, gridRubrics, type AccountGrid, type Rubric, type RubricId } f
 // Masse salariale réelle, lue telle que le journal de paie la renvoie : solde = débit − crédit, en centimes entiers.
 // Masse salariale chargée = rubriques « brut » + rubriques « cotisations ». Aucune valeur reconstituée : un mois sans
 // journal ou une ligne sans montant rend le mois n.d., jamais zéro.
-export type LedgerLine = { key: string; month: string; accountId: string; accountName: string | null; debitCents: number | null; creditCents: number | null; contractId: string | null };
+export type Analytic = { type: string | null; code: string | null; value: string | null };
+export type LedgerLine = { key: string; month: string; accountId: string; accountName: string | null; debitCents: number | null; creditCents: number | null; contractId: string | null; analytic?: Analytic[] };
 export type JournalInput = {
   lines: LedgerLine[];
   months: string[]; // mois lus (périmètre de la lecture)
   openMonths: string[]; // paie non clôturée à la lecture
   grid: AccountGrid;
+  serviceAxis?: string | null; // type de code analytique qui porte le service (Paramètres)
+  serviceFilter?: { value: string | null }; // restreint aux lignes d'un service (null : lignes sans code de l'axe)
 };
+
+// Service d'une ligne : code (à défaut libellé) du code analytique de l'axe choisi ; null si la ligne n'en porte pas.
+// PayFit peut renvoyer des codes analytiques sans type : leur axe s'appelle NO_TYPE.
+export const NO_TYPE = "(sans type)";
+export const axisOf = (a: Analytic) => (typeof a.type === "string" && a.type.length > 0 ? a.type : NO_TYPE);
+export function serviceOf(line: LedgerLine, axis: string | null | undefined): string | null {
+  if (!axis) return null;
+  const a = line.analytic?.find((x) => axisOf(x) === axis);
+  return a ? (a.code ?? a.value ?? null) : null;
+}
+export const withService = (input: JournalInput, value: string | null): JournalInput => ({ ...input, serviceFilter: { value } });
 export type Nd = { code: "not-read" | "no-journal" | "amount-missing" | "month-nd" | "etp-nd" | "zero-base"; reason: string; months?: string[] };
 
 export type AccountTotal = { accountId: string; accountName: string | null; rubric: Rubric | null; debitCents: number; creditCents: number; balanceCents: number; lines: number };
@@ -25,9 +39,10 @@ export type MonthPayroll =
       byRubric: Record<RubricId, number>;
       accounts: AccountTotal[]; // comptes de charges de personnel (63/64) et comptes classés
       unclassified: AccountTotal[]; // comptes 63/64 sans rubrique : hors masse, signalés
+      paidContracts: string[]; // contrats portant une ligne de brut dans le mois (personnes-mois rémunérées)
     };
 
-const zeroRubrics = (): Record<RubricId, number> => ({ salaires: 0, primes: 0, indemnites: 0, cotisations: 0, "provisions-cp": 0, "autres-charges": 0, taxes: 0 });
+const zeroRubrics = (): Record<RubricId, number> => ({ salaires: 0, primes: 0, stages: 0, indemnites: 0, cotisations: 0, taxes: 0, "provisions-cp": 0, "autres-charges": 0 });
 
 const cache = new WeakMap<JournalInput, Map<string, MonthPayroll>>();
 
@@ -47,8 +62,11 @@ export function monthPayroll(input: JournalInput, month: string): MonthPayroll {
 function computeMonth(input: JournalInput, month: string): MonthPayroll {
   const open = input.openMonths.includes(month);
   if (!input.months.includes(month)) return { month, kind: "nd", open, nd: { code: "not-read", reason: `mois ${month} hors de la lecture PayFit appliquée` } };
-  const lines = input.lines.filter((l) => l.month === month);
-  if (!lines.length) return { month, kind: "nd", open, nd: { code: "no-journal", reason: `journal de paie ${month} non renvoyé par PayFit (mois non clôturé ou hors historique)` } };
+  const all = input.lines.filter((l) => l.month === month);
+  if (!all.length) return { month, kind: "nd", open, nd: { code: "no-journal", reason: `journal de paie ${month} non renvoyé par PayFit (mois non clôturé ou hors historique)` } };
+  const f = input.serviceFilter;
+  const lines = f ? all.filter((l) => serviceOf(l, input.serviceAxis) === f.value) : all;
+  const paid = new Set<string>();
   const rubrics = gridRubrics(input.grid);
   const accounts = new Map<string, AccountTotal & { payroll: boolean }>();
   for (const l of lines) {
@@ -58,6 +76,7 @@ function computeMonth(input: JournalInput, month: string): MonthPayroll {
     if (l.debitCents === null && l.creditCents === null) {
       return { month, kind: "nd", open, nd: { code: "amount-missing", reason: `ligne ${l.key} du compte ${l.accountId} sans montant (ni débit ni crédit)` } };
     }
+    if (c.rubric?.role === "brut" && l.contractId) paid.add(l.contractId);
     const a = accounts.get(l.accountId) ?? { accountId: l.accountId, accountName: l.accountName, rubric: c.rubric, debitCents: 0, creditCents: 0, balanceCents: 0, lines: 0, payroll };
     a.debitCents += l.debitCents ?? 0;
     a.creditCents += l.creditCents ?? 0;
@@ -67,19 +86,19 @@ function computeMonth(input: JournalInput, month: string): MonthPayroll {
     accounts.set(l.accountId, a);
   }
   const byRubric = zeroRubrics();
-  const all = [...accounts.values()].sort((x, y) => x.accountId.localeCompare(y.accountId));
-  for (const a of all) if (a.rubric) byRubric[a.rubric.id] += a.balanceCents;
-  const sumRole = (role: Rubric["role"]) => all.filter((a) => a.rubric?.role === role).reduce((s, a) => s + a.balanceCents, 0);
+  const totals = [...accounts.values()].sort((x, y) => x.accountId.localeCompare(y.accountId));
+  for (const a of totals) if (a.rubric) byRubric[a.rubric.id] += a.balanceCents;
+  const sumRole = (role: Rubric["role"]) => totals.filter((a) => a.rubric?.role === role).reduce((s, a) => s + a.balanceCents, 0);
   const brut = sumRole("brut");
   const cotisations = sumRole("cotisations");
   const strip = ({ payroll: _p, ...a }: AccountTotal & { payroll: boolean }): AccountTotal => a;
-  return { month, kind: "value", open, brut, cotisations, masse: brut + cotisations, byRubric, accounts: all.map(strip), unclassified: all.filter((a) => !a.rubric).map(strip) };
+  return { month, kind: "value", open, brut, cotisations, masse: brut + cotisations, byRubric, accounts: totals.map(strip), unclassified: totals.filter((a) => !a.rubric).map(strip), paidContracts: [...paid].sort() };
 }
 
 // Somme d'une fenêtre de mois : n.d. si un mois l'est (mois nommés), sinon totaux exacts ; mois provisoires listés.
 export type PayrollWindow =
   | { kind: "nd"; nd: Nd; months: MonthPayroll[] }
-  | { kind: "value"; brut: number; cotisations: number; masse: number; byRubric: Record<RubricId, number>; months: MonthPayroll[]; openMonths: string[] };
+  | { kind: "value"; brut: number; cotisations: number; masse: number; byRubric: Record<RubricId, number>; months: MonthPayroll[]; openMonths: string[]; paidContractMonths: number };
 
 export function windowPayroll(input: JournalInput, months: string[]): PayrollWindow {
   const rows = months.map((m) => monthPayroll(input, m));
@@ -96,7 +115,15 @@ export function windowPayroll(input: JournalInput, months: string[]): PayrollWin
     byRubric,
     months: rows,
     openMonths: ok.filter((r) => r.open).map((r) => r.month),
+    paidContractMonths: ok.reduce((s, r) => s + r.paidContracts.length, 0),
   };
+}
+
+// Services présents sur la période (codes de l'axe choisi), plus « non ventilé » (null) si des lignes n'en portent pas.
+export function servicesOf(input: JournalInput, months: string[]): (string | null)[] {
+  const set = new Set<string | null>();
+  for (const l of input.lines) if (months.includes(l.month)) set.add(serviceOf(l, input.serviceAxis));
+  return [...set].sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)));
 }
 
 export const shiftYear = (month: string, years: number) => `${Number(month.slice(0, 4)) + years}${month.slice(4)}`;

@@ -13,7 +13,9 @@ import { requireWorkspace } from "@/lib/workspace";
 import { HeadcountForm } from "./HeadcountForm";
 import { PayfitHistoryForm } from "./PayfitHistoryForm";
 import { PayrollGridForm } from "./PayrollGridForm";
-import { getPayrollGrid } from "@/lib/payroll-settings";
+import { getPayrollGrid, getServiceAxis } from "@/lib/payroll-settings";
+import { journalAxes } from "@/lib/payroll/context";
+import { ServiceAxisForm } from "./ServiceAxisForm";
 import { gridRubrics } from "@/lib/payroll/grid";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,8 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
     withWorkspace(workspace.id, (tx) =>
       tx.select({ updatedAt: workspaceSetting.updatedAt }).from(workspaceSetting).where(and(eq(workspaceSetting.workspaceId, workspace.id), eq(workspaceSetting.key, key))),
     ).then(([r]) => r?.updatedAt ?? null);
+  const axes = await journalAxes(workspace.id);
+  const serviceAxis = await getServiceAxis(workspace.id, axes);
   const [natures, row, history, historyAt, payroll] = await Promise.all([getHeadcountNatures(workspace.id), updatedAt(HEADCOUNT_NATURES_KEY), getPayfitHistoryMode(workspace.id), updatedAt(PAYFIT_HISTORY_KEY), getPayrollGrid(workspace.id)]);
 
   return (
@@ -102,6 +106,10 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
             : `Modifié le ${payroll.updatedAt ? dateTimeFmt.format(payroll.updatedAt) : "n.d."} par un administrateur.`}
         </p>
         <PayrollGridForm slug={slug} rows={gridRubrics(payroll.grid)} disabled={!isAdmin} />
+        <p className="desc" data-testid="setting-payroll-axis-origin">
+          Service : {serviceAxis.origin === "setting" ? `axe « ${serviceAxis.axis ?? "aucun"} », modifié le ${serviceAxis.updatedAt ? dateTimeFmt.format(serviceAxis.updatedAt) : "n.d."}` : serviceAxis.origin === "single-axis" ? `axe « ${serviceAxis.axis} », seul axe analytique présent dans le journal (défaut)` : axes.length ? "aucun axe choisi" : "aucun code analytique dans le journal PayFit appliqué"}.
+        </p>
+        <ServiceAxisForm slug={slug} axes={axes} current={serviceAxis.axis} disabled={!isAdmin} />
       </section>
     </>
   );

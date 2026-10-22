@@ -167,7 +167,9 @@ export function createFixtureFetch(apiKey: string): FetchLike {
       const lines = ph.periods
         .filter((p) => p.month === month && contractIds.has(p.contractId))
         .flatMap((p) => {
-          const base = { operationDate: date, analyticCodes: [], employeeFullName: null, contractId: p.contractId };
+          // Service fictif : code analytique « Service » (TEST-SVC-A/B/C) selon le numéro du contrat modulo 3.
+          const svc = ["A", "B", "C"][Number(p.contractId.slice(-3)) % 3];
+          const base = { operationDate: date, analyticCodes: [{ type: "Service", code: `TEST-SVC-${svc}`, value: `Service fictif ${svc}` }], employeeFullName: null, contractId: p.contractId };
           const out = [];
           if (p.grossMinor !== null) {
             out.push({ ...base, accountId: "641100", accountName: "Salaires et appointements", debit: euros(p.grossMinor), credit: null });
