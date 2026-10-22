@@ -173,3 +173,22 @@ describe("temps par contrat", async () => {
     expect(r.warnings.some((w) => w.includes("2025-01") && w.includes("négatif"))).toBe(true);
   });
 });
+
+describe("mois daté absent chez PayFit (404)", () => {
+  it("signale le mois indisponible et conserve les autres : jamais une lecture en échec ni un mois à zéro", async () => {
+    const base = createFixtureFetch("fixture-A-1");
+    const f: FetchLike = async (url, init) => {
+      if (url.includes("/accounting-v2?date=202610") || url.includes("/contracts/time?") && url.includes("date=202610")) return json({ message: "not found" }, 404);
+      return base(url, init);
+    };
+    const r = await readPayFit(createPayFitClient("fixture-A-1", { fetchImpl: f, minIntervalMs: 0 }), ["2026-09", "2026-10"]);
+    expect(r.collections.find((c) => c.collection === "ledger_lines")?.status).toBe("read");
+    expect(r.records.some((x) => x.collection === "ledger_lines" && x.period === "2026-09")).toBe(true);
+    expect(r.records.some((x) => x.collection === "ledger_lines" && x.period === "2026-10")).toBe(false);
+    expect(r.records.some((x) => x.collection === "worked_time" && x.period === "2026-10")).toBe(false);
+    expect(r.warnings.filter((w) => w.includes("2026-10") && w.includes("indisponible chez PayFit"))).toHaveLength(2);
+    // Un 404 sur une collection non datée reste une erreur.
+    const g: FetchLike = async (url, init) => (url.includes("/collaborators") ? json({}, 404) : base(url, init));
+    await expect(readPayFit(createPayFitClient("fixture-A-1", { fetchImpl: g, minIntervalMs: 0 }), ["2026-09"])).rejects.toThrow();
+  });
+});

@@ -367,11 +367,24 @@ export async function readPayFit(client: PayFitClient, months: string[]): Promis
     ),
   );
   if (has(PAYFIT_SCOPES.contracts) && !withTime) warnings.push("Quotités et horaires contractuels non lus : droit contracts:time-information:read non accordé.");
+  // Un mois daté absent chez PayFit (404 : paie non clôturée, mois antérieur à l'historique) n'invalide pas la lecture :
+  // le mois est signalé comme indisponible et ses enregistrements sont absents (n.d. en aval), jamais mis à zéro.
+  const monthly = async <T,>(label: string, month: string, read: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await read();
+    } catch (e) {
+      if (e instanceof ProviderError && e.code === "not_found") {
+        warnings.push(`${label} ${month} : indisponible chez PayFit (mois non clôturé ou hors historique) ; aucune donnée pour ce mois.`);
+        return null;
+      }
+      throw e;
+    }
+  };
   await collection("worked_time", PAYFIT_SCOPES.time, async () => {
     const out: SourceRecordInput[] = [];
     for (const month of months) {
-      const rows = await client.paginate(cid, "contracts/time", "contracts", (r) => id(r.contractId, "time.contractId"), { date: month.replace("-", "") });
-      out.push(...rows.map((r) => normalizeWorkedTime(r, month)));
+      const rows = await monthly("Temps", month, () => client.paginate(cid, "contracts/time", "contracts", (r) => id(r.contractId, "time.contractId"), { date: month.replace("-", "") }));
+      if (rows) out.push(...rows.map((r) => normalizeWorkedTime(r, month)));
     }
     return out;
   });
@@ -390,13 +403,18 @@ export async function readPayFit(client: PayFitClient, months: string[]): Promis
   });
   await collection("payroll_status", PAYFIT_SCOPES.accounting, async () => {
     const out: SourceRecordInput[] = [];
-    for (const month of months) out.push(normalizePayrollStatus(await client.get(`/companies/${cid}/payroll-status?date=${month.replace("-", "")}`), month));
+    for (const month of months) {
+      const body = await monthly("Statut de paie", month, () => client.get(`/companies/${cid}/payroll-status?date=${month.replace("-", "")}`));
+      if (body !== null) out.push(normalizePayrollStatus(body, month));
+    }
     return out;
   });
   await collection("ledger_lines", PAYFIT_SCOPES.accounting, async () => {
     const out: SourceRecordInput[] = [];
     for (const month of months) {
-      const { records: lines, offPeriod } = normalizeLedger(await client.get(`/companies/${cid}/accounting-v2?date=${month.replace("-", "")}`), month);
+      const body = await monthly("Journal", month, () => client.get(`/companies/${cid}/accounting-v2?date=${month.replace("-", "")}`));
+      if (body === null) continue;
+      const { records: lines, offPeriod } = normalizeLedger(body, month);
       if (offPeriod > 0) warnings.push(`Journal ${month} : ${offPeriod} ligne(s) datée(s) hors du mois demandé.`);
       out.push(...lines);
     }
