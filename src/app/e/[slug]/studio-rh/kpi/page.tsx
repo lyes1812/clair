@@ -406,12 +406,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                 <td />
                 <Cell col="headcount" shown={averageShown(t.headcountAverage.current)} href={detailHref("headcount-avg", null)} />
                 <Cell col="etp" shown={averageShown(t.etpAverage.current)} href={detailHref("etp-avg", null)} />
-                <Cell
-                  col="entries"
-                  shown={toCur.kind === "exact" && toCur.entries === null ? { text: "n.d. — entrées non exactes sur la période (sans effet sur la formule sorties ÷ effectif au premier jour)", kind: "nd" } : show(toCur, (x) => String(x.entries))}
-                  href={detailHref("turnover", null)}
-                />
-                <Cell col="exits" shown={show(toCur, (x) => String(x.exits))} href={detailHref("turnover", null)} />
+                <Cell col="entries" shown={show(dash.movements.entries, (x) => String(x.value))} href={detailHref("turnover", null)} />
+                <Cell col="exits" shown={show(dash.movements.exits, (x) => String(x.value))} href={detailHref("turnover", null)} />
                 <Cell col="theoretical" shown={show(dash.theoretical, (x) => fmtHalfDays(x.half))} href={detailHref("absenteeism", null)} />
                 <Cell col="absence-days" shown={show(absCur, (x) => fmtHalfDays(x.ratio.num))} href={detailHref("absenteeism", null)} />
                 <Cell col="absenteeism" shown={show(absCur, (x) => fmtPercent(x.ratio))} href={detailHref("absenteeism", null)} />

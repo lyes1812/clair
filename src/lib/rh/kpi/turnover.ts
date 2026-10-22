@@ -6,7 +6,7 @@ import { headcountAverage } from "./average";
 import { ratio } from "./fraction";
 import { memo } from "./memo";
 import { checkWindow, countedOpts } from "./period";
-import { kpiNd, type EventContribution, type KpiInput, type MonthMovements, type Turnover, type Window } from "./types";
+import { kpiNd, periodReason, type EventContribution, type KpiInput, type MonthMovements, type MovementTotal, type Turnover, type Window } from "./types";
 
 const eventKey = (e: EventDraft) => `${e.contractKey}|${e.kind}`;
 
@@ -76,12 +76,15 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
       if (params.neutralizeContinuity && partner?.counted) {
         return { row: r, why: "neutralized", label: `contrat continu neutralisé (avec ${externalOf.get(partner.event.contractKey) ?? partner.event.contractKey} le ${formatDate(partner.event.date)})`, partner: p };
       }
-      if (params.neutralizeContinuity && !partner && r.event.personKey !== null && !neighbourKnown(data, r.event.kind, r.event.date)) {
-        const day = formatDate(addDays(r.event.date, r.event.kind === "entry" ? -1 : 1));
-        return { row: r, why: "continuity-unknown", label: `continuité non vérifiable : le ${day} n'est pas couvert par la source (contrat ${r.event.kind === "entry" ? "précédent" : "suivant"} inconnu)`, partner: p };
-      }
+      // Sortie de nature exclue : jamais comptée, qu'elle soit continue ou non ⇒ aucune incertitude.
       if (r.event.kind === "exit" && r.event.nature !== null && params.excludedExitNatures.includes(r.event.nature)) {
         return { row: r, why: "excluded-nature", label: `sortie exclue : nature ${contractNatureLabel(r.event.nature)} (Paramètres)`, partner: p };
+      }
+      // Mouvement qui serait compté : sans partenaire compté connu, il faut que le jour voisin soit couvert (un partenaire compté
+      // pourrait y être déclaré plus tard, par exemple sur un autre SIRET).
+      if (params.neutralizeContinuity && r.event.personKey !== null && !neighbourKnown(data, r.event.kind, r.event.date)) {
+        const day = formatDate(addDays(r.event.date, r.event.kind === "entry" ? -1 : 1));
+        return { row: r, why: "continuity-unknown", label: `continuité non vérifiable : le ${day} n'est pas couvert par la source (contrat ${r.event.kind === "entry" ? "précédent" : "suivant"} inconnu)`, partner: p };
       }
       return { row: r, why: "counted", label: "compté", partner: p };
     });
@@ -96,6 +99,30 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
       return { kind: c.kind, value: events.filter((x) => x.why === "counted" && x.row.event.kind === kind).length, qualifiers: c.qualifiers };
     };
     return { month, entries: count(ml.entriesCount, "entry"), exits: count(ml.exitsCount, "exit"), events };
+  });
+}
+
+// Entrées et sorties comptées d'une période (ligne « Période » de l'écran) : somme des mois, « ≥ » si un mois l'est, n.d. avec
+// la raison du premier mois n.d. ; indépendant de la formule du turnover.
+export function windowMovements(input: KpiInput, w: Window): { entries: MovementTotal; exits: MovementTotal } {
+  return memo(input, `mv-w:${w.from}:${w.to}`, () => {
+    const g = checkWindow(input.data, w);
+    if (g) return { entries: { kind: "nd", nd: g }, exits: { kind: "nd", nd: g } };
+    const months = w.months.map((m) => monthMovements(input, m));
+    const total = (pick: (m: MonthMovements) => Count): MovementTotal => {
+      const nds = months.filter((m) => pick(m).kind === "nd");
+      if (nds.length) {
+        const first = pick(nds[0]);
+        const reason = first.kind === "nd" ? first.nd.reason : "n.d.";
+        return { kind: "nd", nd: kpiNd("month-nd", periodReason(nds.map((m) => m.month), nds[0].month, reason), { months: nds.map((m) => m.month) }) };
+      }
+      const value = months.reduce((s, m) => {
+        const c = pick(m);
+        return s + (c.kind === "nd" ? 0 : c.value);
+      }, 0);
+      return { kind: months.some((m) => pick(m).kind === "lower_bound") ? "lower_bound" : "exact", value };
+    };
+    return { entries: total((m) => m.entries), exits: total((m) => m.exits) };
   });
 }
 

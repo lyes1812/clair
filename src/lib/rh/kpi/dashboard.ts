@@ -5,7 +5,7 @@ import { etpAverage, headcountAverage } from "./average";
 import { compareWindows, etpValue } from "./compare";
 import { etpMonthEnd } from "./etp";
 import { countedOpts, lastClosedMonth, monthWindow, previousWindow } from "./period";
-import { monthMovements, turnover } from "./turnover";
+import { monthMovements, turnover, windowMovements } from "./turnover";
 import type { EtpMonthEnd, KpiDashboard, KpiDetail, KpiDetailId, KpiInput, KpiRow, Window } from "./types";
 
 // Assemblage de l'écran KPI RH : tuiles (valeur, N-1, écart), une ligne par mois de la fenêtre, types d'absence.
@@ -39,6 +39,7 @@ export function kpiDashboard(input: KpiInput, w: Window): KpiDashboard {
     },
     rows,
     theoretical: theoreticalWindow(input, w),
+    movements: windowMovements(input, w),
     absenceTypes: absenceTypeChoices(input),
   };
 }

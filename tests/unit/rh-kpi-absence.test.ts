@@ -242,6 +242,15 @@ describe("absentéisme — dates inconnues couvertes, statut nul sans date, jour
     const m = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day")], "2025-03");
     expect(r(m)).toBe("lower_bound:12/124");
     if (m.kind !== "nd") expect(m.slices[0].notes.join(" ")).toContain("10 demi-journée(s) sous le contrat C-C2 de la même personne");
+    // Sans statut : 12 demi-journées sous C-C1 et 10 sous C-C2, toutes incertaines et tracées sur la ligne écartée.
+    const ns = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day", { status: null })], "2025-03");
+    expect(r(ns)).toBe("lower_bound:0/124");
+    if (ns.kind !== "nd") expect(ns.excluded[0]).toMatchObject({ why: "status-nd", uncertain: 22, label: expect.stringContaining("sous le contrat C-C2") });
+    // Absence ouverte (sans fin) sur le CDD terminé le 15/03 : en avril, elle peut couvrir tout le CDI C-C2 ⇒ « ≥ ».
+    // Avril : C-A 30 j + C-C2 30 j = 60 j = 120 demi-journées ; 60 demi-journées incertaines sous C-C2.
+    const open = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", null, null)], "2025-04");
+    expect(r(open)).toBe("lower_bound:0/120");
+    if (open.kind !== "nd") expect(open.excluded[0].label).toContain("60 demi-journée(s) sous le contrat C-C2");
     // Une absence rattachée à C-C2 qui couvre ces jours lève l'incertitude.
     expect(r(run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day"), absence("Y", "C-C2", "2025-03-16", "beginning-of-day", "2025-03-20", "end-of-day")], "2025-03"))).toBe("exact:22/124");
   });

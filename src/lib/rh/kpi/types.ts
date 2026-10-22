@@ -70,6 +70,7 @@ export type Average =
 export type EventWhy = "counted" | "out-of-scope" | "future" | "neutralized" | "excluded-nature" | "continuity-unknown";
 export type EventContribution = { row: EventRow; why: EventWhy; label: string; partner: { contractKey: string; date: string } | null };
 export type MonthMovements = { month: string; entries: Count; exits: Count; events: EventContribution[] };
+export type MovementTotal = { kind: Kind; value: number } | { kind: "nd"; nd: KpiNd };
 export type TurnoverBase =
   | { kind: "average"; average: Extract<Average, { kind: "exact" }> }
   | { kind: "start"; date: string; persons: number; contractKeys: string[] };
@@ -140,6 +141,7 @@ export type KpiDashboard = {
   tiles: { etpEnd: Compared<EtpMonthEnd>; etpAverage: Compared<Average>; headcountAverage: Compared<Average>; turnover: Compared<Turnover>; absenteeism: Compared<Absenteeism> };
   rows: KpiRow[];
   theoretical: TheoreticalWindow;
+  movements: { entries: MovementTotal; exits: MovementTotal };
   absenceTypes: AbsenceTypeChoice[];
 };
 export type KpiDetailId = "etp-end" | "headcount" | "entries" | "exits" | "theoretical" | "absenteeism" | "etp-avg" | "headcount-avg" | "turnover";

@@ -4,7 +4,7 @@ import { createFixtureFetch } from "@/lib/connectors/payfit/fixture";
 import { compareWindows } from "@/lib/rh/kpi/compare";
 import { same } from "@/lib/rh/kpi/fraction";
 import { civilWindow, rollingWindow } from "@/lib/rh/kpi/period";
-import { monthMovements, turnover } from "@/lib/rh/kpi/turnover";
+import { monthMovements, turnover, windowMovements } from "@/lib/rh/kpi/turnover";
 import type { Turnover } from "@/lib/rh/kpi/types";
 import { NIR, PAYFIT_EDGES, payfitEdgeFetch, type DsnDeclarationSpec, type DsnPerson } from "./helpers/edge-cases";
 import { DSN_ABSENCES, fixtureAbsences, kpiInput } from "./helpers/kpi";
@@ -243,5 +243,41 @@ describe("turnover — contrats continus aux bords de la couverture DSN (jour vo
     expect(start).toMatchObject({ entries: null, exits: 0 });
     const withSept = dsnBuild(edgeFiles(monthRange("2024-09", "2025-09").map(left)));
     expect(isRatio(turnover(kpiInput(withSept, DSN_ABSENCES), w), 0, 48)).toBe(true);
+    // Ligne « Période » : sorties exactes (0) même si les entrées sont n.d., chacune avec sa propre raison.
+    const totals = windowMovements(kpiInput(first, DSN_ABSENCES), w);
+    expect(totals.exits).toEqual({ kind: "exact", value: 0 });
+    expect(totals.entries).toMatchObject({ kind: "nd", nd: { months: ["2024-10"], reason: expect.stringContaining("K-C2 le 01/10/2024") } });
+  });
+  it("sortie de nature exclue au dernier jour déposé : jamais comptée ⇒ exact (0/48), sans incertitude", () => {
+    const before = dsnBuild(edgeFiles(monthRange("2024-10", "2025-09").map(right)));
+    const t = turnover(kpiInput(before, DSN_ABSENCES, { excludedExitNatures: ["02"] }), w);
+    expect(isRatio(t, 0, 48)).toBe(true);
+    expect(monthMovements(kpiInput(before, DSN_ABSENCES, { excludedExitNatures: ["02"] }), "2025-09").events.map((e) => e.why)).toEqual(["excluded-nature"]);
+  });
+  it("deux SIRET : partenaire non compté trouvé (stage) mais l'autre SIRET n'a pas déposé le lendemain ⇒ n.d. ; déposé avec un CDI ⇒ neutralisé", () => {
+    // A : CDI K-A1 au SIRET 1 jusqu'au 30/09/2025, stage K-A2 (29) au SIRET 1 dès le 01/10/2025 ; le SIRET 2 dépose (ou non)
+    // octobre 2025 avec un CDI K-A3 de A commençant le 01/10/2025. B (SIRET 1) et C (SIRET 2) stables : 3 personnes, Σ = 36.
+    const spec = (month: string, nic: string, withA3: boolean): DsnDeclarationSpec => {
+      const people: DsnPerson[] = [];
+      if (nic === "00011") {
+        people.push({ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] });
+        const a: DsnPerson["contracts"] = [];
+        if (month <= "2025-09") a.push({ number: "K-A1", start: "2024-03-01", nature: "01", gross: "1500.00", ...(month === "2025-09" ? { end: "2025-09-30", endReason: "059" } : {}) });
+        if (month >= "2025-10") a.push({ number: "K-A2", start: "2025-10-01", nature: "29", gross: "600.00" });
+        people.push({ nir: NIR.a, employeeNumber: "A", contracts: a });
+      } else {
+        people.push({ nir: NIR.c, employeeNumber: "C", contracts: [{ number: "K-C", start: "2024-01-01", nature: "01", gross: "2000.00" }] });
+        if (withA3 && month >= "2025-10") people.push({ nir: NIR.a, employeeNumber: "A", contracts: [{ number: "K-A3", start: "2025-10-01", nature: "01", gross: "900.00" }] });
+      }
+      return { month, nic, people };
+    };
+    const s1 = monthRange("2024-10", "2025-10").map((m) => spec(m, "00011", false));
+    const files = (specs: DsnDeclarationSpec[]) => edgeFiles(specs).map((f, i) => ({ ...f, filename: `${i}-${f.filename}` }));
+    const partial = dsnBuild(files([...s1, ...monthRange("2024-10", "2025-09").map((m) => spec(m, "00022", false))]));
+    const full = dsnBuild(files([...s1, ...monthRange("2024-10", "2025-10").map((m) => spec(m, "00022", true))]));
+    expect(turnover(kpiInput(partial, DSN_ABSENCES), w)).toMatchObject({ kind: "nd", nd: { months: ["2025-09"], reason: expect.stringContaining("K-A1 le 30/09/2025") } });
+    const t = turnover(kpiInput(full, DSN_ABSENCES), w);
+    expect(isRatio(t, 0, 72)).toBe(true);
+    expect(monthMovements(kpiInput(full, DSN_ABSENCES), "2025-09").events.map((e) => e.label)).toEqual(["contrat continu neutralisé (avec K-A3 le 01/10/2025)"]);
   });
 });
