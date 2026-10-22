@@ -45,7 +45,7 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   // Le transport fictif renvoie tous les contrats : avril 2025 = 7 personnes, 1 entrée (002), 0 sortie, sans « ≥ » ni n.d.
   await page.goto(`${collab}?mois=2025-04`);
   await expect(page.getByTestId("payfit-history-notice")).toContainText("Données telles que remontées par l'API PayFit");
-  await expect(page.getByTestId("payfit-history-notice")).toContainText("peuvent être sous-estimés");
+  await expect(page.getByTestId("payfit-history-notice")).toContainText("faussés dans un sens ou dans l'autre");
   await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("7");
   await expect(page.getByTestId("entries-count").locator("dd")).toHaveText("1");
   await expect(page.getByTestId("exits-count").locator("dd")).toHaveText("0");

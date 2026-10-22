@@ -44,8 +44,8 @@ export function PayfitHistoryNotice({ ctx }: { ctx: CollabContext }) {
       {h.limit ? (
         <>
           PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois : pour les mois {(h.limit.lowerFrom === h.limit.lowerTo ? formatMonth(h.limit.lowerFrom) : `${formatMonth(h.limit.lowerFrom)} à ${formatMonth(h.limit.lowerTo)}`).toLowerCase()}
-          {h.limit.exactFrom ? ` (avant le ${formatDate(h.limit.exactFrom)})` : ""}, effectifs, entrées, sorties, turnover et absentéisme ne comptent pas les
-          salariés sortis avant cette limite et peuvent être sous-estimés.
+          {h.limit.exactFrom ? ` (avant le ${formatDate(h.limit.exactFrom)})` : ""}, les chiffres ne comptent pas les salariés sortis avant cette
+          limite : les effectifs, l'ETP et les sorties peuvent être sous-estimés ; les entrées, le turnover et l'absentéisme peuvent être faussés dans un sens ou dans l'autre (un contrat qui fait suite à un contrat non renvoyé compte comme une entrée, et les dénominateurs sont réduits).
         </>
       ) : (
         <>Aucun mois de la lecture n'est antérieur à la limite de conservation des contrats archivés.</>

@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { compareWindows } from "@/lib/rh/kpi/compare";
-import { absenteeism, theoreticalWindow } from "@/lib/rh/kpi/absence";
+import { monthRange } from "@/lib/connectors/months";
+import { absenteeism, absenteeismMonth, theoreticalWindow } from "@/lib/rh/kpi/absence";
 import { same } from "@/lib/rh/kpi/fraction";
 import { rollingWindow } from "@/lib/rh/kpi/period";
 import { turnover } from "@/lib/rh/kpi/turnover";
 import type { Absenteeism, Turnover } from "@/lib/rh/kpi/types";
 import { payfitHistoryLimit, rawPayfitHistory } from "@/lib/rh/raw-history";
-import { DSN_ABSENCES, fixtureAbsences, kpiInput } from "./helpers/kpi";
-import { dsnFixtureBuild, payfitEdgeBuild, payfitFixtureBuild } from "./helpers/rh";
+import { payfitEdgeFetch } from "./helpers/edge-cases";
+import { absence, DSN_ABSENCES, fixtureAbsences, kpiInput, readAbsences } from "./helpers/kpi";
+import { dsnFixtureBuild, payfitBuild, payfitEdgeBuild, payfitFixtureBuild } from "./helpers/rh";
 
 // Mode « brut » de l'historique PayFit (décision de Lyes, 22/10/2026) : les mois antérieurs à la limite de conservation sont
 // calculés sur ce que l'API renvoie. Le transport fictif renvoie tous les contrats : les chiffres bruts égalent ceux de la DSN.
@@ -63,5 +65,31 @@ describe("historique PayFit brut — KPI sur la lecture fictive du 21/10/2026", 
   it("type par défaut (maladie ordinaire) absent de la lecture fictive : 0 j ÷ 2 510 j, exact", () => {
     const a = absenteeism(kpiInput(raw, abs, { absenceTypes: ["fr_maladie_ordinaire"] }), w);
     expect(isRatio(a, 0, 5020)).toBe(true);
+  });
+});
+
+describe("historique PayFit brut — absence d'un contrat que PayFit ne renvoie plus (lecture du 31/01/2026, limite 31/01/2025)", async () => {
+  // C-1 seul renvoyé, présent tout du long. C-OLD (archivé) n'est plus dans la collection contracts mais ses absences peuvent l'être.
+  const months = monthRange("2024-10", "2026-01");
+  const stored = await payfitBuild("cle-fictive-edge-1234", payfitEdgeFetch("cle-fictive-edge-1234", { collaborators: [{ id: "P1" }], contracts: [{ contractId: "C-1", collaboratorId: "P1", startDate: "2024-06-01", endDate: null }] }), months, new Date("2026-01-31T08:00:00Z"));
+  const raw = rawPayfitHistory(stored);
+  const rows = [absence("A-OLD", "C-OLD", "2024-11-04", "beginning-of-day", "2024-11-08", "end-of-day")];
+  it("brut : absence terminée avant la limite ⇒ non comptée et listée ; novembre 2024 = 0 ÷ 30 j (C-1), exact ; fenêtre calculée", () => {
+    const nov = absenteeismMonth(kpiInput(raw, readAbsences(rows, months)), "2024-11");
+    expect(nov.kind).toBe("exact");
+    if (nov.kind !== "nd") {
+      expect(same(nov.ratio, { num: 0, den: 60 })).toBe(true);
+      expect(nov.excluded).toMatchObject([{ absenceId: "A-OLD", why: "contract-not-returned", label: expect.stringContaining("non renvoyé par PayFit") }]);
+    }
+    expect(absenteeism(kpiInput(raw, readAbsences(rows, months)), rollingWindow("2025-12")).kind).toBe("exact");
+  });
+  it("signalé : le mois reste n.d. (borne basse), sans changement", () => {
+    expect(absenteeismMonth(kpiInput(stored, readAbsences(rows, months)), "2024-11")).toMatchObject({ kind: "nd", nd: { code: "month-lower-bound" } });
+  });
+  it("brut : contrat inconnu pour une absence qui se termine le 31/01/2025 (limite) ou après ⇒ anomalie, n.d.", () => {
+    const edge = [absence("A-LIM", "C-OLD", "2025-01-27", "beginning-of-day", "2025-01-31", "end-of-day")];
+    expect(absenteeismMonth(kpiInput(raw, readAbsences(edge, months)), "2025-01")).toMatchObject({ kind: "nd", nd: { code: "absence-unknown-contract" } });
+    const late = [absence("A-NEW", "C-OLD", "2025-06-02", "beginning-of-day", "2025-06-03", "end-of-day")];
+    expect(absenteeismMonth(kpiInput(raw, readAbsences(late, months)), "2025-06")).toMatchObject({ kind: "nd", nd: { code: "absence-unknown-contract" } });
   });
 });

@@ -58,8 +58,8 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
         <h2>Historique PayFit</h2>
         <p>
           PayFit ne renvoie plus les contrats archivés depuis plus de {PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois. Pour les mois antérieurs à la date de
-          lecture moins {PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois, les effectifs, entrées, sorties, le turnover et l'absentéisme calculés sur ce que
-          l'API renvoie peuvent être sous-estimés.
+          lecture moins {PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois, les chiffres calculés sur ce que l'API renvoie ne comptent pas ces salariés :
+          les effectifs, l'ETP et les sorties peuvent être sous-estimés ; les entrées, le turnover et l'absentéisme peuvent être faussés dans un sens ou dans l'autre (un contrat qui fait suite à un contrat non renvoyé compte comme une entrée, et les dénominateurs sont réduits).
         </p>
         <p className="desc" data-testid="setting-payfit-history-origin">
           {history.origin === "default"

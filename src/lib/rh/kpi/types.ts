@@ -108,7 +108,7 @@ export type AbsenceExcluded = {
   contractId: string;
   type: string;
   status: string | null;
-  why: "type" | "status" | "status-nd" | "contract-out-of-scope" | "date-nd-covered";
+  why: "type" | "status" | "status-nd" | "contract-out-of-scope" | "contract-not-returned" | "date-nd-covered";
   label: string;
   uncertain: number;
 };

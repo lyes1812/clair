@@ -10,6 +10,7 @@ import { civilWindow, closedMonths, defaultYear, lastClosedMonth, previousWindow
 import type { Compared, KpiDetailId, KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
 import { loadKpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
+import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import type { Shown } from "@/lib/rh/view";
 import {
@@ -82,7 +83,7 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
 }
 
 // Couverture d'un mois du tableau : complet, borne basse ou n.d. avec la raison.
-function coverageShown(data: RhBuildData, month: string, establishments?: string[]): Shown {
+function coverageShown(data: RhBuildData, month: string, establishments?: string[], raw?: PayfitHistoryLimit | null): Shown {
   const ref = data.build.referenceDate;
   if (ref && monthEnd(month) > ref) return { text: `n.d. — mois non clos à la date de référence (${formatDate(ref)})`, kind: "nd" };
   const cov = coverageAt(data, month, establishments);
@@ -90,6 +91,8 @@ function coverageShown(data: RhBuildData, month: string, establishments?: string
   if (g.nd) return { text: `n.d. — ${g.nd.reason}`, kind: "nd" };
   const lower = cov.filter((c) => c.presenceStatus === "lower_bound");
   if (lower.length) return { text: "borne basse", kind: "lower", foot: lower[0].presenceReason ?? undefined };
+  // Historique PayFit brut : mois antérieur à la limite de conservation, calculé sur ce que l'API renvoie (mention en tête).
+  if (raw && month >= raw.lowerFrom && month <= raw.lowerTo) return { text: "brut (API PayFit)", kind: "value" };
   return { text: "complet", kind: "value" };
 }
 
@@ -100,6 +103,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   if (!ctx.input) return <KpiHeader ctx={ctx} closedMonth={null} />;
   const data = ctx.input.data;
   const open = ctx.input.openMonths ?? [];
+  const isPayfit = data.build.source === "payfit";
+  const rawLimit = ctx.collab.payfitHistory?.mode === "raw" ? ctx.collab.payfitHistory.limit : null;
   const closed = closedMonths(data, open);
   const last = lastClosedMonth(data, open);
 
@@ -211,7 +216,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
     const lastChange = dates.sort((a, b) => b.getTime() - a.getTime())[0];
     return `modifié le ${dateTimeFmt.format(lastChange)}`;
   };
-  const etpParams = `temps plein = 1 : ${s.fullTimeIsOne ? "oui" : "non"} · plafond 1 : ${s.capAtOne ? "oui" : "non"}${ctx.collab.data?.build.source === "payfit" ? ` · forfait jours sans quotité = 1 : ${s.forfaitJoursIsOne ? "oui" : "non"}` : ""} · ${s.etpDecimals} décimales · natures ${natureList(natures)} (${changed(["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"])})`;
+  const etpParams = `temps plein = 1 : ${s.fullTimeIsOne ? "oui" : "non"} · plafond 1 : ${s.capAtOne ? "oui" : "non"}${isPayfit ? ` · forfait jours sans quotité = 1 : ${s.forfaitJoursIsOne ? "oui" : "non"}` : ""} · ${s.etpDecimals} décimales · natures ${natureList(natures)} (${changed(isPayfit ? ["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"] : ["fullTimeIsOne", "capAtOne", "etpDecimals"])})`;
   const hcParams = `natures ${natureList(natures)}${nature ? " (filtre)" : ""}`;
   const toParams = `${s.turnoverFormula === "half_sum" ? "((E + S) ÷ 2) ÷ effectif moyen" : "S ÷ effectif au premier jour"} · continus ${s.neutralizeContinuity ? "neutralisés" : "comptés"} · sorties exclues : ${s.excludedExitNatures.length ? natureList(s.excludedExitNatures) : "aucune"} (${changed(["turnoverFormula", "neutralizeContinuity", "excludedExitNatures"])})`;
   const absParams = `types : ${s.absenceTypes.length ? s.absenceTypes.join(", ") : "aucun"} · statuts : ${s.absenceStatuses.map((x) => ABSENCE_STATUS_LABELS[x] ?? x).join(", ")} · ${s.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"} (${changed(["absenceTypes", "absenceStatuses", "dayBasis"])})`;
@@ -233,7 +238,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   // Avis de couverture des mois non complets de la période, regroupés par raison.
   const covNotices = new Map<string, string[]>();
   for (const m of w.months) {
-    const c = coverageShown(data, m, input.scope.establishments);
+    const c = coverageShown(data, m, input.scope.establishments, rawLimit);
     if (c.kind === "value") continue;
     const key = c.kind === "lower" ? `borne basse — ${c.foot ?? "contrats archivés inconnus"}` : c.text;
     covNotices.set(key, [...(covNotices.get(key) ?? []), m]);
@@ -247,7 +252,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const rows = dash.rows.map((r) => ({
     r,
     cells: {
-      coverage: coverageShown(data, r.month, input.scope.establishments),
+      coverage: coverageShown(data, r.month, input.scope.establishments, rawLimit),
       headcount: showHeadcount(r.headcount, "persons"),
       etp: etpShown(r.etp),
       entries: showCount(r.movements.entries),

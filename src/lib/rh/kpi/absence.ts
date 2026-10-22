@@ -1,5 +1,6 @@
 import { formatDate, monthEnd, monthOf, monthStart } from "@/lib/dates";
-import { gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
+import { gateAt, monthRanges, natureOfMonth, payfitRetentionLimit } from "@/lib/rh/headcount";
+import { PAYFIT_ARCHIVED_RETENTION_MONTHS } from "@/lib/rh/referential/build-payfit";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft } from "@/lib/rh/referential/types";
 import { absenceSlots, countDays, eachDay, isWeekday } from "./days";
@@ -182,7 +183,18 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
         continue;
       }
       const c = byExternal.get(a.contractId);
-      if (!c) return { month, kind: "nd", nd: kpiNd("absence-unknown-contract", `absence ${a.id} rattachée au contrat ${a.contractId} inconnu du référentiel`) };
+      if (!c) {
+        // PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois, mais peut renvoyer leurs absences : une absence
+        // terminée avant la limite de conservation, sur un contrat absent de la lecture, n'est pas comptée (son contrat ne
+        // l'est pas non plus dans les jours théoriques). Ce cas n'atteint ce point qu'en historique brut : en mode signalé, ces
+        // mois sont n.d. plus haut. Ailleurs, un contrat inconnu reste une anomalie : n.d.
+        const limit = payfitRetentionLimit(data);
+        if (limit !== null && ed !== null && ed < limit) {
+          excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-not-returned", label: `contrat ${a.contractId} non renvoyé par PayFit (archivé depuis plus de ${PAYFIT_ARCHIVED_RETENTION_MONTHS} mois) : absence non comptée, comme son contrat dans les jours théoriques`, uncertain: 0 });
+          continue;
+        }
+        return { month, kind: "nd", nd: kpiNd("absence-unknown-contract", `absence ${a.id} rattachée au contrat ${a.contractId} inconnu du référentiel`) };
+      }
       spillOver(a, c);
       orphan(a, c);
       if (c.startDate === null || c.nature === null || !opts.natures.includes(c.nature) || !inEst(scope.establishments, c.establishmentId)) {

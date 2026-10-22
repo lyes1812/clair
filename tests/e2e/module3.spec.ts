@@ -129,6 +129,9 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   const cell = (m: string, col: string) => page.getByTestId("kpi-monthly-table").locator(`tr[data-month='${m}'] td[data-col='${col}']`);
   // Brut : octobre 2025 (mois charnière) compté comme les autres ; 76 j (ABS-2 : 31 + 30 + 15) ÷ 2 510 j = 3,03 %.
   await expect(cell("2025-10", "absenteeism")).toHaveText("14,29 %"); // 31 j ÷ (7 contrats × 31 j)
+  // Couverture : mois antérieur à la limite de conservation signalé comme brut, sans « ≥ » ni n.d.
+  if (lower("2025-10")) await expect(cell("2025-10", "coverage")).toHaveText("brut (API PayFit)");
+  await expect(cell("2026-02", "coverage")).toHaveText("complet");
   await expect(cell("2025-12", "absenteeism")).toHaveText("6,91 %");
   await expect(cell("2026-02", "absenteeism")).toHaveText("0,00 %");
   await expect(cell("2026-02", "theoretical")).toHaveText("182 j");

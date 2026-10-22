@@ -73,13 +73,14 @@ test("DSN : dépôt, aperçu, application, réimport détecté, annule et rempla
   // Paramètres de l'espace : définition de l'effectif (défaut validé CDI + CDD), modifiable par l'administrateur.
   await page.goto(`/e/${slug}/parametres`);
   await expect(page.getByTestId("setting-headcount-origin")).toContainText("Valeur par défaut");
-  await expect(page.getByRole("checkbox", { name: /^CDI 01$/ })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: /^CDD 02$/ })).toBeChecked();
-  await page.getByRole("checkbox", { name: /^CDD 02$/ }).uncheck();
-  await page.getByRole("button", { name: "Enregistrer" }).click();
-  await expect(page.getByRole("status")).toContainText("enregistrées");
+  const headcount = page.getByTestId("setting-headcount");
+  await expect(headcount.getByRole("checkbox", { name: /^CDI 01$/ })).toBeChecked();
+  await expect(headcount.getByRole("checkbox", { name: /^CDD 02$/ })).toBeChecked();
+  await headcount.getByRole("checkbox", { name: /^CDD 02$/ }).uncheck();
+  await headcount.getByRole("button", { name: "Enregistrer" }).click();
+  await expect(headcount.getByRole("status")).toContainText("enregistrées");
   await page.reload();
   await expect(page.getByTestId("setting-headcount-origin")).toContainText("Modifié le");
-  await expect(page.getByRole("checkbox", { name: /^CDD 02$/ })).not.toBeChecked();
+  await expect(headcount.getByRole("checkbox", { name: /^CDD 02$/ })).not.toBeChecked();
   await page.screenshot({ path: `${CAPTURES}/2a-01-parametres.png`, fullPage: true });
 });

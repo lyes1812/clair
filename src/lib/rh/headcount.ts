@@ -112,8 +112,13 @@ const inEst = (establishments: string[] | undefined, id: string | null) => !esta
 // plus de `rétention` mois avant la lecture ; l'effectif à D est donc exact dès que D ≥ date de lecture − rétention, même
 // dans un mois dont la couverture est en borne basse (ses entrées et sorties, elles, restent incomplètes).
 export function payfitExactFrom(data: RhBuildData): string | null {
-  if (data.build.source !== "payfit" || PAYFIT_ARCHIVED_RETENTION_MONTHS === null || !data.build.referenceDate) return null;
   if (!data.coverage.some((c) => c.presenceStatus === "lower_bound")) return null; // aucun mois limité (ou mode brut)
+  return payfitRetentionLimit(data);
+}
+// Limite de conservation PayFit (date de lecture − rétention), quel que soit le mode d'historique : un contrat terminé avant
+// cette date a pu disparaître de l'API.
+export function payfitRetentionLimit(data: RhBuildData): string | null {
+  if (data.build.source !== "payfit" || PAYFIT_ARCHIVED_RETENTION_MONTHS === null || !data.build.referenceDate) return null;
   return addMonthsToDate(data.build.referenceDate, -PAYFIT_ARCHIVED_RETENTION_MONTHS);
 }
 const exactAt = (data: RhBuildData, date: string) => {
