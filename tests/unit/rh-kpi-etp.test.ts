@@ -183,3 +183,37 @@ describe("Quotités construites (cas E)", () => {
     expect(noScope).toMatchObject({ kind: "nd", nd: { code: "quota-missing", reason: expect.stringContaining("contracts:time-information:read") } });
   });
 });
+
+describe("DSN — nature déclarée chaque mois (CDD K-A transformé en CDI au 01/07/2025 sous le même numéro)", () => {
+  // K-A : nature 02 jusqu'en juin 2025, 01 à partir de juillet ; K-B : CDI à 75,84/151,67 = 0,5 tout du long.
+  // Une valeur de juin ne doit pas changer quand la DSN de juillet est déposée : juin reste un CDD pour K-A.
+  const spec = (month: string): DsnDeclarationSpec => ({
+    month,
+    people: [
+      { nir: NIR.a, employeeNumber: "A", contracts: [{ number: "K-A", start: "2024-01-01", nature: month < "2025-07" ? "02" : "01", gross: "2000.00" }] },
+      { nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", quota: "75.84", gross: "1000.00" }] },
+    ],
+  });
+  const before = dsnBuild(edgeFiles(monthRange("2024-07", "2025-06").map(spec)));
+  const after = dsnBuild(edgeFiles(monthRange("2024-07", "2025-07").map(spec)));
+  it("filtre CDI : ETP fin juin 0,5 (K-B seul) avant et après le dépôt de juillet ; juillet : 1,5", () => {
+    for (const d of [before, after]) {
+      const i = kpiInput(d, DSN_ABSENCES, {}, { nature: "01" });
+      expect(e4(etpMonthEnd(i, "2025-06"))).toBe("exact:5000");
+      const avg = etpAverage(i, rollingWindow("2025-06"));
+      expect(avg.kind === "exact" && same(avg.ratio, { num: 60000, den: 120000 })).toBe(true);
+    }
+    expect(e4(etpMonthEnd(kpiInput(after, DSN_ABSENCES, {}, { nature: "01" }), "2025-07"))).toBe("exact:15000");
+  });
+  it("filtre CDD : ETP fin juin 1 (K-A) avant et après ; juillet : 0 (plus aucun CDD déclaré)", () => {
+    for (const d of [before, after]) expect(e4(etpMonthEnd(kpiInput(d, DSN_ABSENCES, {}, { nature: "02" }), "2025-06"))).toBe("exact:10000");
+    const jul = etpMonthEnd(kpiInput(after, DSN_ABSENCES, {}, { nature: "02" }), "2025-07");
+    expect(e4(jul)).toBe("exact:0");
+  });
+  it("détail : la nature affichée est celle déclarée pour le mois", () => {
+    const jun = etpMonthEnd(kpiInput(after, DSN_ABSENCES), "2025-06");
+    if (jun.kind !== "nd") expect(jun.contributions.find((c) => c.externalId === "K-A")?.nature).toBe("02");
+    const jul = etpMonthEnd(kpiInput(after, DSN_ABSENCES), "2025-07");
+    if (jul.kind !== "nd") expect(jul.contributions.find((c) => c.externalId === "K-A")?.nature).toBe("01");
+  });
+});

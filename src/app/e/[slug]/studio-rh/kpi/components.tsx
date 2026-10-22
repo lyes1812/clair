@@ -125,9 +125,10 @@ export function KpiTile(props: {
   qualifiers?: string[];
   def: string;
   detail: string;
+  detailN1: string;
   children?: ReactNode;
 }) {
-  const { id, label, shown, title, n1, delta, params, qualifiers = [], def, detail, children } = props;
+  const { id, label, shown, title, n1, delta, params, qualifiers = [], def, detail, detailN1, children } = props;
   return (
     <div data-testid={`kpi-tile-${id}`}>
       <dt>{label}</dt>
@@ -138,7 +139,7 @@ export function KpiTile(props: {
       <span className="tile-foot" data-testid={`kpi-tile-${id}-params`}>{params}</span>
       {children}
       <span className="tile-foot">
-        <a href={`#def-${def}`}>Définition</a> · <a href={detail}>Détail</a>
+        <a href={`#def-${def}`}>Définition</a> · <a href={detail}>Détail</a> · <a href={detailN1} data-testid={`kpi-tile-${id}-detail-n1`}>Détail N-1</a>
       </span>
     </div>
   );

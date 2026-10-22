@@ -6,7 +6,7 @@ import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@
 import { coverageAt, gateAt, monthRanges } from "@/lib/rh/headcount";
 import { KPI_DETAIL_IDS, kpiDashboard, kpiDetail } from "@/lib/rh/kpi/dashboard";
 import { fmtDelta, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
-import { civilWindow, closedMonths, defaultYear, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
+import { civilWindow, closedMonths, defaultYear, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
 import type { Compared, KpiDetailId, KpiInput, Window } from "@/lib/rh/kpi/types";
 import { loadKpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
@@ -157,6 +157,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   if (rawDetail && !detailId) ignore("detail", rawDetail, "détail inconnu");
   const moisOk = isMonth(rawMois);
   if (rawMois && !moisOk) ignore("mois", rawMois, "format AAAA-MM attendu");
+  // periode=n1 : le détail porte sur la période N-1 (retrace les valeurs N-1 des tuiles et de la ligne « Période »).
+  const rawPeriode = one(sp.periode);
+  const onPrevious = rawPeriode === "n1";
+  if (rawPeriode && !onPrevious) ignore("periode", rawPeriode, "valeur possible : n1");
+  const detailWindow = onPrevious ? previousWindow(w) : w;
   const windowDetail = detailId === "etp-avg" || detailId === "headcount-avg" || detailId === "turnover";
   const monthDetail = detailId !== null && !windowDetail && detailId !== "absenteeism";
   let detail: ReturnType<typeof kpiDetail> = null;
@@ -164,11 +169,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
     ignore("detail", rawDetail, rawMois ? "mois invalide : détail non affiché" : "mois requis pour ce détail");
   } else if (detailId) {
     if (windowDetail && moisOk) ignore("mois", rawMois, "sans objet pour un détail de période");
-    detail = kpiDetail(input, w, detailId, moisOk && !windowDetail ? rawMois : null);
+    detail = kpiDetail(input, detailWindow, detailId, moisOk && !windowDetail ? rawMois : null);
     if (!detail) {
       ignore("mois", rawMois, "hors de la période affichée et de son N-1");
       // L'absentéisme a un défaut sans mois (la période) ; un détail de mois n'en a pas et n'est pas affiché.
-      if (detailId === "absenteeism") detail = kpiDetail(input, w, detailId, null);
+      if (detailId === "absenteeism") detail = kpiDetail(input, detailWindow, detailId, null);
       else ignore("detail", rawDetail, "mois hors période : détail non affiché");
     }
   } else if (moisOk) ignore("mois", rawMois, "aucun détail demandé");
@@ -184,8 +189,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
     return `?${p.toString()}`;
   };
-  const detailHref = (id: string, month: string | null) => `${query(month ? { detail: id, mois: month } : { detail: id })}#kpi-detail`;
+  const detailHref = (id: string, month: string | null, previous = false) => `${query({ detail: id, ...(month ? { mois: month } : {}), ...(previous ? { periode: "n1" } : {}) })}#kpi-detail`;
 
+  // Liens internes d'un détail : un détail de période N-1 renvoie aux détails de période N-1 ; les mois gardent leur date.
+  const inDetail = (id: string, month: string | null) => detailHref(id, month, onPrevious && month === null);
   const maps: Maps = { persons: new Map(data.persons.map((p) => [p.personKey, p])), contracts: new Map(data.contracts.map((c) => [c.contractKey, c])) };
   const s = ctx.settings.values;
   const natures = nature ? [nature] : ctx.collab.natures.codes;
@@ -314,6 +321,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             qualifiers={t.etpEnd.current.kind === "nd" ? [] : t.etpEnd.current.qualifiers}
             def="etp-month-end"
             detail={detailHref("etp-end", w.to)}
+            detailN1={detailHref("etp-end", dash.previousWindow.to)}
           />
           <KpiTile
             id="etp-avg"
@@ -326,6 +334,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             qualifiers={t.etpAverage.current.kind === "nd" ? [] : t.etpAverage.current.qualifiers}
             def="etp-average"
             detail={detailHref("etp-avg", null)}
+            detailN1={detailHref("etp-avg", null, true)}
           />
           <KpiTile
             id="headcount-avg"
@@ -337,6 +346,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             params={hcParams}
             def="headcount-average"
             detail={detailHref("headcount-avg", null)}
+            detailN1={detailHref("headcount-avg", null, true)}
           />
           <KpiTile
             id="turnover"
@@ -349,6 +359,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             qualifiers={toCur.kind === "exact" ? toCur.qualifiers : []}
             def="turnover"
             detail={detailHref("turnover", null)}
+            detailN1={detailHref("turnover", null, true)}
           />
           <KpiTile
             id="absenteeism"
@@ -361,6 +372,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             qualifiers={absCur.kind === "nd" ? [] : absCur.qualifiers}
             def="absenteeism"
             detail={detailHref("absenteeism", null)}
+            detailN1={detailHref("absenteeism", null, true)}
           >
             {input.absences.status === "read" && (
               <span className="tile-foot" data-testid="kpi-absence-types">
@@ -411,8 +423,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                 <Cell col="theoretical" shown={show(dash.theoretical, (x) => fmtHalfDays(x.half))} href={detailHref("absenteeism", null)} />
                 <Cell col="absence-days" shown={show(absCur, (x) => fmtHalfDays(x.ratio.num))} href={detailHref("absenteeism", null)} />
                 <Cell col="absenteeism" shown={show(absCur, (x) => fmtPercent(x.ratio))} href={detailHref("absenteeism", null)} />
-                <Cell col="etp-n1" shown={averageShown(t.etpAverage.previous)} href={null} />
-                <Cell col="absenteeism-n1" shown={absenteeismShown(t.absenteeism.previous)} href={null} />
+                <Cell col="etp-n1" shown={averageShown(t.etpAverage.previous)} href={detailHref("etp-avg", null, true)} />
+                <Cell col="absenteeism-n1" shown={absenteeismShown(t.absenteeism.previous)} href={detailHref("absenteeism", null, true)} />
               </tr>
             </tfoot>
           </table>
@@ -427,6 +439,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <section className="panel" id="kpi-detail" data-testid="kpi-detail">
           <h2>
             Détail — {DETAIL_TITLES[detailId]}
+            {onPrevious ? " (N-1)" : ""}
             {"month" in detail && detail.month ? ` · ${detail.month}` : ` · ${"window" in detail ? detail.window.label : w.label}`}
           </h2>
           <p className="desc"><a href={query({})}>Fermer le détail</a></p>
@@ -434,9 +447,9 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} />}
           {(detail.id === "entries" || detail.id === "exits") && <MovementsDetail v={detail.value} kind={detail.id === "entries" ? "entry" : "exit"} maps={maps} slug={slug} />}
           {(detail.id === "theoretical" || detail.id === "absenteeism") && <AbsenceMonthDetail id={detail.id} v={detail.value} theoretical={detail.theoretical} maps={maps} slug={slug} />}
-          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={detailHref} />}
-          {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={detailHref} />}
-          {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={detailHref} />}
+          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} />}
+          {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={inDetail} />}
+          {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={inDetail} />}
         </section>
       )}
 

@@ -451,7 +451,7 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
         contractKey,
         personKey,
         establishmentId: first.decl.siret,
-        nature,
+        nature: str(first.rec.data.nature), // nature déclarée à l'entrée (pas celle d'une transformation ultérieure)
         endReason: null,
         flags: [],
         fieldsNd: {},
@@ -467,7 +467,7 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
           contractKey,
           personKey,
           establishmentId: endOcc.decl.siret,
-          nature,
+          nature: str(endOcc.rec.data.nature), // nature déclarée avec la fin
           endReason: c.endReason,
           flags: [],
           fieldsNd: c.endReason === null ? { endReason: nd("not-provided", "motif de rupture absent (S21.G00.62.002)") } : {},

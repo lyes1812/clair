@@ -72,7 +72,7 @@ function dsnEtp(input: KpiInput, c: ContractDraft, month: string): EtpContributi
   const sourceOf = (r: ContractMonthDraft): EtpSource => ({ source: "dsn", month, establishmentId: r.establishmentId, contractQuota: r.contractQuota, referenceQuota: r.referenceQuota, quotaUnit: r.quotaUnit, modality: r.modality });
   const sig = (r: ContractMonthDraft) => [r.contractQuota, r.referenceQuota, r.quotaUnit, r.modality].join("|");
   const r = rows[0];
-  const base = { ...refOf(c), source: sourceOf(r) };
+  const base = { ...refOf(c), nature: r.nature, source: sourceOf(r) }; // nature déclarée ce mois
   const other = rows.find((x) => sig(x) !== sig(r));
   if (other) {
     return { ...base, kind: "missing", nd: kpiNd("quota-inconsistent", `quotités divergentes entre SIRET ${r.establishmentId} (${r.contractQuota ?? "n.d."}/${r.referenceQuota ?? "n.d."}) et ${other.establishmentId} (${other.contractQuota ?? "n.d."}/${other.referenceQuota ?? "n.d."}) en ${month}`) };

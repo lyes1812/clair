@@ -1,5 +1,5 @@
 import { formatDate, monthEnd, monthOf, monthStart } from "@/lib/dates";
-import { gateAt, monthRanges } from "@/lib/rh/headcount";
+import { gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft } from "@/lib/rh/referential/types";
 import { absenceSlots, countDays, eachDay, isWeekday } from "./days";
@@ -46,12 +46,13 @@ export function theoreticalMonth(input: KpiInput, month: string): TheoreticalMon
       .sort((a, b) => a.contractKey.localeCompare(b.contractKey) || a.establishmentId.localeCompare(b.establishmentId));
     for (const m of rows) {
       const c = byKey.get(m.contractKey);
-      if (!c || seen.has(c.contractKey) || c.startDate === null || c.nature === null || !opts.natures.includes(c.nature)) continue;
+      const nature = c ? natureOfMonth(c, m) : null;
+      if (!c || seen.has(c.contractKey) || c.startDate === null || nature === null || !opts.natures.includes(nature)) continue;
       seen.add(c.contractKey);
       const from = max(c.startDate, monthStart(month));
       const to = min(c.endDate ?? monthEnd(month), monthEnd(month));
       const days = countDays(from, to, params.dayBasis);
-      contributions.push({ contractKey: c.contractKey, externalId: c.externalId, personKey: c.personKey, establishmentId: c.establishmentId, nature: c.nature, from, to, days, half: 2 * days, provenance: m.provenance.presentAnyDay ?? null });
+      contributions.push({ contractKey: c.contractKey, externalId: c.externalId, personKey: c.personKey, establishmentId: c.establishmentId, nature, from, to, days, half: 2 * days, provenance: m.provenance.presentAnyDay ?? null });
     }
     return { month, kind: "exact", half: contributions.reduce((s, x) => s + x.half, 0), contributions };
   });
@@ -160,8 +161,11 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       const c = byExternal.get(a.contractId);
       if (!c) return { month, kind: "nd", nd: kpiNd("absence-unknown-contract", `absence ${a.id} rattachée au contrat ${a.contractId} inconnu du référentiel`) };
       if (c.startDate === null || c.nature === null || !opts.natures.includes(c.nature) || !inEst(scope.establishments, c.establishmentId)) {
-        const label = c.startDate === null ? "contrat non positionnable (sans date de début)" : "contrat hors natures comptées ou hors établissement";
-        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: 0 });
+        // Contrat hors périmètre : l'absence n'est pas comptée, mais ses jours qui tombent sous un autre contrat compté de la même
+        // personne restent incertains (ex. CDD non compté puis CDI compté pendant l'absence).
+        const spill = c.startDate !== null ? spillOver(a, c) : { count: 0, notes: [] as string[] };
+        const label = (c.startDate === null ? "contrat non positionnable (sans date de début)" : "contrat hors natures comptées ou hors établissement") + (spill.notes.length ? ` ; ${spill.notes.join(" ; ")}` : "");
+        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: spill.count });
         continue;
       }
       // Demi-journées que l'absence peut couvrir hors de son contrat mais sous un autre contrat compté de la même personne

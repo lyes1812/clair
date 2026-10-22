@@ -164,7 +164,11 @@ export function presenceAt(data: RhBuildData, c: ContractDraft, date: string, es
   return { state: "present" };
 }
 
-type Active = { contract: ContractDraft; establishmentId: string };
+// Nature retenue pour un mois : DSN, celle déclarée ce mois-là (S21.G00.40.007 de la ligne du mois, un CDD transformé en CDI
+// sous le même numéro reste un CDD pour ses mois de CDD) ; PayFit, celle du contrat (non historisée par PayFit).
+export const natureOfMonth = (c: ContractDraft, m: ContractMonthDraft): string | null => (m.presenceBasis === "declared" ? m.nature : c.nature);
+
+type Active = { contract: ContractDraft; establishmentId: string; nature: string | null };
 
 function activeAt(data: RhBuildData, date: string, establishments?: string[]): Active[] {
   const M = monthOf(date);
@@ -176,13 +180,13 @@ function activeAt(data: RhBuildData, date: string, establishments?: string[]): A
       const c = index(data).contracts.get(m.contractKey);
       if (!c || c.startDate === null || !isActiveOn(c.startDate, c.endDate, date)) continue;
       if (m.flags.includes("declared_before_start")) continue;
-      out.push({ contract: c, establishmentId: m.establishmentId });
+      out.push({ contract: c, establishmentId: m.establishmentId, nature: m.nature });
     }
     return out;
   }
   for (const c of data.contracts) {
     if (c.startDate === null || !isActiveOn(c.startDate, c.endDate, date) || !inEst(establishments, c.establishmentId)) continue;
-    out.push({ contract: c, establishmentId: c.establishmentId ?? "n.d." });
+    out.push({ contract: c, establishmentId: c.establishmentId ?? "n.d.", nature: c.nature });
   }
   return out;
 }
@@ -194,7 +198,7 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
   const g = gateAt(data, date, opts.establishments);
   if (g.nd) return { kind: "nd", nd: g.nd };
   const all = activeAt(data, date, opts.establishments);
-  const isCounted = (r: Active) => r.contract.nature !== null && opts.natures.includes(r.contract.nature);
+  const isCounted = (r: Active) => r.nature !== null && opts.natures.includes(r.nature);
   // Détail par établissement : toutes les lignes déclarées (C5) ; totaux : une seule présence par contrat.
   const bySiret: BySiret = {};
   const siretPersons = new Map<string, Set<string>>();
@@ -217,7 +221,7 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
   const persons = new Set<string>();
   let withoutPerson = 0;
   for (const r of rows) {
-    const k = natureKey(r.contract.nature);
+    const k = natureKey(r.nature);
     if (!isCounted(r)) {
       outByNature[k] = (outByNature[k] ?? 0) + 1;
       continue;
@@ -281,7 +285,8 @@ function rowState(c: ContractDraft, m: ContractMonthDraft, natures: string[]): R
   if (m.presenceBasis === "not_declared") return { code: "not_declared", label: "non déclaré ce mois" };
   if (m.flags.includes("declared_after_end")) return { code: "declared_after_end", label: `déclaré ce mois, fin le ${formatDate(c.endDate)} (antérieure)` };
   if (m.flags.includes("declared_before_start")) return { code: "before_start", label: `déclaré avant son début (${formatDate(c.startDate)})` };
-  if (c.nature === null || !natures.includes(c.nature)) return { code: "out_of_scope", label: `hors effectif : nature ${contractNatureLabel(c.nature)}` };
+  const nature = natureOfMonth(c, m);
+  if (nature === null || !natures.includes(nature)) return { code: "out_of_scope", label: `hors effectif : nature ${contractNatureLabel(nature)}` };
   const startIn = c.startDate !== null && monthOf(c.startDate) === m.month;
   const endIn = c.endDate !== null && monthOf(c.endDate) === m.month;
   if (startIn && endIn) return { code: "entered_exited", label: `entré le ${formatDate(c.startDate)}, sorti le ${formatDate(c.endDate)}` };
@@ -308,7 +313,8 @@ export function monthlyList(data: RhBuildData, month: string, opts: HeadcountOpt
     const persons = new Set<string>();
     for (const m of monthRows) {
       const c = ix.contracts.get(m.contractKey);
-      if (!m.presentAnyDay || !c || c.nature === null || !opts.natures.includes(c.nature) || seen.has(c.contractKey)) continue;
+      const n = c ? natureOfMonth(c, m) : null;
+      if (!m.presentAnyDay || !c || n === null || !opts.natures.includes(n) || seen.has(c.contractKey)) continue;
       seen.add(c.contractKey);
       if (c.personKey) persons.add(c.personKey);
     }

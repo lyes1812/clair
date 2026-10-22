@@ -199,6 +199,10 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(detail.getByTestId("kpi-detail-total")).toContainText("6,10");
   await page.screenshot({ path: `${CAPTURES}/3-03-kpi-dsn.png`, fullPage: true });
 
+  // Détail N-1 de l'effectif moyen : retrace le 6,50 de la tuile (78/12).
+  await page.getByTestId("kpi-tile-headcount-avg-detail-n1").click();
+  await expect(page.getByTestId("kpi-detail")).toContainText("(N-1)");
+  await expect(page.getByTestId("kpi-detail-total")).toContainText("moyenne = 13/2 = 6,50");
   // Détail du turnover : 1 entrée, 1 sortie, base effectif moyen 83/12.
   await page.goto(`${kpi}?detail=turnover#kpi-detail`);
   await expect(page.getByTestId("kpi-detail-total")).toContainText("((1 + 1) ÷ 2) ÷ 83/12 = 12/83 = 14,46 %");
