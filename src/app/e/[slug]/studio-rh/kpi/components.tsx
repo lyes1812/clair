@@ -298,7 +298,7 @@ export function HeadcountDetail({ v, maps, slug, month, natureAt }: { v: Headcou
       </div>
       {v.declaredAfterEndKeys.length > 0 && (
         <p className="desc" data-testid="kpi-detail-after-end">
-          Déclarés ce mois après leur fin, non comptés (versement après départ présumé) :{" "}
+          Déclarés ce mois après leur fin, non comptés (versement après départ, rupture déclarée acquise) :{" "}
           {v.declaredAfterEndKeys.map((k, i) => (
             <span key={k}>
               {i > 0 ? ", " : ""}

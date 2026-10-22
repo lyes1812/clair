@@ -253,7 +253,7 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
     contractKeys: counted.map((r) => r.contract.contractKey).sort(),
     qualifiers: [
       ...new Set(lower.map((c) => c.presenceReason).filter((r): r is string => r !== null)),
-      ...(afterEnd.length ? [`${afterEnd.length} contrat(s) déclaré(s) après leur fin, non compté(s) : versement après départ présumé`] : []),
+      ...(afterEnd.length ? [`${afterEnd.length} contrat(s) déclaré(s) après leur fin, non compté(s) : versement après départ (rupture déclarée acquise)`] : []),
     ],
     bySiret,
   };

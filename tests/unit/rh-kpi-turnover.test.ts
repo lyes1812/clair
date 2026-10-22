@@ -312,7 +312,7 @@ describe("turnover — révisions DSN : aucune valeur « exacte » qui changerai
     expect(isRatio(t, 24, 48)).toBe(true);
     expect(t).toMatchObject({ entries: 1, exits: 1 });
   });
-  it("contrat redéclaré sans fin après sa fin (versement après départ présumé) : sortie comptée, effectif exact ; limite écrite si la rupture était annulée", () => {
+  it("contrat redéclaré sans fin après sa fin (versement après départ) : sortie comptée, effectif exact ; une nouvelle fin déclarée plus tard corrige les chiffres", () => {
     // K-A : fin au 30/06/2025 déclarée en juin, redéclaré sans fin en juillet et août (régularisation ?), fin au 30/09 en septembre.
     const spec = (month: string): DsnDeclarationSpec => {
       const people: DsnPerson[] = [{ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] }];
