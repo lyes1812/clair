@@ -1,4 +1,4 @@
-import type { Count, EventRow, HeadcountResult } from "@/lib/rh/headcount";
+import { monthRanges, type Count, type EventRow, type HeadcountResult } from "@/lib/rh/headcount";
 import type { AbsenceRow, CoverageDraft, FieldNd, MissingCode, Provenance, RhBuildData } from "@/lib/rh/referential/types";
 
 // KPI RH : calculs purs sur le référentiel Collaborateurs (aucune base, aucune horloge). Chaque chiffre est exact,
@@ -150,3 +150,9 @@ export type KpiDetail =
   | { id: "turnover"; window: Window; value: Turnover };
 
 export const kpiNd = (code: KpiNdCode, reason: string, extra: { months?: string[]; keys?: string[] } = {}): KpiNd => ({ code, reason, ...extra });
+
+// Raison d'un KPI de période n.d. : les mois en cause, puis la raison du premier (une seule fois s'il n'y en a qu'un).
+export function periodReason(months: string[], first: string, reason: string): string {
+  if (months.length === 1) return `${first} : ${reason}`;
+  return `${months.length} mois n.d. (${monthRanges(months)}) ; ${first} : ${reason}`;
+}

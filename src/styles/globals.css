@@ -140,7 +140,7 @@ p { margin: 0; }
 .source-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .source-head > div { display: grid; gap: 6px; }
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 0; }
-.facts div { display: grid; gap: 4px; }
+.facts div { display: grid; gap: 4px; align-content: start; }
 .facts dt { font-size: var(--clair-type-label); color: var(--muted); }
 .facts dd { margin: 0; font-size: var(--clair-type-form); font-weight: 550; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }

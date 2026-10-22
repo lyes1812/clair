@@ -4,14 +4,14 @@ import { etpMonthEnd } from "./etp";
 import { ratio } from "./fraction";
 import { memo } from "./memo";
 import { checkWindow, countedOpts } from "./period";
-import { kpiNd, type Average, type KpiInput, type MonthValue, type Window } from "./types";
+import { kpiNd, periodReason, type Average, type KpiInput, type MonthValue, type Window } from "./types";
 
 // Moyennes de fin de mois : tous les mois doivent être exacts, sinon n.d. en nommant les mois en cause.
 function average(input: KpiInput, w: Window, unit: "etp" | "persons", values: MonthValue[]): Average {
   const nds = values.filter((v) => v.kind === "nd");
   if (nds.length) {
     const months = nds.map((v) => v.month);
-    return { kind: "nd", unit, months: values, nd: kpiNd("month-nd", `n.d. : ${monthRanges(months)} — ${nds[0].month} : ${nds[0].nd?.reason ?? "n.d."}`, { months }) };
+    return { kind: "nd", unit, months: values, nd: kpiNd("month-nd", periodReason(months, nds[0].month, nds[0].nd?.reason ?? "valeur absente"), { months }) };
   }
   const lowers = values.filter((v) => v.kind === "lower_bound");
   if (lowers.length) {

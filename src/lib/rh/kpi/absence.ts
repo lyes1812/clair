@@ -8,6 +8,7 @@ import { memo } from "./memo";
 import { checkWindow, countedOpts } from "./period";
 import {
   kpiNd,
+  periodReason,
   type AbsenceExcluded,
   type AbsenceSlice,
   type AbsenceTypeChoice,
@@ -186,7 +187,7 @@ export function absenteeism(input: KpiInput, w: Window): Absenteeism {
     if (nds.length) {
       const allLower = nds.every((m) => m.nd.code === "month-lower-bound");
       const list = nds.map((m) => m.month);
-      return { kind: "nd", months, nd: kpiNd(allLower ? "month-lower-bound" : "month-nd", `n.d. : ${monthRanges(list)} — ${nds[0].month} : ${nds[0].nd.reason}`, { months: list }) };
+      return { kind: "nd", months, nd: kpiNd(allLower ? "month-lower-bound" : "month-nd", periodReason(list, nds[0].month, nds[0].nd.reason), { months: list }) };
     }
     const exact = months as Extract<AbsenteeismMonth, { kind: "exact" | "lower_bound" }>[];
     const num = exact.reduce((s, m) => s + m.ratio.num, 0);

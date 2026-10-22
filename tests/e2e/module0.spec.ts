@@ -57,10 +57,12 @@ test.describe.serial("Module 0 — socle", () => {
     await menu.getByText("Studio RH", { exact: true }).click();
     await expect(menu.getByRole("link", { name: "Collaborateurs" })).toBeVisible();
 
+    // Modules livrés : sans source retenue, n.d. explicite ; modules à venir : écran d'attente.
+    const EMPTY: Record<string, string> = { Collaborateurs: "collaborateurs-nd", "KPI RH": "kpi-nd" };
     for (const label of MENU.slice(1)) {
       await menu.getByRole("link", { name: label }).click();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(label);
-      await expect(page.getByTestId("placeholder")).toBeVisible();
+      await expect(page.getByTestId(EMPTY[label] ?? "placeholder")).toBeVisible();
     }
   });
 

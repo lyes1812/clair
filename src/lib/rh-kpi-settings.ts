@@ -99,3 +99,11 @@ export async function setKpiSettings(workspaceId: string, next: KpiSettingValues
   }
   return written;
 }
+
+// Origine affichée d'un paramètre (Paramètres et écran KPI RH) : modification datée, valeur illisible, défaut validé ou proposé.
+export function kpiOriginText(key: KpiSettingKey, o: KpiOrigin, formatDateTime: (d: Date) => string): string {
+  if (o.origin === "setting") return `Modifié le ${formatDateTime(o.updatedAt)} par un administrateur.`;
+  if (o.origin === "invalid") return "Valeur enregistrée illisible : à ré-enregistrer (les KPI ne sont pas calculés d'ici là).";
+  const [y, m, d] = KPI_DEFAULTS_VALIDATED_ON.split("-");
+  return KPI_DEFAULT_STATUS[key] === "validated" ? `Valeur par défaut validée le ${d}/${m}/${y}.` : "Valeur par défaut proposée, à confirmer.";
+}
