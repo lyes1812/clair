@@ -241,7 +241,7 @@ describe("absentéisme — dates inconnues couvertes, statut nul sans date, jour
     // Absence rattachée à C-C1 du 10 au 20/03/2025 : 10 → 15 comptés (12 demi-journées) ; 16 → 20 sous C-C2 : incertains.
     const m = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day")], "2025-03");
     expect(r(m)).toBe("lower_bound:12/124");
-    if (m.kind !== "nd") expect(m.slices[0].notes.join(" ")).toContain("10 demi-journée(s) sous le contrat C-C2 de la même personne");
+    if (m.kind !== "nd") expect(m.slices[0].notes.join(" ")).toContain("10 demi-journée(s) incertaine(s) sous le contrat C-C2 de la même personne");
     // Sans statut : 12 demi-journées sous C-C1 et 10 sous C-C2, toutes incertaines et tracées sur la ligne écartée.
     const ns = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day", { status: null })], "2025-03");
     expect(r(ns)).toBe("lower_bound:0/124");
@@ -250,12 +250,21 @@ describe("absentéisme — dates inconnues couvertes, statut nul sans date, jour
     // Avril : C-A 30 j + C-C2 30 j = 60 j = 120 demi-journées ; 60 demi-journées incertaines sous C-C2.
     const open = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", null, null)], "2025-04");
     expect(r(open)).toBe("lower_bound:0/120");
-    if (open.kind !== "nd") expect(open.excluded[0].label).toContain("60 demi-journée(s) sous le contrat C-C2");
+    if (open.kind !== "nd") expect(open.excluded[0].label).toContain("60 demi-journée(s) incertaine(s) sous le contrat C-C2");
     // Natures comptées = CDI seul : l'absence rattachée au CDD (non compté) n'est pas comptée, mais ses jours sous le CDI le sont
     // en incertain. Mars : C-A 31 j + C-C2 16 j = 47 j = 94 demi-journées ; 10 incertaines (16 → 20/03).
     const cdi = absenteeismMonth(kpiInput(data, readAbsences([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day")], MONTHS), { natures: ["01"] }), "2025-03");
     expect(r(cdi)).toBe("lower_bound:0/94");
     if (cdi.kind !== "nd") expect(cdi.excluded[0]).toMatchObject({ why: "contract-out-of-scope", uncertain: 10, label: expect.stringContaining("sous le contrat C-C2") });
+    // Trace après résolution : X sur le CDD (10 → 20/03), Y sur le CDI (16 → 18/03) ⇒ 6 demi-journées résolues, 4 restent incertaines.
+    const both2 = run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day"), absence("Y", "C-C2", "2025-03-16", "beginning-of-day", "2025-03-18", "end-of-day")], "2025-03");
+    expect(r(both2)).toBe("lower_bound:18/124");
+    if (both2.kind !== "nd") {
+      const x = both2.slices.find((s) => s.absenceId === "X")!;
+      expect(x.uncertain).toBe(4);
+      expect(x.notes.join(" ")).toContain("4 demi-journée(s) incertaine(s) sous le contrat C-C2 de la même personne (non rattachées par PayFit) ; 6 déjà comptée(s) par d'autres absences");
+      expect(both2.qualifiers.join(" ")).toContain("≥ : 4 demi-journée(s) incertaine(s)");
+    }
     // Une absence rattachée à C-C2 qui couvre ces jours lève l'incertitude.
     expect(r(run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day"), absence("Y", "C-C2", "2025-03-16", "beginning-of-day", "2025-03-20", "end-of-day")], "2025-03"))).toBe("exact:22/124");
   });
@@ -270,7 +279,7 @@ describe("absentéisme — contrat sans date de début ou sans collaborateur : r
     const data = await build({ collaborators: [{ id: "P-C" }], contracts: [{ contractId: "C-C1", collaboratorId: "P-C", startDate: "2024-06-01", endDate: null, natureContratDsn: "01" }, { contractId: "C-C2", collaboratorId: "P-C", status: "PENDING", startDate: null, endDate: null, natureContratDsn: "02" }] });
     const m = absenteeismMonth(kpiInput(data, readAbsences([absence("A", "C-C2", "2025-03-10", "beginning-of-day", "2025-03-14", "end-of-day")], MONTHS)), "2025-03");
     expect(r(m)).toBe("lower_bound:0/62");
-    if (m.kind !== "nd") expect(m.excluded[0]).toMatchObject({ why: "contract-out-of-scope", uncertain: 10, label: expect.stringContaining("contrat non positionnable (sans date de début) ; 10 demi-journée(s) sous le contrat C-C1") });
+    if (m.kind !== "nd") expect(m.excluded[0]).toMatchObject({ why: "contract-out-of-scope", uncertain: 10, label: expect.stringContaining("contrat non positionnable (sans date de début) ; 10 demi-journée(s) incertaine(s) sous le contrat C-C1") });
   });
   it("absence sur un contrat sans collaborateur : ses jours hors contrat ne sont pas « non comptés » en exact", async () => {
     // C-C1 : CDD de P-C jusqu'au 15/03/2025 ; C-C2 : CDI sans collaborateur dès le 16/03. Absence sur C-C2 du 10 au 20/03.

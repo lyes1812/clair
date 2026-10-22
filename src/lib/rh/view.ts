@@ -104,7 +104,7 @@ export type Shown = { text: string; kind: "value" | "lower" | "nd"; foot?: strin
 export function showHeadcount(r: HeadcountResult, field: "persons" | "contracts" | "allContracts"): Shown {
   if (r.kind === "nd") return { text: `n.d. — ${r.nd.reason}`, kind: "nd" };
   const n = fmtInt(r[field]);
-  const after = r.declaredAfterEnd > 0 && field !== "allContracts" ? `dont ${r.declaredAfterEnd} déclaré(s) après leur fin` : null;
+  const after = r.declaredAfterEnd > 0 && field !== "allContracts" ? `${r.declaredAfterEnd} déclaré(s) après leur fin, non compté(s)` : null;
   if (r.kind === "lower_bound") return { text: `≥ ${n}`, kind: "lower", foot: ["borne basse (voir la couverture du mois)", after].filter(Boolean).join(" · ") };
   return { text: n, kind: "value", foot: after ?? undefined };
 }

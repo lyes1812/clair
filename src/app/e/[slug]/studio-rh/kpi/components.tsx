@@ -296,9 +296,20 @@ export function HeadcountDetail({ v, maps, slug, month, natureAt }: { v: Headcou
           </tbody>
         </table>
       </div>
+      {v.declaredAfterEndKeys.length > 0 && (
+        <p className="desc" data-testid="kpi-detail-after-end">
+          Déclarés ce mois après leur fin, non comptés (versement après départ présumé) :{" "}
+          {v.declaredAfterEndKeys.map((k, i) => (
+            <span key={k}>
+              {i > 0 ? ", " : ""}
+              {maps.contracts.get(k) ? <ContractLink contractKey={k} externalId={maps.contracts.get(k)!.externalId} slug={slug} /> : <code>{k}</code>}
+            </span>
+          ))}
+        </p>
+      )}
       <Total>
-        Σ {v.kind === "lower_bound" ? "≥" : "="} {fmtInt(v.persons)} personne{v.persons > 1 ? "s" : ""} ({fmtInt(v.contracts)} contrat{v.contracts > 1 ? "s" : ""}) ·{" "}
-        <a href={`/e/${slug}/studio-rh/collaborateurs?mois=${month}`}>liste du mois dans Collaborateurs</a>
+        Σ {v.kind === "lower_bound" ? "≥" : "="} {fmtInt(v.persons)} personne{v.persons > 1 ? "s" : ""} ({fmtInt(v.contracts)} contrat{v.contracts > 1 ? "s" : ""})
+        {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>} · <a href={`/e/${slug}/studio-rh/collaborateurs?mois=${month}`}>liste du mois dans Collaborateurs</a>
       </Total>
     </>
   );
@@ -514,7 +525,7 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
           <h3>Absences non comptées</h3>
           <div className="table-wrap">
             <table className="data-table" data-testid="kpi-detail-excluded">
-              <thead><tr><th>Absence</th><th>Contrat</th><th>Type</th><th>Statut</th><th className="wrap">Raison</th></tr></thead>
+              <thead><tr><th>Absence</th><th>Contrat</th><th>Type</th><th>Statut</th><th className="num">Incertaines</th><th className="wrap">Raison</th></tr></thead>
               <tbody>
                 {v.excluded.map((x) => (
                   <tr key={`${x.absenceId}-${x.why}`}>
@@ -522,6 +533,7 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
                     <td><code>{x.contractId}</code></td>
                     <td><code>{x.type}</code></td>
                     <td>{statusText(x.status)}</td>
+                    <td className="num">{x.uncertain ? <span className="lower">{x.uncertain}</span> : 0}</td>
                     <td className="wrap">{x.label}</td>
                   </tr>
                 ))}

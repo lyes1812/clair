@@ -105,17 +105,37 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
     const slices: AbsenceSlice[] = [];
     const excluded: AbsenceExcluded[] = [];
     const uncertainIds = new Set<string>();
-    const undated: { a: (typeof absences.rows)[number]; contractKey: string; possible: SlotKey[]; known: string; which: string; spill: number }[] = [];
+    const undated: { a: (typeof absences.rows)[number]; contractKey: string; possible: SlotKey[]; known: string; which: string }[] = [];
     const personContracts = new Map<string, ContractDraft[]>();
     for (const k of data.contracts) {
       if (!k.personKey || k.startDate === null || k.nature === null || !opts.natures.includes(k.nature) || !inEst(scope.establishments, k.establishmentId)) continue;
       if (k.startDate > me || (k.endDate !== null && k.endDate < ms)) continue;
       personContracts.set(k.personKey, [...(personContracts.get(k.personKey) ?? []), k]);
     }
-    const spillOver = (a: (typeof absences.rows)[number], c: ContractDraft): { count: number; notes: string[] } => {
-      const notes: string[] = [];
-      let count = 0;
-      if (!c.personKey) return { count, notes };
+    const setOf = (m: Map<string, Set<SlotKey>>, k: string) => {
+      let s = m.get(k);
+      if (!s) m.set(k, (s = new Set()));
+      return s;
+    };
+    // Demi-journées incertaines, gardées par absence pour que le détail retrace le « ≥ » (après résolution par l'union).
+    const doubtOf = new Map<string, { contractKey: string; slot: SlotKey; via: string | null }[]>();
+    const addDoubt = (id: string, contractKey: string, slots: SlotKey[], via: string | null = null) => {
+      if (!slots.length) return;
+      uncertainIds.add(id);
+      const list = doubtOf.get(id) ?? [];
+      for (const slot of slots) {
+        setOf(doubt, contractKey).add(slot);
+        list.push({ contractKey, slot, via });
+      }
+      doubtOf.set(id, list);
+    };
+    const orphanOf = new Map<string, number>();
+    // Demi-journées que l'absence peut couvrir hors de son contrat mais sous un autre contrat compté de la même personne
+    // (ex. fin d'un CDD et début d'un CDI pendant l'absence) : au dénominateur de l'autre contrat, non rattachées par PayFit
+    // ⇒ incertaines (« ≥ »). Une borne inconnue est remplacée par la borne de l'autre contrat dans le mois ; un contrat sans
+    // date de début n'a pas de période connue : tous les jours sous l'autre contrat sont incertains.
+    const spillOver = (a: (typeof absences.rows)[number], c: ContractDraft) => {
+      if (!c.personKey) return;
       for (const c2 of personContracts.get(c.personKey) ?? []) {
         if (c2.contractKey === c.contractKey) continue;
         const clip2 = { from: max(ms, c2.startDate!), to: min(me, c2.endDate ?? me) };
@@ -127,26 +147,27 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
           clip2,
           params.dayBasis,
         );
-        // Période du contrat de l'absence inconnue (sans date de début) : tous les jours sous c2 sont incertains.
         const on = [...new Set([...s2.slots, ...s2.uncertain])].filter((x) => {
           const d = x.slice(0, 10);
           return c.startDate === null || d < c.startDate || (c.endDate !== null && d > c.endDate);
         });
-        if (!on.length) continue;
-        on.forEach((x) => setOf(doubt, c2.contractKey).add(x));
-        uncertainIds.add(a.id);
-        count += on.length;
-        notes.push(`${on.length} demi-journée(s) sous le contrat ${c2.externalId} de la même personne : non rattachées par PayFit, incertaines`);
+        addDoubt(a.id, c2.contractKey, on, c2.externalId);
       }
-      return { count, notes };
+    };
+    // Contrat sans collaborateur : les jours de l'absence hors de sa période (bornes inconnues : tout le mois) peuvent tomber sous
+    // un autre contrat compté de la même personne, inconnue ⇒ incertitude (« ≥ »), jamais « non comptés » en exact.
+    const orphan = (a: (typeof absences.rows)[number], c: ContractDraft) => {
+      if (c.personKey) return;
+      const from = a.start.date === null ? ms : max(a.start.date, ms);
+      const to = a.end.date === null ? me : min(a.end.date, me);
+      const n = eachDay(from, to).filter((d) => (params.dayBasis === "calendar" || isWeekday(d)) && (c.startDate === null || d < c.startDate || (c.endDate !== null && d > c.endDate))).length;
+      if (!n) return;
+      orphanDays += n;
+      orphanOf.set(a.id, n);
+      uncertainIds.add(a.id);
     };
     let outside = 0;
     let orphanDays = 0;
-    const setOf = (m: Map<string, Set<SlotKey>>, k: string) => {
-      let s = m.get(k);
-      if (!s) m.set(k, (s = new Set()));
-      return s;
-    };
     for (const a of absences.rows) {
       const sd = a.start.date;
       const ed = a.end.date;
@@ -162,18 +183,14 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       }
       const c = byExternal.get(a.contractId);
       if (!c) return { month, kind: "nd", nd: kpiNd("absence-unknown-contract", `absence ${a.id} rattachée au contrat ${a.contractId} inconnu du référentiel`) };
+      spillOver(a, c);
+      orphan(a, c);
       if (c.startDate === null || c.nature === null || !opts.natures.includes(c.nature) || !inEst(scope.establishments, c.establishmentId)) {
-        // Contrat hors périmètre : l'absence n'est pas comptée, mais ses jours qui tombent sous un autre contrat compté de la même
-        // personne restent incertains (ex. CDD non compté puis CDI compté pendant l'absence).
-        const spill = spillOver(a, c);
-        const label = (c.startDate === null ? "contrat non positionnable (sans date de début)" : "contrat hors natures comptées ou hors établissement") + (spill.notes.length ? ` ; ${spill.notes.join(" ; ")}` : "");
-        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: spill.count });
+        // Contrat hors périmètre : l'absence n'est pas comptée (ses éventuels débordements sont incertains, ci-dessus).
+        const label = c.startDate === null ? "contrat non positionnable (sans date de début)" : "contrat hors natures comptées ou hors établissement";
+        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: 0 });
         continue;
       }
-      // Demi-journées que l'absence peut couvrir hors de son contrat mais sous un autre contrat compté de la même personne
-      // (ex. fin d'un CDD et début d'un CDI pendant l'absence) : au dénominateur de l'autre contrat, non rattachées par PayFit
-      // ⇒ incertaines (« ≥ »). Une borne inconnue est remplacée par la borne de l'autre contrat dans le mois.
-      const spill = spillOver(a, c);
       if (sd === null || ed === null) {
         // Borne inconnue : remplacée par la borne de la période du contrat dans le mois (vide si le contrat n'y est pas actif).
         const reach = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };
@@ -187,49 +204,36 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
         );
         const possible = [...new Set([...r.slots, ...r.uncertain])];
         const known = sd === null && ed === null ? "dates de début et de fin non renseignées" : sd === null ? `date de début non renseignée, fin le ${formatDate(ed)}` : `date de fin non renseignée, début le ${formatDate(sd)}`;
-        const more = spill.notes.length ? ` ; ${spill.notes.join(" ; ")}` : "";
         if (!possible.length) {
-          const label = `aucune demi-journée comptée possible dans la période du contrat (${known})${more}`;
-          excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: spill.count });
+          excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label: `aucune demi-journée comptée possible dans la période du contrat (${known})`, uncertain: 0 });
           continue;
         }
         if (a.status === null) {
           // Jamais comptée : des dates inconnues ne font qu'élargir ses demi-journées incertaines.
-          possible.forEach((x) => setOf(doubt, c.contractKey).add(x));
-          uncertainIds.add(a.id);
-          excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "status-nd", label: `statut non renseigné : non comptée (${known})${more}`, uncertain: possible.length + spill.count });
+          addDoubt(a.id, c.contractKey, possible);
+          excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "status-nd", label: `statut non renseigné : non comptée (${known})`, uncertain: 0 });
           continue;
         }
         // Décidé après la boucle : n.d. seulement si une demi-journée possible n'est pas déjà comptée par une absence datée.
-        undated.push({ a, contractKey: c.contractKey, possible, known: `${known}${more}`, which: sd === null && ed === null ? "début et de fin" : sd === null ? "début" : "fin", spill: spill.count });
+        undated.push({ a, contractKey: c.contractKey, possible, known, which: sd === null && ed === null ? "début et de fin" : sd === null ? "début" : "fin" });
         continue;
       }
       const clip = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };
       const inMonth = eachDay(max(sd, ms), min(ed, me)).filter((d) => params.dayBasis === "calendar" || isWeekday(d));
       const outsideContract = inMonth.filter((d) => d < c.startDate! || (c.endDate !== null && d > c.endDate)).length;
       outside += outsideContract;
-      // Contrat sans collaborateur : ses jours d'absence hors contrat peuvent tomber sous un autre contrat compté de la même
-      // personne, inconnue ⇒ incertitude (« ≥ »), jamais « non comptés » en exact.
-      if (!c.personKey && outsideContract) {
-        orphanDays += outsideContract;
-        uncertainIds.add(a.id);
-      }
       if (a.status === null) {
         // Créneaux que l'absence pourrait couvrir, moments compris : comptés comme incertains, jamais comme absents.
         const p = absenceSlots({ start: { date: sd, moment: a.start.moment }, end: { date: ed, moment: a.end.moment } }, clip, params.dayBasis);
-        const possible = [...new Set([...p.slots, ...p.uncertain])];
-        possible.forEach((x) => setOf(doubt, c.contractKey).add(x));
-        if (possible.length) uncertainIds.add(a.id);
-        const more = spill.notes.length ? ` ; ${spill.notes.join(" ; ")}` : "";
-        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "status-nd", label: `statut non renseigné : non comptée${more}`, uncertain: possible.length + spill.count });
+        addDoubt(a.id, c.contractKey, [...new Set([...p.slots, ...p.uncertain])]);
+        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "status-nd", label: "statut non renseigné : non comptée", uncertain: 0 });
         continue;
       }
       const s = absenceSlots({ start: { date: sd, moment: a.start.moment }, end: { date: ed, moment: a.end.moment } }, clip, params.dayBasis);
       const u = setOf(union, c.contractKey);
       const added = s.slots.filter((x) => !u.has(x));
       added.forEach((x) => u.add(x));
-      s.uncertain.forEach((x) => setOf(doubt, c.contractKey).add(x));
-      if (s.uncertain.length) uncertainIds.add(a.id);
+      addDoubt(a.id, c.contractKey, s.uncertain);
       slices.push({
         absenceId: a.id,
         contractKey: c.contractKey,
@@ -243,15 +247,52 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
         to: clip.to,
         half: added.length,
         overlap: s.slots.length - added.length,
-        uncertain: s.uncertain.length,
+        uncertain: 0,
         outsideContract,
-        notes: [...s.notes, ...spill.notes],
+        notes: [...s.notes],
       });
     }
     for (const x of undated) {
       const u = union.get(x.contractKey) ?? new Set<SlotKey>();
       if (x.possible.some((sl) => !u.has(sl))) return { month, kind: "nd", nd: kpiNd("absence-date-nd", `absence ${x.a.id} : date de ${x.which} non renseignée dans PayFit`) };
-      excluded.push({ absenceId: x.a.id, contractId: x.a.contractId, type: x.a.type, status: x.a.status, why: "date-nd-covered", label: `${x.known} : toutes ses demi-journées possibles sur ce contrat sont déjà comptées par d'autres absences`, uncertain: x.spill });
+      excluded.push({ absenceId: x.a.id, contractId: x.a.contractId, type: x.a.type, status: x.a.status, why: "date-nd-covered", label: `${x.known} : toutes ses demi-journées possibles sur ce contrat sont déjà comptées par d'autres absences`, uncertain: 0 });
+    }
+    // Trace par absence : demi-journées incertaines restantes après l'union (celles qui font le « ≥ »), débordements et
+    // jours hors contrat d'un contrat sans collaborateur.
+    const traceOf = (id: string): { uncertain: number; notes: string[] } => {
+      const seen = new Set<string>();
+      const byVia = new Map<string, { open: number; closed: number }>();
+      let open = 0;
+      for (const d of doubtOf.get(id) ?? []) {
+        const k = `${d.contractKey}|${d.slot}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const isOpen = !(union.get(d.contractKey)?.has(d.slot) ?? false);
+        if (isOpen) open += 1;
+        if (d.via) {
+          const v = byVia.get(d.via) ?? { open: 0, closed: 0 };
+          if (isOpen) v.open += 1;
+          else v.closed += 1;
+          byVia.set(d.via, v);
+        }
+      }
+      const notes = [...byVia].map(([via, v]) =>
+        v.open ? `${v.open} demi-journée(s) incertaine(s) sous le contrat ${via} de la même personne (non rattachées par PayFit)${v.closed ? ` ; ${v.closed} déjà comptée(s) par d'autres absences` : ""}` : `${v.closed} demi-journée(s) sous le contrat ${via} déjà comptée(s) par d'autres absences`,
+      );
+      const o = orphanOf.get(id);
+      if (o) notes.push(`${o} jour(s) hors contrat, collaborateur du contrat inconnu : rattachement non vérifiable (« ≥ »)`);
+      return { uncertain: open, notes };
+    };
+    for (const sl of slices) {
+      const tr = traceOf(sl.absenceId);
+      sl.uncertain = tr.uncertain;
+      sl.notes.push(...tr.notes);
+    }
+    for (const x of excluded) {
+      if (x.why === "type" || x.why === "status") continue;
+      const tr = traceOf(x.absenceId);
+      x.uncertain = tr.uncertain;
+      if (tr.notes.length) x.label = `${x.label} ; ${tr.notes.join(" ; ")}`;
     }
     let num = 0;
     for (const u of union.values()) num += u.size;

@@ -152,6 +152,11 @@ describe("Quotités construites (cas E)", () => {
     expect(etp4FromFte(-1, 4)).toBe(-10000);
     expect(etp4FromFte(-0.5, 2)).toBe(-5000);
     expect(etp4FromQuotas(-75.835, 151.67, 4)).toBe(-5000);
+    // Un seul arrondi de la valeur source : 21/39 = 0,538461… ⇒ 0,538 à 3 décimales (pas 0,5385 puis 0,539) ;
+    // 7/39 = 0,179487… ⇒ 0,179 ; 30/38 = 0,789473… ⇒ 0,789 ; 11/38 = 0,289473… ⇒ 0,289.
+    expect([21 / 39, 7 / 39, 30 / 38, 11 / 38].map((x) => etp4FromFte(x, 3))).toEqual([5380, 1790, 7890, 2890]);
+    expect(etp4FromFte(21 / 39, 4)).toBe(5385);
+    expect(etp4FromQuotas(81.9, 151.67, 3)).toBe(5400); // 81,9 / 151,67 = 0,539988… ⇒ 0,540
   });
   it("E3b : quotité négative (S21.G00.40.013 = -75,84) ⇒ contrat n.d., jamais soustrait ; avec un autre contrat ⇒ « ≥ 1 »", () => {
     const alone = etpOf([one({ quota: "-75.84" })]);

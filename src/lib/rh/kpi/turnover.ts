@@ -68,8 +68,6 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
     const partners = continuityPartners(input);
     const partnerOf = (r: EventRow) => partners.get(eventKey(r.event)) ?? null;
     const externalOf = new Map(data.contracts.map((c) => [c.contractKey, c.externalId]));
-    const redeclared = new Map<string, string>();
-    for (const m of data.months) if (m.flags.includes("declared_after_end") && !redeclared.has(m.contractKey)) redeclared.set(m.contractKey, m.month);
     const events: EventContribution[] = [...ml.entries, ...ml.exits].map((r) => {
       const partner = partnerOf(r);
       const p = partner ? { contractKey: partner.event.contractKey, date: partner.event.date } : null;
@@ -89,10 +87,6 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
         const day = formatDate(addDays(r.event.date, r.event.kind === "entry" ? -1 : 1));
         return { row: r, why: "continuity-unknown", label: `continuité non vérifiable : le ${day} n'est pas couvert par la source (contrat ${r.event.kind === "entry" ? "précédent" : "suivant"} inconnu)`, partner: p };
       }
-      // DSN : contrat redéclaré après sa fin dans un mois suivant ⇒ la rupture peut être annulée : sortie non vérifiable.
-      if (r.event.kind === "exit" && redeclared.has(r.event.contractKey)) {
-        return { row: r, why: "end-doubtful", label: `fin incertaine : contrat déclaré après sa fin en ${redeclared.get(r.event.contractKey)} (rupture annulée ?)`, partner: p };
-      }
       return { row: r, why: "counted", label: "compté", partner: p };
     });
     const count = (c: Count, kind: "entry" | "exit"): Count => {
@@ -102,11 +96,6 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
       if (unknown.length) {
         const list = unknown.map((x) => `${x.row.contract.externalId} le ${formatDate(x.row.event.date)}`).join(", ");
         return { kind: "nd", nd: nd("coverage-incomplete", `${what} de ${month} : contrats continus non vérifiables (${list}) — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés`) };
-      }
-      const doubtful = events.filter((x) => x.why === "end-doubtful" && x.row.event.kind === kind);
-      if (doubtful.length) {
-        const list = doubtful.map((x) => `${x.row.contract.externalId} le ${formatDate(x.row.event.date)}`).join(", ");
-        return { kind: "nd", nd: nd("coverage-incomplete", `${what} de ${month} : fin incertaine (${list}) — contrat déclaré après sa fin dans une DSN suivante (rupture annulée ?)`) };
       }
       return { kind: c.kind, value: events.filter((x) => x.why === "counted" && x.row.event.kind === kind).length, qualifiers: c.qualifiers };
     };
@@ -179,7 +168,7 @@ export function turnover(input: KpiInput, w: Window): Turnover {
     const date = monthStart(w.from);
     const h0 = headcountAt(input.data, date, countedOpts(input));
     if (h0.kind === "nd") return { kind: "nd", formula, months, nd: kpiNd(h0.nd.code, h0.nd.reason) };
-    if (h0.kind === "lower_bound") return { kind: "nd", formula, months, nd: kpiNd("month-lower-bound", `effectif au ${formatDate(date)} en borne basse (PayFit)`) };
+    if (h0.kind === "lower_bound") return { kind: "nd", formula, months, nd: kpiNd("month-lower-bound", `effectif au ${formatDate(date)} en borne basse${h0.qualifiers[0] ? ` (${h0.qualifiers[0]})` : ""}`) };
     if (h0.persons === 0) return { kind: "nd", formula, months, nd: kpiNd("denominator-zero", `effectif nul au ${formatDate(date)}`) };
     return { kind: "exact", formula, ratio: ratio(S, h0.persons), entries: E, exits: S, base: { kind: "start", date, persons: h0.persons, contractKeys: h0.contractKeys }, months, qualifiers };
   });

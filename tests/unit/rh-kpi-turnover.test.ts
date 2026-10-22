@@ -312,8 +312,8 @@ describe("turnover — révisions DSN : aucune valeur « exacte » qui changerai
     expect(isRatio(t, 24, 48)).toBe(true);
     expect(t).toMatchObject({ entries: 1, exits: 1 });
   });
-  it("fin déclarée puis contrat redéclaré sans fin le mois suivant (rupture annulée ?) : sortie n.d., effectif « ≥ » ; fin définitive connue : exact", () => {
-    // K-A : fin au 30/06/2025 déclarée en juin, redéclaré sans fin en juillet et août, fin au 30/09 déclarée en septembre.
+  it("contrat redéclaré sans fin après sa fin (versement après départ présumé) : sortie comptée, effectif exact ; limite écrite si la rupture était annulée", () => {
+    // K-A : fin au 30/06/2025 déclarée en juin, redéclaré sans fin en juillet et août (régularisation ?), fin au 30/09 en septembre.
     const spec = (month: string): DsnDeclarationSpec => {
       const people: DsnPerson[] = [{ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] }];
       const a = { number: "K-A", start: "2024-01-01", nature: "01", gross: "1500.00" };
@@ -323,14 +323,15 @@ describe("turnover — révisions DSN : aucune valeur « exacte » qui changerai
       return { month, people };
     };
     const w = rollingWindow("2025-07");
+    // Jusqu'en juillet : sortie du 30/06 comptée (S = 1), effectif fin juillet 1 (K-B), K-A compté à part.
+    // Σ effectifs 2024-08 → 2025-07 = 11 × 2 + 1 = 23 ⇒ (12 × 1) ÷ (2 × 23) = 12/46.
     const july = dsnBuild(edgeFiles(monthRange("2024-08", "2025-07").map(spec)));
     const i1 = kpiInput(july, DSN_ABSENCES);
-    expect(monthMovements(i1, "2025-06").exits).toMatchObject({ kind: "nd", nd: { reason: expect.stringContaining("fin incertaine (K-A le 30/06/2025)") } });
-    expect(turnover(i1, w).kind).toBe("nd");
-    expect(headcountAt(july, "2025-07-31", countedOpts(i1))).toMatchObject({ kind: "lower_bound", persons: 1 });
+    expect(monthMovements(i1, "2025-06").exits).toMatchObject({ kind: "exact", value: 1 });
+    expect(headcountAt(july, "2025-07-31", countedOpts(i1))).toMatchObject({ kind: "exact", persons: 1, declaredAfterEndKeys: [expect.stringContaining("dsn:")] });
+    expect(isRatio(turnover(i1, w), 12, 46)).toBe(true);
+    // La DSN de septembre déclare une nouvelle fin : la rupture de juin était annulée ; les chiffres sont corrigés (limite écrite).
     const sept = dsnBuild(edgeFiles(monthRange("2024-08", "2025-09").map(spec)));
-    const i2 = kpiInput(sept, DSN_ABSENCES);
-    expect(headcountAt(sept, "2025-07-31", countedOpts(i2))).toMatchObject({ kind: "exact", persons: 2 });
-    expect(isRatio(turnover(i2, w), 0, 48)).toBe(true);
+    expect(isRatio(turnover(kpiInput(sept, DSN_ABSENCES), w), 0, 48)).toBe(true);
   });
 });

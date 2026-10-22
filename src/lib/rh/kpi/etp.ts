@@ -17,17 +17,28 @@ const frNum = (x: number) => x.toLocaleString("fr-FR", { maximumFractionDigits: 
 // ⌊a ÷ b⌋ pour b > 0 (la division BigInt tronque vers zéro, ce qui fausserait l'arrondi d'une valeur négative).
 const floorDiv = (a: bigint, b: bigint) => (a >= 0n ? a / b : -((-a + b - 1n) / b));
 
+// Valeur décimale exacte d'un nombre de la source (sa plus courte écriture décimale), en fraction num / 10^k.
+function decimalOf(x: number): { num: bigint; den: bigint } {
+  let t = String(x);
+  if (/e/i.test(t)) t = x.toFixed(20).replace(/\.?0+$/, "");
+  const neg = t.startsWith("-");
+  if (neg) t = t.slice(1);
+  const [i, f = ""] = t.split(".");
+  return { num: BigInt(i + f) * (neg ? -1n : 1n), den: 10n ** BigInt(f.length) };
+}
+
+// Un seul arrondi, au plus proche (demi vers le haut), de la valeur exacte à `decimals` décimales ; résultat en dix-millièmes.
+const roundTo4 = (num: bigint, den: bigint, decimals: 2 | 3 | 4) => Number(floorDiv(2n * num * pow10(decimals) + den, 2n * den) * pow10(4 - decimals));
+
 export function etp4FromQuotas(contractQuota: number, referenceQuota: number, decimals: 2 | 3 | 4): number {
-  const cq4 = BigInt(to4(contractQuota));
-  const rq4 = BigInt(to4(referenceQuota));
-  const units = floorDiv(2n * cq4 * pow10(decimals) + rq4, 2n * rq4);
-  return Number(units * pow10(4 - decimals));
+  const c = decimalOf(contractQuota);
+  const r = decimalOf(referenceQuota);
+  return roundTo4(c.num * r.den, c.den * r.num, decimals);
 }
 
 export function etp4FromFte(fte: number, decimals: 2 | 3 | 4): number {
-  const x4 = BigInt(to4(fte));
-  const step = pow10(4 - decimals);
-  return Number(floorDiv(2n * x4 + step, 2n * step) * step);
+  const x = decimalOf(fte);
+  return roundTo4(x.num, x.den, decimals);
 }
 
 const refOf = (c: ContractDraft): ContractRef => ({ contractKey: c.contractKey, externalId: c.externalId, personKey: c.personKey, establishmentId: c.establishmentId, nature: c.nature });
