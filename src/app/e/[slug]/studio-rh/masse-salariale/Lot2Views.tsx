@@ -2,14 +2,19 @@ import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { servicesOf, shiftYear, windowPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
-import { labelTotals, operatingRevenue, provisionMonth, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
+import { comptaGap, CONGES_PREFIX, labelTotals, operatingRevenue, provisionMonth, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 
 const lowerMonth = (m: string) => formatMonth(m).toLowerCase();
 const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
-const pct = (a: number, b: number) => (b === 0 ? "n.d. (N-1 nul)" : `${a - b > 0 ? "+" : ""}${fmtPercent({ num: a - b, den: b })}`);
+const pct = (a: number, b: number) => (b === 0 ? "n.d. (N-1 nul)" : b < 0 ? "n.d. (N-1 négatif)" : `${a - b > 0 ? "+" : ""}${fmtPercent({ num: a - b, den: b })}`);
 const rubricLabel = (id: RubricId | "non-classe") => (id === "non-classe" ? "Comptes 63/64 non classés" : (RUBRICS.find((r) => r.id === id)?.label ?? id));
 const BRUT: RubricId[] = ["salaires", "primes", "stages", "indemnites"];
+// Raisons des n.d. d'un tableau, listées sous le tableau (jamais seulement en infobulle).
+const ndReasons = (reasons: (string | null | undefined)[]) => {
+  const list = [...new Set(reasons.filter((r): r is string => Boolean(r)))];
+  return list.length ? <p className="tile-foot nd" data-testid="nd-reasons">n.d. : {list.join(" ; ")}</p> : null;
+};
 
 // --- Onglet « Fixe & variable » : brut par rubrique et par libellé de paie PayFit, N et N-1, primes par famille et par mois.
 export function FixeVariableView({ input, months, prevMonths }: { input: JournalInput; months: string[]; prevMonths: string[] }) {
@@ -18,17 +23,18 @@ export function FixeVariableView({ input, months, prevMonths }: { input: Journal
   if (cur.kind === "nd") return <p className="nd" data-testid="fv-nd">n.d. — {cur.nd.reason}</p>;
   const n = labelTotals(input, months);
   const p = prev.kind === "value" ? labelTotals(input, prevMonths) : [];
-  const keyOf = (t: { rubric: RubricId; label: string }) => `${t.rubric}\u0000${t.label.toLowerCase()}`;
-  const keys = [...new Map([...n, ...p].map((t) => [keyOf(t), t])).values()].sort((a, b) => BRUT.indexOf(a.rubric) - BRUT.indexOf(b.rubric) || a.label.localeCompare(b.label));
-  const val = (list: typeof n, k: string) => list.filter((t) => keyOf(t) === k).reduce((s, t) => s + t.cents, 0);
+  // Même clé que le calcul (libellé sans accents ni casse) ; libellé affiché : celui de la période N s'il existe.
+  const keys = [...new Map([...p, ...n].map((t) => [t.key, t])).values()].sort((a, b) => BRUT.indexOf(a.rubric) - BRUT.indexOf(b.rubric) || a.label.localeCompare(b.label));
+  const val = (list: typeof n, k: string) => list.filter((t) => t.key === k).reduce((s, t) => s + t.cents, 0);
+  const prevNd = prev.kind === "nd" ? prev.nd.reason : null;
   const fixe = (w: typeof prev) => (w.kind === "value" ? w.byRubric.salaires : null);
   const variable = (w: typeof prev) => (w.kind === "value" ? w.byRubric.primes + w.byRubric.indemnites : null);
-  const families = [...new Set(n.filter((t) => t.rubric === "primes").map((t) => t.label))].sort();
+  const families = n.filter((t) => t.rubric === "primes").sort((a, b) => a.label.localeCompare(b.label));
   const tile = (id: string, label: string, a: number | null, b: number | null, foot: string) => (
     <div data-testid={`fv-tile-${id}`}>
       <dt>{label}</dt>
       <dd>{a === null ? "n.d." : formatEuros(a)}</dd>
-      <span className="tile-foot">N-1 : {b === null ? "n.d." : formatEuros(b)}{a !== null && b !== null ? ` · ${signed(a - b)} · ${pct(a, b)}` : ""}</span>
+      <span className="tile-foot">N-1 : {b === null ? `n.d. — ${prevNd ?? "non disponible"}` : formatEuros(b)}{a !== null && b !== null ? ` · ${signed(a - b)} · ${pct(a, b)}` : ""}</span>
       <span className="tile-foot">{foot} · <a href="#def-fixe-variable">Définition</a></span>
     </div>
   );
@@ -39,7 +45,7 @@ export function FixeVariableView({ input, months, prevMonths }: { input: Journal
         <dl className="facts">
           {tile("fixe", "Fixe (salaires et congés payés)", fixe(cur), fixe(prev), "rubrique « Salaires et appointements »")}
           {tile("variable", "Variable (primes et indemnités)", variable(cur), variable(prev), "rubriques « Primes » et « Indemnités et avantages »")}
-          {tile("primes", "dont primes", cur.byRubric.primes, prev.kind === "value" ? prev.byRubric.primes : null, `${families.length} famille(s) : ${families.join(", ") || "aucune"}`)}
+          {tile("primes", "dont primes", cur.byRubric.primes, prev.kind === "value" ? prev.byRubric.primes : null, `${families.length} famille(s) : ${families.map((f) => f.label).join(", ") || "aucune"}`)}
           {tile("stages", "Gratifications de stage", cur.byRubric.stages, prev.kind === "value" ? prev.byRubric.stages : null, "rubrique à part, comptée dans le brut")}
         </dl>
       </section>
@@ -50,7 +56,7 @@ export function FixeVariableView({ input, months, prevMonths }: { input: Journal
             <thead><tr><th>Rubrique</th><th>Libellé (PayFit)</th><th className="num">N-1</th><th className="num">N</th><th className="num">Écart €</th><th className="num">Écart %</th></tr></thead>
             <tbody>
               {keys.map((t) => {
-                const k = keyOf(t);
+                const k = t.key;
                 const a = val(n, k);
                 const b = val(p, k);
                 return (
@@ -70,6 +76,7 @@ export function FixeVariableView({ input, months, prevMonths }: { input: Journal
             </tfoot>
           </table>
         </div>
+        {ndReasons([prevNd && `N-1 (${prevMonths[0]} → ${prevMonths.at(-1)}) : ${prevNd}`])}
       </section>
       <section className="panel">
         <h2>Primes par famille et par mois</h2>
@@ -78,14 +85,14 @@ export function FixeVariableView({ input, months, prevMonths }: { input: Journal
         ) : (
           <div className="table-wrap">
             <table className="data-table" data-testid="fv-primes-months">
-              <thead><tr><th>Mois</th>{families.map((f) => <th key={f} className="num">{f}</th>)}<th className="num">Total primes</th></tr></thead>
+              <thead><tr><th>Mois</th>{families.map((f) => <th key={f.key} className="num">{f.label}</th>)}<th className="num">Total primes</th></tr></thead>
               <tbody>
                 {cur.months.map((r) => {
-                  const lt = labelTotals(input, [r.month]).filter((t) => t.rubric === "primes");
+                  const lt = r.kind === "value" ? labelTotals(input, [r.month]) : [];
                   return (
                     <tr key={r.month} data-month={r.month}>
                       <td>{formatMonth(r.month)}</td>
-                      {families.map((f) => <td key={f} className="num">{formatEuros(lt.filter((t) => t.label === f).reduce((s, t) => s + t.cents, 0))}</td>)}
+                      {families.map((f) => <td key={f.key} className="num">{r.kind === "value" ? formatEuros(lt.filter((t) => t.key === f.key).reduce((s, t) => s + t.cents, 0)) : "n.d."}</td>)}
                       <td className="num">{r.kind === "value" ? formatEuros(r.byRubric.primes) : "n.d."}</td>
                     </tr>
                   );
@@ -110,18 +117,28 @@ export function PaieComptaView(props: {
   fullInput: JournalInput;
   months: string[];
   serviceFiltered: boolean;
-  compta: { source: "pennylane" | "fec" | null; reason: string; lines: ComptaLine[]; months: string[] };
+  compta: { source: "pennylane" | "fec" | null; reason: string; lines: ComptaLine[]; months: string[]; nd: Record<string, string> };
 }) {
   const { slug, input, fullInput, months, serviceFiltered, compta } = props;
   const last = months.at(-1)!;
   const prov = (m: string) => provisionMonth(input, m);
   const cur = prov(last);
   const n1 = prov(shiftYear(last, -1));
-  const show = (x: ProvisionMonth, pick: (v: Extract<ProvisionMonth, { kind: "value" }>) => number) => (x.kind === "nd" ? "n.d." : formatEuros(pick(x)));
+  type PV = Extract<ProvisionMonth, { kind: "value" }>;
+  const show = (x: ProvisionMonth, pick: (v: PV) => number | null) => {
+    const v = x.kind === "nd" ? null : pick(x);
+    return v === null ? "n.d." : formatEuros(v);
+  };
+  // Raisons des n.d. de la provision : mois n.d., ou part sans aucune ligne de dotation dans le mois.
+  const why = (x: ProvisionMonth, m: string) =>
+    x.kind === "nd"
+      ? `${m} : ${x.reason}`
+      : [x.conges === null ? `${m} : congés payés — aucune ligne ${CONGES_PREFIX} « Mois courant »` : null, x.charges === null ? `${m} : charges sociales — aucune ligne hors ${CONGES_PREFIX} « Mois courant »` : null].filter(Boolean).join(" ; ") || null;
   const services = fullInput.serviceAxis ? servicesOf(fullInput, [last, shiftYear(last, -1)]) : [];
-  const recon = serviceFiltered ? null : compta.source ? reconcile(fullInput, compta.lines, compta.months, months) : null;
+  const recon = serviceFiltered ? null : compta.source ? reconcile(fullInput, compta.lines, compta.months, months, compta.nd) : null;
   const masse = windowPayroll(fullInput, months);
-  const produits = compta.source && months.every((m) => compta.months.includes(m)) ? operatingRevenue(compta.lines, months) : null;
+  const gap = compta.source ? comptaGap(compta.months, compta.nd, months) : null;
+  const produits = compta.source && !gap ? operatingRevenue(compta.lines, months) : null;
   return (
     <>
       <section className="panel" data-testid="pc-provision">
@@ -130,8 +147,8 @@ export function PaieComptaView(props: {
           <div data-testid="pc-tile-provision">
             <dt>Provision fin {lowerMonth(last)}</dt>
             <dd className={cur.kind === "nd" ? "nd" : undefined}>{cur.kind === "nd" ? `n.d. — ${cur.reason}` : formatEuros(cur.total)}</dd>
-            <span className="tile-foot">congés payés {show(cur, (v) => v.conges)} + charges sociales {show(cur, (v) => v.charges)}</span>
-            <span className="tile-foot" data-testid="pc-tile-provision-n1">fin {lowerMonth(shiftYear(last, -1))} : {show(n1, (v) => v.total)}{cur.kind === "value" && n1.kind === "value" ? ` · ${signed(cur.total - n1.total)}` : ""}</span>
+            <span className="tile-foot">congés payés {show(cur, (v) => v.conges)} + charges sociales {show(cur, (v) => v.charges)}{cur.kind === "value" && why(cur, last) ? ` (${why(cur, last)})` : ""}</span>
+            <span className="tile-foot" data-testid="pc-tile-provision-n1">fin {lowerMonth(shiftYear(last, -1))} : {n1.kind === "nd" ? `n.d. — ${n1.reason}` : formatEuros(n1.total)}{cur.kind === "value" && n1.kind === "value" ? ` · ${signed(cur.total - n1.total)}` : ""}</span>
             <span className="tile-foot"><a href="#def-provision">Définition</a></span>
           </div>
         </dl>
@@ -147,8 +164,8 @@ export function PaieComptaView(props: {
                     <td>{formatMonth(m)}</td>
                     <td className="num">{show(a, (v) => v.conges)}</td>
                     <td className="num">{show(a, (v) => v.charges)}</td>
-                    <td className="num" data-col="total" title={a.kind === "nd" ? a.reason : undefined}>{show(a, (v) => v.total)}</td>
-                    <td className="num" data-col="total-n1" title={b.kind === "nd" ? b.reason : undefined}>{show(b, (v) => v.total)}</td>
+                    <td className="num" data-col="total">{show(a, (v) => v.total)}</td>
+                    <td className="num" data-col="total-n1">{show(b, (v) => v.total)}</td>
                     <td className="num">{a.kind === "value" && b.kind === "value" ? signed(a.total - b.total) : "n.d."}</td>
                   </tr>
                 );
@@ -156,6 +173,7 @@ export function PaieComptaView(props: {
             </tbody>
           </table>
         </div>
+        {ndReasons(months.flatMap((m) => [why(prov(m), m), why(prov(shiftYear(m, -1)), shiftYear(m, -1))]))}
         {services.length > 0 && !serviceFiltered && (
           <div className="table-wrap" style={{ marginTop: 12 }}>
             <table className="data-table" data-testid="pc-provision-services">
@@ -177,6 +195,7 @@ export function PaieComptaView(props: {
                 })}
               </tbody>
             </table>
+            {ndReasons(services.flatMap((s) => [last, shiftYear(last, -1)].map((m) => why(provisionMonth(withService(fullInput, s), m), `${s ?? "Non ventilé"} ${m}`))))}
           </div>
         )}
       </section>
@@ -232,7 +251,7 @@ export function PaieComptaView(props: {
             : masse.kind === "nd"
               ? `n.d. — ${masse.nd.reason}`
               : produits === null
-                ? `n.d. — ${compta.source ? "comptabilité non lue pour toute la période" : "aucune source comptable retenue (produits d'exploitation 70 à 75)"}`
+                ? `n.d. — ${compta.source ? gap : `aucune source comptable retenue (${compta.reason}) : produits d'exploitation 70 à 75`}`
                 : produits <= 0
                   ? "n.d. — aucun produit d'exploitation (comptes 70 à 75) sur la période"
                   : `${fmtPercent({ num: masse.masse, den: produits })} — masse chargée ${formatEuros(masse.masse)} ÷ produits d'exploitation ${formatEuros(produits)}`}

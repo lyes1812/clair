@@ -86,6 +86,8 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   // Paramètre GET invalide : remplacé et signalé.
   await page.goto(`${ms}?annee=2031`);
   await expect(page.getByTestId("ms-param-notice")).toContainText("paramètre ignoré : annee=2031");
+  await page.goto(`${ms}?vue=constructor`);
+  await expect(page.getByTestId("ms-param-notice")).toContainText("paramètre ignoré : vue=constructor");
 
   // Contrôle DSN : sans dépôt, l'écran le dit ; avec les DSN fictives (même société), brut DSN = brut du journal.
   await page.goto(ms);

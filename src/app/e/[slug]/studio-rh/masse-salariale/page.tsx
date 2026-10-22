@@ -94,8 +94,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   // Onglets de l'écran (sous-vues de Masse salariale, pas des entrées de menu).
   const VUES = { synthese: "Synthèse", "fixe-variable": "Fixe & variable", "paie-compta": "Paie & comptabilité" } as const;
   const rawVue = one(sp.vue);
-  const vue: keyof typeof VUES = rawVue in VUES ? (rawVue as keyof typeof VUES) : "synthese";
-  if (rawVue && !(rawVue in VUES)) ignore("vue", rawVue, "vues : synthese, fixe-variable, paie-compta");
+  const vue: keyof typeof VUES = Object.hasOwn(VUES, rawVue) ? (rawVue as keyof typeof VUES) : "synthese";
+  if (rawVue && !Object.hasOwn(VUES, rawVue)) ignore("vue", rawVue, "vues : synthese, fixe-variable, paie-compta");
   const rawService = one(sp.service);
   const knownServices = ctx.service.axis ? servicesOf(fullInput, fullInput.months) : [];
   const serviceValue: string | null | undefined = !rawService ? undefined : rawService === NV && knownServices.includes(null) ? null : knownServices.includes(rawService) ? rawService : undefined;
@@ -220,7 +220,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       </p>
 
       {vue === "fixe-variable" && <FixeVariableView input={input} months={months} prevMonths={prevMonths} />}
-      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} compta={ctx.compta} />}
+      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} compta={await ctx.compta()} />}
       {vue === "synthese" && (
         <>
       <section className="panel">
