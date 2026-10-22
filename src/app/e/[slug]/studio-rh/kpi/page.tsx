@@ -217,7 +217,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       absenteeismN1: absenteeismShown(r.previous.absenteeism),
     },
   }));
-  const ndItems = rows.flatMap(({ r, cells }) => Object.values(cells).map((shown) => ({ month: r.month, shown })));
+  // Les colonnes N-1 portent sur le même mois un an plus tôt : leurs raisons sont datées de ce mois-là.
+  const ndItems = rows.flatMap(({ r, cells }) =>
+    Object.entries(cells).map(([col, shown]) => ({ month: col === "etpN1" || col === "absenteeismN1" ? r.previous.month : r.month, shown })),
+  );
   const toCur = t.turnover.current;
   const absCur = t.absenteeism.current;
 

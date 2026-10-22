@@ -101,7 +101,7 @@ export function PayfitNotice({ data }: { data: RhBuildData }) {
       Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.{" "}
       {lower.length > 0 && exactFrom ? (
         <>
-          PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois (constaté sur le compte pilote) : l'effectif et l'ETP sont exacts à partir du {formatDate(exactFrom)} ; les entrées, sorties et
+          PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois (constaté sur le compte pilote, à vérifier pour chaque espace) : l'effectif et l'ETP sont exacts à partir du {formatDate(exactFrom)} ; les entrées, sorties et
           absences des mois {monthRanges(lower)} sont incomplètes, et tout turnover ou absentéisme d'une période qui contient l'un de ces mois est n.d.
         </>
       ) : (
