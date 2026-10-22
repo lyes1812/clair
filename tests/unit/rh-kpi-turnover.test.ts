@@ -90,3 +90,28 @@ describe("turnover — contrats continus (PAYFIT_EDGES.rehire, lecture du 31/01/
     expect(mv.events.map((e) => e.why)).toEqual(["neutralized"]);
   });
 });
+
+describe("turnover — couple un pour un (une sortie, deux entrées le lendemain, lecture du 31/01/2026)", async () => {
+  // P-X : C-A du 01/06/2024 au 30/06/2025, puis C-B et C-C dès le 01/07/2025 ; P-Y : C-Y depuis 2024. Natures 01.
+  // Effectif fin de mois : 2 personnes sur les 12 mois de 2025-02 → 2026-01 (Σ = 24). Couple neutralisé : C-A ↔ C-B
+  // (ordre des contrats) ; C-C est une vraie entrée. E = 1, S = 0 ⇒ (12 × 1) ÷ (2 × 24) = 12/48 = 25 %.
+  const edge = {
+    collaborators: [{ id: "P-X" }, { id: "P-Y" }],
+    contracts: [
+      { contractId: "C-A", collaboratorId: "P-X", startDate: "2024-06-01", endDate: "2025-06-30", natureContratDsn: "01" },
+      { contractId: "C-B", collaboratorId: "P-X", startDate: "2025-07-01", endDate: null, natureContratDsn: "01" },
+      { contractId: "C-C", collaboratorId: "P-X", startDate: "2025-07-01", endDate: null, natureContratDsn: "01" },
+      { contractId: "C-Y", collaboratorId: "P-Y", startDate: "2024-01-01", endDate: null, natureContratDsn: "01" },
+    ],
+  };
+  const data = await payfitBuild("cle-fictive-edge-1234", payfitEdgeFetch("cle-fictive-edge-1234", edge as never), monthRange("2024-10", "2026-01"), new Date("2026-01-31T08:00:00Z"));
+  it("une sortie ne neutralise qu'une entrée : E = 1, S = 0, 12/48", () => {
+    const input = kpiInput(data, DSN_ABSENCES);
+    const t = turnover(input, rollingWindow("2026-01"));
+    expect(isRatio(t, 12, 48)).toBe(true);
+    expect(t).toMatchObject({ entries: 1, exits: 0 });
+    const july = monthMovements(input, "2025-07").events.map((e) => `${e.row.contract.externalId}:${e.why}`).sort();
+    expect(july).toEqual(["C-B:neutralized", "C-C:counted"]);
+    expect(monthMovements(input, "2025-06").events.map((e) => `${e.row.contract.externalId}:${e.why}`)).toEqual(["C-A:neutralized"]);
+  });
+});

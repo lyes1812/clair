@@ -141,6 +141,13 @@ describe("Quotités construites (cas E)", () => {
     expect(e4(two)).toBe("lower_bound:10000");
     expect(two.missing.map((m) => m.externalId)).toEqual(["K-1"]);
   });
+  it("E3b : quotité négative (S21.G00.40.013 = -75,84) ⇒ contrat n.d., jamais soustrait ; avec un autre contrat ⇒ « ≥ 1 »", () => {
+    const alone = etpOf([one({ quota: "-75.84" })]);
+    expect(alone).toMatchObject({ kind: "nd", nd: { code: "quota-missing", reason: expect.stringContaining("quotité du contrat négative") } });
+    const two = etpOf([decl([{ number: "K-1", start: "2025-01-01", quota: "-75.84", gross: "1000.00" }, { number: "K-2", start: "2025-01-01", gross: "1000.00" }])]);
+    expect(e4(two)).toBe("lower_bound:10000");
+    expect(two.missing.map((m) => m.externalId)).toEqual(["K-1"]);
+  });
   it("E4 : forfait jours 218/218 ⇒ 1 ; unités 90 et 99 non interprétées ⇒ n.d.", () => {
     expect(e4(etpOf([one({ unit: "20", quota: "218", reference: "218" })]))).toBe("exact:10000");
     expect(etpOf([one({ unit: "90" })])).toMatchObject({ kind: "nd", nd: { reason: expect.stringContaining("autre unité (90) non interprétée") } });

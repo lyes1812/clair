@@ -19,6 +19,7 @@ import {
   type SlotKey,
   type TheoreticalContribution,
   type TheoreticalMonth,
+  type TheoreticalWindow,
   type Window,
 } from "./types";
 
@@ -53,6 +54,17 @@ export function theoreticalMonth(input: KpiInput, month: string): TheoreticalMon
       contributions.push({ contractKey: c.contractKey, externalId: c.externalId, personKey: c.personKey, establishmentId: c.establishmentId, nature: c.nature, from, to, days, half: 2 * days, provenance: m.provenance.presentAnyDay ?? null });
     }
     return { month, kind: "exact", half: contributions.reduce((s, x) => s + x.half, 0), contributions };
+  });
+}
+
+export function theoreticalWindow(input: KpiInput, w: Window): TheoreticalWindow {
+  return memo(input, `th-w:${w.from}:${w.to}`, () => {
+    const g = checkWindow(input.data, w);
+    if (g) return { kind: "nd", nd: g, months: [] };
+    const months = w.months.map((m) => theoreticalMonth(input, m));
+    const nds = months.filter((m): m is Extract<TheoreticalMonth, { kind: "nd" }> => m.kind === "nd");
+    if (nds.length) return { kind: "nd", months, nd: kpiNd("month-nd", periodReason(nds.map((m) => m.month), nds[0].month, nds[0].nd.reason), { months: nds.map((m) => m.month) }) };
+    return { kind: "exact", half: months.reduce((s, m) => s + (m.kind === "exact" ? m.half : 0), 0), months };
   });
 }
 
@@ -119,6 +131,8 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
         continue;
       }
       if (sd === null || ed === null) {
+        // Date de borne inconnue : seuls les mois de la période du contrat peuvent être touchés (les créneaux y sont bornés).
+        if (month < monthOf(c.startDate) || (c.endDate !== null && month > monthOf(c.endDate))) continue;
         return { month, kind: "nd", nd: kpiNd("absence-date-nd", `absence ${a.id} : date de ${sd === null ? "début" : "fin"} non renseignée dans PayFit`) };
       }
       const clip = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };
@@ -126,9 +140,9 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       const outsideContract = inMonth.filter((d) => d < c.startDate! || (c.endDate !== null && d > c.endDate)).length;
       outside += outsideContract;
       if (a.status === null) {
-        const possible = eachDay(max(sd, clip.from), min(ed, clip.to))
-          .filter((d) => params.dayBasis === "calendar" || isWeekday(d))
-          .flatMap((d) => [`${d}#0`, `${d}#1`]);
+        // Créneaux que l'absence pourrait couvrir, moments compris : comptés comme incertains, jamais comme absents.
+        const p = absenceSlots({ start: { date: sd, moment: a.start.moment }, end: { date: ed, moment: a.end.moment } }, clip, params.dayBasis);
+        const possible = [...new Set([...p.slots, ...p.uncertain])];
         possible.forEach((x) => setOf(doubt, c.contractKey).add(x));
         if (possible.length) uncertainIds.add(a.id);
         excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "status-nd", label: "statut non renseigné : non comptée", uncertain: possible.length });

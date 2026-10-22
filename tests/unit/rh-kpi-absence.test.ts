@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { monthRange } from "@/lib/connectors/months";
 import { createFixtureFetch } from "@/lib/connectors/payfit/fixture";
-import { absenteeism, absenteeismMonth, absenceTypeChoices, theoreticalMonth } from "@/lib/rh/kpi/absence";
+import { absenteeism, absenteeismMonth, absenceTypeChoices, theoreticalMonth, theoreticalWindow } from "@/lib/rh/kpi/absence";
 import { same } from "@/lib/rh/kpi/fraction";
 import { rollingWindow } from "@/lib/rh/kpi/period";
 import type { AbsenteeismMonth, KpiInput } from "@/lib/rh/kpi/types";
@@ -133,6 +133,28 @@ describe("absentéisme — cas construits (contrat 005, mars 2026)", async () =>
     expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "end-of-day", { status: "pending_approval" })], "2026-03", { absenceStatuses: ["approved", "pending_approval"] }))).toBe("exact:2/434");
     expect(r(run([absence("a", "005", "2026-03-02", "beginning-of-day", "2026-03-02", "end-of-day", { type: "test_other" })]))).toBe("exact:0/434");
   });
+  it("A15b : statut nul — seuls les créneaux possibles (moments compris) sont incertains", () => {
+    // b sans statut, 02/03 mi-journée → fin : seul l'après-midi est possible ; déjà couvert par a ⇒ exact 1/434.
+    const both = [absence("a", "005", "2026-03-02", "middle-of-day", "2026-03-02", "end-of-day"), absence("b", "005", "2026-03-02", "middle-of-day", "2026-03-02", "end-of-day", { status: null })];
+    expect(r(run(both))).toBe("exact:1/434");
+    const alone = run([absence("b", "005", "2026-03-02", "middle-of-day", "2026-03-02", "end-of-day", { status: null })]);
+    expect(r(alone)).toBe("lower_bound:0/434");
+    if (alone.kind !== "nd") {
+      expect(alone.qualifiers.join(" ")).toContain("1 demi-journée(s) incertaine(s)");
+      expect(alone.excluded[0]).toMatchObject({ why: "status-nd", uncertain: 1 });
+    }
+  });
+  it("A18b : date absente — seuls les mois de la période du contrat sont n.d.", () => {
+    // 003 se termine le 31/12/2025 : une absence sans fin commencée le 29/12/2025 ne touche aucun jour compté ensuite.
+    const noEnd = [absence("a", "003", "2025-12-29", "beginning-of-day", null, null)];
+    expect(r(run(noEnd, "2025-12"))).toBe("absence-date-nd");
+    expect(r(run(noEnd, "2026-01"))).toBe("exact:0/372");
+    expect(r(run(noEnd, "2026-03"))).toBe("exact:0/434");
+    // 004 commence le 15/02/2026 : une absence sans début ne touche aucun jour compté avant février.
+    const noStart = [absence("a", "004", null, null, "2026-02-20", "end-of-day")];
+    expect(r(run(noStart, "2026-01"))).toBe("exact:0/372");
+    expect(r(run(noStart, "2026-02"))).toBe("absence-date-nd");
+  });
   it("A17–A18 : contrat inconnu ⇒ mois n.d. ; date absente ⇒ mois touchés n.d., jamais de fin supposée", () => {
     const ghost = [absence("a", "TEST-A-CONTRACT-999", "2026-03-02", "beginning-of-day", "2026-03-03", "end-of-day")];
     expect(r(run(ghost, "2026-03"))).toBe("absence-unknown-contract");
@@ -148,5 +170,20 @@ describe("absentéisme — cas construits (contrat 005, mars 2026)", async () =>
     expect(r(absenteeismMonth(outOfScope, "2026-09"))).toBe("month-out-of-scope");
     expect(r(absenteeismMonth(outOfScope, "2026-10"))).toBe("after-reference");
     expect(r(absenteeismMonth(mk({ status: "unavailable", nd: nd("scope-missing", "accès refusé par le fournisseur pour cette clé") }), "2026-03"))).toBe("absences-unavailable");
+  });
+});
+
+describe("jours théoriques d'une fenêtre (indépendants des absences)", async () => {
+  // DSN, 2025-10 → 2026-09 en calendaire : 217 + 210 + 217 + 186 + 182 + 217 + 210 + 217 + 210 + 217 + 217 + 210 = 2 510 j.
+  it("DSN : 2 510 j exacts alors que l'absentéisme est n.d. (arrêts non extraits)", () => {
+    const input = kpiInput(dsnFixtureBuild(), DSN_ABSENCES);
+    expect(theoreticalWindow(input, rollingWindow("2026-09"))).toMatchObject({ kind: "exact", half: 5020 });
+    expect(absenteeism(input, rollingWindow("2026-09"))).toMatchObject({ kind: "nd", nd: { code: "not-extracted" } });
+  });
+  it("PayFit lu le 21/10/2026 : n.d. à cause du mois charnière 2025-10, même raison que la colonne", async () => {
+    const input = kpiInput(await payfitFixtureBuild(), await fixtureAbsences());
+    const t = theoreticalWindow(input, rollingWindow("2026-09"));
+    expect(t).toMatchObject({ kind: "nd", nd: { code: "month-nd", months: ["2025-10"] } });
+    if (t.kind === "nd") expect(t.nd.reason).toBe(`2025-10 : ${(theoreticalMonth(input, "2025-10") as { nd: { reason: string } }).nd.reason}`);
   });
 });

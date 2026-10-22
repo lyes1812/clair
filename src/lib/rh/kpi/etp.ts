@@ -38,6 +38,9 @@ function payfitEtp(input: KpiInput, c: ContractDraft): EtpContribution | EtpMiss
     const checks = c.fteAtRead !== null && to4(c.fteAtRead) !== 10000 ? [`temps plein (isFullTime) mais fullTimeEquivalent = ${frNum(c.fteAtRead)} : 1 retenu (Paramètres)`] : [];
     return { ...base, kind: "etp", etp4: 10000, basis: "payfit_full_time", checks, provenance: c.provenance.isFullTimeAtRead ?? null };
   }
+  if (c.fteAtRead !== null && c.fteAtRead < 0) {
+    return { ...base, kind: "missing", nd: kpiNd("quota-missing", `fullTimeEquivalent négatif dans PayFit (${frNum(c.fteAtRead)}) : quotité non retenue`) };
+  }
   if (c.fteAtRead !== null) {
     const x4 = to4(c.fteAtRead);
     const checks: string[] = [];
@@ -85,6 +88,7 @@ function dsnEtp(input: KpiInput, c: ContractDraft, month: string): EtpContributi
   if (r.referenceQuota === null) return missing(kpiNd("quota-missing", "S21.G00.40.012 absente"));
   if (r.referenceQuota <= 0) return missing(kpiNd("quota-missing", "quotité de référence nulle (S21.G00.40.012)"));
   if (r.contractQuota === null) return missing(kpiNd("quota-missing", "S21.G00.40.013 absente"));
+  if (r.contractQuota < 0) return missing(kpiNd("quota-missing", `quotité du contrat négative (S21.G00.40.013 = ${frNum(r.contractQuota)})`));
   const cq4 = to4(r.contractQuota);
   const rq4 = to4(r.referenceQuota);
   let etp4: number;

@@ -81,6 +81,8 @@ export type Turnover =
 export type SlotKey = string; // « 2026-03-02#0 » matin, « 2026-03-02#1 » après-midi
 export type TheoreticalContribution = ContractRef & { from: string; to: string; days: number; half: number; provenance: Provenance | null };
 export type TheoreticalMonth = { month: string; kind: "exact"; half: number; contributions: TheoreticalContribution[] } | { month: string; kind: "nd"; nd: KpiNd };
+// Jours théoriques d'une fenêtre : somme exacte des mois, ou n.d. dès qu'un mois l'est (indépendant des absences).
+export type TheoreticalWindow = { kind: "exact"; half: number; months: TheoreticalMonth[] } | { kind: "nd"; nd: KpiNd; months: TheoreticalMonth[] };
 export type AbsenceSlice = {
   absenceId: string;
   contractKey: string;
@@ -137,6 +139,7 @@ export type KpiDashboard = {
   scope: KpiScope;
   tiles: { etpEnd: Compared<EtpMonthEnd>; etpAverage: Compared<Average>; headcountAverage: Compared<Average>; turnover: Compared<Turnover>; absenteeism: Compared<Absenteeism> };
   rows: KpiRow[];
+  theoretical: TheoreticalWindow;
   absenceTypes: AbsenceTypeChoice[];
 };
 export type KpiDetailId = "etp-end" | "headcount" | "entries" | "exits" | "theoretical" | "absenteeism" | "etp-avg" | "headcount-avg" | "turnover";
@@ -145,7 +148,7 @@ export type KpiDetail =
   | { id: "headcount"; month: string; value: HeadcountResult }
   | { id: "entries" | "exits"; month: string; value: MonthMovements }
   | { id: "theoretical" | "absenteeism"; month: string; value: AbsenteeismMonth; theoretical: TheoreticalMonth }
-  | { id: "absenteeism-window"; month: null; window: Window; value: Absenteeism }
+  | { id: "absenteeism-window"; month: null; window: Window; value: Absenteeism; theoretical: TheoreticalWindow }
   | { id: "etp-avg" | "headcount-avg"; window: Window; value: Average }
   | { id: "turnover"; window: Window; value: Turnover };
 

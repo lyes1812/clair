@@ -20,6 +20,7 @@ import type {
   KpiNd,
   MonthMovements,
   TheoreticalMonth,
+  TheoreticalWindow,
   Turnover,
 } from "@/lib/rh/kpi/types";
 import type { KpiContext } from "@/lib/rh/kpi-context";
@@ -527,7 +528,8 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
   );
 }
 
-export function AbsenteeismWindowDetail({ v, detailHref }: { v: Absenteeism; detailHref: (id: string, month: string) => string }) {
+export function AbsenteeismWindowDetail({ v, theoretical, detailHref }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string }) {
+  const th = new Map(theoretical.months.map((m) => [m.month, m]));
   return (
     <>
       {v.months.length > 0 && (
@@ -539,7 +541,7 @@ export function AbsenteeismWindowDetail({ v, detailHref }: { v: Absenteeism; det
                 <tr key={m.month} data-month={m.month}>
                   <td>{m.month}</td>
                   <Cell col="absence-days" shown={absenceDaysShown(m)} href={detailHref("absenteeism", m.month)} />
-                  <Cell col="theoretical" shown={show(m, (x) => fmtHalfDays(x.ratio.den))} href={detailHref("theoretical", m.month)} />
+                  <Cell col="theoretical" shown={th.has(m.month) ? theoreticalShown(th.get(m.month)!) : { text: "n.d. — jours théoriques non calculés", kind: "nd" }} href={detailHref("theoretical", m.month)} />
                   <Cell col="absenteeism" shown={absenteeismShown(m)} href={detailHref("absenteeism", m.month)} />
                 </tr>
               ))}

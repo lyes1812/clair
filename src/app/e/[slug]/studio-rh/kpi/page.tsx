@@ -153,8 +153,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const rawMois = one(sp.mois);
   const detailId = (KPI_DETAIL_IDS as string[]).includes(rawDetail) ? (rawDetail as KpiDetailId) : null;
   if (rawDetail && !detailId) ignore("detail", rawDetail, "détail inconnu");
-  const detail = detailId ? kpiDetail(input, w, detailId, isMonth(rawMois) ? rawMois : null) : null;
-  if (detailId && !detail) ignore("mois", rawMois || "(absent)", "hors de la période affichée et de son N-1");
+  const moisOk = isMonth(rawMois);
+  if (rawMois && !moisOk) ignore("mois", rawMois, "format AAAA-MM attendu");
+  const detail = detailId ? kpiDetail(input, w, detailId, moisOk ? rawMois : null) : null;
+  if (detailId && !detail && (moisOk || !rawMois)) ignore("mois", rawMois || "(absent)", "hors de la période affichée et de son N-1");
 
   const query = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -391,7 +393,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                 <Cell col="etp" shown={averageShown(t.etpAverage.current)} href={detailHref("etp-avg", null)} />
                 <Cell col="entries" shown={show(toCur, (x) => String(x.entries))} href={detailHref("turnover", null)} />
                 <Cell col="exits" shown={show(toCur, (x) => String(x.exits))} href={detailHref("turnover", null)} />
-                <Cell col="theoretical" shown={show(absCur, (x) => fmtHalfDays(x.ratio.den))} href={detailHref("absenteeism", null)} />
+                <Cell col="theoretical" shown={show(dash.theoretical, (x) => fmtHalfDays(x.half))} href={detailHref("absenteeism", null)} />
                 <Cell col="absence-days" shown={show(absCur, (x) => fmtHalfDays(x.ratio.num))} href={detailHref("absenteeism", null)} />
                 <Cell col="absenteeism" shown={show(absCur, (x) => fmtPercent(x.ratio))} href={detailHref("absenteeism", null)} />
                 <Cell col="etp-n1" shown={averageShown(t.etpAverage.previous)} href={null} />
@@ -417,7 +419,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} />}
           {(detail.id === "entries" || detail.id === "exits") && <MovementsDetail v={detail.value} kind={detail.id === "entries" ? "entry" : "exit"} maps={maps} slug={slug} />}
           {(detail.id === "theoretical" || detail.id === "absenteeism") && <AbsenceMonthDetail id={detail.id} v={detail.value} theoretical={detail.theoretical} maps={maps} slug={slug} />}
-          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} detailHref={detailHref} />}
+          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={detailHref} />}
           {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={detailHref} />}
           {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={detailHref} />}
         </section>

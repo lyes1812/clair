@@ -164,6 +164,11 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(tile("turnover-delta")).toContainText("−39,39 pts");
   await expect(tile("absenteeism").locator("dd")).toHaveText("n.d. — arrêts non extraits de la DSN");
   await expect(page.getByTestId("kpi-monthly-table").locator("tr[data-month='2025-12'] td[data-col='theoretical']")).toHaveText("217 j");
+  // Jours théoriques de la période : exacts même quand l'absentéisme est n.d. (2 510 j sur octobre 2025 → septembre 2026).
+  const footTheoretical = (await page.getByTestId("kpi-monthly-foot").locator("td[data-col='theoretical']").textContent())!;
+  expect(footTheoretical.replace(/\s/g, " "), [...footTheoretical].map((c) => c.charCodeAt(0).toString(16)).join(" ")).toBe("2 510 j");
+  await page.goto(`${kpi}?detail=absenteeism&mois=2026-13#kpi-detail`);
+  await expect(page.getByTestId("kpi-param-notice")).toContainText("paramètre ignoré : mois=2026-13 (format AAAA-MM attendu)");
 
   // Année civile 2025.
   await page.goto(`${kpi}?mode=civil&annee=2025`);

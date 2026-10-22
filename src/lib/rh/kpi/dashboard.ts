@@ -1,6 +1,6 @@
 import { addMonths, monthEnd } from "@/lib/dates";
 import { coverageAt, headcountAt } from "@/lib/rh/headcount";
-import { absenteeism, absenteeismMonth, absenceTypeChoices, theoreticalMonth } from "./absence";
+import { absenteeism, absenteeismMonth, absenceTypeChoices, theoreticalMonth, theoreticalWindow } from "./absence";
 import { etpAverage, headcountAverage } from "./average";
 import { compareWindows, etpValue } from "./compare";
 import { etpMonthEnd } from "./etp";
@@ -38,6 +38,7 @@ export function kpiDashboard(input: KpiInput, w: Window): KpiDashboard {
       absenteeism: compareWindows(input, w, absenteeism, (a) => a.ratio, "points"),
     },
     rows,
+    theoretical: theoreticalWindow(input, w),
     absenceTypes: absenceTypeChoices(input),
   };
 }
@@ -48,7 +49,7 @@ export const KPI_DETAIL_IDS: KpiDetailId[] = ["etp-end", "headcount", "entries",
 export function kpiDetail(input: KpiInput, w: Window, id: KpiDetailId, month: string | null): KpiDetail | null {
   if (id === "etp-avg" || id === "headcount-avg") return { id, window: w, value: id === "etp-avg" ? etpAverage(input, w) : headcountAverage(input, w) };
   if (id === "turnover") return { id, window: w, value: turnover(input, w) };
-  if (id === "absenteeism" && month === null) return { id: "absenteeism-window", month: null, window: w, value: absenteeism(input, w) };
+  if (id === "absenteeism" && month === null) return { id: "absenteeism-window", month: null, window: w, value: absenteeism(input, w), theoretical: theoreticalWindow(input, w) };
   if (month === null) return null;
   const allowed = new Set([...w.months, ...w.months.map((m) => addMonths(m, -12))]);
   if (!allowed.has(month)) return null;
