@@ -422,6 +422,8 @@ export const rhFinding = pgTable(
 
 // --- Hypothèses budgétaires (module 5) : base figée (copie immuable du réel au mois de référence), scénarios et
 // hypothèses datées saisies dans Clair. La projection est recalculée à la demande par le moteur pur (src/lib/budget).
+// Garde-fous hors schéma Drizzle (migrations 0012 et 0013) : déclencheurs d'immutabilité de la base et du scénario
+// figé, politiques RLS restrictives contre la suppression d'un scénario figé ou de ses hypothèses.
 export const budgetBase = pgTable(
   "budget_base",
   {

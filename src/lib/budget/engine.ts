@@ -41,6 +41,7 @@ export function presence(month: string, from: string, to: string | null, prorata
 const specificity = (s: Scope) => (s.kind === "contrat" ? 3 : s.kind === "service" ? 2 : 1);
 const scopeText = (s: Scope) => (s.kind === "global" ? "toute l'entreprise" : s.kind === "service" ? `service ${s.service}` : "contrat ciblé");
 export const hireKey = (id: string) => `embauche:${id}`;
+export const enteredAfter = (base: BaseSnapshot, c: BaseContract) => c.startDate !== null && c.startDate > monthLast(base.refMonth);
 
 type Aug = Extract<Hypothesis, { kind: "augmentation" }>;
 type Hire = Extract<Hypothesis, { kind: "embauche" }>;
@@ -126,7 +127,9 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
   const fixes = new Map(hyps.filter((h): h is Fix => h.kind === "base").map((h) => [h.contractKey, h]));
   const conflicts = new Set<string>();
   const augFor = new Map<string, Aug[]>();
-  for (const c of base.contracts) augFor.set(c.contractKey, augmentationsFor({ key: c.contractKey, service: c.service, isHire: false }, augs, conflicts));
+  // Un contrat entré après le mois de référence a une base saisie à son entrée : comme une embauche, il ne reçoit que
+  // les augmentations qui le visent directement.
+  for (const c of base.contracts) augFor.set(c.contractKey, augmentationsFor({ key: c.contractKey, service: c.service, isHire: enteredAfter(base, c) }, augs, conflicts));
   for (const h of hires) augFor.set(hireKey(h.id), augmentationsFor({ key: hireKey(h.id), service: h.service, isHire: true }, augs, conflicts));
   if (conflicts.size) return { kind: "error", errors: [...conflicts] };
 
@@ -166,15 +169,22 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
         contributions.push({ hypothesisId: a.id, kind: "augmentation", label: a.label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
       });
       if (p.n !== p.d) {
-        // Mois incomplet : entrée après le mois de référence, départ saisi ou fin de contrat connue.
-        const part = levels(S, list, p, rate).at(-1)!;
-        const top = full.at(-1)!;
-        const b = part.brut - top.brut;
-        const ch = part.charges - top.charges;
-        const ends = stop !== null && stop <= end;
-        const byDep = ends && dep !== null && stop === dep.lastPaidDate;
-        const label = byDep ? dep.label : ends ? `Fin de contrat connue le ${c.endDate}` : `Entrée le ${from}`;
-        contributions.push({ hypothesisId: byDep ? dep.id : null, kind: byDep ? "depart" : ends ? "fin-contrat" : "entree", label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
+        // Mois incomplet : réductions successives, chacune rattachée à sa cause — entrée après le mois de référence,
+        // puis fin de contrat connue, puis départ saisi. Chaque ligne = différence de deux niveaux arrondis.
+        const endKnown = c.endDate !== null && c.endDate <= end ? c.endDate : null;
+        const depDate = dep !== null && dep.lastPaidDate <= end ? dep.lastPaidDate : null;
+        const steps: { p: Frac; kind: "entree" | "fin-contrat" | "depart"; label: string; id: string | null }[] = [];
+        if (from > monthStart(m)) steps.push({ p: presence(m, from, null, conv.prorata), kind: "entree", label: `Entrée le ${from}`, id: null });
+        if (endKnown) steps.push({ p: presence(m, from, endKnown, conv.prorata), kind: "fin-contrat", label: `Fin de contrat connue le ${endKnown}`, id: null });
+        if (depDate) steps.push({ p: presence(m, from, [depDate, endKnown].filter((x): x is string => x !== null).sort()[0], conv.prorata), kind: "depart", label: dep!.label, id: dep!.id });
+        let prev = full.at(-1)!;
+        for (const st of steps) {
+          const lv = levels(S, list, st.p, rate).at(-1)!;
+          const b = lv.brut - prev.brut;
+          const ch = lv.charges - prev.charges;
+          if (b !== 0 || ch !== 0) contributions.push({ hypothesisId: st.id, kind: st.kind, label: st.label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
+          prev = lv;
+        }
       }
       const atEnd = from <= end && (stop === null || stop >= end);
       if (atEnd && c.counted) {

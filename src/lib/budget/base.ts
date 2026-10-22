@@ -26,6 +26,8 @@ export function buildBase({ input, kpi, refMonth, lastMonth, syncId, readAt }: B
   if (ref.kind === "nd") return { kind: "nd", reason: `mois de référence ${refMonth} : ${ref.nd.reason}` };
   // Le référentiel doit être exact à la fin du mois de référence (mois fini à la date de lecture, effectif complet).
   const end = monthEnd(refMonth);
+  const readOn = kpi.data.build.referenceDate;
+  if (!readOn || readOn < end) return { kind: "nd", reason: `référentiel Collaborateurs lu le ${readOn ?? "n.d."}, avant la fin de ${refMonth} : synchronisez PayFit après le dernier jour du mois de référence` };
   const gate = gateAt(kpi.data, end);
   if (gate.nd) return { kind: "nd", reason: `référentiel Collaborateurs fin ${refMonth} : ${gate.nd.reason}` };
   const hc = headcountAt(kpi.data, end, countedOpts(kpi));
@@ -94,7 +96,7 @@ export function buildBase({ input, kpi, refMonth, lastMonth, syncId, readAt }: B
       externalId: c.externalId,
       label,
       service: services.length === 1 ? services[0] : null,
-      serviceNd: services.length > 1 ? `plusieurs services en ${refMonth} (${services.map((s) => s ?? "non ventilé").join(", ")}) : non ventilé` : null,
+      serviceNd: services.length > 1 ? `plusieurs services en ${refMonth} (${services.map((s) => s ?? "non ventilé").join(", ")}) : non ventilé` : later ? "entré après le mois de référence : aucune ligne de paie, service inconnu" : null,
       startDate: c.startDate,
       endDate: c.endDate,
       counted,
@@ -113,21 +115,25 @@ export function buildBase({ input, kpi, refMonth, lastMonth, syncId, readAt }: B
       const mp = monthPayroll(input, m);
       if (mp.kind === "nd") return { month: m, kind: "nd", reason: mp.nd.reason };
       const e = etpMonthEnd(kpi, m);
-      const h = e.kind === "nd" ? null : e.headcount;
+      const h = headcountAt(kpi.data, monthEnd(m), countedOpts(kpi));
+      const etpWhy = e.kind === "exact" ? null : e.kind === "nd" ? e.nd.reason : [e.missing.length ? `${e.missing.length} contrat(s) sans quotité` : null, ...e.qualifiers].filter(Boolean).join(" ; ") || "ETP en borne basse";
+      const hcWhy = h.kind === "exact" ? null : h.kind === "nd" ? h.nd.reason : "effectif en borne basse";
       return {
         month: m,
         kind: "value",
         brut: mp.brut,
         cotisations: mp.cotisations,
         masse: mp.masse,
-        headcount: h && h.kind === "exact" ? h.contracts : null,
+        headcount: h.kind === "exact" ? h.contracts : null,
         etp4: e.kind === "exact" ? e.etp4 : null,
-        etpNd: e.kind === "exact" ? null : e.kind === "nd" ? e.nd.reason : `ETP en borne basse (${e.missing.length} contrat(s) sans quotité)`,
+        etpNd: [hcWhy && `effectif : ${hcWhy}`, etpWhy && `ETP : ${etpWhy}`].filter(Boolean).join(" ; ") || null,
       };
     });
 
-  const known = contracts.every((c) => c.base !== null);
-  const refBaseCost = known ? contracts.reduce((s, c) => s + c.base!.salaryCents + roundDiv(BigInt(c.base!.salaryCents) * BigInt(c.base!.refCotisationsCents), BigInt(c.base!.refBrutCents)), 0) : null;
+  // Rapprochement du mois de référence : contrats présents à sa fin seulement (pas ceux entrés après).
+  const present = contracts.filter((c) => !(c.startDate !== null && c.startDate > end));
+  const known = present.every((c) => c.base !== null);
+  const refBaseCost = known ? present.reduce((s, c) => s + c.base!.salaryCents + roundDiv(BigInt(c.base!.salaryCents) * BigInt(c.base!.refCotisationsCents), BigInt(c.base!.refBrutCents)), 0) : null;
   const etpNote = kpi.data.build.source === "payfit" ? `quotités PayFit à la date de lecture (${kpi.data.build.referenceDate ?? "n.d."}), non historisées` : null;
   return { kind: "value", base: { currency: CURRENCY, refMonth, syncId, readAt, contracts, actuals, refMasse: ref.masse, refBaseCost, etpNote } };
 }

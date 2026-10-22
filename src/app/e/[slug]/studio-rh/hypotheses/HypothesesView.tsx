@@ -1,6 +1,6 @@
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
-import { hireKey, roundDiv } from "@/lib/budget/engine";
+import { enteredAfter, hireKey, roundDiv } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import type { Amount, BaseSnapshot, Hypothesis, Projection, Scope } from "@/lib/budget/types";
 import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
@@ -76,8 +76,8 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
         <h2>Base figée — {formatMonth(base.refMonth).toLowerCase()} <span className="desc">— <a href="#def-base-contrat">coût de référence d'un contrat</a></span></h2>
         <dl className="facts">
           <div data-testid="hyp-base-total">
-            <dt>Coût mensuel de la base ({base.contracts.length} contrats)</dt>
-            <dd className={base.refBaseCost === null ? "nd" : undefined}>{base.refBaseCost === null ? `n.d. — ${base.contracts.filter((c) => !c.base).length} base(s) de contrat n.d.` : formatEuros(base.refBaseCost)}</dd>
+            <dt>Coût mensuel de la base ({base.contracts.filter((c) => !enteredAfter(base, c)).length} contrats présents fin {formatMonth(base.refMonth).toLowerCase()})</dt>
+            <dd className={base.refBaseCost === null ? "nd" : undefined}>{base.refBaseCost === null ? `n.d. — ${base.contracts.filter((c) => !c.base && !enteredAfter(base, c)).length} base(s) de contrat n.d.` : formatEuros(base.refBaseCost)}</dd>
             <span className="tile-foot">salaires et gratifications de stage + charges au taux observé de chaque contrat</span>
           </div>
           <div data-testid="hyp-base-masse">

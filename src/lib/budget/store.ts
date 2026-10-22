@@ -38,7 +38,7 @@ export const hypothesisSchema: z.ZodType<Hypothesis> = z.discriminatedUnion("kin
   }),
   z.object({ id, kind: z.literal("depart"), label, contractKey: z.string().min(1).max(300), lastPaidDate: date, exitCost: amount.nullable() }),
   z.object({ id, kind: z.literal("ponctuel"), label, month, amount, service: z.string().min(1).max(200).nullable() }),
-  z.object({ id, kind: z.literal("base"), label, contractKey: z.string().min(1).max(300), salaryCents: cents.positive(), chargesBps: bps.min(0) }),
+  z.object({ id, kind: z.literal("base"), label, contractKey: z.string().min(1).max(300), salaryCents: cents.nonnegative(), chargesBps: bps.min(0) }),
 ]) as z.ZodType<Hypothesis>;
 
 export type ScenarioKind = "budget" | "revise" | "simulation";
@@ -97,6 +97,8 @@ export async function duplicateScenario(workspaceId: string, actor: string, scen
   };
   return withWorkspace(workspaceId, async (tx) => {
     const s = src.scenario;
+    const [locked] = await tx.select({ id: budgetBase.id }).from(budgetBase).where(eq(budgetBase.id, s.baseId)).for("update");
+    if (!locked) throw new BudgetError("Base figée introuvable (scénario supprimé entre-temps).");
     const [row] = await tx
       .insert(budgetScenario)
       .values({ workspaceId, baseId: s.baseId, name, kind: s.kind, firstMonth: s.firstMonth, lastMonth: s.lastMonth, conventions: s.conventions, status: "brouillon", duplicatedFrom: s.id, createdBy: actor })
@@ -155,6 +157,8 @@ export async function freezeScenario(workspaceId: string, actor: string, scenari
 export async function deleteScenario(workspaceId: string, scenarioId: string): Promise<void> {
   await withWorkspace(workspaceId, async (tx) => {
     const { scenario: s } = await lockDraft(tx, scenarioId);
+    // Base verrouillée : deux suppressions (ou une suppression et une duplication) qui la partagent s'attendent.
+    await tx.select({ id: budgetBase.id }).from(budgetBase).where(eq(budgetBase.id, s.baseId)).for("update");
     await tx.delete(budgetScenario).where(eq(budgetScenario.id, scenarioId));
     const others = await tx.select({ id: budgetScenario.id }).from(budgetScenario).where(eq(budgetScenario.baseId, s.baseId)).limit(1);
     if (!others.length) await tx.delete(budgetBase).where(eq(budgetBase.id, s.baseId));

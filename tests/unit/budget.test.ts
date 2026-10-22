@@ -127,6 +127,14 @@ describe("projection", () => {
     expect(n.contributions.filter((c) => c.contractKey === "D").map((c) => [c.kind, c.cost])).toEqual([["base", 420000], ["entree", -140000]]);
     expect(n).toMatchObject({ cost: 1065000 + 280000, headcount: 4, etp4: 35000 });
   });
+  it("entrée et départ le même mois : deux lignes successives (Entrée −1 400 €, Départ −1 400 €) ; pas d'augmentation générale pour un contrat entré après la base", () => {
+    const late = { ...base, contracts: [...base.contracts, contract("D", { startDate: "2026-11-11", baseNd: "entré après" })] };
+    const fixD: Hypothesis = { id: "fixD", kind: "base", label: "Base de D", contractKey: "D", salaryCents: 300000, chargesBps: 4000 };
+    const depD: Hypothesis = { id: "dD", kind: "depart", label: "Départ D", contractKey: "D", lastPaidDate: "2026-11-20", exitCost: null };
+    const g: Hypothesis = { id: "g", kind: "augmentation", label: "Générale", from: "2026-11", rateBps: 1000, scope: { kind: "global" } };
+    const n = month(project(late, "2026-10", "2026-12", [fixC, fixD, depD, g], conv), "2026-11");
+    expect(n.contributions.filter((c) => c.contractKey === "D").map((c) => [c.kind, c.cost])).toEqual([["base", 420000], ["entree", -140000], ["depart", -140000]]);
+  });
   it("atterrissage 2026 = réel janvier–septembre (9 × 7 000 €) + octobre–décembre projetés", () => {
     const p = project(base, "2026-10", "2026-12", [fixC], conv);
     expect(landing(base, p, "2026")).toMatchObject({ kind: "value", actual: 6300000, projected: 3 * 1065000, total: 6300000 + 3195000 });
@@ -169,6 +177,8 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     expect(b1?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
     expect(b1?.contracts.find((c) => c.externalId.endsWith("004"))).toMatchObject({ base: null, baseNd: "entré le 2026-02-15, après le mois de référence : base à saisir", etp4: 10000 });
     expect(b1?.etpNote).toContain("quotités PayFit à la date de lecture");
+    // Rapprochement de janvier sur les seuls contrats présents fin janvier : pas de prime en janvier, base = masse.
+    expect(b1).toMatchObject({ refMasse: 1953000, refBaseCost: 1953000 });
     const extra = { ...lines[0], key: "extra", month: "2026-09", accountId: "641100", debitCents: 0, creditCents: null, contractId: "TEST-A-CONTRACT-001", analytic: [{ type: "Service", code: "TEST-SVC-Z", value: "Z" }] as never };
     const r2 = buildBase({ input: { ...input, lines: [...lines, extra] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" });
     expect(r2.kind === "value" && r2.base.contracts.find((c) => c.externalId.endsWith("001"))).toMatchObject({ service: null, serviceNd: expect.stringContaining("plusieurs services") });

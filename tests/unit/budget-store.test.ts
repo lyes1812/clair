@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/db/client";
-import { budgetBase, budgetHypothesis, organization } from "@/db/schema";
+import { budgetBase, budgetHypothesis, budgetScenario, organization, user } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { addHypothesis, BudgetError, createScenario, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
@@ -22,7 +22,9 @@ beforeAll(async () => {
   await db.insert(organization).values({ id: W, name: "Budget", slug: W, createdAt: new Date() });
 });
 afterAll(async () => {
+  // Suppression de l'espace avec des scénarios figés : les cascades ne sont pas bloquées.
   await db.delete(organization).where(sql`id = ${W}`);
+  expect((await db.execute(sql`select count(*)::int n from organization where id = ${W}`)).rows[0]).toEqual({ n: 0 });
   await pool.end();
 });
 
@@ -54,6 +56,28 @@ describe("scénarios : gel, duplication, base figée", () => {
     const left = await withWorkspace(W, (tx) => tx.select({ id: budgetBase.id }).from(budgetBase).where(sql`id = ${full.scenario.baseId}`));
     expect(left).toHaveLength(0);
     await expect(deleteHypothesis(W, id, uuid())).rejects.toThrow("Scénario introuvable");
+  });
+  it("base corrigée à 0 € (contrat non payé) acceptée ; suppressions concurrentes de l'original et de sa copie : base supprimée", async () => {
+    const nd: BaseSnapshot = { ...base, refBaseCost: null, contracts: [{ ...base.contracts[0], base: null, baseNd: "entré le 2026-09-16 : mois de référence incomplet" }] };
+    const id = await createScenario(W, actor, { name: "Z", kind: "budget", firstMonth: "2026-10", lastMonth: "2026-10" }, nd, conv);
+    await addHypothesis(W, actor, id, { id: uuid(), kind: "base", label: "Congé sans solde", contractKey: "A", salaryCents: 0, chargesBps: 0 });
+    const copy = (await duplicateScenario(W, actor, id, "Z2"))!;
+    const baseId = (await getScenario(W, id))!.scenario.baseId;
+    await Promise.all([deleteScenario(W, id), deleteScenario(W, copy)]);
+    expect(await withWorkspace(W, (tx) => tx.select({ id: budgetBase.id }).from(budgetBase).where(sql`id = ${baseId}`))).toHaveLength(0);
+  });
+  it("scénario figé : suppression directe refusée par la RLS ; auteur supprimable (colonnes d'auteur mises à NULL)", async () => {
+    const U = `test-user-budget-${Date.now()}`;
+    await db.insert(user).values({ id: U, name: "Auteur", email: `${U}@test.invalid` });
+    const id = await createScenario(W, U, { name: "F", kind: "budget", firstMonth: "2026-10", lastMonth: "2026-12" }, base, conv);
+    await addHypothesis(W, U, id, aug(uuid(), "Générale"));
+    await freezeScenario(W, U, id);
+    expect(await withWorkspace(W, (tx) => tx.delete(budgetHypothesis).where(sql`scenario_id = ${id}`).returning({ id: budgetHypothesis.id }))).toHaveLength(0);
+    expect(await withWorkspace(W, (tx) => tx.delete(budgetScenario).where(sql`id = ${id}`).returning({ id: budgetScenario.id }))).toHaveLength(0);
+    await db.delete(user).where(sql`id = ${U}`);
+    const after = (await getScenario(W, id))!;
+    expect(after.scenario).toMatchObject({ status: "fige", createdBy: null, frozenBy: null });
+    expect(after.hypotheses).toHaveLength(1);
   });
   it("gel refusé tant qu'un mois projeté est n.d. (base à compléter)", async () => {
     const nd: BaseSnapshot = { ...base, refBaseCost: null, contracts: [{ ...base.contracts[0], base: null, baseNd: "entré le 2026-09-16 : mois de référence incomplet" }] };

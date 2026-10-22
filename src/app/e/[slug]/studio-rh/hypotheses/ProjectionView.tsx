@@ -10,15 +10,15 @@ const KIND: Record<Contribution["kind"], string> = {
   base: "Base", augmentation: "Augmentation", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
 };
 const eur = (v: number | null) => (v === null ? "n.d." : formatEuros(v));
-type Row = { month: string; layer: "reel" | "projete"; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null };
+type Row = { month: string; layer: "reel" | "projete"; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
 
 // Mois de l'année du premier mois projeté (réel figé) puis mois projetés jusqu'à la fin de l'horizon.
 function rowsOf(base: BaseSnapshot, proj: Projection, scenario: ScenarioRow): Row[] {
   const year = scenario.firstMonth.slice(0, 4);
   const actual: Row[] = base.actuals
     .filter((a) => a.month.startsWith(year) && a.month < scenario.firstMonth)
-    .map((a) => (a.kind === "nd" ? { month: a.month, layer: "reel", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: a.reason } : { month: a.month, layer: "reel", brut: a.brut, charges: a.cotisations, cost: a.masse, headcount: a.headcount, etp4: a.etp4, nd: null }));
-  const projected: Row[] = proj.kind === "error" ? [] : proj.months.map((p: ProjectedMonth) => (p.kind === "nd" ? { month: p.month, layer: "projete", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reasons.join(" ; ") } : { month: p.month, layer: "projete", brut: p.brut, charges: p.charges, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null }));
+    .map((a) => (a.kind === "nd" ? { month: a.month, layer: "reel", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: a.reason, etpNd: null } : { month: a.month, layer: "reel", brut: a.brut, charges: a.cotisations, cost: a.masse, headcount: a.headcount, etp4: a.etp4, nd: null, etpNd: a.etpNd }));
+  const projected: Row[] = proj.kind === "error" ? [] : proj.months.map((p: ProjectedMonth) => (p.kind === "nd" ? { month: p.month, layer: "projete", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reasons.join(" ; "), etpNd: null } : { month: p.month, layer: "projete", brut: p.brut, charges: p.charges, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
   return [...actual, ...projected];
 }
 
@@ -124,8 +124,8 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
             </tbody>
           </table>
         </div>
-        {rows.some((r) => r.nd) && (
-          <p className="tile-foot nd">n.d. : {[...new Set(rows.filter((r) => r.nd).map((r) => `${r.month} : ${r.nd}`))].join(" ; ")}</p>
+        {rows.some((r) => r.nd || r.etpNd) && (
+          <p className="tile-foot nd" data-testid="proj-nd-reasons">n.d. : {[...new Set(rows.flatMap((r) => [r.nd && `${r.month} : ${r.nd}`, r.etpNd && `${r.month} : ${r.etpNd}`]).filter(Boolean))].join(" ; ")}</p>
         )}
         {rows.some((r) => r.layer === "projete" && r.cost !== null && (r.brut === null || r.charges === null)) && (
           <p className="tile-foot">Brut ou charges n.d. sur un mois projeté : un élément saisi en coût chargé n'est pas ventilé entre brut et charges ; le coût employeur reste exact.</p>
