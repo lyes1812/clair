@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, doublePrecision, index, integer, jsonb, pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, numeric, pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type {
   CoverageDraft, EndStatus, EventFlag, FieldNd, FindingSeverity, MonthFlag, PresenceBasis, PresenceStatus, Provenance, RhBuildInputs, RhBuildSummary, RhSource, TimeStatus,
 } from "@/lib/rh/referential/types";
@@ -241,6 +241,8 @@ export const workspaceSetting = pgTable(
 // appliquées, jamais fusionné entre sources ; chaque champ porte sa provenance ou sa raison d'absence (n.d.).
 const wsRef = () => text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" });
 const buildRef = () => uuid("build_id").notNull().references(() => rhBuild.id, { onDelete: "cascade" });
+// Quantités (ETP, heures, quotités) : numeric exact pour les sommes SQL ; relu en nombre côté application.
+const qty = (name: string) => numeric(name, { precision: 14, scale: 4, mode: "number" });
 const fieldsNd = () => jsonb("fields_nd").$type<Record<string, FieldNd>>().notNull().default({});
 const provenance = () => jsonb("provenance").$type<Record<string, Provenance>>().notNull().default({});
 
@@ -310,8 +312,8 @@ export const rhContract = pgTable(
     endStatus: text("end_status").$type<EndStatus>().notNull(), // known | none_cdi | none_other_nature | none_nature_nd | unpositioned | disappeared
     nature: text("nature"),
     statusSource: text("status_source"), // PayFit ACTIVE/ARCHIVED/PENDING : affiché, jamais compté
-    fteAtRead: doublePrecision("fte_at_read"),
-    weeklyHoursAtRead: doublePrecision("weekly_hours_at_read"),
+    fteAtRead: qty("fte_at_read"),
+    weeklyHoursAtRead: qty("weekly_hours_at_read"),
     isFullTimeAtRead: boolean("is_full_time_at_read"),
     modalityAtRead: text("modality_at_read"),
     executive: boolean("executive"),
@@ -336,12 +338,12 @@ export const rhContractMonth = pgTable(
     presentAnyDay: boolean("present_any_day").notNull(),
     presentMonthEnd: boolean("present_month_end").notNull(),
     nature: text("nature"),
-    referenceQuota: doublePrecision("reference_quota"),
-    contractQuota: doublePrecision("contract_quota"),
+    referenceQuota: qty("reference_quota"),
+    contractQuota: qty("contract_quota"),
     quotaUnit: text("quota_unit"),
     modality: text("modality"),
-    paidTime: doublePrecision("paid_time"),
-    workedTime: doublePrecision("worked_time"),
+    paidTime: qty("paid_time"),
+    workedTime: qty("worked_time"),
     timeUnit: text("time_unit"),
     paymentCount: integer("payment_count"),
     flags: jsonb("flags").$type<MonthFlag[]>().notNull().default([]),

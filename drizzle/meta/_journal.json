@@ -64,6 +64,13 @@
       "when": 1792611136457,
       "tag": "0008_rh_referential",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792628251209,
+      "tag": "0009_rh_numeric",
+      "breakpoints": true
     }
   ]
 }

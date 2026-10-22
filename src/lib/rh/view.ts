@@ -74,6 +74,7 @@ export function timeUnitLabel(unit: string | null, source: RhSource): string {
 export const MONTH_FLAG_LABELS: Record<MonthFlag, string> = {
   negative_time: "temps négatif",
   time_missing: "sans ligne de temps",
+  time_outside_contract: "temps hors période du contrat",
   declared_before_start: "déclaré avant le début",
   declared_after_end: "déclaré après la fin",
   not_declared: "non déclaré",

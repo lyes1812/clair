@@ -1,4 +1,7 @@
+import { PAYFIT_ARCHIVED_RETENTION_MONTHS } from "./referential/build-payfit";
+
 // Définitions écrites dans l'app (règle 6 de CLAUDE.md), accessibles depuis chaque chiffre du module Collaborateurs.
+const RETENTION = PAYFIT_ARCHIVED_RETENTION_MONTHS;
 export const RH_DEFINITIONS: { id: string; title: string; text: string }[] = [
   {
     id: "presence",
@@ -44,7 +47,9 @@ export const RH_DEFINITIONS: { id: string; title: string; text: string }[] = [
     id: "lower-bound",
     title: "Borne basse (PayFit)",
     text:
-      "Hypothèse à confirmer sur le compte pilote : PayFit ne renvoie plus les contrats archivés depuis plus d'un an. Les effectifs des mois antérieurs à la date de lecture moins douze mois sont donc affichés « ≥ n (borne basse) » ; les sorties de ces mois sont « n.d. ».",
+      RETENTION === null
+        ? "PayFit renvoie tous les contrats, archivés compris : aucune borne basse n'est appliquée."
+        : `Hypothèse à confirmer sur le compte pilote : PayFit ne renvoie plus les contrats archivés depuis plus de ${RETENTION} mois. Les effectifs des mois jusqu'au mois de la date de lecture moins ${RETENTION} mois (inclus) sont donc affichés « ≥ n (borne basse) » ; les sorties de ces mois sont « n.d. ».`,
   },
   {
     id: "identity",

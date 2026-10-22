@@ -109,7 +109,8 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
   ];
   for (const r of records) {
     if (r.collection !== "collaborators") continue;
-    const id = String(r.data.id);
+    const id = str(r.data.id);
+    if (!id) throw new Error(`enregistrement collaborators sans identifiant : ${r.key}`);
     const p = newPerson(id);
     for (const [field, path] of NAME_FIELDS) {
       const v = str(r.data[path]);
@@ -131,6 +132,7 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
   const contracts: ContractDraft[] = [];
   const months: ContractMonthDraft[] = [];
   const events: EventDraft[] = [];
+  const stubContracts = new Map<string, string[]>(); // collaborateur absent de collaborators → contrats qui le référencent
   const retention = PAYFIT_ARCHIVED_RETENTION_MONTHS;
   const windowStart = retention !== null ? addMonths(presenceTo, -retention) : null;
   const timeUnavailable = unavailable("worked_time");
@@ -142,7 +144,8 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
   for (const r of records) {
     if (r.collection !== "contracts") continue;
     const d = r.data;
-    const cid = String(d.contractId);
+    const cid = str(d.contractId);
+    if (!cid) throw new Error(`enregistrement contracts sans identifiant : ${r.key}`);
     const key = `payfit:${cid}`;
     const collaboratorId = str(d.collaboratorId);
     const startDate = str(d.startDate);
@@ -179,7 +182,8 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
       if (c[field] === null) c.fieldsNd[field] = missing;
       else c.provenance[field] = prov("contracts", cid, null, path);
     };
-    trace("startDate", "startDate", nd("not-provided", "date de début absente dans PayFit"));
+    trace("startDate", "startDate", status === "PENDING" ? nd("not-provided", "contrat en attente chez PayFit, date de début non fixée") : nd("not-provided", "date de début absente dans PayFit"));
+    if (endDate !== null) c.provenance.endDate = prov("contracts", cid, null, "endDate");
     trace("nature", "natureContratDsn", nd("not-provided", "nature de contrat absente dans PayFit"));
     trace("statusSource", "status", nd("not-provided", "statut absent dans PayFit"));
     const timeMissing = timeRead ? nd("not-provided", "non renseigné dans PayFit") : nd("scope-missing", "droit contracts:time-information:read non accordé à la clé");
@@ -187,7 +191,7 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
     trace("weeklyHoursAtRead", "standardWeeklyHours", timeMissing);
     trace("isFullTimeAtRead", "isFullTime", timeMissing);
     trace("modalityAtRead", "workingTimeModality", timeMissing);
-    trace("executive", "estCadreDirigeant", nd("not-provided", "non renseigné dans PayFit"));
+    trace("executive", "executive", nd("not-provided", "non renseigné dans PayFit"));
 
     // Personne liée (B5, B6, B6 bis) : l'identifiant de source est conservé tel quel, jamais rapproché par le nom.
     if (!collaboratorId) {
@@ -201,10 +205,9 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
           ? stubPerson(collaboratorId, nd("scope-missing", collaboratorsUnavailable))
           : stubPerson(collaboratorId, nd("not-provided", `collaborateur absent de la collection collaborators de la ${readLabel}`));
         persons.set(p.personKey, p);
-        if (!collaboratorsUnavailable) {
-          findings.push(finding("person-not-in-collaborators", { persons: [p.personKey], contracts: [key], message: `collaborateur ${collaboratorId} référencé par le contrat ${cid} mais absent de la collection collaborators` }));
-        }
+        if (!collaboratorsUnavailable) stubContracts.set(p.personKey, []);
       }
+      stubContracts.get(p.personKey)?.push(key);
       p.hasContract = true;
     }
 
@@ -214,7 +217,6 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
       findings.push(finding("no-start-date", { contracts: [key], persons: c.personKey ? [c.personKey] : [], message: `contrat ${cid} sans date de début : non positionnable, hors effectif` }));
     } else if (endDate !== null) {
       c.endStatus = "known";
-      c.provenance.endDate = prov("contracts", cid, null, "endDate");
     } else if (nature === "01") {
       c.endStatus = "none_cdi";
     } else if (nature !== null) {
@@ -241,10 +243,60 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
     if (startDate !== null && (minStart === null || startDate < minStart)) minStart = startDate;
   }
 
+  for (const [personKey, keys] of stubContracts) {
+    findings.push(finding("person-not-in-collaborators", { persons: [personKey], contracts: keys, message: `collaborateur ${personKey.slice("payfit:".length)} référencé par ${keys.length} contrat(s) mais absent de la collection collaborators` }));
+  }
+
   const presenceFrom = minStart !== null && monthOf(minStart) < presenceTo ? monthOf(minStart) : presenceTo;
   const allMonths = monthsBetween(presenceFrom, presenceTo);
 
   // --- Mois et événements des contrats positionnés.
+  const consumedTime = new Set<string>();
+  const readTime = (row: ContractMonthDraft, c: ContractDraft, t: SourceRecordInput, M: string) => {
+    const cid = c.externalId;
+    consumedTime.add(t.key);
+    const unit = str(t.data.unit);
+    row.timeUnit = unit;
+    if (unit !== null) row.provenance.timeUnit = prov("worked_time", t.key, M, "unit");
+    else row.fieldsNd.timeUnit = nd("not-provided", "unité de temps absente dans PayFit");
+    const cells: [keyof Pick<ContractMonthDraft, "paidTime" | "workedTime">, string][] = [
+      ["paidTime", "paidWorkedTime"],
+      ["workedTime", "effectiveWorkedTime"],
+    ];
+    for (const [field, path] of cells) {
+      const v = numOrNull(t.data[path]);
+      if (v === null) row.fieldsNd[field] = nd("not-provided", "temps absent de PayFit pour ce mois");
+      else {
+        row[field] = v;
+        row.provenance[field] = prov("worked_time", t.key, M, path);
+        if (v < 0) {
+          if (!row.flags.includes("negative_time")) row.flags.push("negative_time");
+          findings.push(finding("negative-time", { contracts: [c.contractKey], persons: c.personKey ? [c.personKey] : [], month: M, message: `temps ${path === "paidWorkedTime" ? "payé" : "travaillé"} négatif (${v}) pour le contrat ${cid} en ${M} : régularisation PayFit conservée telle quelle`, provenance: { [field]: prov("worked_time", t.key, M, path) } }));
+        }
+      }
+    }
+  };
+  const emptyMonth = (c: ContractDraft, M: string): ContractMonthDraft => ({
+    contractKey: c.contractKey,
+    month: M,
+    establishmentId: establishment,
+    presenceBasis: "dates",
+    presentAnyDay: false,
+    presentMonthEnd: false,
+    nature: null,
+    referenceQuota: null,
+    contractQuota: null,
+    quotaUnit: null,
+    modality: null,
+    paidTime: null,
+    workedTime: null,
+    timeUnit: null,
+    paymentCount: null,
+    flags: [],
+    fieldsNd: {},
+    provenance: {},
+  });
+  const notHistorized = nd("not-in-source", "non historisé par PayFit : valeur à la date de lecture sur la fiche");
   for (const c of contracts) {
     if (c.startDate === null) continue;
     const cid = c.externalId;
@@ -270,9 +322,9 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
         fieldsNd: {},
         provenance: { presentAnyDay: prov("contracts", cid, null, "startDate, endDate"), presentMonthEnd: prov("contracts", cid, null, "startDate, endDate") },
       };
-      const notHistorized = nd("not-in-source", "non historisé par PayFit : valeur à la date de lecture sur la fiche");
       for (const f of ["nature", "referenceQuota", "contractQuota", "quotaUnit", "modality"] as const) row.fieldsNd[f] = notHistorized;
       row.fieldsNd.paymentCount = nd("not-in-source", "PayFit n'expose pas les versements");
+      const t = timeByKey.get(`${cid}@${M}`);
       if (timeUnavailable) {
         row.fieldsNd.paidTime = nd("scope-missing", timeUnavailable);
         row.fieldsNd.workedTime = nd("scope-missing", timeUnavailable);
@@ -280,36 +332,38 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
         const out = nd("month-out-of-scope", `mois hors du périmètre de la lecture appliquée (mois lus : ${scopeLabel})`);
         row.fieldsNd.paidTime = out;
         row.fieldsNd.workedTime = out;
+      } else if (t) {
+        readTime(row, c, t, M);
+      } else if (c.startDate > referenceDate) {
+        // Contrat à venir : aucune ligne de temps attendue avant son début (D4), ni drapeau ni constat.
+        const future = nd("after-reference", `contrat non commencé à la date de référence (${formatDate(referenceDate)})`);
+        row.fieldsNd.paidTime = future;
+        row.fieldsNd.workedTime = future;
+      } else if (M === presenceTo) {
+        // Mois de la lecture : la paie du mois n'est pas forcément passée, l'absence de ligne n'est pas un constat.
+        const current = nd("no-time-line", `mois en cours à la date de lecture (${formatDate(referenceDate)}) : aucune ligne de temps encore`);
+        row.fieldsNd.paidTime = current;
+        row.fieldsNd.workedTime = current;
       } else {
-        const t = timeByKey.get(`${cid}@${M}`);
-        if (!t) {
-          const none = nd("no-time-line", `aucune ligne de temps PayFit pour ce contrat en ${M}`);
-          row.fieldsNd.paidTime = none;
-          row.fieldsNd.workedTime = none;
-          row.flags.push("time_missing");
-          findings.push(finding("time-missing", { contracts: [c.contractKey], persons: c.personKey ? [c.personKey] : [], month: M, message: `contrat ${cid} présent en ${M} sans ligne de temps dans la lecture` }));
-        } else {
-          const unit = str(t.data.unit);
-          row.timeUnit = unit;
-          if (unit !== null) row.provenance.timeUnit = prov("worked_time", t.key, M, "unit");
-          const cells: [keyof Pick<ContractMonthDraft, "paidTime" | "workedTime">, string][] = [
-            ["paidTime", "paidWorkedTime"],
-            ["workedTime", "effectiveWorkedTime"],
-          ];
-          for (const [field, path] of cells) {
-            const v = numOrNull(t.data[path]);
-            if (v === null) row.fieldsNd[field] = nd("not-provided", "temps absent de PayFit pour ce mois");
-            else {
-              row[field] = v;
-              row.provenance[field] = prov("worked_time", t.key, M, path);
-              if (v < 0) {
-                if (!row.flags.includes("negative_time")) row.flags.push("negative_time");
-                findings.push(finding("negative-time", { contracts: [c.contractKey], persons: c.personKey ? [c.personKey] : [], month: M, message: `temps ${path === "paidWorkedTime" ? "payé" : "travaillé"} négatif (${v}) pour le contrat ${cid} en ${M} : régularisation PayFit conservée telle quelle`, provenance: { [field]: prov("worked_time", t.key, M, path) } }));
-              }
-            }
-          }
-        }
+        const none = nd("no-time-line", `aucune ligne de temps PayFit pour ce contrat en ${M}`);
+        row.fieldsNd.paidTime = none;
+        row.fieldsNd.workedTime = none;
+        row.flags.push("time_missing");
+        findings.push(finding("time-missing", { contracts: [c.contractKey], persons: c.personKey ? [c.personKey] : [], month: M, message: `contrat ${cid} présent en ${M} sans ligne de temps dans la lecture` }));
       }
+      months.push(row);
+    }
+    // Lignes de temps hors de la période du contrat (régularisation après la fin, temps avant le début) : conservées,
+    // présence fausse, signalées ; jamais ignorées en silence (E1).
+    for (const M of allMonths) {
+      const t = timeByKey.get(`${cid}@${M}`);
+      if (!t || consumedTime.has(t.key) || overlapsMonth(c.startDate, c.endDate, M)) continue;
+      const row = emptyMonth(c, M);
+      for (const f of ["nature", "referenceQuota", "contractQuota", "quotaUnit", "modality"] as const) row.fieldsNd[f] = notHistorized;
+      row.fieldsNd.paymentCount = nd("not-in-source", "PayFit n'expose pas les versements");
+      row.flags.push("time_outside_contract");
+      readTime(row, c, t, M);
+      findings.push(finding("time-outside-contract", { contracts: [c.contractKey], persons: c.personKey ? [c.personKey] : [], month: M, message: `ligne de temps PayFit en ${M} pour le contrat ${cid} hors de sa période (${formatDate(c.startDate)} → ${c.endDate ? formatDate(c.endDate) : "sans fin"}) : régularisation ?`, provenance: { paidTime: prov("worked_time", t.key, M, "paidWorkedTime") } }));
       months.push(row);
     }
 
@@ -328,7 +382,7 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
     };
     if (c.startDate > referenceDate) entry.flags.push("future");
     if (c.statusSource === "PENDING") entry.flags.push("pending");
-    if (windowStart !== null && entry.month < windowStart) entry.flags.push("lower_bound_window");
+    if (windowStart !== null && entry.month <= windowStart) entry.flags.push("lower_bound_window");
     events.push(entry);
     if (c.endDate !== null) {
       const exit: EventDraft = {
@@ -345,14 +399,15 @@ export function buildFromPayFit(input: PayFitBuildInput): RhBuildResult {
         provenance: { date: prov("contracts", cid, null, "endDate") },
       };
       if (c.endDate > referenceDate) exit.flags.push("future");
-      if (windowStart !== null && exit.month < windowStart) exit.flags.push("lower_bound_window");
+      if (windowStart !== null && exit.month <= windowStart) exit.flags.push("lower_bound_window");
       events.push(exit);
     }
   }
 
   // --- Couverture par mois (B4, F1, F5).
   const coverage = allMonths.map((M) => {
-    const lower = windowStart !== null && M < windowStart;
+    // Mois charnière inclus : un contrat archivé dans ce mois peut déjà avoir plus de `retention` mois d'ancienneté.
+    const lower = windowStart !== null && M <= windowStart;
     const timeStatus = timeUnavailable ? "unavailable" : scopeMonths.includes(M) ? "read" : "out_of_scope";
     return {
       establishmentId: establishment,

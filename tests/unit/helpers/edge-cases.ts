@@ -92,7 +92,11 @@ export const PAYFIT_EDGES: Record<string, PayFitEdgeCase> = {
 // ---------- DSN : constructeur de déclarations fictives ----------
 export type DsnPerson = {
   nir?: string; ntt?: string; family?: string; given?: string; employeeNumber?: string;
-  contracts: { number: string; start: string; end?: string; endReason?: string; nature?: string; quota?: string; reference?: string; gross?: string }[];
+  contracts: {
+    number: string; start: string; end?: string; endReason?: string; nature?: string; quota?: string; reference?: string; gross?: string;
+    // Activités (S21.G00.53) émises après la rémunération ; type 01 = travail rémunéré, unité 10 = heures.
+    activities?: { type?: string; unit?: string; measure: string }[];
+  }[];
 };
 export type DsnDeclarationSpec = { month: string; siren?: string; nic?: string; type?: "01" | "03"; order?: string; fraction?: string; people: DsnPerson[] };
 
@@ -143,6 +147,11 @@ export function dsnText(spec: DsnDeclarationSpec): string {
         r("S21.G00.51.010", c.number);
         r("S21.G00.51.011", "001");
         r("S21.G00.51.013", c.gross!);
+        for (const a of c.activities ?? []) {
+          r("S21.G00.53.001", a.type ?? "01");
+          r("S21.G00.53.002", a.measure);
+          r("S21.G00.53.003", a.unit ?? "10");
+        }
       }
     }
   }

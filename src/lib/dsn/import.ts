@@ -144,10 +144,12 @@ export async function dsnCoverageIn(tx: Tx, extraSyncId?: string): Promise<Cover
   const ids = applied.map((s) => s.id);
   if (extraSyncId && !ids.includes(extraSyncId)) ids.push(extraSyncId);
   if (ids.length === 0) return [];
+  // Ordre explicite : deux copies identiques d'une déclaration dans deux dépôts donnent toujours la même sélection.
   const rows = await tx
     .select({ syncId: sourceRecord.syncId, data: sourceRecord.data })
     .from(sourceRecord)
-    .where(and(inArray(sourceRecord.syncId, ids), eq(sourceRecord.collection, "declarations")));
+    .where(and(inArray(sourceRecord.syncId, ids), eq(sourceRecord.collection, "declarations")))
+    .orderBy(sourceRecord.syncId, sourceRecord.recordKey);
   const declarations: SelectableDeclaration[] = rows.map((r) => {
     const d = r.data as Record<string, unknown>;
     return {

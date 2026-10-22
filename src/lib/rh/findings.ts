@@ -25,6 +25,7 @@ export const FINDING_LABELS: Record<string, { case: string; label: string; sever
   "attributes-changed": { case: "C12", label: "Nature ou quotité modifiée entre deux mois (avenant ?)", severity: "info" },
   "negative-time": { case: "E1", label: "Temps négatif (régularisation)", severity: "check" },
   "time-missing": { case: "F2", label: "Contrat présent sans ligne de temps dans un mois lu", severity: "check" },
+  "time-outside-contract": { case: "E1 bis", label: "Ligne de temps PayFit hors de la période du contrat (régularisation ?)", severity: "info" },
   "lower-bound-window": { case: "B4", label: "Mois antérieurs à la fenêtre de conservation PayFit : effectifs en borne basse", severity: "info" },
 };
 

@@ -85,7 +85,8 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   await expect(page.getByTestId("year-dec31").locator("dd")).toHaveText("7");
   await expect(page.getByTestId("year-entries").locator("dd")).toHaveText("≥ 1");
   await expect(page.getByTestId("year-exits").locator("dd")).toHaveText("≥ 1");
-  await expect(page.getByTestId("year-exits")).toContainText("sur les mois couverts (3/12)");
+  // Sorties connues seulement de novembre à décembre 2025 (borne basse jusqu'au mois charnière d'octobre inclus).
+  await expect(page.getByTestId("year-exits")).toContainText("sur les mois couverts (2/12)");
   await expect(page.getByTestId("collab-annual-table").getByRole("row")).toHaveCount(8);
   await expect(page.getByTestId("collab-annual-table").getByRole("row").filter({ hasText: "TEST-A-CONTRACT-002" })).toContainText("9 sur 12 couverts");
   await page.screenshot({ path: `${CAPTURES}/2-02-annee.png`, fullPage: true });

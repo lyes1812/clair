@@ -66,11 +66,15 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
     declarationKeys: r.status === "blocked" ? [] : r.selected.map((d) => d.key),
     provenance: {},
   }));
+  // Mois manquants : de la première déclaration du SIRET jusqu'au dernier mois vu tous établissements confondus,
+  // pour qu'un établissement qui cesse de déclarer rende le total n.d. plutôt qu'exact sans lui (C5). Décision par
+  // défaut : un établissement qui apparaît plus tard n'est pas réputé manquant avant sa première déclaration.
   const monthsBySiret = new Map<string, string[]>();
   for (const r of input.coverage) monthsBySiret.set(r.siret, [...(monthsBySiret.get(r.siret) ?? []), r.month]);
+  const globalLast = [...input.coverage.map((r) => r.month)].sort().pop() ?? null;
   for (const [siret, ms] of monthsBySiret) {
     const sorted = [...ms].sort();
-    for (const M of monthsBetween(sorted[0], sorted[sorted.length - 1])) {
+    for (const M of monthsBetween(sorted[0], globalLast ?? sorted[sorted.length - 1])) {
       if (covStatus.has(`${siret}|${M}`)) continue;
       covStatus.set(`${siret}|${M}`, "missing" as CoverageRow["status"]);
       coverage.push({ establishmentId: siret, month: M, presenceStatus: "missing", presenceReason: `aucune déclaration appliquée pour ${M} (SIRET ${siret})`, timeStatus: "paid_only", timeReason: "temps travaillé non porté par la DSN", declarationKeys: [], provenance: {} });
@@ -221,7 +225,8 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
     occs.sort((a, b) => declOrder(a.decl, b.decl)); // la plus ancienne d'abord
     const first = occs[0];
     const latest = occs[occs.length - 1];
-    const personId = str(latest.rec.data.personId) ?? "";
+    const personId = str(latest.rec.data.personId);
+    if (!personId) throw new Error(`enregistrement contracts DSN sans identifiant de personne : ${latest.rec.key}`);
     const personKey = `dsn:${personId}`;
     const contractKey = `dsn:${contractId}`;
     const startDate = str(first.rec.data.startDate) ?? str(latest.rec.data.startDate);
@@ -257,7 +262,7 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
       },
       provenance: {
         externalId: prov(latest, "S21.G00.40.009"),
-        personKey: prov(latest, "S21.G00.30.001"),
+        personKey: prov(latest, persons.get(personKey)?.identifierKind === "ntt" ? "S21.G00.30.020" : "S21.G00.30.001"),
         establishmentId: prov(latest, "S21.G00.11.001"),
         firstDeclaredMonth: prov(first, "S20.G00.05.005"),
         lastDeclaredMonth: prov(latest, "S20.G00.05.005"),
@@ -289,14 +294,16 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
     person.hasContract = true;
 
     // Mois déclarés : une ligne par (déclaration retenue, SIRET), attributs de cette déclaration (C12).
-    const seenMonth = new Set<string>();
     const declaredMonths = new Set<string>();
+    const byMonthSiret = new Map<string, Occ[]>(); // fractions d'un même mois : attributs de la première, versements et activités cumulés
     for (const o of occs) {
+      declaredMonths.add(o.decl.month);
+      const mk = `${o.decl.month}|${o.decl.siret}`;
+      byMonthSiret.set(mk, [...(byMonthSiret.get(mk) ?? []), o]);
+    }
+    for (const group of byMonthSiret.values()) {
+      const o = group[0];
       const M = o.decl.month;
-      declaredMonths.add(M);
-      const mk = `${M}|${o.decl.siret}`;
-      if (seenMonth.has(mk)) continue;
-      seenMonth.add(mk);
       const row: ContractMonthDraft = {
         contractKey,
         month: M,
@@ -343,17 +350,18 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
           if (endDate !== null) row.provenance.presentMonthEnd = prov(endOcc!, "S21.G00.62.001");
         }
       }
-      const k = `${o.decl.key}|${contractId}`;
-      row.paymentCount = remunerations.get(k) ?? 0;
+      row.paymentCount = group.reduce((n, g) => n + (remunerations.get(`${g.decl.key}|${contractId}`) ?? 0), 0);
       if (row.paymentCount === 0) row.fieldsNd.paymentCount = nd("no-payment", `aucun versement déclaré pour ce contrat en ${M}`);
-      else row.provenance.paymentCount = prov(o, "S21.G00.51");
-      const acts = activities.get(k) ?? [];
+      else row.provenance.paymentCount = prov(group.find((g) => (remunerations.get(`${g.decl.key}|${contractId}`) ?? 0) > 0) ?? o, "S21.G00.51");
+      const acts = group.flatMap((g) => activities.get(`${g.decl.key}|${contractId}`) ?? []);
       if (acts.length === 0) row.fieldsNd.paidTime = nd("no-activity", `aucune activité déclarée pour ce contrat en ${M}`);
       else if (new Set(acts.map((a) => a.unit)).size > 1) row.fieldsNd.paidTime = nd("mixed-units", `activités en unités hétérogènes (${[...new Set(acts.map((a) => a.unit ?? "n.d."))].join(", ")})`);
       else {
-        row.paidTime = acts.reduce((s, a) => s + a.measure, 0);
+        // Somme arrondie à 4 décimales (précision du stockage numeric(14,4)) : pas de bruit flottant.
+        row.paidTime = Math.round(acts.reduce((s, a) => s + a.measure, 0) * 1e4) / 1e4;
         row.timeUnit = acts[0].unit;
-        row.provenance.paidTime = { ...prov(o, "S21.G00.53.002"), recordKey: acts[0].rec.key, collection: "activities" };
+        const first = group.find((g) => (activities.get(`${g.decl.key}|${contractId}`) ?? []).length > 0) ?? o;
+        row.provenance.paidTime = { ...prov(first, "S21.G00.53.002"), recordKey: acts[0].rec.key, collection: "activities" };
         if (row.timeUnit === null) row.fieldsNd.timeUnit = nd("not-provided", "unité d'activité absente (S21.G00.53.003)");
       }
       months.push(row);
@@ -406,6 +414,12 @@ export function buildFromDsn(input: DsnBuildInput): RhBuildResult {
       findings.push(finding("no-start-date", { contracts: [contractKey], persons: [personKey], message: `contrat ${c.externalId} sans date de début : non positionnable, hors effectif` }));
     } else if (endDate !== null) {
       c.endStatus = "known";
+      const lastComplete = complete[complete.length - 1];
+      for (const M of complete) {
+        if (M <= c.lastDeclaredMonth! || M > endMonth! || (lastComplete !== undefined && M > lastComplete)) continue;
+        months.push(notDeclared(M, `contrat non déclaré en ${M} avant sa fin déclarée du ${formatDate(endDate)}`));
+        findings.push(finding("declared-gap", { contracts: [contractKey], persons: [personKey], month: M, message: `contrat ${c.externalId} absent de la déclaration de ${M} (mois complet) alors que sa fin est déclarée au ${formatDate(endDate)}` }));
+      }
     } else {
       const after = complete.filter((M) => M > c.lastDeclaredMonth!);
       if (after.length) {

@@ -1,10 +1,16 @@
 import { sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 process.env.CLAIR_SECRETS_KEY ??= Buffer.alloc(32, 3).toString("base64");
 process.env.CLAIR_ENABLE_FIXTURE_PROVIDERS = "true";
 
+// Le constructeur PayFit est enveloppé pour pouvoir le faire échouer une fois (chemin d'échec de rebuildRh).
+vi.mock("@/lib/rh/referential/build-payfit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/rh/referential/build-payfit")>();
+  return { ...actual, buildFromPayFit: vi.fn(actual.buildFromPayFit) };
+});
 const { db, pool } = await import("@/db/client");
+const { buildFromPayFit } = await import("@/lib/rh/referential/build-payfit");
 const { organization, rhBuild, rhContract, rhPerson, workspaceEvent } = await import("@/db/schema");
 const { withWorkspace } = await import("@/db/workspace-scope");
 const sync = await import("@/lib/connectors/sync");
@@ -100,8 +106,21 @@ describe("référentiel Collaborateurs en base", () => {
     expect(absences.every((a) => ["TEST-A-CONTRACT-001", "TEST-A-CONTRACT-003"].includes(a.contractId))).toBe(true);
   });
 
-  it("nouvelle photographie appliquée ⇒ nouveau build courant, l'ancien conservé une fois comme « superseded »", async () => {
+  it("échec du constructeur ⇒ l'ancien build reste courant, événement rh.rebuild_failed, reconstruction possible ensuite", async () => {
     await readAndApply(A, "fixture-A-2");
+    vi.mocked(buildFromPayFit).mockImplementationOnce(() => {
+      throw new Error("panne fictive du constructeur");
+    });
+    await expect(ensureRhBuild(A, "payfit", actor)).rejects.toThrow("panne fictive");
+    const current = await withWorkspace(A, (tx) => tx.select({ id: rhBuild.id }).from(rhBuild).where(sql`${rhBuild.status} = 'current' and ${rhBuild.source} = 'payfit'`));
+    expect(current.map((b) => b.id)).toEqual([firstBuild]);
+    expect(await withWorkspace(A, (tx) => tx.select().from(rhPerson).where(sql`${rhPerson.buildId} = ${firstBuild}`))).toHaveLength(8);
+    const failed = await withWorkspace(A, (tx) => tx.select().from(workspaceEvent).where(sql`${workspaceEvent.kind} = 'rh.rebuild_failed'`));
+    expect(failed).toHaveLength(1);
+    expect(failed[0].detail).toMatchObject({ source: "payfit", reason: "panne fictive du constructeur" });
+  });
+
+  it("nouvelle photographie appliquée ⇒ nouveau build courant, l'ancien conservé une fois comme « superseded »", async () => {
     const state = await ensureRhBuild(A, "payfit", actor);
     expect(state.kind === "ready" && state.build.id).not.toBe(firstBuild);
     const builds = await withWorkspace(A, (tx) => tx.select({ id: rhBuild.id, status: rhBuild.status }).from(rhBuild).where(sql`${rhBuild.source} = 'payfit'`));

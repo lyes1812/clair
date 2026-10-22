@@ -1,5 +1,6 @@
-import { formatDate, isActiveOn, monthEnd, monthOf, monthStart, monthsBetween, overlapsMonth } from "@/lib/dates";
+import { addMonths, formatDate, isActiveOn, monthEnd, monthOf, monthStart, monthsBetween, overlapsMonth } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
+import { PAYFIT_ARCHIVED_RETENTION_MONTHS } from "./referential/build-payfit";
 import { nd, type ContractDraft, type ContractMonthDraft, type CoverageDraft, type EventDraft, type FieldNd, type FindingDraft, type PersonDraft, type RhBuildData } from "./referential/types";
 
 // Règles d'effectif (§ 6), fonctions pures sur un référentiel : exactes sur les mois complets, « borne basse » sur les
@@ -120,14 +121,17 @@ export function gateAt(data: RhBuildData, date: string, establishments?: string[
   if (data.build.unavailableReason) return { nd: nd("source-unavailable", data.build.unavailableReason), coverage: cov };
   if (!ref) return { nd: nd("month-not-covered", "aucun mois complet dans la source retenue"), coverage: cov };
   if (date > ref) return { nd: nd("after-reference", `période postérieure à la date de référence (${formatDate(ref)}) ; voir Mouvements › À venir`), coverage: cov };
-  if (data.build.presenceFrom && M < data.build.presenceFrom) return { nd: nd("before-coverage", `période non couverte par la source retenue (couverture : ${coverageLabel(data)})`), coverage: cov };
-  if (!cov.length) return { nd: nd("month-not-covered", `aucune déclaration appliquée pour ${M}${establishments ? ` (SIRET ${establishments.join(", ")})` : ""}`), coverage: cov };
-  const bad = cov.filter((c) => c.presenceStatus === "blocked" || c.presenceStatus === "incomplete" || c.presenceStatus === "missing");
-  if (bad.length) {
-    const code = bad.some((c) => c.presenceStatus === "blocked") ? "coverage-blocked" : bad.some((c) => c.presenceStatus === "incomplete") ? "coverage-incomplete" : "month-not-covered";
-    return { nd: nd(code, bad.map((c) => c.presenceReason ?? `mois ${c.month} non couvert (SIRET ${c.establishmentId})`).join(" ")), coverage: cov };
+  if (cov.length) {
+    // Un mois qui a une ligne de couverture porte sa propre raison (incomplet, bloqué, manquant), même avant le premier mois complet.
+    const bad = cov.filter((c) => c.presenceStatus === "blocked" || c.presenceStatus === "incomplete" || c.presenceStatus === "missing");
+    if (bad.length) {
+      const code = bad.some((c) => c.presenceStatus === "blocked") ? "coverage-blocked" : bad.some((c) => c.presenceStatus === "incomplete") ? "coverage-incomplete" : "month-not-covered";
+      return { nd: nd(code, bad.map((c) => c.presenceReason ?? `mois ${c.month} non couvert (SIRET ${c.establishmentId})`).join(" ")), coverage: cov };
+    }
+    return { nd: null, coverage: cov };
   }
-  return { nd: null, coverage: cov };
+  if (data.build.presenceFrom && M < data.build.presenceFrom) return { nd: nd("before-coverage", `période non couverte par la source retenue (couverture : ${coverageLabel(data)})`), coverage: cov };
+  return { nd: nd("month-not-covered", `aucune déclaration appliquée pour ${M}${establishments ? ` (SIRET ${establishments.join(", ")})` : ""}`), coverage: cov };
 }
 
 // Présence d'un contrat à une date (définition 1) : bornes incluses ; DSN : déclaré ce mois, mois complet.
@@ -154,15 +158,12 @@ function activeAt(data: RhBuildData, date: string, establishments?: string[]): A
   const M = monthOf(date);
   const out: Active[] = [];
   if (data.build.source === "dsn") {
-    const seen = new Set<string>();
+    // Une ligne par (contrat, établissement déclarant) : le détail par SIRET les voit toutes, les totaux dédoublonnent par clé.
     for (const m of index(data).declared.get(M) ?? []) {
       if (m.presenceBasis !== "declared" || !inEst(establishments, m.establishmentId)) continue;
       const c = index(data).contracts.get(m.contractKey);
       if (!c || c.startDate === null || !isActiveOn(c.startDate, c.endDate, date)) continue;
       if (m.flags.includes("declared_before_start")) continue;
-      // Un contrat déclaré par deux établissements le même mois ne compte qu'une fois dans le total.
-      if (seen.has(c.contractKey)) continue;
-      seen.add(c.contractKey);
       out.push({ contract: c, establishmentId: m.establishmentId });
     }
     return out;
@@ -180,35 +181,41 @@ const natureKey = (n: string | null) => n ?? "nd";
 export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts): HeadcountResult {
   const g = gateAt(data, date, opts.establishments);
   if (g.nd) return { kind: "nd", nd: g.nd };
-  const rows = activeAt(data, date, opts.establishments);
-  const counted = rows.filter((r) => r.contract.nature !== null && opts.natures.includes(r.contract.nature));
-  const byNature: Record<string, number> = {};
-  const outByNature: Record<string, number> = {};
-  const persons = new Set<string>();
+  const all = activeAt(data, date, opts.establishments);
+  const isCounted = (r: Active) => r.contract.nature !== null && opts.natures.includes(r.contract.nature);
+  // Détail par établissement : toutes les lignes déclarées (C5) ; totaux : une seule présence par contrat.
   const bySiret: BySiret = {};
   const siretPersons = new Map<string, Set<string>>();
-  let withoutPerson = 0;
-  for (const r of rows) {
-    const inScope = counted.includes(r);
-    const k = natureKey(r.contract.nature);
-    if (!inScope) {
-      outByNature[k] = (outByNature[k] ?? 0) + 1;
-      continue;
-    }
-    byNature[k] = (byNature[k] ?? 0) + 1;
+  for (const r of all) {
+    if (!isCounted(r)) continue;
     const s = (bySiret[r.establishmentId] ??= { persons: 0, contracts: 0 });
     s.contracts += 1;
-    if (r.contract.personKey === null) withoutPerson += 1;
-    else {
-      persons.add(r.contract.personKey);
+    if (r.contract.personKey !== null) {
       const sp = siretPersons.get(r.establishmentId) ?? new Set<string>();
       sp.add(r.contract.personKey);
       siretPersons.set(r.establishmentId, sp);
     }
   }
   for (const [siret, sp] of siretPersons) bySiret[siret].persons = sp.size;
+  const seen = new Set<string>();
+  const rows = all.filter((r) => (seen.has(r.contract.contractKey) ? false : (seen.add(r.contract.contractKey), true)));
+  const counted = rows.filter(isCounted);
+  const byNature: Record<string, number> = {};
+  const outByNature: Record<string, number> = {};
+  const persons = new Set<string>();
+  let withoutPerson = 0;
+  for (const r of rows) {
+    const k = natureKey(r.contract.nature);
+    if (!isCounted(r)) {
+      outByNature[k] = (outByNature[k] ?? 0) + 1;
+      continue;
+    }
+    byNature[k] = (byNature[k] ?? 0) + 1;
+    if (r.contract.personKey === null) withoutPerson += 1;
+    else persons.add(r.contract.personKey);
+  }
   const M = monthOf(date);
-  const declaredAfterEnd = (index(data).declared.get(M) ?? []).filter((m) => m.flags.includes("declared_after_end") && inEst(opts.establishments, m.establishmentId)).length;
+  const declaredAfterEnd = new Set((index(data).declared.get(M) ?? []).filter((m) => m.flags.includes("declared_after_end") && inEst(opts.establishments, m.establishmentId)).map((m) => m.contractKey)).size;
   const lower = g.coverage.filter((c) => c.presenceStatus === "lower_bound");
   return {
     kind: lower.length ? "lower_bound" : "exact",
@@ -240,16 +247,21 @@ function monthCount(data: RhBuildData, month: string, kind: "entry" | "exit", op
     .filter((r): r is EventRow => r !== null)
     .sort((a, b) => (a.event.date < b.event.date ? -1 : a.event.date > b.event.date ? 1 : a.contract.contractKey.localeCompare(b.contract.contractKey)));
   const value = rows.filter((r) => r.inScope && (!ref || r.event.date <= ref)).length;
+  if (ref && monthStart(month) > ref) return { rows, count: { kind: "nd", nd: nd("after-reference", `période postérieure à la date de référence (${formatDate(ref)}) ; voir Mouvements › À venir`) } };
   const cov = coverageAt(data, month, opts.establishments);
   if (!cov.length) return { rows, count: { kind: "nd", nd: nd("month-not-covered", `période non couverte par la source retenue (couverture : ${coverageLabel(data)})`) } };
+  const blocked = cov.filter((c) => c.presenceStatus === "blocked");
+  if (blocked.length) return { rows, count: { kind: "nd", nd: nd("coverage-blocked", blocked.map((c) => c.presenceReason ?? `mois ${c.month} bloqué`).join(" ")) } };
   // Qualificatifs courts : la raison complète est portée par la couverture du mois (bandeau à l'écran).
   const lower = cov.filter((c) => c.presenceStatus === "lower_bound");
   if (lower.length) {
-    if (kind === "exit") return { rows, count: { kind: "nd", nd: nd("coverage-incomplete", `sorties de ${month} inconnues : contrats archivés depuis plus de 12 mois absents de PayFit (hypothèse à confirmer)`) } };
+    if (kind === "exit") return { rows, count: { kind: "nd", nd: nd("coverage-incomplete", `sorties de ${month} inconnues : contrats archivés depuis plus de ${PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois absents de PayFit (hypothèse à confirmer)`) } };
     return { rows, count: { kind: "lower_bound", value, qualifiers: ["borne basse (PayFit)"] } };
   }
   const bad = cov.filter((c) => c.presenceStatus !== "complete");
   if (bad.length) return { rows, count: { kind: "lower_bound", value, qualifiers: ["mois non couvert : un contrat commencé et fini dans le mois serait invisible"] } };
+  // Mois de la date de référence non écoulé : le total du mois n'est pas connaissable.
+  if (ref && monthOf(ref) === month && ref < monthEnd(month)) return { rows, count: { kind: "lower_bound", value, qualifiers: [`mois en cours à la date de référence : connu jusqu'au ${formatDate(ref)}`] } };
   return { rows, count: { kind: "exact", value, qualifiers: [] } };
 }
 
@@ -339,32 +351,60 @@ export function movements(data: RhBuildData, from: string, to: string, opts: Hea
       .sort((a, b) => a.event.date.localeCompare(b.event.date) || a.contract.contractKey.localeCompare(b.contract.contractKey));
   const notes: Movements["notes"] = [];
   for (const M of monthsBetween(from, to)) {
+    if (ref && monthStart(M) > ref) {
+      notes.push({ month: M, reason: `n.d. — période postérieure à la date de référence (${formatDate(ref)}) ; voir À venir` });
+      continue;
+    }
     const cov = coverageAt(data, M, opts.establishments);
     if (!cov.length) {
       notes.push({ month: M, reason: `n.d. — période non couverte par la source retenue (couverture : ${coverageLabel(data)})` });
+      continue;
+    }
+    const blocked = cov.filter((c) => c.presenceStatus === "blocked");
+    if (blocked.length) {
+      notes.push({ month: M, reason: `n.d. — ${blocked.map((c) => c.presenceReason ?? "mois bloqué").join(" ")}` });
       continue;
     }
     const lower = cov.filter((c) => c.presenceStatus === "lower_bound");
     if (lower.length) notes.push({ month: M, reason: `entrées : au moins celles connues ; sorties : n.d. — ${lower[0].presenceReason ?? "borne basse"}` });
     const bad = cov.filter((c) => c.presenceStatus !== "complete" && c.presenceStatus !== "lower_bound");
     if (bad.length) notes.push({ month: M, reason: `au moins les mouvements connus — ${bad.map((c) => c.presenceReason ?? c.presenceStatus).join(" ")} ; un contrat commencé et fini dans le mois serait invisible` });
+    if (ref && monthOf(ref) === M && ref < monthEnd(M) && !lower.length && !bad.length) notes.push({ month: M, reason: `mois en cours à la date de référence : mouvements connus jusqu'au ${formatDate(ref)}` });
   }
+  const upcomingOf = (e: EventDraft) => isFuture(e) && inEst(opts.establishments, e.establishmentId);
   return {
     entries: rowsOf("entry", (e) => inRange(e) && !isFuture(e)),
     exits: rowsOf("exit", (e) => inRange(e) && !isFuture(e)),
-    upcoming: [...rowsOf("entry", isFuture), ...rowsOf("exit", isFuture)].sort((a, b) => a.event.date.localeCompare(b.event.date)),
+    upcoming: [...rowsOf("entry", upcomingOf), ...rowsOf("exit", upcomingOf)].sort((a, b) => a.event.date.localeCompare(b.event.date)),
     unplaced: data.contracts.filter((c) => c.startDate === null),
     disappeared: data.contracts.filter((c) => c.endStatus === "disappeared"),
     notes,
   };
 }
 
-function mergePresence(list: Presence[]): Presence {
+function mergePresence(list: Presence[], none: string): Presence {
   if (list.some((p) => p.state === "present")) return { state: "present" };
   const ndP = list.find((p): p is { state: "nd"; nd: FieldNd } => p.state === "nd");
   if (ndP) return ndP;
   const absent = list.find((p): p is { state: "absent"; reason: string } => p.state === "absent");
-  return absent ?? { state: "absent", reason: "aucun contrat" };
+  return absent ?? { state: "absent", reason: none };
+}
+
+// Plages de mois contiguës (« 2025-01 → 2025-03, 2025-07 ») : jamais une plage reconstituée entre deux mois isolés.
+function monthRanges(months: string[]): string {
+  const out: string[] = [];
+  let start: string | null = null;
+  let prev: string | null = null;
+  for (const m of months) {
+    if (start === null) start = m;
+    else if (prev !== null && addMonths(prev, 1) !== m) {
+      out.push(start === prev ? start : `${start} → ${prev}`);
+      start = m;
+    }
+    prev = m;
+  }
+  if (start !== null && prev !== null) out.push(start === prev ? start : `${start} → ${prev}`);
+  return out.join(", ");
 }
 
 export function annualList(data: RhBuildData, year: number, opts: HeadcountOpts): AnnualList {
@@ -383,7 +423,10 @@ export function annualList(data: RhBuildData, year: number, opts: HeadcountOpts)
   const yearEnd = `${year}-12-31`;
   const inYear = (c: ContractDraft) => c.startDate !== null && c.startDate <= yearEnd && (c.endDate === null || c.endDate >= yearStart);
   const declaredInYear = new Set(data.months.filter((m) => m.month.startsWith(`${year}-`) && m.presenceBasis === "declared" && inEst(opts.establishments, m.establishmentId)).map((m) => m.contractKey));
-  const concerns = (c: ContractDraft) => (data.build.source === "dsn" ? declaredInYear.has(c.contractKey) || inYear(c) : inYear(c) && inEst(opts.establishments, c.establishmentId));
+  const concerns = (c: ContractDraft) =>
+    data.build.source === "dsn"
+      ? declaredInYear.has(c.contractKey) || (!opts.establishments && inYear(c))
+      : inYear(c) && inEst(opts.establishments, c.establishmentId);
   const byPerson = new Map<string, ContractDraft[]>();
   for (const c of data.contracts) {
     if (!c.personKey || !concerns(c)) continue;
@@ -394,7 +437,13 @@ export function annualList(data: RhBuildData, year: number, opts: HeadcountOpts)
     const person = ix.persons.get(personKey);
     if (!person) continue;
     const counted = contracts.filter((c) => c.nature !== null && opts.natures.includes(c.nature));
-    const presence = (date: string) => mergePresence(counted.map((c) => presenceAt(data, c, date, opts.establishments)));
+    const none = counted.length === 0 ? `hors natures comptées : ${[...new Set(contracts.map((c) => contractNatureLabel(c.nature)))].join(", ")}` : "aucun contrat";
+    const presence = (date: string): Presence => {
+      // La couverture prime : au-delà de la date de référence ou hors couverture, la cellule est n.d. quelle que soit la nature.
+      const g = gateAt(data, date, opts.establishments);
+      if (g.nd) return { state: "nd", nd: g.nd };
+      return mergePresence(counted.map((c) => presenceAt(data, c, date, opts.establishments)), none);
+    };
     const strip: StripCell[] = months.map((M) => {
       const p = presence(monthEnd(M));
       return p.state === "present" ? { month: M, state: "present", reason: null } : p.state === "nd" ? { month: M, state: "nd", reason: p.nd.reason } : { month: M, state: "absent", reason: p.reason };
@@ -435,7 +484,7 @@ export function annualList(data: RhBuildData, year: number, opts: HeadcountOpts)
     }
     if (ndMonths.length === 12) return { kind: "nd", nd: nd("month-not-covered", `aucun mois de ${year} couvert par la source retenue (couverture : ${coverageLabel(data)})`) };
     const covered = 12 - ndMonths.length;
-    if (ndMonths.length) qualifiers.add(`${value} sur les mois couverts (${covered}/12) ; n.d. de ${ndMonths[0]} à ${ndMonths[ndMonths.length - 1]}`);
+    if (ndMonths.length) qualifiers.add(`${value} sur les mois couverts (${covered}/12) ; n.d. : ${monthRanges(ndMonths)}`);
     return { kind: lower || covered < 12 ? "lower_bound" : "exact", value, qualifiers: [...qualifiers] };
   };
   return {

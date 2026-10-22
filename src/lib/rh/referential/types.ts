@@ -73,7 +73,7 @@ export type PresenceStatus = "complete" | "lower_bound" | "incomplete" | "blocke
 export type TimeStatus = "read" | "out_of_scope" | "unavailable" | "paid_only";
 export type FindingSeverity = "info" | "check";
 export type EventFlag = "future" | "pending" | "continuity_same_person" | "rehire" | "renumbered" | "lower_bound_window" | "provisional";
-export type MonthFlag = "negative_time" | "time_missing" | "declared_before_start" | "declared_after_end" | "not_declared";
+export type MonthFlag = "negative_time" | "time_missing" | "time_outside_contract" | "declared_before_start" | "declared_after_end" | "not_declared";
 
 // Lignes produites par les constructeurs purs (sans id, espace ni build : ajoutés à l'insertion).
 export type PersonDraft = Traced & {
