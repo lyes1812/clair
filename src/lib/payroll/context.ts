@@ -7,6 +7,7 @@ import { getPayrollGrid, getServiceAxis, type PayrollGrid, type ServiceAxis } fr
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { loadKpiContext, type KpiContext } from "@/lib/rh/kpi-context";
 import { loadPayrollOpenMonths } from "@/lib/rh/referential/store";
+import { dsnRemunerationsByMonth, type DsnMonth } from "./dsn";
 import { axisOf, NO_TYPE, serviceOf, type Analytic, type EtpMonth, type JournalInput, type LedgerLine } from "./engine";
 
 // Contexte de l'écran Masse salariale : journal de paie de la lecture PayFit appliquée, grille de comptes de l'espace,
@@ -20,6 +21,7 @@ export type PayrollContext = {
   etp: (months: string[], service?: { value: string | null }) => EtpMonth[];
   axes: string[]; // types de codes analytiques présents dans le journal
   service: ServiceAxis;
+  dsn: Map<string, DsnMonth>; // contrôle : rémunérations DSN des déclarations qui font foi, par mois
 };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? v : null);
@@ -27,7 +29,7 @@ const num = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? 
 export async function loadPayrollContext(slug: string): Promise<PayrollContext> {
   const kpi = await loadKpiContext(slug, {});
   const ws = kpi.collab.workspace.id;
-  const [grid, sync] = await Promise.all([getPayrollGrid(ws), activeSync(ws, "payfit")]);
+  const [grid, sync, dsn] = await Promise.all([getPayrollGrid(ws), activeSync(ws, "payfit"), dsnRemunerationsByMonth(ws)]);
   // Service d'un contrat pour un mois : celui de ses lignes de journal ce mois-là (null : non ventilé).
   let contractService: Map<string, string | null> | null = null;
   let axisForEtp: string | null = null;
@@ -44,12 +46,12 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
       return { month, etp4: null, reason: e.kind === "nd" ? e.nd.reason : `ETP en borne basse (${e.qualifiers.join(" ; ")})` };
     });
   const none: ServiceAxis = { axis: null, origin: "none", updatedAt: null };
-  if (!sync) return { kpi, grid, read: null, unavailable: "aucune lecture PayFit appliquée : connectez PayFit dans Données", input: null, etp, axes: [], service: none };
+  if (!sync) return { kpi, grid, read: null, unavailable: "aucune lecture PayFit appliquée : connectez PayFit dans Données", input: null, etp, axes: [], service: none, dsn };
   const months = ((sync.scope as { months?: unknown }).months as string[] | undefined) ?? [];
   const read = { syncId: sync.id, startedAt: sync.startedAt, months };
   const outcome = ((sync.summary as { collections?: CollectionOutcome[] }).collections ?? []).find((c) => c.collection === "ledger_lines");
-  if (!outcome) return { kpi, grid, read, unavailable: "journal comptable absent de la lecture PayFit appliquée", input: null, etp, axes: [], service: none };
-  if (outcome.status === "unavailable") return { kpi, grid, read, unavailable: `journal comptable non lu : ${outcome.reason}`, input: null, etp, axes: [], service: none };
+  if (!outcome) return { kpi, grid, read, unavailable: "journal comptable absent de la lecture PayFit appliquée", input: null, etp, axes: [], service: none, dsn };
+  if (outcome.status === "unavailable") return { kpi, grid, read, unavailable: `journal comptable non lu : ${outcome.reason}`, input: null, etp, axes: [], service: none, dsn };
   const rows = await withWorkspace(ws, (tx) =>
     tx
       .select({ key: sourceRecord.recordKey, data: sourceRecord.data })
@@ -78,7 +80,7 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
     for (const l of lines) if (l.contractId && !contractService.has(`${l.month}|${l.contractId}`)) contractService.set(`${l.month}|${l.contractId}`, serviceOf(l, service.axis));
   }
   const openMonths = await loadPayrollOpenMonths(ws, sync.id);
-  return { kpi, grid, read, unavailable: null, input: { lines, months, openMonths, grid: grid.grid, serviceAxis: service.axis }, etp, axes, service };
+  return { kpi, grid, read, unavailable: null, input: { lines, months, openMonths, grid: grid.grid, serviceAxis: service.axis }, etp, axes, service, dsn };
 }
 
 // Axes analytiques présents dans le journal de la lecture PayFit appliquée (Paramètres).

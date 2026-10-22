@@ -1,9 +1,16 @@
 import { expect, test, type Locator } from "@playwright/test";
+import { fixtureDsnBytes } from "../../src/lib/dsn/fixture";
 import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
 
 // Module 4 (lot 1) : masse salariale réelle sur le journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle).
 // Valeurs attendues recalculées à la main depuis la fixture (voir tests/unit/payroll.test.ts).
 const run = Date.now().toString(36);
+const dsn = (month: string) => ({ name: `dsn-${month}.txt`, mimeType: "text/plain", buffer: Buffer.from(fixtureDsnBytes({ month })) });
+const span = (from: string, to: string) => {
+  const out: string[] = [];
+  for (let [y, m] = from.split("-").map(Number); `${y}-${String(m).padStart(2, "0")}` <= to; m === 12 ? ((m = 1), (y += 1)) : (m += 1)) out.push(`${y}-${String(m).padStart(2, "0")}`);
+  return out;
+};
 const txt = async (l: Locator) => ((await l.textContent()) ?? "").replace(/\s+/g, " ").trim();
 
 test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, grille de comptes", async ({ page }) => {
@@ -79,6 +86,22 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   // Paramètre GET invalide : remplacé et signalé.
   await page.goto(`${ms}?annee=2031`);
   await expect(page.getByTestId("ms-param-notice")).toContainText("paramètre ignoré : annee=2031");
+
+  // Contrôle DSN : sans dépôt, l'écran le dit ; avec les DSN fictives (même société), brut DSN = brut du journal.
+  await page.goto(ms);
+  await expect(page.getByTestId("ms-dsn-control")).toContainText("aucune DSN déposée");
+  await page.goto(`/e/${slug}/donnees/dsn`);
+  await page.getByLabel(/Fichiers DSN/).setInputFiles(span("2025-01", "2026-09").map(dsn));
+  await page.getByRole("button", { name: "Déposer et prévisualiser" }).click();
+  await expect(page.getByTestId("sync-status")).toHaveText("Aperçu à valider", { timeout: 90_000 });
+  await page.getByRole("button", { name: "Appliquer cette lecture" }).click();
+  await expect(page.getByTestId("sync-status")).toHaveText("Appliquée");
+  await page.goto(ms);
+  expect(await txt(row("2026-01", "dsn"))).toBe("14 830,00 €");
+  expect(await txt(row("2026-01", "dsn-ecart"))).toBe("0,00 €");
+  expect(await txt(row("2026-03", "dsn"))).toBe("18 730,00 €");
+  expect(await txt(page.getByTestId("ms-monthly-foot").locator("td[data-col='dsn-ecart']"))).toBe("0,00 €");
+  await page.getByTestId("ms-monthly-table").screenshot({ path: `${CAPTURES}/4-03-controle-dsn.png` });
 
   // Grille de comptes : défaut proposé visible, modifiable par l'administrateur ; définitions dans l'écran.
   await page.goto(`/e/${slug}/parametres`);

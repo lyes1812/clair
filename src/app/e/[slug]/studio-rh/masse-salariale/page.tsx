@@ -142,6 +142,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
     { label: `Janv.–${monthShort(`${year}-${lastOfYear}`)}`, de: "01", a: lastOfYear },
     { label: `${monthShort(`${year}-${lastOfYear}`)} seul`, de: lastOfYear, a: lastOfYear },
   ].filter((p, i, all) => p.a <= lastOfYear && all.findIndex((x) => x.de === p.de && x.a === p.a) === i);
+  // Contrôle DSN : affiché sur le total entreprise seulement (la DSN ne porte pas le code analytique du journal).
+  const showDsn = serviceValue === undefined && [...months, ...prevMonths].some((m) => ctx.dsn.has(m));
   const etpSum = (c: CostPerEtp) => (c.kind === "value" ? `${fmtEtp4(c.etpMonths4)} ETP-mois` : "");
 
   return (
@@ -293,7 +295,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
           <table className="data-table" data-testid="ms-monthly-table">
             <thead>
               <tr>
-                <th>Mois</th><th className="num">Brut</th><th className="num">dont primes</th><th className="num">Cotisations</th><th className="num">Masse chargée</th><th className="num">Masse N-1</th><th className="num">Écart</th><th className="num">ETP fin de mois</th><th className="num">Coût / ETP</th>
+                <th>Mois</th><th className="num">Brut</th><th className="num">dont primes</th><th className="num">Cotisations</th><th className="num">Masse chargée</th><th className="num">Masse N-1</th><th className="num">Écart</th><th className="num">ETP fin de mois</th><th className="num">Coût / ETP</th>{showDsn && <><th className="num">Brut DSN (001)</th><th className="num">Écart journal − DSN</th></>}
               </tr>
             </thead>
             <tbody>
@@ -312,6 +314,17 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                     <td className="num" data-col="ecart">{diff === null ? "n.d." : `${diff > 0 ? "+" : ""}${formatEuros(diff)}`}</td>
                     <td className="num" data-col="etp">{e.etp4 === null ? <span className="nd" title={e.reason ?? ""}>n.d.</span> : fmtEtp4(e.etp4)}</td>
                     <td className="num" data-col="cout-etp">{r.kind === "value" && e.etp4 ? eurosOf({ num: r.masse * 10000, den: e.etp4 }) : "n.d."}</td>
+                    {showDsn && (() => {
+                      const d = ctx.dsn.get(r.month);
+                      const b = d?.byType["001"];
+                      if (!d || b === undefined) return <><td className="num nd" data-col="dsn">{d ? "type 001 absent" : "non déposée"}</td><td className="num">—</td></>;
+                      return (
+                        <>
+                          <td className="num" data-col="dsn" title={d.status !== "complete" ? d.messages.join(" ; ") : undefined}>{formatEuros(b)}{d.status !== "complete" ? " ⚠" : ""}</td>
+                          <td className="num" data-col="dsn-ecart">{r.kind === "value" ? `${r.brut - b > 0 ? "+" : ""}${formatEuros(r.brut - b)}` : "n.d."}</td>
+                        </>
+                      );
+                    })()}
                   </tr>
                 );
               })}
@@ -327,10 +340,24 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 <td className="num">{evo.kind === "value" ? evoEuros(evo) : "n.d."}</td>
                 <td className="num">{cost.kind === "value" ? etpSum(cost) : "n.d."}</td>
                 <td className="num" data-col="cout-etp">{cost.kind === "value" ? eurosOf(cost.costCents) : "n.d."}</td>
+                {showDsn && (() => {
+                  const vals = months.map((m) => ctx.dsn.get(m)?.byType["001"]);
+                  if (vals.some((v) => v === undefined)) return <><td className="num nd">incomplet</td><td className="num">—</td></>;
+                  const sum = (vals as number[]).reduce((s, v) => s + v, 0);
+                  return <><td className="num" data-col="dsn">{formatEuros(sum)}</td><td className="num" data-col="dsn-ecart">{cur.kind === "value" ? `${cur.brut - sum > 0 ? "+" : ""}${formatEuros(cur.brut - sum)}` : "n.d."}</td></>;
+                })()}
               </tr>
             </tfoot>
           </table>
         </div>
+        <p className="tile-foot" data-testid="ms-dsn-control">
+          {showDsn
+            ? "Contrôle DSN : brut déclaré (rémunération S21.G00.51 de type 001, brut non plafonné) des déclarations qui font foi, tous établissements ; ⚠ = mois DSN incomplet ou bloqué. Un écart s'explique ligne par ligne dans le détail du mois."
+            : serviceValue !== undefined
+              ? "Contrôle DSN : disponible sur le total entreprise (sans filtre Service)."
+              : "Contrôle DSN : aucune DSN déposée pour ces mois — déposez-les dans Données › DSN pour comparer le brut du journal au brut déclaré."}{" "}
+          <a href={`/e/${slug}/donnees/dsn`}>Données › DSN</a>
+        </p>
         {cur.kind === "value" && (
           <p className="tile-foot" data-testid="ms-hors-masse">
             Dans les cotisations : taxes et contributions sur les salaires {formatEuros(cur.byRubric.taxes)} · dans le brut : gratifications de stage {formatEuros(cur.byRubric.stages)} · hors masse chargée : provisions de congés payés {formatEuros(cur.byRubric["provisions-cp"])}, autres charges de personnel {formatEuros(cur.byRubric["autres-charges"])}

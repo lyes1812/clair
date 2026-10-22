@@ -147,6 +147,12 @@ describe("référentiel Collaborateurs en base", () => {
     if (state.kind !== "ready") return;
     expect(state.build).toMatchObject({ presenceFrom: "2024-10", presenceTo: "2024-11", referenceDate: "2024-11-30" });
     expect(state.build.summary.persons).toBe(6);
+    // Contrôle DSN de la masse salariale : brut déclaré (type 001) des déclarations qui font foi, par mois.
+    const { dsnRemunerationsByMonth } = await import("@/lib/payroll/dsn");
+    const dsn = await dsnRemunerationsByMonth(A);
+    expect(dsn.get("2024-10")).toMatchObject({ status: "complete", byType: { "001": 1384000 } });
+    expect(dsn.get("2024-11")?.byType["001"]).toBe(1384000);
+    expect((await dsnRemunerationsByMonth(B)).size).toBe(0);
     const data = await loadRhBuild(A, state.build.id);
     expect(headcountAt(data, "2024-11-30", NATURES)).toMatchObject({ kind: "exact", persons: 6, contracts: 6 });
     expect(data.persons.every((p) => p.personKey.startsWith("dsn:"))).toBe(true);
