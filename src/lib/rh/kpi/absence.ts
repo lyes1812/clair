@@ -127,9 +127,10 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
           clip2,
           params.dayBasis,
         );
+        // Période du contrat de l'absence inconnue (sans date de début) : tous les jours sous c2 sont incertains.
         const on = [...new Set([...s2.slots, ...s2.uncertain])].filter((x) => {
           const d = x.slice(0, 10);
-          return d < c.startDate! || (c.endDate !== null && d > c.endDate);
+          return c.startDate === null || d < c.startDate || (c.endDate !== null && d > c.endDate);
         });
         if (!on.length) continue;
         on.forEach((x) => setOf(doubt, c2.contractKey).add(x));
@@ -140,6 +141,7 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       return { count, notes };
     };
     let outside = 0;
+    let orphanDays = 0;
     const setOf = (m: Map<string, Set<SlotKey>>, k: string) => {
       let s = m.get(k);
       if (!s) m.set(k, (s = new Set()));
@@ -163,7 +165,7 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       if (c.startDate === null || c.nature === null || !opts.natures.includes(c.nature) || !inEst(scope.establishments, c.establishmentId)) {
         // Contrat hors périmètre : l'absence n'est pas comptée, mais ses jours qui tombent sous un autre contrat compté de la même
         // personne restent incertains (ex. CDD non compté puis CDI compté pendant l'absence).
-        const spill = c.startDate !== null ? spillOver(a, c) : { count: 0, notes: [] as string[] };
+        const spill = spillOver(a, c);
         const label = (c.startDate === null ? "contrat non positionnable (sans date de début)" : "contrat hors natures comptées ou hors établissement") + (spill.notes.length ? ` ; ${spill.notes.join(" ; ")}` : "");
         excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: spill.count });
         continue;
@@ -206,6 +208,12 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       const inMonth = eachDay(max(sd, ms), min(ed, me)).filter((d) => params.dayBasis === "calendar" || isWeekday(d));
       const outsideContract = inMonth.filter((d) => d < c.startDate! || (c.endDate !== null && d > c.endDate)).length;
       outside += outsideContract;
+      // Contrat sans collaborateur : ses jours d'absence hors contrat peuvent tomber sous un autre contrat compté de la même
+      // personne, inconnue ⇒ incertitude (« ≥ »), jamais « non comptés » en exact.
+      if (!c.personKey && outsideContract) {
+        orphanDays += outsideContract;
+        uncertainIds.add(a.id);
+      }
       if (a.status === null) {
         // Créneaux que l'absence pourrait couvrir, moments compris : comptés comme incertains, jamais comme absents.
         const p = absenceSlots({ start: { date: sd, moment: a.start.moment }, end: { date: ed, moment: a.end.moment } }, clip, params.dayBasis);
@@ -259,7 +267,8 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
     if (unresolved) qualifiers.push(`≥ : ${unresolved} demi-journée(s) incertaine(s) (absences ${[...uncertainIds].sort().join(", ")})`);
     const noStatus = excluded.filter((x) => x.why === "status-nd").length;
     if (noStatus) qualifiers.push(`${noStatus} absence(s) sans statut non comptée(s)`);
-    return { month, kind: unresolved ? "lower_bound" : "exact", ratio: ratio(num, t.half), theoretical: t.contributions, slices, excluded, qualifiers };
+    if (orphanDays) qualifiers.push(`≥ : ${orphanDays} jour(s) d'absence hors contrat d'un contrat sans collaborateur (rattachement non vérifiable)`);
+    return { month, kind: unresolved || orphanDays ? "lower_bound" : "exact", ratio: ratio(num, t.half), theoretical: t.contributions, slices, excluded, qualifiers };
   });
 }
 

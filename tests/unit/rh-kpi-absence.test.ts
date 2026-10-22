@@ -260,3 +260,24 @@ describe("absentéisme — dates inconnues couvertes, statut nul sans date, jour
     expect(r(run([absence("X", "C-C1", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day"), absence("Y", "C-C2", "2025-03-16", "beginning-of-day", "2025-03-20", "end-of-day")], "2025-03"))).toBe("exact:22/124");
   });
 });
+
+describe("absentéisme — contrat sans date de début ou sans collaborateur : rattachement non vérifiable ⇒ « ≥ »", async () => {
+  const MONTHS = monthRange("2024-10", "2026-01");
+  const build = (edge: unknown) => payfitBuild("cle-fictive-edge-1234", payfitEdgeFetch("cle-fictive-edge-1234", edge as never), MONTHS, new Date("2026-01-31T08:00:00Z"));
+  it("absence sur un contrat sans date de début : ses jours sous le CDI compté de la même personne sont incertains", async () => {
+    // P-C : CDI C-C1 depuis 2024-06-01 ; C-C2 en attente, sans date de début. Absence sur C-C2 du 10 au 14/03/2025.
+    // Mars : C-C1 seul, 31 j = 62 demi-journées ; 10 demi-journées incertaines sous C-C1.
+    const data = await build({ collaborators: [{ id: "P-C" }], contracts: [{ contractId: "C-C1", collaboratorId: "P-C", startDate: "2024-06-01", endDate: null, natureContratDsn: "01" }, { contractId: "C-C2", collaboratorId: "P-C", status: "PENDING", startDate: null, endDate: null, natureContratDsn: "02" }] });
+    const m = absenteeismMonth(kpiInput(data, readAbsences([absence("A", "C-C2", "2025-03-10", "beginning-of-day", "2025-03-14", "end-of-day")], MONTHS)), "2025-03");
+    expect(r(m)).toBe("lower_bound:0/62");
+    if (m.kind !== "nd") expect(m.excluded[0]).toMatchObject({ why: "contract-out-of-scope", uncertain: 10, label: expect.stringContaining("contrat non positionnable (sans date de début) ; 10 demi-journée(s) sous le contrat C-C1") });
+  });
+  it("absence sur un contrat sans collaborateur : ses jours hors contrat ne sont pas « non comptés » en exact", async () => {
+    // C-C1 : CDD de P-C jusqu'au 15/03/2025 ; C-C2 : CDI sans collaborateur dès le 16/03. Absence sur C-C2 du 10 au 20/03.
+    // Mars : 15 j + 16 j = 31 j = 62 demi-journées ; 16 → 20/03 comptés (10) ; 10 → 15/03 (6 j) hors contrat, personne inconnue.
+    const data = await build({ collaborators: [{ id: "P-C" }], contracts: [{ contractId: "C-C1", collaboratorId: "P-C", startDate: "2024-06-01", endDate: "2025-03-15", natureContratDsn: "02" }, { contractId: "C-C2", collaboratorId: null, startDate: "2025-03-16", endDate: null, natureContratDsn: "01" }] });
+    const m = absenteeismMonth(kpiInput(data, readAbsences([absence("A", "C-C2", "2025-03-10", "beginning-of-day", "2025-03-20", "end-of-day")], MONTHS)), "2025-03");
+    expect(r(m)).toBe("lower_bound:10/62");
+    if (m.kind !== "nd") expect(m.qualifiers.join(" ")).toContain("6 jour(s) d'absence hors contrat d'un contrat sans collaborateur");
+  });
+});

@@ -67,7 +67,7 @@ export type Average =
   | { kind: "nd"; unit: "etp" | "persons"; nd: KpiNd; months: MonthValue[] };
 
 // Turnover
-export type EventWhy = "counted" | "out-of-scope" | "future" | "neutralized" | "excluded-nature" | "continuity-unknown";
+export type EventWhy = "counted" | "out-of-scope" | "future" | "neutralized" | "excluded-nature" | "continuity-unknown" | "end-doubtful";
 export type EventContribution = { row: EventRow; why: EventWhy; label: string; partner: { contractKey: string; date: string } | null };
 export type MonthMovements = { month: string; entries: Count; exits: Count; events: EventContribution[] };
 export type MovementTotal = { kind: Kind; value: number } | { kind: "nd"; nd: KpiNd };

@@ -3,7 +3,7 @@ import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, monthEnd } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
-import { coverageAt, gateAt, monthRanges } from "@/lib/rh/headcount";
+import { coverageAt, gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
 import { KPI_DETAIL_IDS, kpiDashboard, kpiDetail } from "@/lib/rh/kpi/dashboard";
 import { fmtDelta, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { civilWindow, closedMonths, defaultYear, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
@@ -191,6 +191,13 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   };
   const detailHref = (id: string, month: string | null, previous = false) => `${query({ detail: id, ...(month ? { mois: month } : {}), ...(previous ? { periode: "n1" } : {}) })}#kpi-detail`;
 
+  // Nature retenue pour un contrat un mois donné (DSN : déclarée ce mois-là ; PayFit : celle du contrat).
+  const natureAt = (key: string, month: string): string | null => {
+    const c = data.contracts.find((x) => x.contractKey === key);
+    if (!c) return null;
+    const m = data.months.find((x) => x.contractKey === key && x.month === month && x.presenceBasis === "declared" && (!etab || x.establishmentId === etab));
+    return m ? natureOfMonth(c, m) : c.nature;
+  };
   // Liens internes d'un détail : un détail de période N-1 renvoie aux détails de période N-1 ; les mois gardent leur date.
   const inDetail = (id: string, month: string | null) => detailHref(id, month, onPrevious && month === null);
   const maps: Maps = { persons: new Map(data.persons.map((p) => [p.personKey, p])), contracts: new Map(data.contracts.map((c) => [c.contractKey, c])) };
@@ -444,12 +451,12 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           </h2>
           <p className="desc"><a href={query({})}>Fermer le détail</a></p>
           {detail.id === "etp-end" && <EtpEndDetail v={detail.value} maps={maps} slug={slug} decimals={s.etpDecimals} refDate={data.build.referenceDate} />}
-          {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} />}
+          {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} natureAt={natureAt} />}
           {(detail.id === "entries" || detail.id === "exits") && <MovementsDetail v={detail.value} kind={detail.id === "entries" ? "entry" : "exit"} maps={maps} slug={slug} />}
           {(detail.id === "theoretical" || detail.id === "absenteeism") && <AbsenceMonthDetail id={detail.id} v={detail.value} theoretical={detail.theoretical} maps={maps} slug={slug} />}
           {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} />}
           {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={inDetail} />}
-          {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={inDetail} />}
+          {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={inDetail} natureAt={natureAt} />}
         </section>
       )}
 

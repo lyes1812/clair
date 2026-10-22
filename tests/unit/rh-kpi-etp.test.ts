@@ -217,3 +217,19 @@ describe("DSN — nature déclarée chaque mois (CDD K-A transformé en CDI au 0
     if (jul.kind !== "nd") expect(jul.contributions.find((c) => c.externalId === "K-A")?.nature).toBe("01");
   });
 });
+
+describe("DSN — établissement déclarant du mois dans le détail de l'ETP", () => {
+  it("K-A déclaré par le SIRET 1 jusqu'en juin 2025 puis par le SIRET 2 : le détail de juin cite le SIRET 1, avant et après le dépôt de juillet", () => {
+    const spec = (month: string, nic: string): DsnDeclarationSpec => {
+      const k = { number: "K-A", start: "2024-01-01", nature: "01", quota: "75.84", gross: "1000.00" };
+      if (nic === "00011") return { month, nic, people: [{ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] }, ...(month <= "2025-06" ? [{ nir: NIR.a, employeeNumber: "A", contracts: [k] }] : [])] };
+      return { month, nic, people: [{ nir: NIR.c, employeeNumber: "C", contracts: [{ number: "K-C", start: "2024-01-01", nature: "01", gross: "2000.00" }] }, ...(month >= "2025-07" ? [{ nir: NIR.a, employeeNumber: "A", contracts: [k] }] : [])] };
+    };
+    const files = (specs: DsnDeclarationSpec[]) => edgeFiles(specs).map((f, i) => ({ ...f, filename: `${i}-${f.filename}` }));
+    const months = (to: string) => monthRange("2024-07", to).flatMap((m) => [spec(m, "00011"), spec(m, "00022")]);
+    for (const to of ["2025-06", "2025-07"]) {
+      const e = etpMonthEnd(kpiInput(dsnBuild(files(months(to))), DSN_ABSENCES, {}, { establishments: ["00000000000011"] }), "2025-06");
+      expect(e.kind !== "nd" && e.contributions.find((c) => c.externalId === "K-A")?.establishmentId).toBe("00000000000011");
+    }
+  });
+});

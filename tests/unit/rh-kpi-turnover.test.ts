@@ -3,7 +3,8 @@ import { monthRange } from "@/lib/connectors/months";
 import { createFixtureFetch } from "@/lib/connectors/payfit/fixture";
 import { compareWindows } from "@/lib/rh/kpi/compare";
 import { same } from "@/lib/rh/kpi/fraction";
-import { civilWindow, rollingWindow } from "@/lib/rh/kpi/period";
+import { civilWindow, countedOpts, rollingWindow } from "@/lib/rh/kpi/period";
+import { headcountAt } from "@/lib/rh/headcount";
 import { monthMovements, turnover, windowMovements } from "@/lib/rh/kpi/turnover";
 import type { Turnover } from "@/lib/rh/kpi/types";
 import { NIR, PAYFIT_EDGES, payfitEdgeFetch, type DsnDeclarationSpec, type DsnPerson } from "./helpers/edge-cases";
@@ -279,5 +280,57 @@ describe("turnover — contrats continus aux bords de la couverture DSN (jour vo
     const t = turnover(kpiInput(full, DSN_ABSENCES), w);
     expect(isRatio(t, 0, 72)).toBe(true);
     expect(monthMovements(kpiInput(full, DSN_ABSENCES), "2025-09").events.map((e) => e.label)).toEqual(["contrat continu neutralisé (avec K-A3 le 01/10/2025)"]);
+  });
+});
+
+describe("turnover — révisions DSN : aucune valeur « exacte » qui changerait au dépôt suivant", () => {
+  const S1 = "00000000000011";
+  it("écran filtré sur un SIRET : neutralisation seulement si le lendemain est déposé partout ; sinon n.d., puis 24/48 une fois déposé", () => {
+    // A quitte K-A1 (CDI, SIRET 1) le 30/06/2025 ; le 01/07, K-A2 (CDD, SIRET 1) et K-A3 (CDI, SIRET 2). B (SIRET 1), C (SIRET 2) stables.
+    const spec = (month: string, nic: string): DsnDeclarationSpec => {
+      const people: DsnPerson[] = [];
+      if (nic === "00011") {
+        people.push({ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] });
+        if (month <= "2025-06") people.push({ nir: NIR.a, employeeNumber: "A", contracts: [{ number: "K-A1", start: "2024-01-01", nature: "01", gross: "1500.00", ...(month === "2025-06" ? { end: "2025-06-30", endReason: "059" } : {}) }] });
+        else people.push({ nir: NIR.a, employeeNumber: "A", contracts: [{ number: "K-A2", start: "2025-07-01", nature: "02", gross: "700.00" }] });
+      } else {
+        people.push({ nir: NIR.c, employeeNumber: "C", contracts: [{ number: "K-C", start: "2024-01-01", nature: "01", gross: "2000.00" }] });
+        if (month >= "2025-07") people.push({ nir: NIR.a, employeeNumber: "A", contracts: [{ number: "K-A3", start: "2025-07-01", nature: "01", gross: "800.00" }] });
+      }
+      return { month, nic, people };
+    };
+    const files = (specs: DsnDeclarationSpec[]) => edgeFiles(specs).map((f, i) => ({ ...f, filename: `${i}-${f.filename}` }));
+    const base = [...monthRange("2024-08", "2025-07").map((m) => spec(m, "00011")), ...monthRange("2024-08", "2025-06").map((m) => spec(m, "00022"))];
+    const w = rollingWindow("2025-07");
+    // SIRET 2 n'a pas encore déposé juillet : le couple K-A1 ↔ K-A2 n'est pas certain (K-A3 pourrait apparaître) ⇒ n.d.
+    const before = dsnBuild(files(base));
+    expect(turnover(kpiInput(before, DSN_ABSENCES, {}, { establishments: [S1] }), w).kind).toBe("nd");
+    expect(monthMovements(kpiInput(before, DSN_ABSENCES, {}, { establishments: [S1] }), "2025-06").events.map((e) => e.why)).toEqual(["continuity-unknown"]);
+    // Juillet déposé : K-A1 ↔ K-A3 (même nature), hors du SIRET filtré ⇒ K-A1 sortie comptée, K-A2 entrée comptée : E = S = 1, Σ = 24.
+    const after = dsnBuild(files([...base, spec("2025-07", "00022")]));
+    const t = turnover(kpiInput(after, DSN_ABSENCES, {}, { establishments: [S1] }), w);
+    expect(isRatio(t, 24, 48)).toBe(true);
+    expect(t).toMatchObject({ entries: 1, exits: 1 });
+  });
+  it("fin déclarée puis contrat redéclaré sans fin le mois suivant (rupture annulée ?) : sortie n.d., effectif « ≥ » ; fin définitive connue : exact", () => {
+    // K-A : fin au 30/06/2025 déclarée en juin, redéclaré sans fin en juillet et août, fin au 30/09 déclarée en septembre.
+    const spec = (month: string): DsnDeclarationSpec => {
+      const people: DsnPerson[] = [{ nir: NIR.b, employeeNumber: "B", contracts: [{ number: "K-B", start: "2024-01-01", nature: "01", gross: "2000.00" }] }];
+      const a = { number: "K-A", start: "2024-01-01", nature: "01", gross: "1500.00" };
+      if (month === "2025-06") people.push({ nir: NIR.a, employeeNumber: "A", contracts: [{ ...a, end: "2025-06-30", endReason: "059" }] });
+      else if (month === "2025-09") people.push({ nir: NIR.a, employeeNumber: "A", contracts: [{ ...a, end: "2025-09-30", endReason: "059" }] });
+      else if (month <= "2025-09") people.push({ nir: NIR.a, employeeNumber: "A", contracts: [a] });
+      return { month, people };
+    };
+    const w = rollingWindow("2025-07");
+    const july = dsnBuild(edgeFiles(monthRange("2024-08", "2025-07").map(spec)));
+    const i1 = kpiInput(july, DSN_ABSENCES);
+    expect(monthMovements(i1, "2025-06").exits).toMatchObject({ kind: "nd", nd: { reason: expect.stringContaining("fin incertaine (K-A le 30/06/2025)") } });
+    expect(turnover(i1, w).kind).toBe("nd");
+    expect(headcountAt(july, "2025-07-31", countedOpts(i1))).toMatchObject({ kind: "lower_bound", persons: 1 });
+    const sept = dsnBuild(edgeFiles(monthRange("2024-08", "2025-09").map(spec)));
+    const i2 = kpiInput(sept, DSN_ABSENCES);
+    expect(headcountAt(sept, "2025-07-31", countedOpts(i2))).toMatchObject({ kind: "exact", persons: 2 });
+    expect(isRatio(turnover(i2, w), 0, 48)).toBe(true);
   });
 });

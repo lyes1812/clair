@@ -275,7 +275,7 @@ export function EtpEndDetail({ v, maps, slug, decimals, refDate }: { v: EtpMonth
   );
 }
 
-export function HeadcountDetail({ v, maps, slug, month }: { v: HeadcountResult; maps: Maps; slug: string; month: string }) {
+export function HeadcountDetail({ v, maps, slug, month, natureAt }: { v: HeadcountResult; maps: Maps; slug: string; month: string; natureAt: (key: string, month: string) => string | null }) {
   if (v.kind === "nd") return <Total nd>n.d. — {v.nd.reason}</Total>;
   return (
     <>
@@ -289,7 +289,7 @@ export function HeadcountDetail({ v, maps, slug, month }: { v: HeadcountResult; 
                 <tr key={k}>
                   <td><Person personKey={c?.personKey ?? null} contractKey={k} maps={maps} slug={slug} /></td>
                   <td>{c ? <ContractLink contractKey={k} externalId={c.externalId} slug={slug} /> : <code>{k}</code>}</td>
-                  <td><Nature code={c?.nature ?? null} /></td>
+                  <td><Nature code={natureAt(k, month)} /></td>
                 </tr>
               );
             })}
@@ -381,7 +381,7 @@ export function AverageDetail({ v, detailHref }: { v: Average; detailHref: (id: 
   );
 }
 
-export function TurnoverDetail({ v, maps, slug, detailHref }: { v: Turnover; maps: Maps; slug: string; detailHref: (id: string, month: string | null) => string }) {
+export function TurnoverDetail({ v, maps, slug, detailHref, natureAt }: { v: Turnover; maps: Maps; slug: string; detailHref: (id: string, month: string | null) => string; natureAt: (key: string, month: string) => string | null }) {
   return (
     <>
       {v.months.length > 0 && (
@@ -415,10 +415,30 @@ export function TurnoverDetail({ v, maps, slug, detailHref }: { v: Turnover; map
           {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
         </Total>
       ) : (
-        <Total>
-          S ÷ effectif au {formatDate(v.base.date)} = {v.exits} ÷ {v.base.persons} = {fmtPercent(v.ratio)}
-          {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
-        </Total>
+        <>
+          <h3>Effectif au {formatDate(v.base.date)} (base de la formule)</h3>
+          <div className="table-wrap">
+            <table className="data-table" data-testid="kpi-detail-base">
+              <thead><tr><th>Personne</th><th>Contrat</th><th>Nature</th></tr></thead>
+              <tbody>
+                {v.base.contractKeys.map((k) => {
+                  const c = maps.contracts.get(k);
+                  return (
+                    <tr key={k}>
+                      <td><Person personKey={c?.personKey ?? null} contractKey={k} maps={maps} slug={slug} /></td>
+                      <td>{c ? <ContractLink contractKey={k} externalId={c.externalId} slug={slug} /> : <code>{k}</code>}</td>
+                      <td><Nature code={natureAt(k, v.base.kind === "start" ? v.base.date.slice(0, 7) : "")} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Total>
+            S ÷ effectif au {formatDate(v.base.date)} = {v.exits} ÷ {v.base.persons} = {fmtPercent(v.ratio)} ({v.base.persons} personne{v.base.persons > 1 ? "s" : ""}, {v.base.contractKeys.length} contrat{v.base.contractKeys.length > 1 ? "s" : ""})
+            {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
+          </Total>
+        </>
       )}
     </>
   );

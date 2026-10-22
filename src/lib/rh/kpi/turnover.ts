@@ -68,33 +68,45 @@ export function monthMovements(input: KpiInput, month: string): MonthMovements {
     const partners = continuityPartners(input);
     const partnerOf = (r: EventRow) => partners.get(eventKey(r.event)) ?? null;
     const externalOf = new Map(data.contracts.map((c) => [c.contractKey, c.externalId]));
+    const redeclared = new Map<string, string>();
+    for (const m of data.months) if (m.flags.includes("declared_after_end") && !redeclared.has(m.contractKey)) redeclared.set(m.contractKey, m.month);
     const events: EventContribution[] = [...ml.entries, ...ml.exits].map((r) => {
       const partner = partnerOf(r);
       const p = partner ? { contractKey: partner.event.contractKey, date: partner.event.date } : null;
       if (!r.inScope) return { row: r, why: "out-of-scope", label: "hors natures comptées", partner: p };
       if (ref && r.event.date > ref) return { row: r, why: "future", label: "postérieur à la date de référence", partner: p };
-      if (params.neutralizeContinuity && partner?.counted) {
+      // Contrat continu : neutralisé seulement si le jour voisin est connu partout (sinon un partenaire mieux apparié pourrait
+      // apparaître au dépôt suivant, par exemple dans un autre établissement).
+      const known = !params.neutralizeContinuity || r.event.personKey === null || neighbourKnown(data, r.event.kind, r.event.date);
+      if (params.neutralizeContinuity && partner?.counted && known) {
         return { row: r, why: "neutralized", label: `contrat continu neutralisé (avec ${externalOf.get(partner.event.contractKey) ?? partner.event.contractKey} le ${formatDate(partner.event.date)})`, partner: p };
       }
       // Sortie de nature exclue : jamais comptée, qu'elle soit continue ou non ⇒ aucune incertitude.
       if (r.event.kind === "exit" && r.event.nature !== null && params.excludedExitNatures.includes(r.event.nature)) {
         return { row: r, why: "excluded-nature", label: `sortie exclue : nature ${contractNatureLabel(r.event.nature)} (Paramètres)`, partner: p };
       }
-      // Mouvement qui serait compté : sans partenaire compté connu, il faut que le jour voisin soit couvert (un partenaire compté
-      // pourrait y être déclaré plus tard, par exemple sur un autre SIRET).
-      if (params.neutralizeContinuity && r.event.personKey !== null && !neighbourKnown(data, r.event.kind, r.event.date)) {
+      if (!known) {
         const day = formatDate(addDays(r.event.date, r.event.kind === "entry" ? -1 : 1));
         return { row: r, why: "continuity-unknown", label: `continuité non vérifiable : le ${day} n'est pas couvert par la source (contrat ${r.event.kind === "entry" ? "précédent" : "suivant"} inconnu)`, partner: p };
+      }
+      // DSN : contrat redéclaré après sa fin dans un mois suivant ⇒ la rupture peut être annulée : sortie non vérifiable.
+      if (r.event.kind === "exit" && redeclared.has(r.event.contractKey)) {
+        return { row: r, why: "end-doubtful", label: `fin incertaine : contrat déclaré après sa fin en ${redeclared.get(r.event.contractKey)} (rupture annulée ?)`, partner: p };
       }
       return { row: r, why: "counted", label: "compté", partner: p };
     });
     const count = (c: Count, kind: "entry" | "exit"): Count => {
       if (c.kind === "nd") return c;
+      const what = kind === "entry" ? "entrées" : "sorties";
       const unknown = events.filter((x) => x.why === "continuity-unknown" && x.row.event.kind === kind);
       if (unknown.length) {
-        const what = kind === "entry" ? "entrées" : "sorties";
         const list = unknown.map((x) => `${x.row.contract.externalId} le ${formatDate(x.row.event.date)}`).join(", ");
         return { kind: "nd", nd: nd("coverage-incomplete", `${what} de ${month} : contrats continus non vérifiables (${list}) — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés`) };
+      }
+      const doubtful = events.filter((x) => x.why === "end-doubtful" && x.row.event.kind === kind);
+      if (doubtful.length) {
+        const list = doubtful.map((x) => `${x.row.contract.externalId} le ${formatDate(x.row.event.date)}`).join(", ");
+        return { kind: "nd", nd: nd("coverage-incomplete", `${what} de ${month} : fin incertaine (${list}) — contrat déclaré après sa fin dans une DSN suivante (rupture annulée ?)`) };
       }
       return { kind: c.kind, value: events.filter((x) => x.why === "counted" && x.row.event.kind === kind).length, qualifiers: c.qualifiers };
     };

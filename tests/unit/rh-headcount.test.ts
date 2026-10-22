@@ -183,11 +183,12 @@ describe("règles d'effectif — DSN, couverture", () => {
     expect(movements(two, "2025-01", "2025-01", { ...OPTS, establishments: ["00000000000011"] }).upcoming).toHaveLength(0);
     expect(movements(two, "2025-01", "2025-01", OPTS).upcoming.map((e) => e.contract.externalId)).toEqual(["K-B"]);
   });
-  it("déclaré après sa fin : hors effectif, compté à part", () => {
+  it("déclaré après sa fin : hors effectif, compté à part, effectif « ≥ » (la rupture peut être annulée)", () => {
     const d = dsnBuild(edgeFiles([DSN_EDGES.endInNextMonth("2025-05", "2025-05-31"), DSN_EDGES.endInNextMonth("2025-06", undefined)]));
     const r = headcountAt(d, "2025-06-30", OPTS);
-    expect(exact(r)).toMatchObject({ persons: 0, contracts: 0 });
+    expect(exact(r)).toMatchObject({ kind: "lower_bound", persons: 0, contracts: 0 });
     expect(r.kind !== "nd" && r.declaredAfterEnd).toBe(1);
+    expect(r.kind !== "nd" && r.qualifiers.join(" ")).toContain("1 contrat(s) déclaré(s) après leur fin (rupture annulée ?)");
     expect(presenceAt(d, d.contracts[0], "2025-06-30")).toEqual({ state: "absent", reason: "déclaré après sa fin" });
   });
 });

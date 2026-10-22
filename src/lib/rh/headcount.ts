@@ -233,8 +233,13 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
   const M = monthOf(date);
   const declaredAfterEnd = new Set((index(data).declared.get(M) ?? []).filter((m) => m.flags.includes("declared_after_end") && inEst(opts.establishments, m.establishmentId)).map((m) => m.contractKey)).size;
   const lower = exactAt(data, date) ? [] : g.coverage.filter((c) => c.presenceStatus === "lower_bound");
+  const afterEndCounted = new Set(
+    (index(data).declared.get(M) ?? []).filter((m) => m.flags.includes("declared_after_end") && inEst(opts.establishments, m.establishmentId) && m.nature !== null && opts.natures.includes(m.nature)).map((m) => m.contractKey),
+  ).size;
+  // Contrat déclaré ce mois-ci après sa fin (DSN) : hors effectif et compté à part, mais la rupture peut être annulée par une
+  // déclaration suivante ⇒ l'effectif est une borne basse (« ≥ »), jamais un exact qui changerait au dépôt suivant.
   return {
-    kind: lower.length ? "lower_bound" : "exact",
+    kind: lower.length || afterEndCounted > 0 ? "lower_bound" : "exact",
     persons: persons.size,
     contracts: counted.length,
     allContracts: rows.length,
@@ -242,7 +247,10 @@ export function headcountAt(data: RhBuildData, date: string, opts: HeadcountOpts
     outOfScope: { byNature: outByNature, withoutPerson, unpositioned: data.contracts.filter((c) => c.startDate === null).length },
     declaredAfterEnd,
     contractKeys: counted.map((r) => r.contract.contractKey).sort(),
-    qualifiers: [...new Set(lower.map((c) => c.presenceReason).filter((r): r is string => r !== null))],
+    qualifiers: [
+      ...new Set(lower.map((c) => c.presenceReason).filter((r): r is string => r !== null)),
+      ...(afterEndCounted ? [`${afterEndCounted} contrat(s) déclaré(s) après leur fin (rupture annulée ?) : non comptés, effectif « ≥ »`] : []),
+    ],
     bySiret,
   };
 }
