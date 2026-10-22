@@ -3,6 +3,7 @@ import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { PAYROLL_DEFINITIONS } from "@/lib/payroll/definitions";
+import { dsnBrutWindow } from "@/lib/payroll/dsn";
 import { costPerEtp, evolution, monthPayroll, servicesOf, shiftYear, windowPayroll, withService, type CostPerEtp, type Evolution, type JournalInput, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
 import { gridRubrics } from "@/lib/payroll/grid";
 import { loadPayrollContext } from "@/lib/payroll/context";
@@ -20,7 +21,7 @@ const MM = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "1
 const MONTH_NAMES = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 
 const money = (w: PayrollWindow, pick: (x: Extract<PayrollWindow, { kind: "value" }>) => number) => (w.kind === "nd" ? `n.d. — ${w.nd.reason}` : formatEuros(pick(w)));
-const evoText = (e: Evolution) => (e.kind === "nd" ? `n.d. — ${e.nd.reason}` : `${e.ratio.num > 0 ? "+" : ""}${fmtPercent(e.ratio)}`);
+const evoText = (e: Evolution) => (e.kind === "nd" ? `n.d. — ${e.nd.reason}` : e.ratio === null ? "n.d. — N-1 nul : % non défini" : `${e.ratio.num > 0 ? "+" : ""}${fmtPercent(e.ratio)}`);
 const evoEuros = (e: Evolution) => (e.kind === "nd" ? "" : `${e.deltaCents > 0 ? "+" : ""}${formatEuros(e.deltaCents)}`);
 const costText = (c: CostPerEtp) => (c.kind === "nd" ? `n.d. — ${c.nd.reason}` : eurosOf(c.costCents));
 const cell = (r: MonthPayroll, pick: (x: Extract<MonthPayroll, { kind: "value" }>) => number) => (r.kind === "nd" ? "n.d." : formatEuros(pick(r)));
@@ -97,8 +98,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const serviceLabel = (v: string | null) => (v === null ? "Non ventilé" : v);
   const years = [...new Set(input.months.map((m) => Number(m.slice(0, 4))))].sort();
   const rawYear = one(sp.annee);
-  const year = years.includes(Number(rawYear)) ? Number(rawYear) : Number(last.slice(0, 4));
-  if (rawYear && String(year) !== rawYear) ignore("annee", rawYear, "année hors de la lecture");
+  const yearOk = years.map(String).includes(rawYear);
+  const year = yearOk ? Number(rawYear) : Number(last.slice(0, 4));
+  if (rawYear && !yearOk) ignore("annee", rawYear, `années lues : ${years.join(", ")}`);
   const lastOfYear = year === Number(last.slice(0, 4)) ? last.slice(5, 7) : (input.months.filter((m) => m.startsWith(`${year}-`)).at(-1)?.slice(5, 7) ?? "12");
   const rawFrom = one(sp.de);
   const rawTo = one(sp.a);
@@ -223,6 +225,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
             <dt>Coût par ETP-mois</dt>
             <dd className={cost.kind === "nd" ? "nd" : undefined}>{costText(cost)}</dd>
             <span className="tile-foot">{etpSum(cost)}{cost.kind === "value" ? " · " : ""}N-1 : {costText(costPrev)}</span>
+            {ctx.etpQualifiers.length > 0 && <span className="tile-foot" data-testid="ms-etp-qualifiers">ETP : {ctx.etpQualifiers.join(" ; ")}</span>}
             <span className="tile-foot"><a href="#def-cout-etp">Définition</a></span>
           </div>
           <div data-testid="ms-tile-brut">
@@ -242,7 +245,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       </section>
 
       <section className="panel">
-        <h2>Tendance mensuelle <span className="desc">— masse chargée en k€, {year} (noir, valeur au-dessus) et {year - 1} (gris)</span></h2>
+        <h2>Tendance mensuelle <span className="desc">— masse chargée en k€, {year} (noir, valeur au-dessus ; bleu clair = paie provisoire ; hachuré = n.d., raison au survol) et {year - 1} (gris)</span></h2>
         <TrendChart rows={cur.months} previous={prev.months} />
       </section>
 
@@ -257,10 +260,11 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         <h2>Services <span className="desc">— coût employeur par service ({ctx.service.axis ? `code analytique « ${ctx.service.axis} » du journal PayFit${ctx.service.origin === "single-axis" ? ", seul axe présent" : ""}` : "aucun axe"}) ; cliquer un service pour filtrer l'écran</span></h2>
         {!ctx.service.axis ? (
           <p className="nd" data-testid="ms-services-nd">
-            n.d. — {ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`} · <a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>
+            n.d. — {ctx.service.origin === "setting" ? "ventilation par service désactivée par un administrateur" : ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`} · <a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>
           </p>
         ) : (
           <div className="table-wrap">
+            {ctx.axisMissing && <p className="notice" data-testid="ms-axis-missing">L'axe « {ctx.service.axis} » choisi dans Paramètres n'existe plus dans le journal appliqué : toutes les lignes sont « Non ventilé ».</p>}
             <table className="data-table" data-testid="ms-services-table">
               <thead>
                 <tr><th>Service</th><th className="num">Coût {year - 1}</th><th className="num">Coût {year}</th><th className="num">Écart €</th><th className="num">Écart %</th><th className="num">Hors primes {year}</th><th className="num">Primes {year}</th><th className="num">Cotisations {year}</th><th className="num">Coût / personne-mois {year}</th><th className="num">Part du coût</th></tr>
@@ -324,8 +328,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                     <td className="num" data-col="cout-etp">{r.kind === "value" && e.etp4 ? eurosOf({ num: r.masse * 10000, den: e.etp4 }) : "n.d."}</td>
                     {showDsn && (() => {
                       const d = ctx.dsn.get(r.month);
-                      const b = d?.byType["001"];
-                      if (!d || b === undefined) return <><td className="num nd" data-col="dsn">{d ? "type 001 absent" : "non déposée"}</td><td className="num">—</td></>;
+                      const b = d && d.status !== "blocked" ? d.byType["001"] : undefined;
+                      if (!d || b === undefined) return <><td className="num nd" data-col="dsn" title={d?.messages.join(" ; ")}>{!d ? "non déposée" : d.status === "blocked" ? "bloquée" : "type 001 absent"}</td><td className="num">—</td></>;
                       return (
                         <>
                           <td className="num" data-col="dsn" title={d.status !== "complete" ? d.messages.join(" ; ") : undefined}>{formatEuros(b)}{d.status !== "complete" ? " ⚠" : ""}</td>
@@ -346,13 +350,13 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 <td className="num" data-col="masse">{money(cur, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
                 <td className="num" data-col="masse-n1">{money(prev, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
                 <td className="num">{evo.kind === "value" ? evoEuros(evo) : "n.d."}</td>
-                <td className="num">{cost.kind === "value" ? etpSum(cost) : "n.d."}</td>
+                <td className="num">{etpCur.every((e) => e.etp4 !== null) ? `${fmtEtp4(etpCur.reduce((s, e) => s + (e.etp4 ?? 0), 0))} ETP-mois` : "n.d."}</td>
                 <td className="num" data-col="cout-etp">{cost.kind === "value" ? eurosOf(cost.costCents) : "n.d."}</td>
                 {showDsn && (() => {
-                  const vals = months.map((m) => ctx.dsn.get(m)?.byType["001"]);
-                  if (vals.some((v) => v === undefined)) return <><td className="num nd">incomplet</td><td className="num">—</td></>;
-                  const sum = (vals as number[]).reduce((s, v) => s + v, 0);
-                  return <><td className="num" data-col="dsn">{formatEuros(sum)}</td><td className="num" data-col="dsn-ecart">{cur.kind === "value" ? `${cur.brut - sum > 0 ? "+" : ""}${formatEuros(cur.brut - sum)}` : "n.d."}</td></>;
+                  const w = dsnBrutWindow(ctx.dsn, months);
+                  if (w.kind === "nd") return <><td className="num nd" data-col="dsn" title={w.reason}>n.d.</td><td className="num">—</td></>;
+                  const warn = w.incompleteMonths.length ? " ⚠" : "";
+                  return <><td className="num" data-col="dsn" title={w.incompleteMonths.length ? `mois incomplets : ${w.incompleteMonths.join(", ")}` : undefined}>{formatEuros(w.brutCents)}{warn}</td><td className="num" data-col="dsn-ecart">{cur.kind === "value" ? `${cur.brut - w.brutCents > 0 ? "+" : ""}${formatEuros(cur.brut - w.brutCents)}` : "n.d."}</td></>;
                 })()}
               </tr>
             </tfoot>
@@ -375,7 +379,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
 
       {detail && (
         <section className="panel" id="ms-detail" data-testid="ms-detail">
-          <h2>Détail par compte — {formatMonth(detail.month)}{detail.open ? " (provisoire)" : ""}</h2>
+          <h2>Détail par compte — {formatMonth(detail.month)}{detail.open ? " (provisoire)" : ""}{serviceValue !== undefined ? ` · service ${serviceLabel(serviceValue)}` : ""}</h2>
           {detail.kind === "nd" ? (
             <p className="nd">n.d. — {detail.nd.reason}</p>
           ) : (
@@ -387,7 +391,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                     <tr key={a.accountId} data-account={a.accountId}>
                       <td>{a.accountId}</td>
                       <td className="wrap">{a.accountName ?? <span className="nd">n.d.</span>}</td>
-                      <td>{a.rubric ? a.rubric.label : <span className="nd">non classé (hors masse)</span>}</td>
+                      <td>{a.rubric ? `${a.rubric.label}${a.rubric.role === "hors-masse" ? " (hors masse)" : ""}` : <span className="nd">non classé (hors masse)</span>}</td>
                       <td className="num">{formatEuros(a.debitCents)}</td>
                       <td className="num">{formatEuros(a.creditCents)}</td>
                       <td className="num">{formatEuros(a.balanceCents)}</td>

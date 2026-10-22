@@ -29,7 +29,7 @@ export function TrendChart({ rows, previous }: { rows: MonthPayroll[]; previous:
                 <text x={x + 12} y={y(r.masse) - 5} textAnchor="middle" fontSize="10" fill="var(--ink)">{fmtFixed({ num: r.masse, den: 100000 }, 1)}</text>
               </>
             ) : (
-              <rect x={x} y={H - 24} width="24" height="24" fill="url(#ms-nd)"><title>{`${r.month} : n.d.`}</title></rect>
+              <rect x={x} y={H - 24} width="24" height="24" fill="url(#ms-nd)"><title>{`${r.month} : n.d. — ${r.nd.reason}`}</title></rect>
             )}
             <text x={x + 20} y={H + 18} textAnchor="middle" fontSize="11" fill="var(--muted)">{monthShort(r.month)}</text>
           </g>

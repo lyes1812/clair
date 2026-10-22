@@ -3,6 +3,7 @@ import { monthRange } from "@/lib/connectors/months";
 import { createPayFitClient, readPayFit } from "@/lib/connectors/payfit/client";
 import { createFixtureFetch } from "@/lib/connectors/payfit/fixture";
 import { costPerEtp, evolution, monthPayroll, NO_TYPE, serviceOf, servicesOf, shiftYear, windowPayroll, withService, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
+import type { DsnMonth } from "@/lib/payroll/dsn";
 import { classify, DEFAULT_PREFIXES, gridRubrics, parseGrid } from "@/lib/payroll/grid";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { rawPayfitHistory } from "@/lib/rh/raw-history";
@@ -102,6 +103,10 @@ describe("période, N-1 et coût par ETP-mois (cas écrits à la main)", () => {
     expect(prev).toMatchObject({ kind: "value", masse: 800000 });
     expect(evolution(cur, prev, (w) => w.masse)).toEqual({ kind: "value", deltaCents: 200000, ratio: { num: 200000, den: 800000 } });
   });
+  it("N-1 nul : l'écart en euros reste affiché, le % est non défini", () => {
+    const z = journal([line("2025-01", "641100", 0, null), line("2026-01", "641100", 1000, null)], ["2025-01", "2026-01"]);
+    expect(evolution(windowPayroll(z, ["2026-01"]), windowPayroll(z, ["2025-01"]), (w) => w.masse)).toEqual({ kind: "value", deltaCents: 1000, ratio: null });
+  });
   it("un mois n.d. dans la période ou dans N-1 : total et évolution n.d., mois nommé", () => {
     const withMarch = windowPayroll(input, ["2026-01", "2026-02", "2026-03"]);
     expect(withMarch).toMatchObject({ kind: "nd", nd: { code: "month-nd", months: ["2026-03"] } });
@@ -155,6 +160,10 @@ describe("services : code analytique du journal (cas écrits à la main)", () =>
   it("filtre par service : le mois reste lu (0 si le service n'a pas de ligne) et la somme des services égale le total", () => {
     const input = { ...journal([withCode(line("2026-01", "641100", 1000, null, "C1"), "S", "TECH"), withCode(line("2026-01", "645100", 400, null, "C1"), "S", "TECH"), line("2026-01", "641100", 500, null, "C2")], ["2026-01"]), serviceAxis: "S" };
     expect(servicesOf(input, ["2026-01"])).toEqual(["TECH", null]);
+    // Une contrepartie (421) sans code n'ouvre pas de service « non ventilé » ; un code vide prend le libellé.
+    const cp = { ...input, lines: [...input.lines.slice(0, 2), line("2026-01", "421000", null, 1400, "C1")] };
+    expect(servicesOf(cp, ["2026-01"])).toEqual(["TECH"]);
+    expect(serviceOf({ ...line("2026-01", "641100", 1, null), analytic: [{ type: "S", code: "", value: "Tech" }] }, "S")).toBe("Tech");
     expect(monthPayroll(withService(input, "TECH"), "2026-01")).toMatchObject({ kind: "value", masse: 1400, paidContracts: ["C1"] });
     expect(monthPayroll(withService(input, null), "2026-01")).toMatchObject({ kind: "value", masse: 500, paidContracts: ["C2"] });
     expect(monthPayroll(withService(input, "DON"), "2026-01")).toMatchObject({ kind: "value", masse: 0 });
@@ -189,7 +198,7 @@ describe("services sur le journal PayFit fictif (Service fictif A : 003, 006 ; B
 
 describe("source DSN : brut déclaré (type 001) d'une période (cas écrits à la main)", async () => {
   const { dsnBrutWindow } = await import("@/lib/payroll/dsn");
-  const m = (month: string, status: "complete" | "incomplete" | "blocked", byType: Record<string, number>) => [month, { month, status, sirets: ["S1"], byType, messages: [] }] as const;
+  const m = (month: string, status: "complete" | "incomplete" | "blocked", byType: Record<string, number>): [string, DsnMonth] => [month, { month, status, sirets: ["S1"], byType, messages: [] }];
   const dsn = new Map([m("2026-01", "complete", { "001": 300000, "002": 280000 }), m("2026-02", "incomplete", { "001": 250000 }), m("2026-03", "blocked", { "001": 1 }), m("2026-04", "complete", { "002": 10 })]);
   it("janvier + février = 5 500,00 € (type 002 jamais additionné) ; février incomplet signalé", () => {
     expect(dsnBrutWindow(dsn, ["2026-01", "2026-02"])).toEqual({ kind: "value", brutCents: 550000, incompleteMonths: ["2026-02"] });

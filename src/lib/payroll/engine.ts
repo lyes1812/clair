@@ -21,7 +21,7 @@ export const axisOf = (a: Analytic) => (typeof a.type === "string" && a.type.len
 export function serviceOf(line: LedgerLine, axis: string | null | undefined): string | null {
   if (!axis) return null;
   const a = line.analytic?.find((x) => axisOf(x) === axis);
-  return a ? (a.code ?? a.value ?? null) : null;
+  return a ? (a.code || a.value || null) : null;
 }
 export const withService = (input: JournalInput, value: string | null): JournalInput => ({ ...input, serviceFilter: { value } });
 export type Nd = { code: "not-read" | "no-journal" | "amount-missing" | "month-nd" | "etp-nd" | "zero-base"; reason: string; months?: string[] };
@@ -122,20 +122,26 @@ export function windowPayroll(input: JournalInput, months: string[]): PayrollWin
 // Services présents sur la période (codes de l'axe choisi), plus « non ventilé » (null) si des lignes n'en portent pas.
 export function servicesOf(input: JournalInput, months: string[]): (string | null)[] {
   const set = new Set<string | null>();
-  for (const l of input.lines) if (months.includes(l.month)) set.add(serviceOf(l, input.serviceAxis));
+  const rubrics = gridRubrics(input.grid);
+  for (const l of input.lines) {
+    if (!months.includes(l.month)) continue;
+    const c = classify(l.accountId, rubrics);
+    if (c.rubric || c.payroll) set.add(serviceOf(l, input.serviceAxis)); // contreparties (42/43…) ignorées
+  }
   return [...set].sort((a, b) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)));
 }
 
 export const shiftYear = (month: string, years: number) => `${Number(month.slice(0, 4)) + years}${month.slice(4)}`;
 
 // Évolution N / N-1 en centimes et en fraction exacte ; n.d. si l'une des deux périodes l'est ou si N-1 vaut zéro.
-export type Evolution = { kind: "value"; deltaCents: number; ratio: { num: number; den: number } } | { kind: "nd"; nd: Nd };
+// N-1 nul : l'écart en euros reste affiché, le % est non défini (ratio null).
+export type Evolution = { kind: "value"; deltaCents: number; ratio: { num: number; den: number } | null } | { kind: "nd"; nd: Nd };
 export function evolution(current: PayrollWindow, previous: PayrollWindow, pick: (w: Extract<PayrollWindow, { kind: "value" }>) => number): Evolution {
   if (current.kind === "nd") return { kind: "nd", nd: { code: "month-nd", reason: `période n.d. (${current.nd.reason})` } };
   if (previous.kind === "nd") return { kind: "nd", nd: { code: "month-nd", reason: `N-1 n.d. (${previous.nd.reason})` } };
   const a = pick(current);
   const b = pick(previous);
-  if (b === 0) return { kind: "nd", nd: { code: "zero-base", reason: "N-1 vaut zéro : évolution en % non définie" } };
+  if (b === 0) return { kind: "value", deltaCents: a - b, ratio: null };
   return { kind: "value", deltaCents: a - b, ratio: { num: a - b, den: b } };
 }
 

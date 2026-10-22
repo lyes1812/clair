@@ -83,16 +83,19 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
           <div data-testid="ms-tile-brut">
             <dt>Brut déclaré (DSN, type 001)</dt>
             <dd className={cur.kind === "nd" ? "nd" : undefined}>{show(cur)}</dd>
-            <span className="tile-foot" data-testid="ms-tile-brut-n1">N-1 : {show(prev)}{cur.kind === "value" && cur.incompleteMonths.length ? ` · mois incomplets : ${cur.incompleteMonths.join(", ")}` : ""}</span>
+            <span className="tile-foot" data-testid="ms-tile-brut-n1">N-1 : {show(prev)}{cur.kind === "value" && cur.incompleteMonths.length ? ` · mois incomplets : ${cur.incompleteMonths.join(", ")}` : ""}{prev.kind === "value" && prev.incompleteMonths.length ? ` · mois N-1 incomplets : ${prev.incompleteMonths.join(", ")}` : ""}</span>
+            <span className="tile-foot"><a href="#def-brut-dsn">Définition</a></span>
           </div>
           <div data-testid="ms-tile-evolution">
             <dt>Évolution du brut vs N-1</dt>
-            <dd className={evo ? undefined : "nd"}>{evo ? `${evo.delta > 0 ? "+" : ""}${fmtPercent(evo.ratio)}` : "n.d."}</dd>
+            <dd className={evo ? undefined : "nd"}>{evo ? `${evo.delta > 0 ? "+" : ""}${fmtPercent(evo.ratio)}` : `n.d. — ${cur.kind === "nd" ? `période : ${cur.reason}` : prev.kind === "nd" ? `N-1 : ${prev.reason}` : "N-1 nul : % non défini"}`}</dd>
             <span className="tile-foot">{evo ? `${evo.delta > 0 ? "+" : ""}${formatEuros(evo.delta)}` : ""}</span>
+            <span className="tile-foot"><a href="#def-brut-dsn">Définition</a></span>
           </div>
           <div data-testid="ms-tile-masse">
             <dt>Masse salariale chargée</dt>
             <dd className="nd">n.d. — {ND_CHARGES}</dd>
+            <span className="tile-foot"><a href="#def-masse-dsn">Définition</a></span>
           </div>
         </dl>
       </section>
@@ -106,6 +109,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
                 const d = dsn.get(m);
                 const p = dsn.get(shiftYear(m, -1));
                 const b = d && d.status !== "blocked" ? d.byType["001"] : undefined;
+                const pInc = p?.status === "incomplete" ? " ⚠" : "";
                 const bp = p && p.status !== "blocked" ? p.byType["001"] : undefined;
                 const others = d ? Object.entries(d.byType).filter(([t]) => t !== "001") : [];
                 return (
@@ -113,7 +117,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
                     <td>{formatMonth(m)}</td>
                     <td>{d ? STATUS[d.status] : <span className="nd">non déposée</span>}</td>
                     <td className="num" data-col="brut">{b === undefined ? "n.d." : formatEuros(b)}</td>
-                    <td className="num" data-col="brut-n1">{bp === undefined ? "n.d." : formatEuros(bp)}</td>
+                    <td className="num" data-col="brut-n1">{bp === undefined ? "n.d." : `${formatEuros(bp)}${pInc}`}</td>
                     <td className="num" data-col="ecart">{b === undefined || bp === undefined ? "n.d." : `${b - bp > 0 ? "+" : ""}${formatEuros(b - bp)}`}</td>
                     <td className="wrap tile-foot">{others.length ? others.map(([t, c]) => `type ${t} : ${formatEuros(c)}`).join(" · ") : "—"}</td>
                   </tr>

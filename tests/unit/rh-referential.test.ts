@@ -153,6 +153,13 @@ describe("référentiel Collaborateurs en base", () => {
     expect(dsn.get("2024-10")).toMatchObject({ status: "complete", byType: { "001": 1384000 } });
     expect(dsn.get("2024-11")?.byType["001"]).toBe(1384000);
     expect((await dsnRemunerationsByMonth(B)).size).toBe(0);
+    // Même déclaration de novembre réexportée (autre logiciel émetteur : autre fichier, même contenu) avec décembre : comptée une seule fois.
+    const id2 = await importDsnFiles(A, [{ filename: "2024-11-reexport.dsn", bytes: new TextEncoder().encode(new TextDecoder().decode(fixtureDsnBytes({ month: "2024-11" })).replace("TEST-LOGICIEL-FICTIF", "TEST-LOGICIEL-FICTIF-2")) }, { filename: "2024-12.dsn", bytes: fixtureDsnBytes({ month: "2024-12" }) }], actor);
+    await sync.applySync(A, id2, actor);
+    expect(((await sync.getSync(A, id2))?.summary as { files: { status: string }[] }).files.map((f) => f.status)).toEqual(["read", "read"]);
+    const again = await dsnRemunerationsByMonth(A);
+    expect(again.get("2024-11")?.byType["001"]).toBe(1384000);
+    expect(again.get("2024-12")?.byType["001"]).toBe(1384000);
     const data = await loadRhBuild(A, state.build.id);
     expect(headcountAt(data, "2024-11-30", NATURES)).toMatchObject({ kind: "exact", persons: 6, contracts: 6 });
     expect(data.persons.every((p) => p.personKey.startsWith("dsn:"))).toBe(true);

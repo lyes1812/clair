@@ -8,6 +8,7 @@ import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { loadKpiContext, type KpiContext } from "@/lib/rh/kpi-context";
 import { loadPayrollOpenMonths } from "@/lib/rh/referential/store";
 import { dsnRemunerationsByMonth, type DsnMonth } from "./dsn";
+import { classify, gridRubrics } from "./grid";
 import { axisOf, NO_TYPE, serviceOf, type Analytic, type EtpMonth, type JournalInput, type LedgerLine } from "./engine";
 
 // Contexte de l'écran Masse salariale : journal de paie de la lecture PayFit appliquée, grille de comptes de l'espace,
@@ -23,6 +24,8 @@ export type PayrollContext = {
   axes: string[]; // types de codes analytiques présents dans le journal
   service: ServiceAxis;
   dsn: Map<string, DsnMonth>; // contrôle : rémunérations DSN des déclarations qui font foi, par mois
+  etpQualifiers: string[]; // limites des ETP utilisés (quotités PayFit non historisées, historique brut)
+  axisMissing: boolean; // axe enregistré dans Paramètres absent du journal courant
 };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isSafeInteger(v) ? v : null);
@@ -48,13 +51,19 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
     });
   const none: ServiceAxis = { axis: null, origin: "none", updatedAt: null };
   const source = kpi.collab.chosen;
-  if (source !== "payfit") return { kpi, source, grid, read: null, unavailable: source === "dsn" ? null : "aucune source RH retenue : connectez PayFit ou déposez des DSN dans Données", input: null, etp, axes: [], service: none, dsn };
-  if (!sync) return { kpi, source, grid, read: null, unavailable: "aucune lecture PayFit appliquée : connectez PayFit dans Données", input: null, etp, axes: [], service: none, dsn };
+  const d0 = kpi.collab.data;
+  const etpQualifiers: string[] = [];
+  if (d0?.build.source === "payfit") etpQualifiers.push(`quotités PayFit à la date de lecture (${d0.build.referenceDate ?? "n.d."}), non historisées`);
+  const lim = kpi.collab.payfitHistory?.mode === "raw" ? kpi.collab.payfitHistory.limit : null;
+  if (lim) etpQualifiers.push(`historique PayFit brut : ETP des mois ${lim.lowerFrom} → ${lim.lowerTo} sans les contrats archivés depuis plus de 12 mois`);
+  const extra = { etpQualifiers, axisMissing: false };
+  if (source !== "payfit") return { kpi, source, grid, read: null, unavailable: source === "dsn" ? null : `aucune source RH retenue (${kpi.collab.source.reason}) : connectez PayFit ou déposez des DSN dans Données`, input: null, etp, axes: [], service: none, dsn, ...extra };
+  if (!sync) return { kpi, source, grid, read: null, unavailable: "aucune lecture PayFit appliquée : connectez PayFit dans Données", input: null, etp, axes: [], service: none, dsn, ...extra };
   const months = ((sync.scope as { months?: unknown }).months as string[] | undefined) ?? [];
   const read = { syncId: sync.id, startedAt: sync.startedAt, months };
   const outcome = ((sync.summary as { collections?: CollectionOutcome[] }).collections ?? []).find((c) => c.collection === "ledger_lines");
-  if (!outcome) return { kpi, source, grid, read, unavailable: "journal comptable absent de la lecture PayFit appliquée", input: null, etp, axes: [], service: none, dsn };
-  if (outcome.status === "unavailable") return { kpi, source, grid, read, unavailable: `journal comptable non lu : ${outcome.reason}`, input: null, etp, axes: [], service: none, dsn };
+  if (!outcome) return { kpi, source, grid, read, unavailable: "journal comptable absent de la lecture PayFit appliquée", input: null, etp, axes: [], service: none, dsn, ...extra };
+  if (outcome.status === "unavailable") return { kpi, source, grid, read, unavailable: `journal comptable non lu : ${outcome.reason}`, input: null, etp, axes: [], service: none, dsn, ...extra };
   const rows = await withWorkspace(ws, (tx) =>
     tx
       .select({ key: sourceRecord.recordKey, data: sourceRecord.data })
@@ -79,11 +88,24 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
   const service = await getServiceAxis(ws, axes);
   if (service.axis) {
     axisForEtp = service.axis;
+    // Service d'un contrat pour un mois : celui de ses lignes de brut, à défaut de ses autres lignes de charges de
+    // personnel ; les contreparties (42/43…) ne comptent pas. Sans ligne : non ventilé.
     contractService = new Map();
-    for (const l of lines) if (l.contractId && !contractService.has(`${l.month}|${l.contractId}`)) contractService.set(`${l.month}|${l.contractId}`, serviceOf(l, service.axis));
+    const rank = new Map<string, number>();
+    const rubrics = gridRubrics(grid.grid);
+    for (const l of lines) {
+      if (!l.contractId) continue;
+      const c = classify(l.accountId, rubrics);
+      const r = c.rubric?.role === "brut" ? 2 : c.rubric || c.payroll ? 1 : 0;
+      const k = `${l.month}|${l.contractId}`;
+      if (r > (rank.get(k) ?? 0)) {
+        rank.set(k, r);
+        contractService.set(k, serviceOf(l, service.axis));
+      }
+    }
   }
   const openMonths = await loadPayrollOpenMonths(ws, sync.id);
-  return { kpi, source, grid, read, unavailable: null, input: { lines, months, openMonths, grid: grid.grid, serviceAxis: service.axis }, etp, axes, service, dsn };
+  return { kpi, source, grid, read, unavailable: null, input: { lines, months, openMonths, grid: grid.grid, serviceAxis: service.axis }, etp, axes, service, dsn, ...extra, axisMissing: Boolean(service.axis && !axes.includes(service.axis)) };
 }
 
 // Axes analytiques présents dans le journal de la lecture PayFit appliquée (Paramètres).

@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { sourceRecord } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { dsnCoverage } from "@/lib/dsn/import";
@@ -20,16 +20,16 @@ export async function dsnRemunerationsByMonth(workspaceId: string): Promise<Map<
   }
   const selected = coverage.flatMap((r) => (r.status === "blocked" ? [] : r.selected.map((d) => ({ syncId: d.sourceId, key: d.key }))));
   if (!selected.length) return out;
+  // Couples exacts (dépôt, déclaration) : une déclaration identique présente dans deux dépôts n'est comptée qu'une fois.
+  const bySync = new Map<string, string[]>();
+  for (const s of selected) bySync.set(s.syncId, [...(bySync.get(s.syncId) ?? []), s.key]);
+  const declKey = sql`${sourceRecord.data}->>'declarationKey'`;
   const rows = await withWorkspace(workspaceId, (tx) =>
     tx
       .select({ period: sourceRecord.period, type: sql<string | null>`${sourceRecord.data}->>'type'`, cents: sql<string>`sum((${sourceRecord.data}->>'amountCents')::bigint)` })
       .from(sourceRecord)
       .where(
-        and(
-          inArray(sourceRecord.syncId, [...new Set(selected.map((s) => s.syncId))]),
-          eq(sourceRecord.collection, "remunerations"),
-          inArray(sql`${sourceRecord.data}->>'declarationKey'`, [...new Set(selected.map((s) => s.key))]),
-        ),
+        and(eq(sourceRecord.collection, "remunerations"), or(...[...bySync].map(([id, keys]) => and(eq(sourceRecord.syncId, id), inArray(declKey, [...new Set(keys)]))))),
       )
       .groupBy(sourceRecord.period, sql`${sourceRecord.data}->>'type'`),
   );
