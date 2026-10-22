@@ -10,13 +10,13 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
     id: "base-contrat",
     title: "Coût de référence d'un contrat",
     text:
-      "Rubriques « Salaires et appointements » et « Gratifications de stage » des lignes du journal de paie du contrat au mois de référence ; les primes et indemnités en sont exclues et se projettent par hypothèse. Charges = ce salaire × taux observé du contrat ce mois-là (cotisations ÷ brut total de ses lignes). Un contrat entré pendant le mois de référence, sans ligne de paie ou sans cotisation rattachée a une base n.d. : la projection est refusée tant qu'une correction de base n'est pas saisie.",
+      "Rubriques « Salaires et appointements » et « Gratifications de stage » des lignes du journal de paie du contrat au mois de référence ; les primes et indemnités en sont exclues et se projettent par hypothèse. Charges = ce salaire × taux observé du contrat ce mois-là (cotisations ÷ brut total de ses lignes). Un contrat entré pendant le mois de référence ou après (déjà connu de PayFit à la lecture), sans ligne de paie ou sans cotisation rattachée a une base n.d. : la projection est n.d. tant qu'une correction de base n'est pas saisie (0 possible pour un contrat non payé). Un contrat dont les lignes portent plusieurs services est non ventilé.",
   },
   {
     id: "augmentation",
     title: "Augmentation",
     text:
-      "Taux appliqué au 1er du mois d'effet, en pourcentage du salaire déjà augmenté : les taux successifs se composent. Si plusieurs augmentations prennent effet le même mois pour un même contrat, la plus ciblée s'applique seule (contrat, puis service, puis toute l'entreprise) ; deux augmentations de même niveau le même mois sont refusées. Les embauches ne reçoivent que les augmentations qui les visent directement.",
+      "Taux appliqué au 1er du mois d'effet, en pourcentage du salaire déjà augmenté : les taux successifs se composent. Si plusieurs augmentations prennent effet le même mois pour un même contrat, la plus ciblée s'applique seule (contrat, puis service, puis toute l'entreprise) ; deux augmentations de même niveau le même mois sont refusées. Les embauches ne reçoivent que les augmentations qui les visent directement. L'effet d'une augmentation est calculé sur le mois complet ; un départ ou une fin de contrat dans le mois porte la réduction correspondante.",
   },
   {
     id: "prorata",
@@ -28,7 +28,7 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
     id: "contribution",
     title: "Contributions d'un mois projeté",
     text:
-      "Le coût d'un mois est la somme de contributions rattachées chacune à la base figée ou à une hypothèse : base du mois complet, effet de chaque augmentation, effet d'un départ ou d'une fin de contrat connue, embauches, éléments ponctuels et coûts de sortie. Calcul exact puis un seul arrondi au centime par niveau cumulé (demi-centime à l'écart de zéro) : chaque contribution est la différence entre deux niveaux arrondis, la somme tombe juste.",
+      "Le coût d'un mois est la somme de contributions rattachées chacune à la base figée ou à une hypothèse : base du mois complet, effet de chaque augmentation, effet d'un départ ou d'une fin de contrat connue, embauches, éléments ponctuels et coûts de sortie. Un contrat entré après le mois de référence apparaît avec sa base du mois complet et une ligne « Entrée » qui retire les jours non payés. Calcul exact puis un seul arrondi au centime par niveau cumulé (demi-centime à l'écart de zéro) : chaque contribution est la différence entre deux niveaux arrondis, la somme tombe juste.",
   },
   {
     id: "atterrissage",
@@ -40,6 +40,6 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
     id: "effectif",
     title: "Effectif et ETP projetés",
     text:
-      "Contrats présents le dernier jour du mois, de natures comptées dans l'effectif (Paramètres › KPI) pour la base, ou déclarés « comptés » pour une embauche. ETP : quotité du mois de référence pour un contrat de la base, quotité saisie pour une embauche.",
+      "Contrats présents le dernier jour du mois, de natures comptées dans l'effectif (Paramètres › KPI) pour la base, ou déclarés « comptés » pour une embauche. ETP : celui du module KPI RH à la fin du mois de référence pour un contrat de la base (source PayFit : quotité à la date de lecture, non historisée), quotité saisie pour une embauche.",
   },
 ];

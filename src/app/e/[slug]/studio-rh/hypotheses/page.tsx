@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { dateTimeFmt } from "@/lib/connectors/labels";
-import { addMonths, formatMonth } from "@/lib/dates";
+import { addMonths, formatMonth, monthEnd } from "@/lib/dates";
 import { BUDGET_DEFINITIONS } from "@/lib/budget/definitions";
 import { landing, project } from "@/lib/budget/engine";
 import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
@@ -107,7 +107,9 @@ export default async function HypothesesPage({ params, searchParams }: { params:
   // Liste des scénarios et création.
   const [rows, conv, ctx] = await Promise.all([listScenarios(workspace.id), getConventions(workspace.id), loadPayrollContext(slug)]);
   const input = ctx.source === "payfit" ? ctx.input : null;
-  const closed = input ? input.months.filter((m) => !input.openMonths.includes(m) && monthPayroll(input, m).kind === "value").sort() : [];
+  // Mois de référence possibles : paie clôturée, journal lu, et mois fini à la date de lecture du référentiel.
+  const refDate = ctx.kpi.input?.data.build.referenceDate ?? null;
+  const closed = input ? input.months.filter((m) => !input.openMonths.includes(m) && refDate !== null && monthEnd(m) <= refDate && monthPayroll(input, m).kind === "value").sort() : [];
   const firsts = closed.map((m) => addMonths(m, 1));
   const unavailable = !input || !ctx.kpi.input ? (ctx.unavailable ?? "journal de paie PayFit et référentiel Collaborateurs requis") : closed.length === 0 ? "aucun mois de paie clos dans la lecture PayFit appliquée" : null;
   return (

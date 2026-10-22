@@ -7,7 +7,7 @@ import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
 import { monthShort } from "../masse-salariale/components";
 
 const KIND: Record<Contribution["kind"], string> = {
-  base: "Base", augmentation: "Augmentation", depart: "Départ", "fin-contrat": "Fin de contrat connue", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
+  base: "Base", augmentation: "Augmentation", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
 };
 const eur = (v: number | null) => (v === null ? "n.d." : formatEuros(v));
 type Row = { month: string; layer: "reel" | "projete"; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null };
@@ -99,7 +99,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
           <div data-testid="proj-tile-headcount">
             <dt>Effectif et ETP fin {formatMonth(last.month).toLowerCase()}</dt>
             <dd className={last.kind === "nd" ? "nd" : undefined}>{last.kind === "nd" ? "n.d." : `${last.headcount} · ${last.etp4 === null ? "ETP n.d." : `${fmtEtp4(last.etp4)} ETP`}`}</dd>
-            <span className="tile-foot">{last.kind === "value" && last.etpNd ? `ETP n.d. — ${last.etpNd} · ` : ""}<a href="#def-effectif">Définition</a></span>
+            <span className="tile-foot">{last.kind === "value" && last.etpNd ? `ETP n.d. — ${last.etpNd} · ` : ""}{base.etpNote ? `${base.etpNote} · ` : ""}<a href="#def-effectif">Définition</a></span>
           </div>
         </dl>
       </section>

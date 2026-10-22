@@ -100,7 +100,7 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
                   return (
                     <tr key={c.contractKey} data-contract={c.externalId}>
                       <td>{c.label}</td>
-                      <td>{c.service ?? "Non ventilé"}</td>
+                      <td>{c.service ?? <span title={c.serviceNd ?? undefined}>Non ventilé{c.serviceNd ? " ⚠" : ""}</span>}</td>
                       <td>{c.startDate ?? "n.d."}</td>
                       <td>{c.endDate ?? "—"}</td>
                       <td className="num">{c.etp4 === null ? <span title={c.etpNd ?? undefined}>n.d.</span> : fmtEtp4(c.etp4)}</td>
@@ -115,6 +115,12 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
             </table>
           </div>
         </details>
+        {(base.etpNote || base.contracts.some((c) => c.serviceNd)) && (
+          <p className="tile-foot" data-testid="hyp-base-notes">
+            {base.etpNote ? `ETP : ${base.etpNote}. ` : ""}
+            {base.contracts.filter((c) => c.serviceNd).map((c) => `${c.label} : ${c.serviceNd}`).join(" ; ")}
+          </p>
+        )}
         {canEdit && toFix.length > 0 && (
           <ActionForm action={add("base")} submit="Enregistrer la correction" testid="hyp-form-base">
             <div className="filters">
@@ -125,7 +131,7 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
                 </select>
               </Field>
               <Text id="fix-label" name="label" label="Libellé" defaultValue="Base saisie" maxLength={200} />
-              <Text id="fix-salary" name="salary" label="Salaire mensuel de base (€)" inputMode="decimal" />
+              <Text id="fix-salary" name="salary" label="Salaire mensuel de base (€, 0 si non payé)" inputMode="decimal" />
               <Text id="fix-charges" name="charges" label="Taux de charges (%)" inputMode="decimal" />
             </div>
           </ActionForm>

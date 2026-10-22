@@ -4,7 +4,7 @@ import type { BaseContract, BaseSnapshot, Hypothesis, ProjectedMonth } from "@/l
 
 // Module 5 — moteur de projection : cas écrits à la main (montants en centimes).
 const contract = (key: string, over: Partial<BaseContract>): BaseContract => ({
-  contractKey: key, externalId: key, label: key, service: null, startDate: "2024-01-01", endDate: null, counted: true, etp4: 10000, etpNd: null, base: null, baseNd: null, ...over,
+  contractKey: key, externalId: key, label: key, service: null, serviceNd: null, startDate: "2024-01-01", endDate: null, counted: true, etp4: 10000, etpNd: null, base: null, baseNd: null, ...over,
 });
 // A : salaire 3 000,00 €, brut total 3 300,00 €, cotisations 1 320,00 € → taux 40 %.
 // B : salaire 2 000,00 €, cotisations 900,00 € sur 2 000,00 € → 45 % ; mi-temps.
@@ -17,7 +17,7 @@ const base: BaseSnapshot = {
     contract("C", { service: "TECH", startDate: "2026-09-16", baseNd: "entré le 2026-09-16 : mois de référence incomplet" }),
   ],
   actuals: Array.from({ length: 9 }, (_, i) => ({ month: `2026-0${i + 1}`, kind: "value" as const, brut: 500000, cotisations: 200000, masse: 700000, headcount: 3, etp4: 25000, etpNd: null })),
-  refMasse: 700000, refBaseCost: null,
+  refMasse: 700000, refBaseCost: null, etpNote: null,
 };
 const fixC: Hypothesis = { id: "fixC", kind: "base", label: "Base de C", contractKey: "C", salaryCents: 250000, chargesBps: 4200 };
 const conv = { prorata: "calendaire" as const };
@@ -106,6 +106,27 @@ describe("projection", () => {
     expect(project(base, "2026-10", "2026-12", [g("x", "2026-09")], conv)).toMatchObject({ kind: "error" });
     expect(project(base, "2026-10", "2026-12", [{ id: "d", kind: "depart", label: "d", contractKey: "Z", lastPaidDate: "2026-11-01", exitCost: null }], conv)).toMatchObject({ kind: "error" });
   });
+  it("refus : départ après la fin de contrat connue ou avant l'entrée ; augmentation ciblant une hypothèse qui n'est pas une embauche", () => {
+    const cdd = { ...base, contracts: base.contracts.map((c) => (c.contractKey === "A" ? { ...c, endDate: "2026-11-30" } : c)) };
+    const dep = (d: string): Hypothesis => ({ id: "dA", kind: "depart", label: "Départ A", contractKey: "A", lastPaidDate: d, exitCost: null });
+    expect(project(cdd, "2026-10", "2027-03", [fixC, dep("2027-03-31")], conv)).toMatchObject({ kind: "error", errors: [expect.stringContaining("fin de contrat connue le 2026-11-30")] });
+    expect(project(cdd, "2026-10", "2027-03", [fixC, dep("2026-11-15")], conv).kind).toBe("value");
+    const late = { ...base, contracts: base.contracts.map((c) => (c.contractKey === "A" ? { ...c, startDate: "2026-11-10" } : c)) };
+    expect(project(late, "2026-10", "2026-12", [fixC, dep("2026-11-05")], conv)).toMatchObject({ kind: "error", errors: [expect.stringContaining("antérieur à l'entrée")] });
+    const p: Hypothesis = { id: "p1", kind: "ponctuel", label: "Prime", month: "2026-10", amount: { mode: "charge", costCents: 100 }, service: null };
+    const aug: Hypothesis = { id: "x", kind: "augmentation", label: "Cible fausse", from: "2026-10", rateBps: 1000, scope: { kind: "contrat", key: "embauche:p1" } };
+    expect(project(base, "2026-10", "2026-12", [fixC, p, aug], conv)).toMatchObject({ kind: "error", errors: [expect.stringContaining("contrat ou embauche ciblé inconnu")] });
+  });
+  it("contrat entré après le mois de référence (base saisie) : présent à partir de son entrée, ligne « Entrée » ; compté fin de mois", () => {
+    const late = { ...base, contracts: [...base.contracts, contract("D", { startDate: "2026-11-11", etp4: 10000, baseNd: "entré le 2026-11-11, après le mois de référence : base à saisir" })] };
+    const fixD: Hypothesis = { id: "fixD", kind: "base", label: "Base de D", contractKey: "D", salaryCents: 300000, chargesBps: 4000 };
+    const p = project(late, "2026-10", "2026-12", [fixC, fixD], conv);
+    expect(month(p, "2026-10").contributions.filter((c) => c.contractKey === "D")).toHaveLength(0);
+    // Novembre : 20 jours sur 30 → 2 000 € + 800 € ; ligne base 4 200 € et entrée −1 400 €.
+    const n = month(p, "2026-11");
+    expect(n.contributions.filter((c) => c.contractKey === "D").map((c) => [c.kind, c.cost])).toEqual([["base", 420000], ["entree", -140000]]);
+    expect(n).toMatchObject({ cost: 1065000 + 280000, headcount: 4, etp4: 35000 });
+  });
   it("atterrissage 2026 = réel janvier–septembre (9 × 7 000 €) + octobre–décembre projetés", () => {
     const p = project(base, "2026-10", "2026-12", [fixC], conv);
     expect(landing(base, p, "2026")).toMatchObject({ kind: "value", actual: 6300000, projected: 3 * 1065000, total: 6300000 + 3195000 });
@@ -126,7 +147,7 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     .map((r) => ({ key: r.key, month: String(r.data.month), accountId: String(r.data.accountId), accountName: (r.data.accountName as string) ?? null, debitCents: r.data.debitCents as number | null, creditCents: r.data.creditCents as number | null, contractId: (r.data.contractId as string) ?? null, analytic: r.data.analyticCodes as never }));
   const input = { lines, months: PAYFIT_MONTHS, openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
   const kpi = kpiInput(await payfitFixtureBuild(), DSN_ABSENCES);
-  const r = buildBase({ input, kpi, refMonth: "2026-09", syncId: "sync-test", readAt: "2026-10-21" });
+  const r = buildBase({ input, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "sync-test", readAt: "2026-10-21" });
   const b = r.kind === "value" ? r.base : null;
   it("7 contrats présents fin septembre (003, CDD fini en 2025, exclu) ; base = 90 % du brut (10 % de primes sur objectif exclus), charges au taux observé", () => {
     expect(b?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
@@ -142,8 +163,18 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     const p = project(b!, "2026-10", "2026-12", [], conv);
     expect(month(p, "2026-10")).toMatchObject({ brut: 1685700, charges: 528300, cost: 2214000, headcount: 7, etp4: 61000 });
   });
+  it("référence janvier 2026 : 004, entré le 15 février et connu de PayFit, est repris avec une base à saisir ; contrat sur deux services → non ventilé", () => {
+    const r1 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-03", syncId: "s", readAt: "2026-10-21" });
+    const b1 = r1.kind === "value" ? r1.base : null;
+    expect(b1?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
+    expect(b1?.contracts.find((c) => c.externalId.endsWith("004"))).toMatchObject({ base: null, baseNd: "entré le 2026-02-15, après le mois de référence : base à saisir", etp4: 10000 });
+    expect(b1?.etpNote).toContain("quotités PayFit à la date de lecture");
+    const extra = { ...lines[0], key: "extra", month: "2026-09", accountId: "641100", debitCents: 0, creditCents: null, contractId: "TEST-A-CONTRACT-001", analytic: [{ type: "Service", code: "TEST-SVC-Z", value: "Z" }] as never };
+    const r2 = buildBase({ input: { ...input, lines: [...lines, extra] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" });
+    expect(r2.kind === "value" && r2.base.contracts.find((c) => c.externalId.endsWith("001"))).toMatchObject({ service: null, serviceNd: expect.stringContaining("plusieurs services") });
+  });
   it("mois de référence hors lecture ou non clos : refus avec la raison", () => {
-    expect(buildBase({ input, kpi, refMonth: "2026-10", syncId: "s", readAt: "2026-10-21" })).toMatchObject({ kind: "nd", reason: expect.stringContaining("hors de la lecture") });
-    expect(buildBase({ input: { ...input, openMonths: ["2026-09"] }, kpi, refMonth: "2026-09", syncId: "s", readAt: "2026-10-21" })).toMatchObject({ kind: "nd", reason: expect.stringContaining("non clôturée") });
+    expect(buildBase({ input, kpi, refMonth: "2026-10", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" })).toMatchObject({ kind: "nd", reason: expect.stringContaining("hors de la lecture") });
+    expect(buildBase({ input: { ...input, openMonths: ["2026-09"] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" })).toMatchObject({ kind: "nd", reason: expect.stringContaining("non clôturée") });
   });
 });

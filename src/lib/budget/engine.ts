@@ -88,17 +88,19 @@ export function validate(base: BaseSnapshot, firstMonth: string, lastMonth: stri
   const inHorizon = (m: string) => m >= firstMonth && m <= lastMonth;
   const deps = new Map<string, Dep>();
   const fixes = new Set<string>();
-  const ids = new Set(hyps.map((h) => h.id));
   for (const h of hyps) {
     if (h.kind === "augmentation") {
       if (!inHorizon(h.from)) errors.push(`« ${h.label} » : mois d'effet ${h.from} hors de l'horizon ${firstMonth} → ${lastMonth} (la base du mois de référence contient déjà le passé)`);
-      if (h.scope.kind === "contrat" && !keys.has(h.scope.key) && !(h.scope.key.startsWith("embauche:") && ids.has(h.scope.key.slice(9)))) errors.push(`« ${h.label} » : contrat ciblé inconnu`);
+      if (h.scope.kind === "contrat" && !keys.has(h.scope.key) && !hyps.some((x) => x.kind === "embauche" && hireKey(x.id) === (h.scope as { key: string }).key)) errors.push(`« ${h.label} » : contrat ou embauche ciblé inconnu`);
     }
     if (h.kind === "depart") {
       if (!keys.has(h.contractKey)) errors.push(`« ${h.label} » : contrat absent de la base figée`);
       if (deps.has(h.contractKey)) errors.push(`« ${h.label} » : deux départs pour le même contrat`);
       deps.set(h.contractKey, h);
       if (h.lastPaidDate < monthStart(firstMonth)) errors.push(`« ${h.label} » : dernier jour payé ${h.lastPaidDate} antérieur à la bascule (${firstMonth})`);
+      const c = base.contracts.find((x) => x.contractKey === h.contractKey);
+      if (c?.endDate && h.lastPaidDate > c.endDate) errors.push(`« ${h.label} » : fin de contrat connue le ${c.endDate} — le dernier jour payé (${h.lastPaidDate}) doit la précéder`);
+      if (c?.startDate && h.lastPaidDate < c.startDate) errors.push(`« ${h.label} » : dernier jour payé (${h.lastPaidDate}) antérieur à l'entrée du contrat (${c.startDate})`);
     }
     if (h.kind === "base") {
       if (!keys.has(h.contractKey)) errors.push(`« ${h.label} » : contrat absent de la base figée`);
@@ -142,7 +144,9 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       const dep = deps.get(c.contractKey) ?? null;
       // Fin de présence : départ saisi ou fin de contrat connue, la plus proche.
       const stop = [dep?.lastPaidDate ?? null, c.endDate].filter((x): x is string => x !== null).sort()[0] ?? null;
-      const p = presence(m, start, stop, conv.prorata);
+      // Contrat entré après le mois de référence (connu de PayFit à la lecture) : présent à partir de son entrée.
+      const from = c.startDate && c.startDate > start ? c.startDate : start;
+      const p = presence(m, from, stop, conv.prorata);
       if (p.n === 0n) continue;
       const fix = fixes.get(c.contractKey) ?? null;
       const S: Frac | null = fix ? { n: B(fix.salaryCents), d: 1n } : c.base ? { n: B(c.base.salaryCents), d: 1n } : null;
@@ -162,14 +166,17 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
         contributions.push({ hypothesisId: a.id, kind: "augmentation", label: a.label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
       });
       if (p.n !== p.d) {
+        // Mois incomplet : entrée après le mois de référence, départ saisi ou fin de contrat connue.
         const part = levels(S, list, p, rate).at(-1)!;
         const top = full.at(-1)!;
         const b = part.brut - top.brut;
         const ch = part.charges - top.charges;
-        const byDep = dep !== null && stop === dep.lastPaidDate;
-        contributions.push({ hypothesisId: byDep ? dep.id : null, kind: byDep ? "depart" : "fin-contrat", label: byDep ? dep.label : `Fin de contrat connue le ${c.endDate}`, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
+        const ends = stop !== null && stop <= end;
+        const byDep = ends && dep !== null && stop === dep.lastPaidDate;
+        const label = byDep ? dep.label : ends ? `Fin de contrat connue le ${c.endDate}` : `Entrée le ${from}`;
+        contributions.push({ hypothesisId: byDep ? dep.id : null, kind: byDep ? "depart" : ends ? "fin-contrat" : "entree", label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
       }
-      const atEnd = stop === null || stop >= end;
+      const atEnd = from <= end && (stop === null || stop >= end);
       if (atEnd && c.counted) {
         headcount += 1;
         if (c.etp4 === null) etpNd.push(`${c.label} : ${c.etpNd ?? "ETP n.d."}`);

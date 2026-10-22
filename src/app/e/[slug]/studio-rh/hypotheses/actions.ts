@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { buildBase } from "@/lib/budget/base";
-import { project } from "@/lib/budget/engine";
 import { getConventions } from "@/lib/budget/settings";
-import { addHypothesis, createScenario, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, type ScenarioKind } from "@/lib/budget/store";
+import { z } from "zod";
+import { addHypothesis, BudgetError, createScenario, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, type ScenarioKind } from "@/lib/budget/store";
 import type { Amount, Hypothesis, HypothesisKind, Scope } from "@/lib/budget/types";
 import { isMonth, monthRange } from "@/lib/connectors/months";
 import { addMonths } from "@/lib/dates";
@@ -19,7 +19,14 @@ const MAX_HORIZON = 24;
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const page = (slug: string) => `/e/${slug}/studio-rh/hypotheses`;
 const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
-const fail = (e: unknown): FormState => ({ error: e instanceof Error ? e.message : "Enregistrement impossible." });
+const isUuid = (v: string) => z.string().uuid().safeParse(v).success;
+// Seules les erreurs métier sont affichées telles quelles ; les autres sont journalisées côté serveur.
+const fail = (e: unknown): FormState => {
+  if (e instanceof BudgetError) return { error: e.message };
+  if (e instanceof z.ZodError) return { error: `Saisie hors des bornes autorisées (${[...new Set(e.issues.map((i) => i.path.join(".")))].join(", ") || "valeur"}).` };
+  console.error("Hypothèses budgétaires : écriture en erreur", e);
+  return { error: "Enregistrement impossible." };
+};
 
 export async function createScenarioAction(slug: string, _prev: FormState, f: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
@@ -36,7 +43,7 @@ export async function createScenarioAction(slug: string, _prev: FormState, f: Fo
   const ctx = await loadPayrollContext(slug);
   if (ctx.source !== "payfit" || !ctx.input || !ctx.read || !ctx.kpi.input) return { error: `Base indisponible : ${ctx.unavailable ?? "journal de paie PayFit et référentiel Collaborateurs requis"}.` };
   const refMonth = addMonths(firstMonth, -1);
-  const b = buildBase({ input: ctx.input, kpi: ctx.kpi.input, refMonth, syncId: ctx.read.syncId, readAt: ctx.read.startedAt.toISOString().slice(0, 10) });
+  const b = buildBase({ input: ctx.input, kpi: ctx.kpi.input, refMonth, lastMonth, syncId: ctx.read.syncId, readAt: ctx.read.startedAt.toISOString().slice(0, 10) });
   if (b.kind === "nd") return { error: `Base figée impossible : ${b.reason}.` };
   let id: string;
   try {
@@ -51,6 +58,7 @@ export async function createScenarioAction(slug: string, _prev: FormState, f: Fo
 
 export async function duplicateScenarioAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
   const name = str(f, "name");
   if (!name || name.length > 120) return { error: "Nom de la copie requis (120 caractères au plus)." };
   let id: string | null;
@@ -67,6 +75,7 @@ export async function duplicateScenarioAction(slug: string, scenarioId: string, 
 
 export async function freezeScenarioAction(slug: string, scenarioId: string, _prev: FormState, _f: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
   try {
     await freezeScenario(workspace.id, session.user.id, scenarioId);
     await recordEvent(workspace.id, session.user.id, "budget.scenario_frozen", { scenarioId });
@@ -79,6 +88,7 @@ export async function freezeScenarioAction(slug: string, scenarioId: string, _pr
 
 export async function deleteScenarioAction(slug: string, scenarioId: string, _prev: FormState, _f: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
   try {
     await deleteScenario(workspace.id, scenarioId);
     await recordEvent(workspace.id, session.user.id, "budget.scenario_deleted", { scenarioId });
@@ -160,24 +170,19 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
   const contractKey = str(f, "contractKey");
   if (!contractKey) throw new Error("Contrat requis.");
   const salaryCents = euros(f, "salary", "Salaire mensuel de base");
-  if (salaryCents <= 0) throw new Error("Salaire mensuel de base positif requis.");
+  if (salaryCents < 0) throw new Error("Salaire mensuel de base positif ou nul requis (0 : contrat non payé, ex. congé sans solde).");
   return { id, kind: "base", label, contractKey, salaryCents, chargesBps: pct(f, "charges", "Taux de charges") };
 }
 
 export async function addHypothesisAction(slug: string, scenarioId: string, kind: HypothesisKind, _prev: FormState, f: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
-  const full = await getScenario(workspace.id, scenarioId);
-  if (!full) return { error: "Scénario introuvable." };
-  if (full.scenario.status !== "brouillon") return { error: "Scénario figé : dupliquez-le pour une variante." };
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
   let h: Hypothesis;
   try {
     h = readHypothesis(kind, f);
   } catch (e) {
-    return fail(e);
+    return e instanceof Error && !(e instanceof z.ZodError) ? { error: e.message } : fail(e);
   }
-  const s = full.scenario;
-  const check = project(full.base, s.firstMonth, s.lastMonth, [...full.hypotheses, h], s.conventions);
-  if (check.kind === "error") return { error: `Hypothèse refusée : ${check.errors.join(" ; ")}.` };
   try {
     await addHypothesis(workspace.id, session.user.id, scenarioId, h);
     await recordEvent(workspace.id, session.user.id, "budget.hypothesis_added", { scenarioId, hypothesisId: h.id, kind: h.kind });
@@ -190,6 +195,7 @@ export async function addHypothesisAction(slug: string, scenarioId: string, kind
 
 export async function deleteHypothesisAction(slug: string, scenarioId: string, hypothesisId: string, _prev: FormState, _f: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId) || !isUuid(hypothesisId)) return { error: "Hypothèse introuvable." };
   try {
     await deleteHypothesis(workspace.id, scenarioId, hypothesisId);
     await recordEvent(workspace.id, session.user.id, "budget.hypothesis_deleted", { scenarioId, hypothesisId });

@@ -5,11 +5,15 @@ import { budgetBase, budgetHypothesis, budgetScenario } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isMonth } from "@/lib/connectors/months";
-import { hireKey } from "./engine";
+import { hireKey, project } from "./engine";
 import { CURRENCY, type BaseSnapshot, type Conventions, type Hypothesis } from "./types";
 
-// Stockage des scénarios (module 5). Une base figée n'est jamais modifiée ; un scénario figé n'accepte plus
-// d'hypothèse ; chaque écriture vérifie l'espace (RLS) et l'état du scénario.
+// Stockage des scénarios (module 5). Une base figée n'est jamais modifiée (déclencheur SQL, empreinte revérifiée à la
+// lecture) ; un scénario figé n'accepte plus d'hypothèse (déclencheur SQL). Chaque écriture vérifie l'espace (RLS) et
+// l'état du scénario dans la même transaction que l'écriture, ligne du scénario verrouillée.
+
+// Erreur métier : son message est affiché tel quel à l'utilisateur.
+export class BudgetError extends Error {}
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const month = z.string().refine(isMonth);
@@ -57,6 +61,7 @@ export async function getScenario(workspaceId: string, scenarioId: string): Prom
   return withWorkspace(workspaceId, async (tx) => {
     const [row] = await tx.select({ scenario: budgetScenario, base: budgetBase }).from(budgetScenario).innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).where(eq(budgetScenario.id, scenarioId));
     if (!row) return null;
+    if (sha256(canonicalJson(row.base.data)) !== row.base.hash) throw new BudgetError("Base figée altérée : son empreinte ne correspond plus à celle enregistrée à la création.");
     const hyps = await tx.select().from(budgetHypothesis).where(eq(budgetHypothesis.scenarioId, scenarioId)).orderBy(asc(budgetHypothesis.createdAt), asc(budgetHypothesis.id));
     return { scenario: row.scenario, base: row.base.data, baseHash: row.base.hash, hypotheses: hyps.map((h) => hypothesisSchema.parse(h.data)) };
   });
@@ -102,32 +107,56 @@ export async function duplicateScenario(workspaceId: string, actor: string, scen
   });
 }
 
-async function draft(workspaceId: string, scenarioId: string) {
-  const [s] = await withWorkspace(workspaceId, (tx) => tx.select({ status: budgetScenario.status }).from(budgetScenario).where(eq(budgetScenario.id, scenarioId)));
-  if (!s) throw new Error("Scénario introuvable.");
-  if (s.status !== "brouillon") throw new Error("Scénario figé : ses hypothèses ne peuvent plus changer (dupliquez-le pour une variante).");
+type Tx = Parameters<Parameters<typeof withWorkspace>[1]>[0];
+// Verrouille la ligne du scénario, vérifie qu'il est en brouillon et relit sa base et ses hypothèses.
+async function lockDraft(tx: Tx, scenarioId: string) {
+  const [row] = await tx.select({ scenario: budgetScenario, base: budgetBase.data }).from(budgetScenario).innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).where(eq(budgetScenario.id, scenarioId)).for("update", { of: budgetScenario });
+  if (!row) throw new BudgetError("Scénario introuvable.");
+  if (row.scenario.status !== "brouillon") throw new BudgetError("Scénario figé : ses hypothèses ne peuvent plus changer (dupliquez-le pour une variante).");
+  const hyps = await tx.select({ data: budgetHypothesis.data }).from(budgetHypothesis).where(eq(budgetHypothesis.scenarioId, scenarioId)).orderBy(asc(budgetHypothesis.createdAt), asc(budgetHypothesis.id));
+  return { scenario: row.scenario, base: row.base, hypotheses: hyps.map((h) => hypothesisSchema.parse(h.data)) };
 }
 
+// Ajout contrôlé par le moteur dans la même transaction : une hypothèse qui rendrait le scénario incalculable
+// (conflit, date hors horizon, contrat inconnu…) est refusée avec la raison.
 export async function addHypothesis(workspaceId: string, actor: string, scenarioId: string, h: Hypothesis): Promise<void> {
-  await draft(workspaceId, scenarioId);
   const parsed = hypothesisSchema.parse(h);
-  await withWorkspace(workspaceId, (tx) => tx.insert(budgetHypothesis).values({ id: parsed.id, workspaceId, scenarioId, kind: parsed.kind, data: parsed, currency: CURRENCY, createdBy: actor }));
+  await withWorkspace(workspaceId, async (tx) => {
+    const { scenario: s, base, hypotheses } = await lockDraft(tx, scenarioId);
+    const check = project(base, s.firstMonth, s.lastMonth, [...hypotheses, parsed], s.conventions);
+    if (check.kind === "error") throw new BudgetError(`Hypothèse refusée : ${check.errors.join(" ; ")}.`);
+    await tx.insert(budgetHypothesis).values({ id: parsed.id, workspaceId, scenarioId, kind: parsed.kind, data: parsed, currency: CURRENCY, createdBy: actor });
+  });
 }
 
 export async function deleteHypothesis(workspaceId: string, scenarioId: string, hypothesisId: string): Promise<void> {
-  await draft(workspaceId, scenarioId);
-  const full = await getScenario(workspaceId, scenarioId);
-  const users = full?.hypotheses.filter((h) => (h.kind === "embauche" && h.replaces === hypothesisId) || (h.kind === "augmentation" && h.scope.kind === "contrat" && h.scope.key === hireKey(hypothesisId))) ?? [];
-  if (users.length) throw new Error(`Hypothèse utilisée par ${users.map((u) => `« ${u.label} »`).join(", ")} : supprimez d'abord ces hypothèses.`);
-  await withWorkspace(workspaceId, (tx) => tx.delete(budgetHypothesis).where(and(eq(budgetHypothesis.scenarioId, scenarioId), eq(budgetHypothesis.id, hypothesisId))));
+  await withWorkspace(workspaceId, async (tx) => {
+    const { hypotheses } = await lockDraft(tx, scenarioId);
+    const users = hypotheses.filter((h) => (h.kind === "embauche" && h.replaces === hypothesisId) || (h.kind === "augmentation" && h.scope.kind === "contrat" && h.scope.key === hireKey(hypothesisId)));
+    if (users.length) throw new BudgetError(`Hypothèse utilisée par ${users.map((u) => `« ${u.label} »`).join(", ")} : supprimez d'abord ces hypothèses.`);
+    const gone = await tx.delete(budgetHypothesis).where(and(eq(budgetHypothesis.scenarioId, scenarioId), eq(budgetHypothesis.id, hypothesisId))).returning({ id: budgetHypothesis.id });
+    if (!gone.length) throw new BudgetError("Hypothèse introuvable.");
+  });
 }
 
+// Gel : définitif ; refusé si la projection est en erreur ou si un mois projeté est n.d.
 export async function freezeScenario(workspaceId: string, actor: string, scenarioId: string): Promise<void> {
-  await draft(workspaceId, scenarioId);
-  await withWorkspace(workspaceId, (tx) => tx.update(budgetScenario).set({ status: "fige", frozenBy: actor, frozenAt: new Date() }).where(eq(budgetScenario.id, scenarioId)));
+  await withWorkspace(workspaceId, async (tx) => {
+    const { scenario: s, base, hypotheses } = await lockDraft(tx, scenarioId);
+    const p = project(base, s.firstMonth, s.lastMonth, hypotheses, s.conventions);
+    if (p.kind === "error") throw new BudgetError(`Gel refusé : ${p.errors.join(" ; ")}.`);
+    const nd = p.months.filter((m) => m.kind === "nd").map((m) => m.month);
+    if (nd.length) throw new BudgetError(`Gel refusé : projection n.d. pour ${nd.join(", ")} (bases à compléter dans Hypothèses).`);
+    await tx.update(budgetScenario).set({ status: "fige", frozenBy: actor, frozenAt: new Date() }).where(and(eq(budgetScenario.id, scenarioId), eq(budgetScenario.status, "brouillon")));
+  });
 }
 
+// Suppression d'un brouillon ; sa base figée est supprimée si aucun autre scénario ne la partage.
 export async function deleteScenario(workspaceId: string, scenarioId: string): Promise<void> {
-  await draft(workspaceId, scenarioId);
-  await withWorkspace(workspaceId, (tx) => tx.delete(budgetScenario).where(eq(budgetScenario.id, scenarioId)));
+  await withWorkspace(workspaceId, async (tx) => {
+    const { scenario: s } = await lockDraft(tx, scenarioId);
+    await tx.delete(budgetScenario).where(eq(budgetScenario.id, scenarioId));
+    const others = await tx.select({ id: budgetScenario.id }).from(budgetScenario).where(eq(budgetScenario.baseId, s.baseId)).limit(1);
+    if (!others.length) await tx.delete(budgetBase).where(eq(budgetBase.id, s.baseId));
+  });
 }

@@ -10,6 +10,7 @@ export type BaseContract = {
   externalId: string;
   label: string; // personne (nom d'usage ou nom) — affichage seulement
   service: string | null; // code analytique du mois de référence (null : non ventilé)
+  serviceNd: string | null; // raison d'un service null (ex. lignes réparties sur plusieurs codes)
   startDate: string | null;
   endDate: string | null; // fin de contrat connue à la création (ex. CDD) : la projection s'arrête à cette date
   counted: boolean; // nature comptée dans l'effectif (paramètre KPI de l'espace)
@@ -36,6 +37,7 @@ export type BaseSnapshot = {
   // contrats sortis, lignes sans contrat), pour que la base se lise contre le réel.
   refMasse: number;
   refBaseCost: number | null; // null si une base de contrat est n.d.
+  etpNote: string | null; // limite des ETP de la base (ex. quotités PayFit à la date de lecture, non historisées)
 };
 
 // --- Hypothèses datées saisies dans Clair.
@@ -68,7 +70,7 @@ export type Prorata = "calendaire" | "aucun";
 export type Conventions = { prorata: Prorata };
 
 // --- Résultat.
-export type ContributionKind = "base" | "augmentation" | "depart" | "fin-contrat" | "embauche" | "ponctuel" | "sortie";
+export type ContributionKind = "base" | "augmentation" | "depart" | "fin-contrat" | "entree" | "embauche" | "ponctuel" | "sortie";
 export type Contribution = {
   hypothesisId: string | null; // null : base figée ou fin de contrat connue
   kind: ContributionKind;
