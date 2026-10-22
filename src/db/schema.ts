@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { boolean, index, integer, jsonb, numeric, pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import type { BaseSnapshot, Conventions, Hypothesis } from "@/lib/budget/types";
 import type {
   CoverageDraft, EndStatus, EventFlag, FieldNd, FindingSeverity, MonthFlag, PresenceBasis, PresenceStatus, Provenance, RhBuildInputs, RhBuildSummary, RhSource, TimeStatus,
 } from "@/lib/rh/referential/types";
@@ -417,4 +418,57 @@ export const rhFinding = pgTable(
     provenance: provenance(),
   },
   (t) => [index("rh_finding_build_code_idx").on(t.buildId, t.code), index("rh_finding_build_month_idx").on(t.buildId, t.month), workspaceIsolation("rh_finding")],
+).enableRLS();
+
+// --- Hypothèses budgétaires (module 5) : base figée (copie immuable du réel au mois de référence), scénarios et
+// hypothèses datées saisies dans Clair. La projection est recalculée à la demande par le moteur pur (src/lib/budget).
+export const budgetBase = pgTable(
+  "budget_base",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: wsRef(),
+    refMonth: text("ref_month").notNull(), // AAAA-MM
+    syncId: text("sync_id").notNull(), // lecture PayFit appliquée à la création
+    data: jsonb("data").$type<BaseSnapshot>().notNull(),
+    hash: text("hash").notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("budget_base_ws_idx").on(t.workspaceId, t.createdAt), workspaceIsolation("budget_base")],
+).enableRLS();
+
+export const budgetScenario = pgTable(
+  "budget_scenario",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: wsRef(),
+    baseId: uuid("base_id").notNull().references(() => budgetBase.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    kind: text("kind").$type<"budget" | "revise" | "simulation">().notNull(),
+    firstMonth: text("first_month").notNull(), // premier mois projeté (bascule)
+    lastMonth: text("last_month").notNull(), // fin de l'horizon
+    conventions: jsonb("conventions").$type<Conventions>().notNull(), // copiées des Paramètres à la création
+    status: text("status").$type<"brouillon" | "fige">().notNull(),
+    duplicatedFrom: uuid("duplicated_from"),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: ts("created_at").defaultNow().notNull(),
+    frozenBy: text("frozen_by").references(() => user.id, { onDelete: "set null" }),
+    frozenAt: ts("frozen_at"),
+  },
+  (t) => [index("budget_scenario_ws_idx").on(t.workspaceId, t.createdAt), workspaceIsolation("budget_scenario")],
+).enableRLS();
+
+export const budgetHypothesis = pgTable(
+  "budget_hypothesis",
+  {
+    id: uuid("id").primaryKey(), // = id de l'hypothèse dans data
+    workspaceId: wsRef(),
+    scenarioId: uuid("scenario_id").notNull().references(() => budgetScenario.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<Hypothesis["kind"]>().notNull(),
+    data: jsonb("data").$type<Hypothesis>().notNull(),
+    currency: text("currency").notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: ts("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("budget_hypothesis_scenario_idx").on(t.scenarioId, t.createdAt), workspaceIsolation("budget_hypothesis")],
 ).enableRLS();

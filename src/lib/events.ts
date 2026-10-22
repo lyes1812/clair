@@ -17,7 +17,13 @@ export type EventKind =
   | "fec.uploaded"
   | "setting.changed"
   | "rh.rebuilt"
-  | "rh.rebuild_failed";
+  | "rh.rebuild_failed"
+  | "budget.scenario_created"
+  | "budget.scenario_duplicated"
+  | "budget.scenario_frozen"
+  | "budget.scenario_deleted"
+  | "budget.hypothesis_added"
+  | "budget.hypothesis_deleted";
 
 export async function recordEvent(
   workspaceId: string,

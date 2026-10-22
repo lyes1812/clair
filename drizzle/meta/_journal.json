@@ -78,6 +78,13 @@
       "when": 1792665516063,
       "tag": "0010_rh_fte_precision",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792709557660,
+      "tag": "0011_budget",
+      "breakpoints": true
     }
   ]
 }

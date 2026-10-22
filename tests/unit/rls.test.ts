@@ -25,6 +25,15 @@ afterAll(async () => {
 });
 
 describe("isolation des espaces par RLS", () => {
+  it("toutes les tables portant workspace_id sont en RLS activée et forcée (y compris module 5)", async () => {
+    const rows = (await db.execute(sql`
+      select c.relname, c.relrowsecurity, c.relforcerowsecurity from pg_class c
+      join information_schema.columns k on k.table_schema = 'public' and k.table_name = c.relname and k.column_name = 'workspace_id'
+      where c.relkind = 'r' and c.relnamespace = 'public'::regnamespace`)).rows as { relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean }[];
+    expect(rows.map((r) => r.relname)).toEqual(expect.arrayContaining(["budget_base", "budget_scenario", "budget_hypothesis"]));
+    expect(rows.filter((r) => !r.relrowsecurity || !r.relforcerowsecurity).map((r) => r.relname)).toEqual([]);
+  });
+
   it("sans espace déclaré, aucune ligne n'est visible", async () => {
     const rows = await db.select().from(workspaceEvent);
     expect(rows).toHaveLength(0);

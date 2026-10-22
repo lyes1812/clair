@@ -8,6 +8,7 @@ import { parseGrid, RUBRICS } from "@/lib/payroll/grid";
 import { parsePayfitHistoryMode, setHeadcountNatures, setPayfitHistoryMode } from "@/lib/rh-settings";
 import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
 import { requireWorkspace } from "@/lib/workspace";
+import { setProrata } from "@/lib/budget/settings";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -117,4 +118,15 @@ export async function saveKpiSettings(slug: string, _prev: FormState, formData: 
   }
   revalidatePath(`/e/${slug}`, "layout");
   return { ok: "Définitions des KPI enregistrées." };
+}
+
+export async function saveProrata(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  try {
+    await setProrata(workspace.id, formData.get("prorata"), session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: "Règle de prorata enregistrée." };
 }

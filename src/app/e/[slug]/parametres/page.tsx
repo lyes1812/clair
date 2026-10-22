@@ -17,6 +17,8 @@ import { getPayrollGrid, getServiceAxis } from "@/lib/payroll-settings";
 import { journalAxes } from "@/lib/payroll/context";
 import { ServiceAxisForm } from "./ServiceAxisForm";
 import { gridRubrics } from "@/lib/payroll/grid";
+import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
+import { ProrataForm } from "./ProrataForm";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +39,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
     ).then(([r]) => r?.updatedAt ?? null);
   const axes = await journalAxes(workspace.id);
   const serviceAxis = await getServiceAxis(workspace.id, axes);
-  const [natures, row, history, historyAt, payroll] = await Promise.all([getHeadcountNatures(workspace.id), updatedAt(HEADCOUNT_NATURES_KEY), getPayfitHistoryMode(workspace.id), updatedAt(PAYFIT_HISTORY_KEY), getPayrollGrid(workspace.id)]);
+  const [natures, row, history, historyAt, payroll, projection] = await Promise.all([getHeadcountNatures(workspace.id), updatedAt(HEADCOUNT_NATURES_KEY), getPayfitHistoryMode(workspace.id), updatedAt(PAYFIT_HISTORY_KEY), getPayrollGrid(workspace.id), getConventions(workspace.id)]);
 
   return (
     <>
@@ -110,6 +112,19 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           Service : {serviceAxis.origin === "setting" ? `axe « ${serviceAxis.axis ?? "aucun"} », modifié le ${serviceAxis.updatedAt ? dateTimeFmt.format(serviceAxis.updatedAt) : "n.d."}` : serviceAxis.origin === "single-axis" ? `axe « ${serviceAxis.axis} », seul axe analytique présent dans le journal (défaut)` : axes.length ? "aucun axe choisi" : "aucun code analytique dans le journal PayFit appliqué"}.
         </p>
         <ServiceAxisForm slug={slug} axes={axes} current={serviceAxis.axis} disabled={!isAdmin} />
+      </section>
+
+      <section className="panel" data-testid="setting-projection" id="projection">
+        <h2>Projection : conventions de calcul</h2>
+        <p>
+          Studio RH › Hypothèses budgétaires projette chaque contrat mois par mois. La règle de prorata des entrées et sorties en cours de mois n'a pas de
+          valeur par défaut : tant qu'elle n'est pas choisie, aucun scénario ne peut être créé. Elle est copiée dans chaque scénario à sa création ; la
+          modifier ne change pas les scénarios existants.
+        </p>
+        <p className="desc" data-testid="setting-projection-origin">
+          {projection ? `Règle : ${PRORATA_LABELS[projection.conventions.prorata]} — modifiée le ${dateTimeFmt.format(projection.updatedAt)}.` : "Non renseignée : aucun scénario ne peut être créé."}
+        </p>
+        <ProrataForm slug={slug} current={projection?.conventions.prorata ?? null} labels={PRORATA_LABELS} disabled={!isAdmin} />
       </section>
     </>
   );
