@@ -2,6 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { ABSENCE_STATUSES } from "@/lib/connectors/payfit/client";
 import { getKpiSettings, KPI_PARSERS, setKpiSettings, type KpiSettingValues } from "@/lib/rh-kpi-settings";
+import { setPayrollGrid } from "@/lib/payroll-settings";
+import { parseGrid, RUBRICS } from "@/lib/payroll/grid";
 import { parsePayfitHistoryMode, setHeadcountNatures, setPayfitHistoryMode } from "@/lib/rh-settings";
 import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
 import { requireWorkspace } from "@/lib/workspace";
@@ -38,6 +40,20 @@ export async function savePayfitHistory(slug: string, _prev: FormState, formData
   }
   revalidatePath(`/e/${slug}`, "layout");
   return { ok: "Historique PayFit enregistré." };
+}
+
+export async function savePayrollGrid(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  const raw = Object.fromEntries(RUBRICS.map((r) => [r.id, String(formData.get(r.id) ?? "").split(/[\s,;]+/).filter(Boolean)]));
+  const grid = parseGrid(raw);
+  if (!grid) return { error: "Grille invalide : préfixes de 2 à 10 chiffres, chacun dans une seule rubrique." };
+  try {
+    await setPayrollGrid(workspace.id, grid, session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: "Grille de comptes enregistrée." };
 }
 
 // Définitions des KPI : chaque champ passe par son parseur strict ; un type d'absence n'est accepté que s'il figure dans la

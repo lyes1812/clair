@@ -12,6 +12,9 @@ import { KpiForm } from "./KpiForm";
 import { requireWorkspace } from "@/lib/workspace";
 import { HeadcountForm } from "./HeadcountForm";
 import { PayfitHistoryForm } from "./PayfitHistoryForm";
+import { PayrollGridForm } from "./PayrollGridForm";
+import { getPayrollGrid } from "@/lib/payroll-settings";
+import { gridRubrics } from "@/lib/payroll/grid";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +33,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
     withWorkspace(workspace.id, (tx) =>
       tx.select({ updatedAt: workspaceSetting.updatedAt }).from(workspaceSetting).where(and(eq(workspaceSetting.workspaceId, workspace.id), eq(workspaceSetting.key, key))),
     ).then(([r]) => r?.updatedAt ?? null);
-  const [natures, row, history, historyAt] = await Promise.all([getHeadcountNatures(workspace.id), updatedAt(HEADCOUNT_NATURES_KEY), getPayfitHistoryMode(workspace.id), updatedAt(PAYFIT_HISTORY_KEY)]);
+  const [natures, row, history, historyAt, payroll] = await Promise.all([getHeadcountNatures(workspace.id), updatedAt(HEADCOUNT_NATURES_KEY), getPayfitHistoryMode(workspace.id), updatedAt(PAYFIT_HISTORY_KEY), getPayrollGrid(workspace.id)]);
 
   return (
     <>
@@ -85,6 +88,20 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           statuses={[...ABSENCE_STATUSES].map((code) => ({ code, label: ABSENCE_STATUS_LABELS[code] ?? code }))}
           disabled={!isAdmin}
         />
+      </section>
+
+      <section className="panel" data-testid="setting-payroll" id="masse-salariale">
+        <h2>Masse salariale : grille de comptes</h2>
+        <p>
+          Studio RH › Masse salariale lit le journal comptable de paie renvoyé par PayFit. Chaque compte est classé dans la rubrique dont un préfixe est le
+          plus long. Masse salariale chargée = rubriques « brut » + « cotisations patronales ». Les comptes 63 et 64 sans rubrique sont signalés « non classés ».
+        </p>
+        <p className="desc" data-testid="setting-payroll-origin">
+          {payroll.origin === "default"
+            ? "Valeur par défaut proposée, reprise de ton script d'actualisation PayFit (641 brut dont 6413 primes, 645 cotisations, 6412/6485 provisions hors masse), à confirmer."
+            : `Modifié le ${payroll.updatedAt ? dateTimeFmt.format(payroll.updatedAt) : "n.d."} par un administrateur.`}
+        </p>
+        <PayrollGridForm slug={slug} rows={gridRubrics(payroll.grid)} disabled={!isAdmin} />
       </section>
     </>
   );
