@@ -155,7 +155,13 @@ describe("absentéisme — cas construits (contrat 005, mars 2026)", async () =>
     expect(r(run(noStart, "2026-01"))).toBe("exact:0/372");
     expect(r(run(noStart, "2026-02"))).toBe("absence-date-nd");
     // Au jour près : une absence sans début qui finit le 10/02/2026, avant le début de 004 (15/02), ne touche aucun jour compté.
-    expect(r(run([absence("a", "004", null, null, "2026-02-10", "end-of-day")], "2026-02"))).toBe("exact:0/364");
+    const before = run([absence("a", "004", null, null, "2026-02-10", "end-of-day")], "2026-02");
+    expect(r(before)).toBe("exact:0/364");
+    if (before.kind !== "nd") expect(before.excluded).toMatchObject([{ absenceId: "a", why: "contract-out-of-scope", label: expect.stringContaining("aucune demi-journée comptée possible") }]);
+    // Lundi–vendredi : fin le dimanche 15/02/2026, jour de début de 004 ⇒ aucune demi-journée comptée possible ⇒ exact.
+    expect(r(run([absence("a", "004", null, null, "2026-02-15", "end-of-day")], "2026-02", { dayBasis: "weekdays" }))).toBe("exact:0/260");
+    // Même borne en calendaire : le dimanche 15/02 est compté ⇒ l'absence peut le toucher ⇒ n.d.
+    expect(r(run([absence("a", "004", null, null, "2026-02-15", "end-of-day")], "2026-02"))).toBe("absence-date-nd");
   });
   it("A17–A18 : contrat inconnu ⇒ mois n.d. ; date absente ⇒ mois touchés n.d., jamais de fin supposée", () => {
     const ghost = [absence("a", "TEST-A-CONTRACT-999", "2026-03-02", "beginning-of-day", "2026-03-03", "end-of-day")];

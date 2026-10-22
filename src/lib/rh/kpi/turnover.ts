@@ -11,9 +11,10 @@ import { kpiNd, type EventContribution, type KpiInput, type MonthMovements, type
 const eventKey = (e: EventDraft) => `${e.contractKey}|${e.kind}`;
 
 // Contrats continus : couples « sortie le jour J ↔ entrée le jour J+1 » de la même personne, appariés un pour un (une sortie
-// ne neutralise qu'une entrée). L'appariement ne dépend que du référentiel, jamais des filtres de l'écran : pour une sortie,
-// entrée de même nature d'abord, puis du même établissement, puis par identifiant de contrat. Que le partenaire soit compté
-// (natures, établissement filtrés) est évalué ensuite, pour le périmètre affiché. Un événement sans partenaire reste ordinaire.
+// ne neutralise qu'une entrée). L'appariement dépend du référentiel et des natures comptées (Paramètres), jamais des filtres de
+// l'écran : pour une sortie, entrée d'une nature comptée d'abord, puis de même nature, puis du même établissement, puis par
+// identifiant de contrat. Que le partenaire soit compté dans le périmètre affiché (filtre nature ou établissement) est évalué
+// ensuite. Un événement sans partenaire reste un mouvement ordinaire.
 function continuityPartners(input: KpiInput): Map<string, { event: EventDraft; counted: boolean }> {
   return memo(input, "continuity", () => {
     const opts = countedOpts(input);
@@ -21,11 +22,12 @@ function continuityPartners(input: KpiInput): Map<string, { event: EventDraft; c
     const counted = (e: EventDraft) => e.nature !== null && opts.natures.includes(e.nature) && (!est || (e.establishmentId !== null && est.includes(e.establishmentId)));
     const flagged = input.data.events.filter((e) => e.personKey !== null && e.flags.includes("continuity_same_person"));
     const entries = flagged.filter((e) => e.kind === "entry");
-    const exits = flagged.filter((e) => e.kind === "exit").sort((a, b) => a.date.localeCompare(b.date) || a.contractKey.localeCompare(b.contractKey));
+    const natured = (e: EventDraft) => (e.nature !== null && input.params.natures.includes(e.nature) ? 1 : 0);
+    const exits = flagged.filter((e) => e.kind === "exit").sort((a, b) => a.date.localeCompare(b.date) || natured(b) - natured(a) || a.contractKey.localeCompare(b.contractKey));
     const out = new Map<string, { event: EventDraft; counted: boolean }>();
     for (const x of exits) {
       const next = addDays(x.date, 1);
-      const affinity = (e: EventDraft) => (e.nature !== null && e.nature === x.nature ? 2 : 0) + (e.establishmentId !== null && e.establishmentId === x.establishmentId ? 1 : 0);
+      const affinity = (e: EventDraft) => 4 * natured(e) + (e.nature !== null && e.nature === x.nature ? 2 : 0) + (e.establishmentId !== null && e.establishmentId === x.establishmentId ? 1 : 0);
       const y = entries
         .filter((e) => !out.has(eventKey(e)) && e.personKey === x.personKey && e.date === next)
         .sort((a, b) => affinity(b) - affinity(a) || a.contractKey.localeCompare(b.contractKey))[0];

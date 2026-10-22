@@ -82,6 +82,7 @@ function dsnEtp(input: KpiInput, c: ContractDraft, month: string): EtpContributi
   const ratioText = readable ? frNum(Number(etp4FromQuotas(r.contractQuota!, r.referenceQuota!, 4)) / 1e4) : null;
   if (r.modality === null) checks.push("modalité S21.G00.40.014 absente : rapport des quotités");
   if (fullTimeIsOne && r.modality === "10") {
+    if (r.referenceQuota !== null && r.referenceQuota <= 0) checks.push(`quotité de référence nulle ou négative (S21.G00.40.012 = ${frNum(r.referenceQuota)}) : 1 retenu par la modalité temps plein (Paramètres)`);
     if (r.contractQuota !== null && r.contractQuota < 0) checks.push(`quotité du contrat négative (S21.G00.40.013 = ${frNum(r.contractQuota)}) : 1 retenu par la modalité temps plein (Paramètres)`);
     if (ratioText !== null && etp4FromQuotas(r.contractQuota!, r.referenceQuota!, 4) !== 10000) checks.push(`modalité temps plein (S21.G00.40.014 = 10), rapport ${ratioText} : 1 retenu (Paramètres)`);
     return { ...base, kind: "etp", etp4: 10000, basis: "dsn_full_time_modality", checks, provenance: r.provenance.modality ?? null };

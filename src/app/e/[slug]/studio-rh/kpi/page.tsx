@@ -165,7 +165,12 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   } else if (detailId) {
     if (windowDetail && moisOk) ignore("mois", rawMois, "sans objet pour un détail de période");
     detail = kpiDetail(input, w, detailId, moisOk && !windowDetail ? rawMois : null);
-    if (!detail) ignore("mois", rawMois, "hors de la période affichée et de son N-1");
+    if (!detail) {
+      ignore("mois", rawMois, "hors de la période affichée et de son N-1");
+      // L'absentéisme a un défaut sans mois (la période) ; un détail de mois n'en a pas et n'est pas affiché.
+      if (detailId === "absenteeism") detail = kpiDetail(input, w, detailId, null);
+      else ignore("detail", rawDetail, "mois hors période : détail non affiché");
+    }
   } else if (moisOk) ignore("mois", rawMois, "aucun détail demandé");
 
   const query = (extra: Record<string, string>) => {

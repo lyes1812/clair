@@ -145,3 +145,27 @@ describe("turnover — appariement indépendant des filtres (C-B en CDD, C-C en 
     expect(cdd).toMatchObject({ entries: 1, exits: 0 });
   });
 });
+
+describe("turnover — partenaire de nature comptée prioritaire (Paramètres), lecture du 31/01/2026", async () => {
+  // P-X : CDI C-A jusqu'au 30/06/2025 ; le 01/07/2025, C-B (29, stage, nature non comptée) et C-C (02, CDD). Le couple
+  // neutralisé est C-A ↔ C-C, les deux de natures comptées ; C-B est hors effectif. P-X compté chaque mois, P-Y aussi :
+  // Σ = 24 ; E = 0, S = 0 ⇒ 0/48 (une sortie appariée au stage aurait donné E = 1, S = 1, 24/48).
+  const edge = {
+    collaborators: [{ id: "P-X" }, { id: "P-Y" }],
+    contracts: [
+      { contractId: "C-A", collaboratorId: "P-X", startDate: "2024-06-01", endDate: "2025-06-30", natureContratDsn: "01" },
+      { contractId: "C-B", collaboratorId: "P-X", startDate: "2025-07-01", endDate: null, natureContratDsn: "29" },
+      { contractId: "C-C", collaboratorId: "P-X", startDate: "2025-07-01", endDate: null, natureContratDsn: "02" },
+      { contractId: "C-Y", collaboratorId: "P-Y", startDate: "2024-01-01", endDate: null, natureContratDsn: "01" },
+    ],
+  };
+  it("CDI → CDD neutralisé malgré un stage commencé le même jour", async () => {
+    const data = await payfitBuild("cle-fictive-edge-1234", payfitEdgeFetch("cle-fictive-edge-1234", edge as never), monthRange("2024-10", "2026-01"), new Date("2026-01-31T08:00:00Z"));
+    const input = kpiInput(data, DSN_ABSENCES);
+    expect(monthMovements(input, "2025-07").events.map((e) => `${e.row.contract.externalId}:${e.why}`).sort()).toEqual(["C-B:out-of-scope", "C-C:neutralized"]);
+    expect(monthMovements(input, "2025-06").events.map((e) => `${e.row.contract.externalId}:${e.why}`)).toEqual(["C-A:neutralized"]);
+    const t = turnover(input, rollingWindow("2026-01"));
+    expect(isRatio(t, 0, 48)).toBe(true);
+    expect(t).toMatchObject({ entries: 0, exits: 0 });
+  });
+});

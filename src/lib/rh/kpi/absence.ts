@@ -1,4 +1,4 @@
-import { monthEnd, monthOf, monthStart } from "@/lib/dates";
+import { formatDate, monthEnd, monthOf, monthStart } from "@/lib/dates";
 import { gateAt, monthRanges } from "@/lib/rh/headcount";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft } from "@/lib/rh/referential/types";
@@ -133,8 +133,22 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       if (sd === null || ed === null) {
         // Date de borne inconnue : seuls les mois de la période du contrat peuvent être touchés (les créneaux y sont bornés).
         if (month < monthOf(c.startDate) || (c.endDate !== null && month > monthOf(c.endDate))) continue;
-        // Au jour près : la borne connue place l'absence entièrement hors de la période du contrat.
-        if ((ed !== null && ed < c.startDate) || (sd !== null && c.endDate !== null && sd > c.endDate)) continue;
+        // Au créneau près : la borne inconnue est remplacée par la borne de la période du contrat dans le mois ; si aucune
+        // demi-journée comptée (ni incertaine) n'est alors atteignable, l'absence est écartée avec sa raison.
+        const reach = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };
+        const r = absenceSlots(
+          {
+            start: sd === null ? { date: reach.from, moment: "beginning-of-day" } : { date: sd, moment: a.start.moment },
+            end: ed === null ? { date: reach.to, moment: "end-of-day" } : { date: ed, moment: a.end.moment },
+          },
+          reach,
+          params.dayBasis,
+        );
+        if (!r.slots.length && !r.uncertain.length) {
+          const label = `aucune demi-journée comptée possible dans la période du contrat (date de ${sd === null ? "début" : "fin"} non renseignée, ${sd === null ? `fin le ${formatDate(ed!)}` : `début le ${formatDate(sd)}`})`;
+          excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "contract-out-of-scope", label, uncertain: 0 });
+          continue;
+        }
         return { month, kind: "nd", nd: kpiNd("absence-date-nd", `absence ${a.id} : date de ${sd === null ? "début" : "fin"} non renseignée dans PayFit`) };
       }
       const clip = { from: max(ms, c.startDate), to: min(me, c.endDate ?? me) };

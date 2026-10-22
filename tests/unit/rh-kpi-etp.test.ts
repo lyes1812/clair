@@ -146,6 +146,9 @@ describe("Quotités construites (cas E)", () => {
     expect(e4(e)).toBe("exact:10000");
     if (e.kind !== "nd") expect(e.contributions[0].checks.join(" ")).toContain("quotité du contrat négative (S21.G00.40.013 = -75,84) : 1 retenu");
     // ⌊(2 × −10000 + 1) ÷ 2⌋ = −10000 ; ⌊(2 × −5000 + 100) ÷ 200⌋ × 100 = −5000 ; ⌊(2 × −758350 × 10⁴ + 1516700) ÷ 3033400⌋ = −5000.
+    const ref0 = etpOf([one({ modality: "10", reference: "0" })]);
+    expect(e4(ref0)).toBe("exact:10000");
+    if (ref0.kind !== "nd") expect(ref0.contributions[0].checks.join(" ")).toContain("quotité de référence nulle ou négative (S21.G00.40.012 = 0)");
     expect(etp4FromFte(-1, 4)).toBe(-10000);
     expect(etp4FromFte(-0.5, 2)).toBe(-5000);
     expect(etp4FromQuotas(-75.835, 151.67, 4)).toBe(-5000);
