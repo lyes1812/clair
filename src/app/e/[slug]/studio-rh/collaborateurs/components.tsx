@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { SourceBadge } from "@/components/SourceBadge";
 import { dateTimeFmt } from "@/lib/connectors/labels";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatMonth } from "@/lib/dates";
 import { contractNatureLabel, endReasonLabel } from "@/lib/dsn/labels";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { RH_DEFINITIONS } from "@/lib/rh/definitions";
@@ -27,11 +27,33 @@ const ND_EXPLANATIONS: [string, string][] = [
   ["Période postérieure à la date de référence", "l'effectif n'est jamais projeté ; les entrées et sorties futures connues sont listées dans Mouvements › À venir."],
   ["Période non couverte", "aucune lecture ni déclaration appliquée pour ce mois : rien n'est reconstitué entre deux mois."],
   ["Mois DSN incomplet ou bloqué", "fractions manquantes ou conflit de numéro d'ordre : les faits sont lus, l'effectif du mois est n.d."],
-  ["Borne basse (PayFit)", "mois antérieurs à la fenêtre de conservation des contrats archivés : « ≥ n », sorties inconnues."],
+  ["Borne basse (PayFit)", "historique PayFit en mode « signalé » (Paramètres) : mois antérieurs à la fenêtre de conservation des contrats archivés en « ≥ n », sorties inconnues. En mode « brut » (défaut), ces mois sont calculés sur ce que l'API renvoie et la limite est dite une fois en tête d'écran."],
   ["Champ non porté par la source", "motif de fin et temps travaillé (DSN), nom d'usage, équipe ou versements (PayFit) : n.d. et non devinés."],
   ["Champ non renseigné", "valeur nulle dans la source (temps, matricule, nature) : n.d., jamais zéro."],
   ["Droit non accordé", "collection ou champ refusé par la clé API : n.d. avec le droit manquant."],
 ];
+
+// Mode « brut » de l'historique PayFit : une seule mention en tête d'écran à la place des « ≥ » et « n.d. » par mois.
+export function PayfitHistoryNotice({ ctx }: { ctx: CollabContext }) {
+  const h = ctx.payfitHistory;
+  const d = ctx.data;
+  if (!h || h.mode !== "raw" || !d) return null;
+  return (
+    <p className="notice" data-testid="payfit-history-notice">
+      Données telles que remontées par l'API PayFit (lecture du {formatDate(d.build.referenceDate)}).{" "}
+      {h.limit ? (
+        <>
+          PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois : pour les mois {(h.limit.lowerFrom === h.limit.lowerTo ? formatMonth(h.limit.lowerFrom) : `${formatMonth(h.limit.lowerFrom)} à ${formatMonth(h.limit.lowerTo)}`).toLowerCase()}
+          {h.limit.exactFrom ? ` (avant le ${formatDate(h.limit.exactFrom)})` : ""}, effectifs, entrées, sorties, turnover et absentéisme ne comptent pas les
+          salariés sortis avant cette limite et peuvent être sous-estimés.
+        </>
+      ) : (
+        <>Aucun mois de la lecture n'est antérieur à la limite de conservation des contrats archivés.</>
+      )}{" "}
+      <a href={`/e/${ctx.slug}/parametres#payfit-historique`}>Paramètre : historique PayFit brut</a>
+    </p>
+  );
+}
 
 export function BuildInfo({ ctx }: { ctx: CollabContext }) {
   const d = ctx.data;
@@ -66,6 +88,7 @@ export function CollabHeader({ ctx, tab, children }: { ctx: CollabContext; tab: 
         <p className="desc">{ITEM.summary}</p>
         <SourceBadge resolution={source} slug={slug} />
         <BuildInfo ctx={ctx} />
+        <PayfitHistoryNotice ctx={ctx} />
         {ctx.switchedAt && (
           <p className="notice" data-testid="source-switch-notice">
             Source RH changée le {dateTimeFmt.format(ctx.switchedAt)} par un administrateur ({source.reason}). Les identifiants PayFit et DSN sont distincts : aucun lien n'est conservé entre les deux référentiels.

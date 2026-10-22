@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { ABSENCE_STATUSES } from "@/lib/connectors/payfit/client";
 import { getKpiSettings, KPI_PARSERS, setKpiSettings, type KpiSettingValues } from "@/lib/rh-kpi-settings";
-import { setHeadcountNatures } from "@/lib/rh-settings";
+import { parsePayfitHistoryMode, setHeadcountNatures, setPayfitHistoryMode } from "@/lib/rh-settings";
 import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
 import { requireWorkspace } from "@/lib/workspace";
 
@@ -27,6 +27,19 @@ export async function saveHeadcountNatures(slug: string, _prev: FormState, formD
   return { ok: "Natures comptées dans l'effectif enregistrées." };
 }
 
+export async function savePayfitHistory(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  const mode = parsePayfitHistoryMode(formData.get("mode"));
+  if (!mode) return { error: "Choisissez un mode d'historique PayFit." };
+  try {
+    await setPayfitHistoryMode(workspace.id, mode, session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: "Historique PayFit enregistré." };
+}
+
 // Définitions des KPI : chaque champ passe par son parseur strict ; un type d'absence n'est accepté que s'il figure dans la
 // lecture PayFit appliquée ou s'il est déjà enregistré.
 export async function saveKpiSettings(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
@@ -40,6 +53,7 @@ export async function saveKpiSettings(slug: string, _prev: FormState, formData: 
   const raw: Record<keyof KpiSettingValues, unknown> = {
     fullTimeIsOne: formData.get("fullTimeIsOne") === "on",
     capAtOne: formData.get("capAtOne") === "on",
+    forfaitJoursIsOne: formData.get("forfaitJoursIsOne") === "on",
     etpDecimals: Number(formData.get("etpDecimals")),
     turnoverFormula: String(formData.get("turnoverFormula") ?? ""),
     excludedExitNatures: formData.getAll("excludedExitNatures").map(String),
@@ -51,6 +65,7 @@ export async function saveKpiSettings(slug: string, _prev: FormState, formData: 
   const LABELS: Record<keyof KpiSettingValues, string> = {
     fullTimeIsOne: "Temps plein = 1",
     capAtOne: "Plafond à 1",
+    forfaitJoursIsOne: "Forfait jours = 1",
     etpDecimals: "Décimales des quotités",
     turnoverFormula: "Formule du turnover",
     excludedExitNatures: "Sorties exclues",

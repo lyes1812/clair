@@ -22,6 +22,7 @@ const { headcountAt } = await import("@/lib/rh/headcount");
 const { activePayFitSync, loadAbsencesOfSync, loadAbsenceTypes } = await import("@/lib/rh/referential/store");
 const { getKpiSettings, setKpiSettings, KPI_DEFAULTS, KPI_KEYS } = await import("@/lib/rh-kpi-settings");
 const { setSetting } = await import("@/lib/settings");
+const { getPayfitHistoryMode, setPayfitHistoryMode } = await import("@/lib/rh-settings");
 const { chooseSourceMode, resolveSource } = await import("@/lib/sources");
 
 // Base de test migrée, rôle non superutilisateur : la RLS est réelle.
@@ -197,6 +198,16 @@ describe("référentiel Collaborateurs en base", () => {
     expect((await getKpiSettings(B)).values).toEqual(KPI_DEFAULTS);
     await setKpiSettings(A, KPI_DEFAULTS, actor);
     expect((await getKpiSettings(A)).invalid).toEqual([]);
+  });
+
+  it("historique PayFit : brut par défaut, « signalé » enregistré pour A seulement, valeur illisible ⇒ défaut", async () => {
+    expect(await getPayfitHistoryMode(A)).toEqual({ mode: "raw", origin: "default" });
+    await setPayfitHistoryMode(A, "flagged", actor);
+    expect(await getPayfitHistoryMode(A)).toEqual({ mode: "flagged", origin: "setting" });
+    expect(await getPayfitHistoryMode(B)).toEqual({ mode: "raw", origin: "default" });
+    await expect(setPayfitHistoryMode(A, "autre" as never, actor)).rejects.toThrow();
+    await setPayfitHistoryMode(A, "raw", actor);
+    expect(await getPayfitHistoryMode(A)).toEqual({ mode: "raw", origin: "setting" });
   });
 
   it("quotité PayFit stockée sans perte : relue de la base, 21/39 arrondi une seule fois à 3 décimales = 0,538", async () => {

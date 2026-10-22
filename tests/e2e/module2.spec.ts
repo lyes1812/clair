@@ -41,8 +41,35 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   await page.getByRole("button", { name: "Appliquer cette lecture" }).click();
   await expect(page.getByTestId("sync-status")).toHaveText("Appliquée (active)");
 
+  // Historique PayFit brut (défaut validé le 22/10/2026) : chiffres tels que l'API les renvoie, une seule mention en tête d'écran.
+  // Le transport fictif renvoie tous les contrats : avril 2025 = 7 personnes, 1 entrée (002), 0 sortie, sans « ≥ » ni n.d.
+  await page.goto(`${collab}?mois=2025-04`);
+  await expect(page.getByTestId("payfit-history-notice")).toContainText("Données telles que remontées par l'API PayFit");
+  await expect(page.getByTestId("payfit-history-notice")).toContainText("peuvent être sous-estimés");
+  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("7");
+  await expect(page.getByTestId("entries-count").locator("dd")).toHaveText("1");
+  await expect(page.getByTestId("exits-count").locator("dd")).toHaveText("0");
+  await expect(page.getByTestId("coverage-notice")).toHaveCount(0);
+  await page.screenshot({ path: `${CAPTURES}/2-01-mois.png`, fullPage: true });
+  await page.goto(`${collab}?mois=2024-10`);
+  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("6");
+  await page.goto(`${collab}/annee?annee=2025`);
+  await expect(page.getByTestId("year-jan1").locator("dd")).toHaveText("6");
+  await expect(page.getByTestId("year-dec31").locator("dd")).toHaveText("7");
+  await expect(page.getByTestId("year-entries").locator("dd")).toHaveText("1");
+  await expect(page.getByTestId("year-exits").locator("dd")).toHaveText("1");
+
+  // Paramètres › Historique PayFit = « signalé » : les mois antérieurs à la limite reviennent en « ≥ » et n.d.
+  await page.goto(`/e/${slug}/parametres`);
+  await expect(page.getByTestId("setting-payfit-history-origin")).toContainText("Valeur par défaut validée le 22/10/2026");
+  await page.getByTestId("setting-payfit-history-flagged").check();
+  await page.getByTestId("setting-payfit-history-save").click();
+  await expect(page.getByTestId("setting-payfit-history").getByRole("status")).toContainText("Historique PayFit enregistré");
+  await page.getByTestId("setting-payfit-history").screenshot({ path: `${CAPTURES}/2-05-parametres-historique.png` });
+
   // La borne basse PayFit dépend de la date de lecture réelle : fenêtre = mois de la date de référence − 12 (inclus).
   await page.goto(`${collab}?mois=2025-04`);
+  await expect(page.getByTestId("payfit-history-notice")).toHaveCount(0);
   await expect(page.getByTestId("source-badge-rh")).toContainText("PayFit");
   await expect(page.getByTestId("rh-build-info")).toContainText("mois lus 2024-10 → 2026-09");
   await expect(page.getByTestId("rh-build-info")).toContainText("une société par espace");
@@ -65,7 +92,7 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   await expect(row002).toContainText("entré le 01/04/2025");
   await expect(row002).toContainText("Fictif A-002");
   await expect(page.getByTestId("collab-monthly-table").getByRole("row")).toHaveCount(8);
-  await page.screenshot({ path: `${CAPTURES}/2-01-mois.png`, fullPage: true });
+  await page.screenshot({ path: `${CAPTURES}/2-01b-mois-signale.png`, fullPage: true });
 
   await page.goto(`${collab}?mois=2025-12`);
   await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText(lowerAt("2025-12-31") ? "≥ 7" : "7");

@@ -69,6 +69,11 @@ function payfitEtp(input: KpiInput, c: ContractDraft): EtpContribution | EtpMiss
     }
     return { ...base, kind: "etp", etp4, basis: "payfit_fte", checks, provenance: c.provenance.fteAtRead ?? null };
   }
+  // Forfait jours sans quotité ni indicateur temps plein dans PayFit : 1 ETP si le paramètre l'indique (décision de Lyes, 22/10/2026).
+  // Un indicateur temps plein explicitement faux (forfait réduit) reste n.d. : sa quotité n'est pas connue.
+  if (input.params.forfaitJoursIsOne && c.modalityAtRead === "forfait_jours" && c.isFullTimeAtRead === null) {
+    return { ...base, kind: "etp", etp4: 10000, basis: "payfit_forfait_jours", checks: ["forfait jours sans quotité renseignée dans PayFit : 1 ETP (Paramètres)"], provenance: c.provenance.modalityAtRead ?? null };
+  }
   const nd = c.fieldsNd.fteAtRead;
   const reason = (nd?.reason ?? "fullTimeEquivalent non renseigné dans PayFit") + (c.isFullTimeAtRead === true && !fullTimeIsOne ? " ; temps plein = 1 désactivé" : "");
   return { ...base, kind: "missing", nd: kpiNd(nd?.code ?? "not-provided", reason) };

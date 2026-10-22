@@ -25,9 +25,9 @@ import type {
 } from "@/lib/rh/kpi/types";
 import type { KpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
-import type { ContractDraft, PersonDraft, RhBuildData } from "@/lib/rh/referential/types";
+import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
-import { BuildInfo, contractHref, FlagTags, Nature, PersonCell, Prov } from "../collaborateurs/components";
+import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
 // Composants de l'écran KPI RH : en-tête, tuiles (valeur, N-1, écart, paramètres), tableau mensuel, détail d'un chiffre.
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/kpi")!;
@@ -95,23 +95,29 @@ export function KpiHeader({ ctx, closedMonth, children }: { ctx: KpiContext; clo
   );
 }
 
-// PayFit : quotités à la lecture et limite de conservation des contrats archivés (au jour près pour l'effectif).
-export function PayfitNotice({ data }: { data: RhBuildData }) {
-  if (data.build.source !== "payfit") return null;
+// PayFit : quotités à la lecture et limite de conservation des contrats archivés. En mode « brut » (défaut), la limite est dite
+// une fois par PayfitHistoryNotice ; en mode « signalé », les mois concernés sont listés ici.
+export function PayfitNotice({ ctx }: { ctx: KpiContext }) {
+  const data = ctx.collab.data;
+  if (!data || data.build.source !== "payfit") return null;
+  const raw = ctx.collab.payfitHistory?.mode === "raw";
   const lower = [...new Set(data.coverage.filter((c) => c.presenceStatus === "lower_bound").map((c) => c.month))].sort();
   const exactFrom = payfitExactFrom(data);
   return (
-    <p className="notice" data-testid="kpi-payfit-notice">
-      Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.{" "}
-      {lower.length > 0 && exactFrom ? (
-        <>
-          PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois (constaté sur le compte pilote, à vérifier pour chaque espace) : l'effectif et l'ETP sont exacts à partir du {formatDate(exactFrom)} ; les entrées, sorties et
-          absences des mois {monthRanges(lower)} sont incomplètes, et tout turnover ou absentéisme d'une période qui contient l'un de ces mois est n.d.
-        </>
-      ) : (
-        <>Aucun mois de la lecture n'est en borne basse.</>
-      )}
-    </p>
+    <>
+      {raw && <PayfitHistoryNotice ctx={ctx.collab} />}
+      <p className="notice" data-testid="kpi-payfit-notice">
+        Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.{" "}
+        {raw ? null : lower.length > 0 && exactFrom ? (
+          <>
+            PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois (constaté sur le compte pilote, à vérifier pour chaque espace) : l'effectif et l'ETP sont exacts à partir du {formatDate(exactFrom)} ; les entrées, sorties et
+            absences des mois {monthRanges(lower)} sont incomplètes, et tout turnover ou absentéisme d'une période qui contient l'un de ces mois est n.d.
+          </>
+        ) : (
+          <>Aucun mois de la lecture n'est en borne basse.</>
+        )}
+      </p>
+    </>
   );
 }
 
@@ -191,6 +197,7 @@ export function NdReasons({ items }: { items: { month: string; shown: Shown }[] 
 const BASIS_LABELS: Record<EtpBasis, string> = {
   payfit_full_time: "temps plein = 1 (Paramètres)",
   payfit_fte: "ETP de la fiche PayFit, arrondi",
+  payfit_forfait_jours: "forfait jours sans quotité PayFit = 1 (Paramètres)",
   dsn_full_time_modality: "modalité temps plein (S21.G00.40.014 = 10) = 1 (Paramètres)",
   dsn_ratio: "quotité ÷ quotité de référence, arrondi",
 };

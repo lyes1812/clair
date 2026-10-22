@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { annualList, headcountAt, monthlyList, movements, presenceAt } from "@/lib/rh/headcount";
+import { rawPayfitHistory } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import { DSN_EDGES, NIR, PAYFIT_EDGES } from "./helpers/edge-cases";
 import { PROFILE_A, short } from "./helpers/reference";
@@ -70,6 +71,8 @@ function referenceCases(name: string, data: () => RhBuildData, kindBefore: "exac
 // payfitFixtureBuild est asynchrone : on l'attend une fois pour les cas de référence.
 const payfitData = await payfitFixtureBuild();
 referenceCases("PayFit (borne basse avant octobre 2025)", () => payfitData, "lower_bound");
+// Historique PayFit brut (défaut, décision de Lyes du 22/10/2026) : mêmes chiffres, tous exacts (le transport fictif renvoie tout).
+referenceCases("PayFit, historique brut", () => rawPayfitHistory(payfitData), "exact");
 referenceCases("DSN (24 mois complets)", () => dsnFixtureBuild(), "exact");
 describe("règles d'effectif — PayFit, qualificatifs", () => {
   it("borne basse : qualificatif explicite ; sorties des mois en borne basse n.d.", () => {

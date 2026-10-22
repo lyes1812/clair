@@ -1,7 +1,8 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { workspaceEvent } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
-import { getHeadcountNatures, type HeadcountNatures } from "@/lib/rh-settings";
+import { getHeadcountNatures, getPayfitHistoryMode, type HeadcountNatures, type PayfitHistoryMode } from "@/lib/rh-settings";
+import { payfitHistoryLimit, rawPayfitHistory, type PayfitHistoryLimit } from "./raw-history";
 import { resolveSource, type SourceResolution } from "@/lib/sources";
 import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
 import type { Count, HeadcountResult } from "./headcount";
@@ -24,6 +25,7 @@ export type CollabContext = {
   data: (RhBuildData & { build: RhBuildRow }) | null;
   switchedAt: Date | null;
   establishments: Establishment[];
+  payfitHistory: { mode: PayfitHistoryMode; origin: "default" | "setting"; limit: PayfitHistoryLimit | null } | null;
 };
 
 export async function loadCollabContext(slug: string): Promise<CollabContext> {
@@ -42,7 +44,15 @@ export async function loadCollabContext(slug: string): Promise<CollabContext> {
   ]);
   const chosen: RhSource | null = source.chosen === "payfit" || source.chosen === "dsn" ? source.chosen : null;
   const state = chosen ? await ensureRhBuild(workspace.id, chosen, session.user.id) : null;
-  const data = state?.kind === "ready" ? await loadRhBuild(workspace.id, state.build.id) : null;
+  const stored = state?.kind === "ready" ? await loadRhBuild(workspace.id, state.build.id) : null;
+  // Historique PayFit : paramètre de l'espace (brut par défaut, décision de Lyes du 22/10/2026).
+  let payfitHistory: CollabContext["payfitHistory"] = null;
+  let data = stored;
+  if (stored && stored.build.source === "payfit") {
+    const h = await getPayfitHistoryMode(workspace.id);
+    payfitHistory = { ...h, limit: payfitHistoryLimit(stored) };
+    if (h.mode === "raw") data = rawPayfitHistory(stored);
+  }
   const switchedAt = lastSwitch[0] && Date.now() - lastSwitch[0].at.getTime() < SWITCH_NOTICE_DAYS * 86_400_000 ? lastSwitch[0].at : null;
   const establishments: Establishment[] = data
     ? [...new Set(data.coverage.map((c) => c.establishmentId))].sort().map((id) => ({
@@ -50,7 +60,7 @@ export async function loadCollabContext(slug: string): Promise<CollabContext> {
         label: data.build.source === "payfit" ? `Société PayFit : ${(data.build.inputs.source === "payfit" && data.build.inputs.company?.name) || id}` : `SIRET ${id}`,
       }))
     : [];
-  return { slug, workspace, userId: session.user.id, source, chosen, natures, state, data, switchedAt, establishments };
+  return { slug, workspace, userId: session.user.id, source, chosen, natures, state, data, switchedAt, establishments, payfitHistory };
 }
 
 // --- Libellés d'affichage

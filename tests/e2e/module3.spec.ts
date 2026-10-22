@@ -84,12 +84,20 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(page.getByTestId("kpi-closed-month")).toContainText(closed);
   await expect(page.getByTestId("kpi-payfit-notice")).toBeVisible();
   await expect(page.getByTestId("kpi-payfit-notice")).toContainText("Quotités à la date de lecture");
+  // Historique PayFit brut (défaut validé le 22/10/2026) : une seule mention en tête d'écran, pas de « ≥ » ni de n.d. de conservation.
+  await expect(page.getByTestId("payfit-history-notice")).toContainText("Données telles que remontées par l'API PayFit");
   await expect(page.getByTestId("kpi-tile-etp-end").locator("dd")).toHaveText("6,10");
   await expect(page.getByTestId("kpi-tile-etp-end")).toContainText("quotités à la date de lecture");
   // ETP moyen exact : somme des ETP fin de mois ÷ 12 (effectif exact au jour près depuis R − 12 mois).
   await expect(page.getByTestId("kpi-tile-etp-avg").locator("dd")).toHaveText(fr2(window.reduce((s, m) => s + etp4(m), 0), 12 * 10000));
-  if (!isMonthEnd) await expect(page.getByTestId("kpi-tile-turnover").locator("dd")).toContainText("n.d.");
-  await expect(page.getByTestId("kpi-tile-absenteeism").locator("dd")).toContainText("types d'absence non choisis");
+  // Septembre 2026 clos : turnover brut 12/83 = 14,46 % (comme la DSN, le transport fictif renvoie tous les contrats), N-1 7/13 ;
+  // absentéisme avec le type par défaut (maladie ordinaire), absent de la lecture fictive : 0 j ÷ 2 510 j.
+  await page.goto(`${kpi}?fin=2026-09`);
+  await expect(page.getByTestId("kpi-tile-turnover").locator("dd")).toHaveText("14,46 %");
+  await expect(page.getByTestId("kpi-tile-turnover-n1")).toContainText("53,85 %");
+  await expect(page.getByTestId("kpi-tile-absenteeism").locator("dd")).toHaveText("0,00 %");
+  await expect(page.getByTestId("kpi-absence-types")).toContainText("absents de la lecture : fr_maladie_ordinaire");
+  await page.goto(kpi);
   await expect(page.getByTestId("kpi-monthly-table").locator("tbody tr")).toHaveCount(12);
   await expect(page.getByTestId("kpi-definitions")).toBeAttached();
   await expect(page.locator("#def-etp-month-end")).toBeAttached();
@@ -99,12 +107,16 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await page.goto(`${kpi}?fin=2027-01`);
   await expect(page.getByTestId("kpi-param-notice")).toContainText("paramètre ignoré : fin=2027-01 (hors des mois clos)");
 
-  // Paramètres : choix des trois types d'absence de la lecture.
+  // Paramètres : défaut « maladie ordinaire » remplacé par les trois types d'absence de la lecture fictive.
   await page.goto(`/e/${slug}/parametres`);
-  await expect(page.getByTestId("setting-kpi-origin-absence-types")).toContainText("Valeur par défaut");
+  await expect(page.getByTestId("setting-kpi-origin-absence-types")).toContainText("Valeur par défaut validée le 22/10/2026");
+  await expect(page.getByTestId("setting-kpi-origin-etp-forfait-jours")).toContainText("Valeur par défaut validée le 22/10/2026");
+  await expect(page.getByTestId("setting-kpi-etp-forfait-jours")).toBeChecked();
   const types = page.getByTestId("setting-kpi-absence-types");
-  await expect(types).toHaveCount(3);
-  for (let i = 0; i < 3; i++) await types.nth(i).check();
+  await expect(types).toHaveCount(4);
+  await expect(types.and(page.locator("[value='fr_maladie_ordinaire']"))).toBeChecked();
+  await types.and(page.locator("[value='fr_maladie_ordinaire']")).uncheck();
+  for (const t of ["test_maternity", "test_paid_leave", "test_sickness"]) await types.and(page.locator(`[value='${t}']`)).check();
   await page.getByTestId("setting-kpi-save").click();
   await expect(page.getByTestId("setting-kpi-status")).toContainText("Définitions des KPI enregistrées");
   await page.reload();
@@ -115,23 +127,38 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await page.goto(`${kpi}?fin=2026-09`);
   await expect(page.getByTestId("kpi-absence-types")).toContainText("test_maternity (1)");
   const cell = (m: string, col: string) => page.getByTestId("kpi-monthly-table").locator(`tr[data-month='${m}'] td[data-col='${col}']`);
-  if (lower("2025-12")) await expect(cell("2025-12", "absenteeism")).toContainText("n.d.");
-  else await expect(cell("2025-12", "absenteeism")).toHaveText("6,91 %");
+  // Brut : octobre 2025 (mois charnière) compté comme les autres ; 76 j (ABS-2 : 31 + 30 + 15) ÷ 2 510 j = 3,03 %.
+  await expect(cell("2025-10", "absenteeism")).toHaveText("14,29 %"); // 31 j ÷ (7 contrats × 31 j)
+  await expect(cell("2025-12", "absenteeism")).toHaveText("6,91 %");
   await expect(cell("2026-02", "absenteeism")).toHaveText("0,00 %");
   await expect(cell("2026-02", "theoretical")).toHaveText("182 j");
-  if (lower("2025-10")) await expect(page.getByTestId("kpi-tile-absenteeism").locator("dd")).toContainText("n.d.");
+  await expect(page.getByTestId("kpi-tile-absenteeism").locator("dd")).toHaveText("3,03 %");
   await page.screenshot({ path: `${CAPTURES}/3-01-kpi-payfit.png`, fullPage: true });
 
-  if (!lower("2025-12")) {
-    await cell("2025-12", "absenteeism").locator("a").click();
-    const detail = page.getByTestId("kpi-detail");
-    await expect(detail).toBeVisible();
-    await expect(detail.getByTestId("kpi-detail-absences")).toContainText("TEST-A-ABSENCE-2");
-    await expect(detail.getByTestId("kpi-detail-absences")).toContainText("30 (15 j)");
-    await expect(detail.getByTestId("kpi-detail-theoretical").locator("tbody tr")).toHaveCount(7);
-    await expect(detail.getByTestId("kpi-detail-total")).toContainText("30 demi-journées = 15 j ÷ 217 j = 6,91 %");
-    await detail.screenshot({ path: `${CAPTURES}/3-02-detail.png` });
+  await cell("2025-12", "absenteeism").locator("a").click();
+  const absDetail = page.getByTestId("kpi-detail");
+  await expect(absDetail).toBeVisible();
+  await expect(absDetail.getByTestId("kpi-detail-absences")).toContainText("TEST-A-ABSENCE-2");
+  await expect(absDetail.getByTestId("kpi-detail-absences")).toContainText("30 (15 j)");
+  await expect(absDetail.getByTestId("kpi-detail-theoretical").locator("tbody tr")).toHaveCount(7);
+  await expect(absDetail.getByTestId("kpi-detail-total")).toContainText("30 demi-journées = 15 j ÷ 217 j = 6,91 %");
+  await absDetail.screenshot({ path: `${CAPTURES}/3-02-detail.png` });
+
+  // Historique « signalé » (Paramètres) : le mois charnière redevient n.d. tant qu'il précède la limite de conservation.
+  await page.goto(`/e/${slug}/parametres`);
+  await page.getByTestId("setting-payfit-history-flagged").check();
+  await page.getByTestId("setting-payfit-history-save").click();
+  await expect(page.getByTestId("setting-payfit-history").getByRole("status")).toContainText("Historique PayFit enregistré");
+  await page.goto(`${kpi}?fin=2026-09`);
+  await expect(page.getByTestId("payfit-history-notice")).toHaveCount(0);
+  if (lower("2025-10")) {
+    await expect(page.getByTestId("kpi-tile-turnover").locator("dd")).toContainText("n.d.");
+    await expect(page.getByTestId("kpi-tile-absenteeism").locator("dd")).toContainText("n.d.");
   }
+  await page.goto(`/e/${slug}/parametres`);
+  await page.getByTestId("setting-payfit-history-raw").check();
+  await page.getByTestId("setting-payfit-history-save").click();
+  await expect(page.getByTestId("setting-payfit-history").getByRole("status")).toContainText("Historique PayFit enregistré");
 
   // Dépôt des 24 DSN fictives, règle « Fichiers uniquement ».
   await page.goto(`/e/${slug}/donnees/dsn`);

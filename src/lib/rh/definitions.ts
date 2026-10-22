@@ -45,11 +45,11 @@ export const RH_DEFINITIONS: { id: string; title: string; text: string }[] = [
   },
   {
     id: "lower-bound",
-    title: "Borne basse (PayFit)",
+    title: "Historique PayFit et borne basse",
     text:
       RETENTION === null
         ? "PayFit renvoie tous les contrats, archivés compris : aucune borne basse n'est appliquée."
-        : `PayFit ne renvoie plus les contrats archivés depuis plus de ${RETENTION} mois (constaté sur le compte pilote le 22/10/2026 : contrats terminés depuis 12 à 14 mois encore renvoyés, aucun au-delà ; à vérifier pour chaque espace). Un contrat présent à une date D n'a pu disparaître que s'il a pris fin plus de ${RETENTION} mois avant la lecture : l'effectif à D est donc exact si D est postérieure ou égale à la date de lecture moins ${RETENTION} mois, et affiché « ≥ n (borne basse) » avant. Les entrées et sorties d'un mois qui commence avant cette date restent incomplètes : entrées « ≥ n », sorties « n.d. ».`,
+        : `PayFit ne renvoie plus les contrats archivés depuis plus de ${RETENTION} mois (constaté sur le compte pilote le 22/10/2026 : contrats terminés depuis 12 à 14 mois encore renvoyés, aucun au-delà ; à vérifier pour chaque espace). Un contrat présent à une date D n'a pu disparaître que s'il a pris fin plus de ${RETENTION} mois avant la lecture : l'effectif à D est donc exact si D est postérieure ou égale à la date de lecture moins ${RETENTION} mois, et affiché « ≥ n (borne basse) » avant. Les entrées et sorties d'un mois qui commence avant cette date restent incomplètes. Paramètre de l'espace « Historique PayFit » : en mode brut (défaut validé le 22/10/2026), ces mois sont calculés sur ce que l'API renvoie, sans « ≥ » ni « n.d. », et la limite est dite une fois en tête d'écran (les chiffres peuvent être sous-estimés) ; en mode signalé, l'effectif y est affiché « ≥ n (borne basse) », les entrées « ≥ n » et les sorties « n.d. ».`,
   },
   {
     id: "identity",

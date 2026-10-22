@@ -66,6 +66,7 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
   const items: [KpiSettingKey, string, string][] = [
     ["fullTimeIsOne", "Un temps plein vaut 1 ETP", yes(v.fullTimeIsOne)],
     ["capAtOne", "Quotité plafonnée à 1", yes(v.capAtOne)],
+    ["forfaitJoursIsOne", "Forfait jours sans quotité PayFit = 1 ETP", yes(v.forfaitJoursIsOne)],
     ["etpDecimals", "Décimales de la quotité avant la somme", String(v.etpDecimals)],
     ["turnoverFormula", "Formule du turnover", v.turnoverFormula === "half_sum" ? "((entrées + sorties) ÷ 2) ÷ effectif moyen" : "sorties ÷ effectif au premier jour"],
     ["neutralizeContinuity", "Contrats continus neutralisés", yes(v.neutralizeContinuity)],
@@ -210,7 +211,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
     const lastChange = dates.sort((a, b) => b.getTime() - a.getTime())[0];
     return `modifié le ${dateTimeFmt.format(lastChange)}`;
   };
-  const etpParams = `temps plein = 1 : ${s.fullTimeIsOne ? "oui" : "non"} · plafond 1 : ${s.capAtOne ? "oui" : "non"} · ${s.etpDecimals} décimales · natures ${natureList(natures)} (${changed(["fullTimeIsOne", "capAtOne", "etpDecimals"])})`;
+  const etpParams = `temps plein = 1 : ${s.fullTimeIsOne ? "oui" : "non"} · plafond 1 : ${s.capAtOne ? "oui" : "non"}${ctx.collab.data?.build.source === "payfit" ? ` · forfait jours sans quotité = 1 : ${s.forfaitJoursIsOne ? "oui" : "non"}` : ""} · ${s.etpDecimals} décimales · natures ${natureList(natures)} (${changed(["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"])})`;
   const hcParams = `natures ${natureList(natures)}${nature ? " (filtre)" : ""}`;
   const toParams = `${s.turnoverFormula === "half_sum" ? "((E + S) ÷ 2) ÷ effectif moyen" : "S ÷ effectif au premier jour"} · continus ${s.neutralizeContinuity ? "neutralisés" : "comptés"} · sorties exclues : ${s.excludedExitNatures.length ? natureList(s.excludedExitNatures) : "aucune"} (${changed(["turnoverFormula", "neutralizeContinuity", "excludedExitNatures"])})`;
   const absParams = `types : ${s.absenceTypes.length ? s.absenceTypes.join(", ") : "aucun"} · statuts : ${s.absenceStatuses.map((x) => ABSENCE_STATUS_LABELS[x] ?? x).join(", ")} · ${s.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"} (${changed(["absenceTypes", "absenceStatuses", "dayBasis"])})`;
@@ -267,7 +268,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
 
   return (
     <KpiHeader ctx={ctx} closedMonth={last}>
-      <PayfitNotice data={data} />
+      <PayfitNotice ctx={ctx} />
       {notices.map((n) => (
         <p key={n} className="notice" data-testid="kpi-param-notice">{n}</p>
       ))}

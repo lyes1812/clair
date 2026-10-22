@@ -29,3 +29,22 @@ export function natureChoices(): { code: string; label: string }[] {
   // Tri explicite par code : Object.entries place les clés numériques canoniques (« 10 », « 20 ») avant « 01 ».
   return Object.entries(CONTRACT_NATURE_LABELS).map(([code, label]) => ({ code, label })).sort((a, b) => a.code.localeCompare(b.code));
 }
+
+// Historique PayFit au-delà de la limite de conservation des contrats archivés (décision de Lyes du 22/10/2026) :
+// « raw » (défaut) : chiffres tels que l'API les renvoie, avec une mention unique en tête d'écran ;
+// « flagged » : mois concernés signalés (effectifs « ≥ », sorties, turnover et N-1 n.d.).
+export const PAYFIT_HISTORY_KEY = "rh.payfit.historyMode";
+export type PayfitHistoryMode = "raw" | "flagged";
+export const DEFAULT_PAYFIT_HISTORY: PayfitHistoryMode = "raw";
+export const PAYFIT_HISTORY_VALIDATED_ON = "2026-10-22";
+export const parsePayfitHistoryMode = (v: unknown): PayfitHistoryMode | null => (v === "raw" || v === "flagged" ? v : null);
+
+export async function getPayfitHistoryMode(workspaceId: string): Promise<{ mode: PayfitHistoryMode; origin: "default" | "setting" }> {
+  const mode = await getSetting(workspaceId, PAYFIT_HISTORY_KEY, parsePayfitHistoryMode);
+  return mode ? { mode, origin: "setting" } : { mode: DEFAULT_PAYFIT_HISTORY, origin: "default" };
+}
+
+export async function setPayfitHistoryMode(workspaceId: string, mode: PayfitHistoryMode, actorUserId: string): Promise<void> {
+  if (!parsePayfitHistoryMode(mode)) throw new Error("Mode d'historique PayFit invalide.");
+  await setSetting(workspaceId, PAYFIT_HISTORY_KEY, mode, actorUserId);
+}

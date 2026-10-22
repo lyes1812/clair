@@ -113,6 +113,7 @@ const inEst = (establishments: string[] | undefined, id: string | null) => !esta
 // dans un mois dont la couverture est en borne basse (ses entrées et sorties, elles, restent incomplètes).
 export function payfitExactFrom(data: RhBuildData): string | null {
   if (data.build.source !== "payfit" || PAYFIT_ARCHIVED_RETENTION_MONTHS === null || !data.build.referenceDate) return null;
+  if (!data.coverage.some((c) => c.presenceStatus === "lower_bound")) return null; // aucun mois limité (ou mode brut)
   return addMonthsToDate(data.build.referenceDate, -PAYFIT_ARCHIVED_RETENTION_MONTHS);
 }
 const exactAt = (data: RhBuildData, date: string) => {

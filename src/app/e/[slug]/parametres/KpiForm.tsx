@@ -5,6 +5,7 @@ import { saveKpiSettings } from "./actions";
 type Values = {
   fullTimeIsOne: boolean;
   capAtOne: boolean;
+  forfaitJoursIsOne: boolean;
   etpDecimals: number;
   turnoverFormula: string;
   excludedExitNatures: string[];
@@ -49,6 +50,11 @@ export function KpiForm({ slug, values, origins, natures, types, readLabel, stat
           <span>Un contrat ne vaut jamais plus de 1 ETP (rapport supérieur à 1 ramené à 1 et signalé).</span>
         </label>
         <Origin id="etp-cap" text={origins.capAtOne} />
+        <label className="check">
+          <input type="checkbox" name="forfaitJoursIsOne" defaultChecked={values.forfaitJoursIsOne} data-testid="setting-kpi-etp-forfait-jours" />
+          <span>PayFit : un contrat au forfait jours sans quotité ni indicateur « temps plein » renseignés vaut 1 ETP (signalé dans le détail). Un indicateur « temps plein » à non reste n.d.</span>
+        </label>
+        <Origin id="etp-forfait-jours" text={origins.forfaitJoursIsOne} />
         <div className="field-row" style={{ maxWidth: 320 }}>
           <label htmlFor="etpDecimals">Décimales de la quotité de chaque contrat (arrondie avant la somme)</label>
           <select className="select" id="etpDecimals" name="etpDecimals" defaultValue={String(values.etpDecimals)} data-testid="setting-kpi-etp-decimals">

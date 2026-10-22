@@ -7,6 +7,7 @@ import { getSettingsMeta, setSetting } from "./settings";
 export const KPI_KEYS = {
   fullTimeIsOne: "rh.kpi.etp.fullTimeIsOne",
   capAtOne: "rh.kpi.etp.capAtOne",
+  forfaitJoursIsOne: "rh.kpi.etp.forfaitJoursIsOne",
   etpDecimals: "rh.kpi.etp.decimals",
   turnoverFormula: "rh.kpi.turnover.formula",
   excludedExitNatures: "rh.kpi.turnover.excludedExitNatures",
@@ -21,11 +22,12 @@ export type KpiSettingValues = Omit<KpiParams, "natures">;
 export const KPI_DEFAULTS: KpiSettingValues = {
   fullTimeIsOne: true,
   capAtOne: true,
+  forfaitJoursIsOne: true,
   etpDecimals: 4,
   turnoverFormula: "half_sum",
   excludedExitNatures: [],
   neutralizeContinuity: true,
-  absenceTypes: [],
+  absenceTypes: ["fr_maladie_ordinaire"],
   absenceStatuses: ["approved"],
   dayBasis: "calendar",
 };
@@ -34,6 +36,7 @@ export const KPI_DEFAULTS_VALIDATED_ON = "2026-10-22";
 export const KPI_DEFAULT_STATUS: Record<KpiSettingKey, "validated" | "proposed"> = {
   fullTimeIsOne: "validated",
   capAtOne: "validated",
+  forfaitJoursIsOne: "validated",
   etpDecimals: "proposed",
   turnoverFormula: "validated",
   excludedExitNatures: "proposed",
@@ -48,6 +51,7 @@ const sortedUnique = (v: unknown[]) => [...new Set(v as string[])].sort();
 export const KPI_PARSERS: { [K in KpiSettingKey]: (v: unknown) => KpiSettingValues[K] | null } = {
   fullTimeIsOne: bool,
   capAtOne: bool,
+  forfaitJoursIsOne: bool,
   etpDecimals: (v) => (v === 2 || v === 3 || v === 4 ? v : null),
   turnoverFormula: (v) => (v === "half_sum" || v === "exits_over_start" ? (v as TurnoverFormula) : null),
   excludedExitNatures: (v) => (Array.isArray(v) && v.every((x) => typeof x === "string" && /^\d{2}$/.test(x)) ? sortedUnique(v) : null),

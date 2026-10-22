@@ -187,6 +187,18 @@ describe("Quotités construites (cas E)", () => {
     const noScope = await at({ ...contract({}), scopes: "accounting:read collaborators:read contracts:read time:read" });
     expect(noScope).toMatchObject({ kind: "nd", nd: { code: "quota-missing", reason: expect.stringContaining("contracts:time-information:read") } });
   });
+  it("E11 : forfait jours sans quotité ni indicateur temps plein (PayFit) ⇒ 1 ETP signalé (Paramètres) ; paramètre désactivé ou temps plein à non ⇒ n.d.", async () => {
+    const contract = (o: Record<string, unknown>) => ({ collaborators: [{ id: "P1" }], contracts: [{ contractId: "C1", collaboratorId: "P1", startDate: "2026-01-01", endDate: null, ...o }] });
+    const at = async (edge: Parameters<typeof payfitEdgeBuild>[0], over = {}) => etpMonthEnd(kpiInput(await payfitEdgeBuild(edge), DSN_ABSENCES, over), "2026-03");
+    const fj = { workingTimeModality: "forfait_jours", isFullTime: null, fullTimeEquivalent: null, standardWeeklyHours: null };
+    const on = await at(contract(fj));
+    expect(e4(on)).toBe("exact:10000");
+    expect(on.kind !== "nd" && on.contributions[0]).toMatchObject({ basis: "payfit_forfait_jours", checks: ["forfait jours sans quotité renseignée dans PayFit : 1 ETP (Paramètres)"] });
+    expect(await at(contract(fj), { forfaitJoursIsOne: false })).toMatchObject({ kind: "nd", nd: { code: "quota-missing" } });
+    expect(await at(contract({ ...fj, isFullTime: false }))).toMatchObject({ kind: "nd", nd: { code: "quota-missing" } });
+    expect(e4(await at(contract({ ...fj, fullTimeEquivalent: 0.5 })))).toBe("exact:5000");
+    expect(await at(contract({ ...fj, workingTimeModality: "standard" }))).toMatchObject({ kind: "nd", nd: { code: "quota-missing" } });
+  });
 });
 
 describe("DSN — nature déclarée chaque mois (CDD K-A transformé en CDI au 01/07/2025 sous le même numéro)", () => {

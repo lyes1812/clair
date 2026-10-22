@@ -13,6 +13,7 @@ export type KpiParams = {
   natures: string[]; // rh.headcount.natures
   fullTimeIsOne: boolean;
   capAtOne: boolean;
+  forfaitJoursIsOne: boolean; // PayFit : forfait jours sans quotité ni indicateur temps plein = 1 ETP
   etpDecimals: 2 | 3 | 4;
   turnoverFormula: TurnoverFormula;
   excludedExitNatures: string[];
@@ -50,7 +51,7 @@ export type KpiNd = { code: KpiNdCode; reason: string; months?: string[]; keys?:
 export type Window = { mode: "month" | "rolling" | "civil"; from: string; to: string; months: string[]; label: string };
 
 // ETP
-export type EtpBasis = "payfit_full_time" | "payfit_fte" | "dsn_full_time_modality" | "dsn_ratio";
+export type EtpBasis = "payfit_full_time" | "payfit_fte" | "payfit_forfait_jours" | "dsn_full_time_modality" | "dsn_ratio";
 export type EtpSource =
   | { source: "payfit"; fteAtRead: number | null; isFullTimeAtRead: boolean | null; weeklyHoursAtRead: number | null; modalityAtRead: string | null }
   | { source: "dsn"; month: string; establishmentId: string; contractQuota: number | null; referenceQuota: number | null; quotaUnit: string | null; modality: string | null };
