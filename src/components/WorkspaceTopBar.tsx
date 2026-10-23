@@ -1,23 +1,28 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { ALL_ITEMS } from "@/lib/nav";
+import type { MenuFamily } from "@/lib/menu";
+import { MegaMenu } from "./MegaMenu";
 import { SignOutButton } from "./SignOutButton";
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 }
 
-export function WorkspaceTopBar({ slug, workspaceName, userName, email }: { slug: string; workspaceName: string; userName: string; email: string }) {
+export function WorkspaceTopBar({ slug, workspaceName, userName, email, families }: { slug: string; workspaceName: string; userName: string; email: string; families: MenuFamily[] }) {
   const pathname = usePathname();
   const rest = pathname.replace(`/e/${slug}/`, "");
   const item = [...ALL_ITEMS].sort((a, b) => b.path.length - a.path.length).find((i) => rest === i.path || rest.startsWith(`${i.path}/`));
   const page = rest === "membres" ? "Membres et accès" : rest === "parametres" ? "Paramètres" : item?.label;
   return (
     <header className="ws-topbar">
-      <nav className="breadcrumb" aria-label="Fil d'Ariane">
-        <span>Espace {workspaceName}</span>
-        {page && (<><span aria-hidden="true">/</span><strong>{page}</strong></>)}
-      </nav>
+      <div className="topbar-left">
+        <MegaMenu families={families} />
+        <nav className="breadcrumb" aria-label="Fil d'Ariane">
+          <span>Espace {workspaceName}</span>
+          {page && (<><span aria-hidden="true">/</span><strong>{page}</strong></>)}
+        </nav>
+      </div>
       <details className="user-menu">
         <summary aria-label={`Compte de ${userName}`} data-testid="user-menu"><span className="avatar">{initials(userName)}</span></summary>
         <div className="user-menu-panel">

@@ -1,6 +1,7 @@
 import { Brand } from "@/components/AuthCard";
 import { WorkspaceNav } from "@/components/WorkspaceNav";
 import { WorkspaceTopBar } from "@/components/WorkspaceTopBar";
+import { menuFamilies } from "@/lib/menu";
 import { ROLE_LABELS } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 
@@ -33,7 +34,7 @@ export default async function WorkspaceLayout({
         </div>
       </aside>
       <div className="shell-main">
-        <WorkspaceTopBar slug={slug} workspaceName={workspace.name} userName={session.user.name} email={session.user.email} />
+        <WorkspaceTopBar slug={slug} workspaceName={workspace.name} userName={session.user.name} email={session.user.email} families={menuFamilies(slug)} />
         <main className="main">{children}</main>
       </div>
     </div>

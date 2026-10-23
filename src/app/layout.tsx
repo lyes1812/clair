@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "@fontsource-variable/inter";
 import "@/styles/typography.css";
 import "@/styles/controls.css";
+import "@/styles/charts.css";
+import "@/styles/ergonomie.css";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {

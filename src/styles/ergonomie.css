@@ -1,0 +1,50 @@
+/* Ergonomie des écrans d'analyse (inspirée des captures du webinaire, dans la charte « 101 ») : bascule d'affichage,
+   panneau de paramètres, tableaux à en-tête fixe, lignes de sous-total, pagination. */
+
+/* Bascule « Afficher tout / Graphique / Tableau ». */
+.view-switch { display: flex; gap: 2px; font-size: var(--clair-type-form); }
+.view-switch a { padding: 6px 12px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; font-weight: 500; }
+.view-switch a:hover { color: var(--ink); }
+.view-switch a[aria-current="page"] { color: var(--blue); border-bottom-color: var(--blue); }
+
+/* En-tête d'un panneau avec ses outils (export, bascules) à droite. */
+.panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.panel-head h2 { min-width: 0; }
+.panel-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Paramètres à gauche, résultat à droite. */
+.param-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 24px; align-items: start; }
+.param-panel { position: sticky; top: 16px; display: grid; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.param-main { display: grid; gap: 20px; min-width: 0; }
+.param-section { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.param-section legend { padding: 0; display: flex; align-items: center; gap: 8px; font-size: var(--clair-type-form-label); font-weight: 650; color: var(--ink); margin-bottom: 4px; }
+.param-section legend svg { color: var(--muted); flex: none; }
+.param-section .select { min-height: 36px; }
+.param-panel .btn { width: 100%; }
+@media (max-width: 960px) {
+  .param-layout { grid-template-columns: 1fr; }
+  .param-panel { position: static; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); align-items: end; }
+}
+
+/* Tableaux : défilement interne avec en-tête fixe, première colonne fixe, lignes de sous-total. */
+.table-wrap.scroll { max-height: 72vh; overflow: auto; }
+.data-table.sticky thead th { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--line); }
+.data-table.sticky-first :is(th, td):first-child { position: sticky; left: 0; z-index: 1; background: #fff; box-shadow: 1px 0 0 var(--line); }
+.data-table.sticky-first thead th:first-child { z-index: 3; background: var(--sidebar-bg); }
+.data-table tbody tr:hover > td, .data-table tbody tr:hover > th { background: #f7f8fb; }
+.data-table tr.subtotal > :is(td, th) { background: var(--surface); font-weight: 600; }
+.data-table tr.total > :is(td, th) { background: #eef1f6; font-weight: 650; border-top: 1px solid #d8dce5; }
+.data-table tr.child > :first-child { padding-left: 30px; }
+.data-table tr.child2 > :first-child { padding-left: 46px; }
+.data-table td.changed, .data-table th.changed { color: var(--danger); font-weight: 600; }
+.ver-badge { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 6px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 10px; font-weight: 650; vertical-align: 1px; }
+.trend { font-size: 10px; margin-right: 3px; color: var(--muted); }
+
+/* Pagination. */
+.pager { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; font-size: var(--clair-type-label); color: var(--muted); }
+.pager .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; pointer-events: none; }
+.pager-range { margin-right: auto; }
+
+/* Barre d'actions fixe sous les filtres. */
+.filters.bar { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); align-items: flex-end; }
+.filters.bar .field-row { flex: 1 1 160px; }
