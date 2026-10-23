@@ -138,6 +138,8 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await page.getByTestId("hyp-duplicate").getByRole("button").click();
   await expect(page.getByTestId("hyp-status")).toHaveText("Brouillon");
   expect(await txt(row("2026-12"))).toBe("24 005,80 €");
+  // Un brouillon ne peut pas servir de base au budget suivant (il pourrait encore changer).
+  await expect(page.getByTestId("hyp-chain-frozen-only")).toBeVisible();
   await page.goto(hyp);
   await expect(page.getByTestId("hyp-scenarios").locator("tbody tr")).toHaveCount(2);
 
@@ -193,6 +195,12 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   expect(await txt(page.getByTestId("proj-tile-landing").locator("dd"))).toBe("272 469,60 €");
   expect(await txt(page.getByTestId("proj-tile-headcount").locator("dd"))).toBe("7 · 6,10 ETP");
   await page.screenshot({ path: `${CAPTURES}/5-05-budget-n1.png`, fullPage: true });
+  // Base dérivée : coût projeté de décembre 2026 par le révisé = base + primes de fin d'année (1 300,00 €, non reprises).
+  await page.getByTestId("hyp-tabs").getByRole("link", { name: "Hypothèses" }).click();
+  await expect(page.getByTestId("hyp-base-masse")).toContainText("Coût projeté de décembre 2026 par « Révisé T4 2026 »");
+  expect(await txt(page.getByTestId("hyp-base-masse").locator("dd"))).toBe("24 005,80 €");
+  await expect(page.getByTestId("hyp-base-gap")).toContainText("éléments ponctuels de 2026-12 1 300,00 €");
+  await page.getByTestId("hyp-tabs").getByRole("link", { name: "Projection" }).click();
   // Budget 2027 contre 2026 (réel janv.–sept. + projeté du révisé oct.–déc. = 281 250,10 €) : −8 780,50 €.
   await page.getByTestId("hyp-tabs").getByRole("link", { name: "Comparaison" }).click();
   await expect(page.getByTestId("cmp-tile-n1").locator("dd")).toContainText("-8 780,50 €");

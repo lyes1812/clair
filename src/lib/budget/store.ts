@@ -167,7 +167,9 @@ export async function deleteScenario(workspaceId: string, scenarioId: string): P
 
 // --- Budgets saisis (référence des comparaisons) : montants chargés globaux par mois d'une année ; un mois vide est n.d.
 const year = z.string().regex(/^\d{4}$/);
-export const amountsSchema = z.record(z.string().refine(isMonth), cents.nonnegative().nullable());
+// Plafond par mois (10^12 €) : la somme de 12 mois reste un entier exact.
+export const MAX_MONTH_CENTS = 100_000_000_000_000;
+export const amountsSchema = z.record(z.string().refine(isMonth), cents.nonnegative().max(MAX_MONTH_CENTS).nullable());
 export type BudgetRow = typeof budgetReference.$inferSelect;
 
 export async function listBudgets(workspaceId: string): Promise<BudgetRow[]> {

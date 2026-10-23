@@ -177,6 +177,9 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     expect(b1?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
     expect(b1?.contracts.find((c) => c.externalId.endsWith("004"))).toMatchObject({ base: null, baseNd: "entré le 2026-02-15, après le mois de référence : base à saisir", etp4: 10000 });
     expect(b1?.etpNote).toContain("quotités PayFit à la date de lecture");
+    // Horizon arrêté en janvier : 004 (entrée en février) est gardé pour une base dérivée, hors des contrats projetés.
+    const r0 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-01", syncId: "s", readAt: "2026-10-21" });
+    expect(r0.kind === "value" && [r0.base.contracts.length, r0.base.upcoming?.map((c) => c.externalId.slice(-3))]).toEqual([6, ["004"]]);
     // Rapprochement de janvier sur les seuls contrats présents fin janvier : pas de prime en janvier, base = masse.
     expect(b1).toMatchObject({ refMasse: 1953000, refBaseCost: 1953000 });
     const extra = { ...lines[0], key: "extra", month: "2026-09", accountId: "641100", debitCents: 0, creditCents: null, contractId: "TEST-A-CONTRACT-001", analytic: [{ type: "Service", code: "TEST-SVC-Z", value: "Z" }] as never };
@@ -211,6 +214,33 @@ describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas �
     const { groupReasons } = await import("@/lib/budget/series");
     expect(groupReasons([{ month: "2026-11", reason: "x" }, { month: "2026-12", reason: "x" }, { month: "2027-01", reason: "x" }, { month: "2027-03", reason: "x" }, { month: "2026-05", reason: "y" }])).toBe("x (2026-11 → 2027-01, 2027-03) ; y (2026-05)");
   });
+  it("base dérivée : écart coût projeté de décembre − base ventilé par nature ; contrat connu à venir repris avec base à saisir", () => {
+    const hyps: Hypothesis[] = [
+      fixC,
+      { id: "pon", kind: "ponctuel", label: "Primes", month: "2026-12", amount: { mode: "charge", costCents: 500000 }, service: null },
+      { id: "h2", kind: "embauche", label: "Recrue", service: "TECH", start: "2026-12-16", end: null, grossFullTimeCents: 300000, quotaBps: 10000, chargesBps: 4000, counted: true, replaces: null },
+      { id: "dB", kind: "depart", label: "Départ B", contractKey: "B", lastPaidDate: "2026-12-10", exitCost: { mode: "brut", brutCents: 100000, chargesBps: 2000 } },
+    ];
+    const b2 = { ...base, upcoming: [contract("U", { startDate: "2027-03-01", baseNd: "à venir" })] };
+    const pr = project(b2, "2026-10", "2026-12", hyps, conv);
+    const r = chainBase({ id: "P", name: "Révisé", firstMonth: "2026-10", lastMonth: "2026-12", conventions: conv }, b2, hyps, pr, "2026-10-23", "2027-12");
+    if (r.kind !== "value") throw new Error(r.reason);
+    // Décembre : A 4 200 + B 10/31 (645,16 + 290,32 = 935,48) + C 3 550 + recrue 16/31 (1 548,39 + 619,35) + primes 5 000 + sortie B 1 200
+    // = 17 053,22 € ; base dérivée : A 4 200 + C 3 550 + recrue mois complet 4 200 = 11 950 €.
+    expect(r.base).toMatchObject({ refMasse: 1705322, refBaseCost: 1195000 });
+    expect(r.base.origin?.gap).toEqual([
+      { label: "éléments ponctuels de 2026-12", cost: 500000 },
+      { label: "coûts de sortie de 2026-12", cost: 120000 },
+      { label: "contrats sortis en 2026-12 (non repris)", cost: 93548 },
+      { label: "prorata d'entrée en 2026-12 des contrats repris", cost: -203226 },
+    ]);
+    expect(r.base.contracts.find((c) => c.contractKey === "U")).toMatchObject({ base: null, baseNd: "entré le 2027-03-01, après le mois de référence : base à saisir" });
+    const child = project(r.base, "2027-01", "2027-12", [], conv);
+    expect(child.kind === "value" && child.months[0]).toMatchObject({ kind: "value", cost: 1195000 });
+    expect(child.kind === "value" && child.months[2]).toMatchObject({ kind: "nd" });
+    const short = chainBase({ id: "P", name: "Révisé", firstMonth: "2026-10", lastMonth: "2026-12", conventions: conv }, b2, hyps, pr, "2026-10-23", "2027-02");
+    expect(short.kind === "value" && short.base.upcoming?.map((c) => c.contractKey)).toEqual(["U"]);
+  });
   it("N-1 : série décalée de 12 mois", () => {
     const s = shifted(one("s", 5, 1, "2025-10"), 12, "n1", "N-1");
     expect(s.points.get("2026-10")).toMatchObject({ month: "2026-10", cost: 5 });
@@ -225,16 +255,17 @@ describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas �
     ];
     const parent = { id: "P", name: "Révisé", firstMonth: "2026-10", lastMonth: "2026-12", conventions: conv };
     const pr = project(base, "2026-10", "2026-12", hyps.slice(0, 4), conv);
-    const r = chainBase(parent, base, hyps.slice(0, 4), pr, "2026-10-23");
+    const r = chainBase(parent, base, hyps.slice(0, 4), pr, "2026-10-23", "2027-12");
     if (r.kind !== "value") throw new Error(r.reason);
     const c = (k: string) => r.base.contracts.find((x) => x.contractKey === k);
     // A : 3 000 € × 1,02 = 3 060 € au taux 40 % ; C : 2 500 € × 1,02 = 2 550 € à 42 % ; embauche : 3 600 € × 80 % = 2 880 € à 45 %.
-    expect(c("A")?.base).toEqual({ salaryCents: 306000, refBrutCents: 330000, refCotisationsCents: 132000 });
+    // Base dérivée = brut et charges exacts du mois complet de décembre (taux = charges ÷ brut).
+    expect(c("A")?.base).toEqual({ salaryCents: 306000, refBrutCents: 306000, refCotisationsCents: 122400 });
     expect(c("B")).toBeUndefined();
-    expect(c("C")?.base).toEqual({ salaryCents: 255000, refBrutCents: 10000, refCotisationsCents: 4200 });
-    expect(c("embauche:h")).toMatchObject({ base: { salaryCents: 288000, refBrutCents: 10000, refCotisationsCents: 4500 }, etp4: 8000, service: "SALES", startDate: "2026-11-16" });
+    expect(c("C")?.base).toEqual({ salaryCents: 255000, refBrutCents: 255000, refCotisationsCents: 107100 });
+    expect(c("embauche:h")).toMatchObject({ base: { salaryCents: 288000, refBrutCents: 288000, refCotisationsCents: 129600 }, etp4: 8000, service: "SALES", startDate: "2026-11-16" });
     // Décembre du parent = 4 284 € + 3 621 € + 4 176 € = 12 081 € = base dérivée (aucun élément ponctuel).
-    expect(r.base).toMatchObject({ refMonth: "2026-12", refMasse: 1208100, refBaseCost: 1208100, origin: { scenarioName: "Révisé", month: "2026-12", notCarried: [] } });
+    expect(r.base).toMatchObject({ refMonth: "2026-12", refMasse: 1208100, refBaseCost: 1208100, origin: { scenarioName: "Révisé", month: "2026-12", notCarried: [], gap: [] } });
     const child = project(r.base, "2027-01", "2027-12", [], conv);
     expect(month(child, "2027-01")).toMatchObject({ cost: 1208100, headcount: 3, etp4: 28000 });
     // Atterrissage 2027 = 12 × 12 081 € ; atterrissage 2026 vu du budget N+1 = réel janv.–sept. + projeté du parent.
@@ -245,12 +276,12 @@ describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas �
     const n1 = shifted(scenarioSeries("c", "Budget 2027", r.base, child), 12, "n1", "N-1");
     expect(n1.points.get("2027-12")).toMatchObject({ cost: 1208100, layer: "projete-parent" });
     // Un départ postérieur à décembre n'est pas repris : signalé.
-    const r2 = chainBase(parent, base, hyps, project(base, "2026-10", "2026-12", hyps, conv), "2026-10-23");
+    const r2 = chainBase(parent, base, hyps, project(base, "2026-10", "2026-12", hyps, conv), "2026-10-23", "2027-12");
     expect(r2.kind === "value" && r2.base.contracts.find((x) => x.contractKey === "A")?.base?.salaryCents).toBe(306000);
     expect(r2.kind === "value" && r2.base.origin?.notCarried).toEqual(["départ « Départ A 2027 » du 2027-02-28 (postérieur à 2026-12)"]);
     // Départ le 31 décembre : le contrat n'est plus présent en janvier, il n'est pas repris.
     const h3 = [...hyps.slice(0, 4), { ...hyps[4], lastPaidDate: "2026-12-31" } as Hypothesis];
-    const r3 = chainBase(parent, base, h3, project(base, "2026-10", "2026-12", h3, conv), "2026-10-23");
+    const r3 = chainBase(parent, base, h3, project(base, "2026-10", "2026-12", h3, conv), "2026-10-23", "2027-12");
     expect(r3.kind === "value" && r3.base.contracts.map((x) => x.contractKey)).toEqual(["C", "embauche:h"].sort((x, y) => x.localeCompare(y)) && expect.not.arrayContaining(["A"]));
   });
 });

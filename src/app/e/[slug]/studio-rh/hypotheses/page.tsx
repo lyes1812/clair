@@ -73,7 +73,9 @@ async function comparison(slug: string, workspaceId: string, s: ScenarioRow, bas
     if (v === "n1") compared.push(shifted(principal, 12, "n1", "N-1"));
     else if (v === "reel") {
       const ctx = await loadPayrollContext(slug);
-      compared.push(ctx.input ? liveSeries("reel", "Réel courant", ctx.input, ctx.kpi.input) : { key: "reel", label: "Réel courant", points: new Map() });
+      // Sans journal PayFit (source DSN, lecture absente) : chaque mois est n.d. avec la raison réelle.
+      const why = ctx.unavailable ?? (ctx.source === "dsn" ? "source RH retenue : DSN — journal de paie PayFit non lu" : "journal de paie indisponible");
+      compared.push(ctx.input ? liveSeries("reel", "Réel courant", ctx.input, ctx.kpi.input) : { key: "reel", label: "Réel courant", points: new Map(monthRange(`${year}-01`, `${year}-12`).map((m) => [m, { month: m, kind: "nd" as const, reason: why }])) });
     } else if (v.startsWith("budget:")) {
       const b = budgets.find((x) => x.id === v.slice(7));
       if (b) compared.push(budgetSeries(`budget-${b.id.slice(0, 8)}`, `Budget « ${b.name} »`, b.year, b.amounts));
@@ -84,6 +86,8 @@ async function comparison(slug: string, workspaceId: string, s: ScenarioRow, bas
   }
   return <ComparisonView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} years={years} year={year} principal={principal} compared={compared} options={options} selected={selected} refMonth={base.refMonth} />;
 }
+
+const centsText = (c: number | null) => (c === null ? "" : `${Math.trunc(c / 100)},${String(Math.abs(c % 100)).padStart(2, "0")}`);
 
 // Budgets saisis : montants chargés globaux par mois (budget fait hors de Clair), référence des comparaisons.
 function BudgetForm({ slug, budget, testid }: { slug: string; budget: BudgetRow | null; testid: string }) {
@@ -104,7 +108,7 @@ function BudgetForm({ slug, budget, testid }: { slug: string; budget: BudgetRow 
         {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")).map((mm) => (
           <div className="field-row" key={mm}>
             <label htmlFor={`${testid}-m${mm}`}>{formatMonth(`${y}-${mm}`).split(" ")[0]} (€ chargés)</label>
-            <input className="input" id={`${testid}-m${mm}`} name={`m${mm}`} inputMode="decimal" defaultValue={budget?.amounts[`${y}-${mm}`] != null ? String(budget.amounts[`${y}-${mm}`]! / 100).replace(".", ",") : ""} />
+            <input className="input" id={`${testid}-m${mm}`} name={`m${mm}`} inputMode="decimal" defaultValue={centsText(budget?.amounts[`${y}-${mm}`] ?? null)} />
           </div>
         ))}
       </div>
@@ -201,7 +205,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
               {draft && <ActionForm action={deleteScenarioAction.bind(null, slug, s.id)} submit="Supprimer le brouillon" testid="hyp-delete" className="inline-form" danger />}
             </div>
           )}
-          {canEdit && (
+          {canEdit && !draft && (
             <details style={{ marginTop: 12 }}>
               <summary>Préparer le budget suivant (simulateur N+1)</summary>
               <p className="desc">Nouveau scénario dont la base est l'état projeté de celui-ci fin {formatMonth(s.lastMonth).toLowerCase()} : contrats encore présents au salaire du mois complet (augmentations comprises), embauches reprises, départs et éléments ponctuels non repris. Projection à partir de {formatMonth(addMonths(s.lastMonth, 1)).toLowerCase()}.</p>
@@ -228,6 +232,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
               </ActionForm>
             </details>
           )}
+          {canEdit && draft && <p className="tile-foot" data-testid="hyp-chain-frozen-only">Simulateur N+1 : figez ce scénario pour en dériver le budget suivant.</p>}
         </section>
         <nav className="tabs" data-testid="hyp-tabs">
           <a href={href("projection")} aria-current={vue === "projection" ? "page" : undefined}>Projection</a>

@@ -8,6 +8,7 @@ import { monthShort } from "../masse-salariale/components";
 const LAYER: Record<Layer, string> = { reel: "réel", "projete-parent": "projeté (parent)", projete: "projeté", budget: "budget" };
 const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
 const cell = (p: Point | undefined) => (!p ? "n.d." : p.kind === "nd" ? "n.d." : formatEuros(p.cost));
+const why = (p: Point | undefined) => (!p ? "mois non couvert par cette lecture" : p.kind === "nd" ? p.reason : undefined);
 const pctText = (pct: { num: number; den: number } | null) => (pct ? `${pct.num > 0 ? "+" : ""}${fmtPercent(pct)}` : "n.d. (référence nulle)");
 
 export type Option = { value: string; label: string };
@@ -84,13 +85,13 @@ export function ComparisonView({
                 return (
                   <tr key={m} data-month={m}>
                     <td>{formatMonth(m)}</td>
-                    <td className="num" data-col="principal" title={a?.kind === "nd" ? a.reason : undefined}>{cell(a)}{a?.kind === "value" ? <span className="tile-foot"> {LAYER[a.layer]}</span> : null}</td>
+                    <td className="num" data-col="principal" title={why(a)}>{cell(a)}{a?.kind === "value" ? <span className="tile-foot"> {LAYER[a.layer]}</span> : null}</td>
                     {compared.map((c) => {
                       const b = c.points.get(m);
                       const e = a?.kind === "value" && b?.kind === "value" ? signed(a.cost - b.cost) : "n.d.";
                       return [
-                        <td key={c.key} className="num" data-col={c.key} title={b?.kind === "nd" ? b.reason : undefined}>{cell(b)}{b?.kind === "value" && b.layer !== "budget" ? <span className="tile-foot"> {LAYER[b.layer]}</span> : null}</td>,
-                        <td key={`${c.key}-e`} className="num" data-col={`${c.key}-ecart`}>{e}</td>,
+                        <td key={c.key} className="num" data-col={c.key} title={why(b)}>{cell(b)}{b?.kind === "value" && b.layer !== "budget" ? <span className="tile-foot"> {LAYER[b.layer]}</span> : null}</td>,
+                        <td key={`${c.key}-e`} className="num" data-col={`${c.key}-ecart`} title={why(a) ?? why(b)}>{e}</td>,
                       ];
                     })}
                   </tr>

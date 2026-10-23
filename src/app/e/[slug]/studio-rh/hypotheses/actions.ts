@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { buildBase } from "@/lib/budget/base";
 import { getConventions } from "@/lib/budget/settings";
 import { z } from "zod";
-import { addHypothesis, BudgetError, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
+import { addHypothesis, BudgetError, MAX_MONTH_CENTS, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
 import { chainBase } from "@/lib/budget/chain";
 import { project } from "@/lib/budget/engine";
 import type { Amount, Hypothesis, HypothesisKind, Scope } from "@/lib/budget/types";
@@ -223,8 +223,9 @@ export async function createChainedScenarioAction(slug: string, parentId: string
   if (!["budget", "revise", "simulation"].includes(kind)) return { error: "Type de scénario invalide." };
   if (!isMonth(lastMonth) || lastMonth < firstMonth) return { error: `Dernier mois projeté requis, à partir de ${firstMonth}.` };
   if (monthRange(firstMonth, lastMonth).length > MAX_HORIZON) return { error: `Horizon de ${MAX_HORIZON} mois au plus.` };
+  if (p.status !== "fige") return { error: "Figez ce scénario avant d'en dériver le budget suivant : un brouillon peut encore changer, la base dérivée ne serait plus traçable." };
   const proj = project(parent.base, p.firstMonth, p.lastMonth, parent.hypotheses, p.conventions);
-  const b = chainBase({ id: p.id, name: p.name, firstMonth: p.firstMonth, lastMonth: p.lastMonth, conventions: p.conventions }, parent.base, parent.hypotheses, proj, new Date().toISOString().slice(0, 10));
+  const b = chainBase({ id: p.id, name: p.name, firstMonth: p.firstMonth, lastMonth: p.lastMonth, conventions: p.conventions }, parent.base, parent.hypotheses, proj, new Date().toISOString().slice(0, 10), lastMonth);
   if (b.kind === "nd") return { error: `Base dérivée impossible : ${b.reason}.` };
   let id: string;
   try {
@@ -253,7 +254,7 @@ export async function saveBudgetAction(slug: string, budgetId: string | null, _p
       continue;
     }
     const c = toCents(raw);
-    if (c === null || c < 0) return { error: `${m} : montant en euros positif ou nul (ex. 140 000,00), ou vide pour « non saisi ».` };
+    if (c === null || c < 0 || c > MAX_MONTH_CENTS) return { error: `${m} : montant en euros positif ou nul (ex. 140 000,00) et inférieur à 1 000 milliards, ou vide pour « non saisi ».` };
     amounts[m] = c;
   }
   try {

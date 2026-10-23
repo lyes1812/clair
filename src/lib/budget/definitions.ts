@@ -34,13 +34,13 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
     id: "atterrissage",
     title: "Atterrissage",
     text:
-      "Masse salariale chargée de l'année du premier mois projeté : réel figé de janvier au mois de référence + mois projetés jusqu'à décembre. n.d. si un mois réel est n.d. ou si l'horizon s'arrête avant décembre.",
+      "Masse salariale chargée de l'année du premier mois projeté : réel figé de janvier au dernier mois clos + mois projetés par le ou les scénarios parents (base dérivée) + mois projetés par ce scénario jusqu'à décembre, chaque partie affichée avec sa source. n.d. si un mois est n.d. ou si l'horizon s'arrête avant décembre.",
   },
   {
     id: "derivee",
     title: "Base dérivée (simulateur N+1)",
     text:
-      "Base d'un scénario créé à partir d'un autre : état projeté de ce dernier au dernier mois de son horizon. Contrats encore présents ce mois-là au salaire du mois complet (augmentations comprises) et à leur taux de charges, embauches reprises comme contrats, départs effectués exclus. Les éléments ponctuels et les hypothèses postérieures à ce mois ne sont pas repris (listés). Les mois projetés du scénario parent servent de N-1 et d'atterrissage de l'année en cours.",
+      "Base d'un scénario créé à partir d'un autre, figé : état projeté de ce dernier au dernier mois de son horizon (brut et charges du mois complet). Contrats encore présents ce mois-là au salaire du mois complet (augmentations comprises) et à leur taux de charges, embauches reprises comme contrats, départs effectués exclus. Les éléments ponctuels et les hypothèses postérieures à ce mois ne sont pas repris (listés). Les mois projetés du scénario parent servent de N-1 et d'atterrissage de l'année en cours.",
   },
   {
     id: "budget-saisi",

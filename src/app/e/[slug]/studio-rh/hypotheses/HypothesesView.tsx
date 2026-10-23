@@ -87,9 +87,21 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
             <span className="tile-foot">salaires et gratifications de stage + charges au taux observé de chaque contrat</span>
           </div>
           <div data-testid="hyp-base-masse">
-            <dt>Masse salariale réelle de {formatMonth(base.refMonth).toLowerCase()}</dt>
-            <dd>{formatEuros(base.refMasse)}</dd>
-            <span className="tile-foot">{base.refBaseCost === null ? "écart avec la base : n.d." : `hors base : ${formatEuros(base.refMasse - base.refBaseCost)} (primes, indemnités, contrats sortis dans le mois, lignes sans contrat)`}</span>
+            {base.origin ? (
+              <>
+                <dt>Coût projeté de {formatMonth(base.refMonth).toLowerCase()} par « {base.origin.scenarioName} »</dt>
+                <dd>{formatEuros(base.refMasse)}</dd>
+                <span className="tile-foot" data-testid="hyp-base-gap">
+                  {base.refBaseCost === null ? "écart avec la base : n.d." : (base.origin.gap ?? []).length === 0 ? "égal à la base dérivée" : `non repris dans la base : ${(base.origin.gap ?? []).map((g) => `${g.label} ${formatEuros(g.cost)}`).join(" ; ")}`}
+                </span>
+              </>
+            ) : (
+              <>
+                <dt>Masse salariale réelle de {formatMonth(base.refMonth).toLowerCase()}</dt>
+                <dd>{formatEuros(base.refMasse)}</dd>
+                <span className="tile-foot">{base.refBaseCost === null ? "écart avec la base : n.d." : `hors base : ${formatEuros(base.refMasse - base.refBaseCost)} (primes, indemnités, contrats sortis dans le mois, lignes sans contrat)`}</span>
+              </>
+            )}
           </div>
         </dl>
         {toFix.length > 0 && (

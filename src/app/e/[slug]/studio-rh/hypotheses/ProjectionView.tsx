@@ -10,7 +10,7 @@ const KIND: Record<Contribution["kind"], string> = {
   base: "Base", augmentation: "Augmentation", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
 };
 const eur = (v: number | null) => (v === null ? "n.d." : formatEuros(v));
-type Row = { month: string; layer: "reel" | "parent" | "projete"; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
+type Row = { month: string; layer: "reel" | "parent" | "projete"; source?: string; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
 
 // Mois de l'année du premier mois projeté (réel figé) puis mois projetés jusqu'à la fin de l'horizon.
 function rowsOf(base: BaseSnapshot, proj: Projection, scenario: ScenarioRow): Row[] {
@@ -21,9 +21,22 @@ function rowsOf(base: BaseSnapshot, proj: Projection, scenario: ScenarioRow): Ro
   // Base dérivée : mois projetés par le scénario parent dans l'année (coût et effectif seulement).
   const prior: Row[] = (base.prior ?? [])
     .filter((p) => p.month.startsWith(year) && p.month < scenario.firstMonth && !base.actuals.some((a) => a.month === p.month))
-    .map((p) => (p.kind === "nd" ? { month: p.month, layer: "parent", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reason, etpNd: null } : { month: p.month, layer: "parent", brut: null, charges: null, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
+    .map((p) => (p.kind === "nd" ? { month: p.month, layer: "parent", source: p.source, brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reason, etpNd: null } : { month: p.month, layer: "parent", source: p.source, brut: p.brut ?? null, charges: p.charges ?? null, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
   const projected: Row[] = proj.kind === "error" ? [] : proj.months.map((p: ProjectedMonth) => (p.kind === "nd" ? { month: p.month, layer: "projete", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reasons.join(" ; "), etpNd: null } : { month: p.month, layer: "projete", brut: p.brut, charges: p.charges, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
   return [...actual, ...prior, ...projected];
+}
+
+// Mois projetés par les scénarios parents, groupés par scénario d'origine (une base dérivée de base dérivée a deux sources).
+function priorBySource(base: BaseSnapshot, months: string[]) {
+  const out: { source: string; months: string[]; cost: number }[] = [];
+  for (const m of months) {
+    const p = base.prior?.find((x) => x.month === m);
+    if (!p || p.kind !== "value") continue;
+    const g = out.find((x) => x.source === p.source) ?? (out.push({ source: p.source, months: [], cost: 0 }), out.at(-1)!);
+    g.months.push(m);
+    g.cost += p.cost;
+  }
+  return out;
 }
 
 function Chart({ rows }: { rows: Row[] }) {
@@ -95,7 +108,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
               <span className="tile-foot" data-testid="proj-tile-landing-split">
                 {[
                   landing.actualMonths.length ? `réel ${monthShort(landing.actualMonths[0])}–${monthShort(landing.actualMonths.at(-1)!)} ${formatEuros(landing.actual)}` : null,
-                  landing.priorMonths.length ? `projeté par « ${base.origin?.scenarioName ?? "parent"} » ${monthShort(landing.priorMonths[0])}–${monthShort(landing.priorMonths.at(-1)!)} ${formatEuros(landing.prior)}` : null,
+                  ...priorBySource(base, landing.priorMonths).map((g) => `${g.source} ${monthShort(g.months[0])}–${monthShort(g.months.at(-1)!)} ${formatEuros(g.cost)}`),
                   landing.projectedMonths.length ? `projeté ${monthShort(landing.projectedMonths[0])}–${monthShort(landing.projectedMonths.at(-1)!)} ${formatEuros(landing.projected)}` : null,
                 ].filter(Boolean).join(" + ")}
               </span>
@@ -124,7 +137,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
               {rows.map((r) => (
                 <tr key={r.month} data-month={r.month} data-layer={r.layer}>
                   <td>{r.layer === "projete" && r.cost !== null ? <a href={`${href}&mois=${r.month}#proj-detail`}>{formatMonth(r.month)}</a> : formatMonth(r.month)}</td>
-                  <td>{r.layer === "reel" ? "Réel" : r.layer === "parent" ? `Projeté — « ${base.origin?.scenarioName ?? "parent"} »` : "Projeté"}</td>
+                  <td>{r.layer === "reel" ? "Réel" : r.layer === "parent" ? (r.source ?? "Projeté (scénario parent)") : "Projeté"}</td>
                   <td className="num">{eur(r.brut)}</td>
                   <td className="num">{eur(r.charges)}</td>
                   <td className="num" data-col="cost" title={r.nd ?? undefined}>{r.cost === null ? "n.d." : formatEuros(r.cost)}</td>

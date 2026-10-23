@@ -42,11 +42,20 @@ export type BaseSnapshot = {
   // figée sur le réel PayFit.
   origin?: BaseOrigin;
   prior?: PriorMonth[]; // mois projetés par le(s) scénario(s) parent(s) entre leur bascule et le mois de référence
+  upcoming?: BaseContract[]; // contrats connus de PayFit qui commencent après l'horizon (repris par une base dérivée)
 };
 
-export type BaseOrigin = { kind: "scenario"; scenarioId: string; scenarioName: string; month: string; at: string; notCarried: string[] };
+export type BaseOrigin = {
+  kind: "scenario";
+  scenarioId: string;
+  scenarioName: string;
+  month: string;
+  at: string;
+  notCarried: string[];
+  gap: { label: string; cost: number }[]; // coût projeté du mois − base dérivée, par nature (non repris)
+};
 export type PriorMonth =
-  | { month: string; kind: "value"; cost: number; headcount: number; etp4: number | null; etpNd: string | null; source: string }
+  | { month: string; kind: "value"; cost: number; brut: number | null; charges: number | null; headcount: number; etp4: number | null; etpNd: string | null; source: string }
   | { month: string; kind: "nd"; reason: string; source: string };
 
 // --- Hypothèses datées saisies dans Clair.
