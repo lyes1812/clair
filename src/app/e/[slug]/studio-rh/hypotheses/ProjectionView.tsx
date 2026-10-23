@@ -10,7 +10,7 @@ const KIND: Record<Contribution["kind"], string> = {
   base: "Base", augmentation: "Augmentation", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
 };
 const eur = (v: number | null) => (v === null ? "n.d." : formatEuros(v));
-type Row = { month: string; layer: "reel" | "projete"; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
+type Row = { month: string; layer: "reel" | "parent" | "projete"; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
 
 // Mois de l'année du premier mois projeté (réel figé) puis mois projetés jusqu'à la fin de l'horizon.
 function rowsOf(base: BaseSnapshot, proj: Projection, scenario: ScenarioRow): Row[] {
@@ -18,8 +18,12 @@ function rowsOf(base: BaseSnapshot, proj: Projection, scenario: ScenarioRow): Ro
   const actual: Row[] = base.actuals
     .filter((a) => a.month.startsWith(year) && a.month < scenario.firstMonth)
     .map((a) => (a.kind === "nd" ? { month: a.month, layer: "reel", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: a.reason, etpNd: null } : { month: a.month, layer: "reel", brut: a.brut, charges: a.cotisations, cost: a.masse, headcount: a.headcount, etp4: a.etp4, nd: null, etpNd: a.etpNd }));
+  // Base dérivée : mois projetés par le scénario parent dans l'année (coût et effectif seulement).
+  const prior: Row[] = (base.prior ?? [])
+    .filter((p) => p.month.startsWith(year) && p.month < scenario.firstMonth && !base.actuals.some((a) => a.month === p.month))
+    .map((p) => (p.kind === "nd" ? { month: p.month, layer: "parent", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reason, etpNd: null } : { month: p.month, layer: "parent", brut: null, charges: null, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
   const projected: Row[] = proj.kind === "error" ? [] : proj.months.map((p: ProjectedMonth) => (p.kind === "nd" ? { month: p.month, layer: "projete", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reasons.join(" ; "), etpNd: null } : { month: p.month, layer: "projete", brut: p.brut, charges: p.charges, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
-  return [...actual, ...projected];
+  return [...actual, ...prior, ...projected];
 }
 
 function Chart({ rows }: { rows: Row[] }) {
@@ -32,6 +36,7 @@ function Chart({ rows }: { rows: Row[] }) {
     <svg viewBox={`0 0 ${width} ${H + 34}`} role="img" aria-label="Coût employeur par mois, réel puis projeté" style={{ width: "100%", maxWidth: width, height: "auto" }} data-testid="proj-chart">
       <defs>
         <pattern id="proj-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="var(--blue)" /></pattern>
+        <pattern id="proj-hatch-parent" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="#9aa6bf" /></pattern>
         <pattern id="proj-nd" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="#e7eaf0" /></pattern>
       </defs>
       <line x1="10" x2={width - 10} y1={H} y2={H} stroke="var(--line)" />
@@ -43,8 +48,8 @@ function Chart({ rows }: { rows: Row[] }) {
               <rect x={x} y={H - 24} width="28" height="24" fill="url(#proj-nd)"><title>{`${r.month} : n.d. — ${r.nd}`}</title></rect>
             ) : (
               <>
-                <rect x={x} y={y(r.cost)} width="28" height={H - y(r.cost)} fill={r.layer === "reel" ? "var(--ink)" : "url(#proj-hatch)"} stroke={r.layer === "reel" ? "none" : "var(--blue)"}>
-                  <title>{`${r.month} (${r.layer === "reel" ? "réel" : "projeté"}) : ${formatEuros(r.cost)}`}</title>
+                <rect x={x} y={y(r.cost)} width="28" height={H - y(r.cost)} fill={r.layer === "reel" ? "var(--ink)" : r.layer === "parent" ? "url(#proj-hatch-parent)" : "url(#proj-hatch)"} stroke={r.layer === "reel" ? "none" : r.layer === "parent" ? "#9aa6bf" : "var(--blue)"}>
+                  <title>{`${r.month} (${r.layer === "reel" ? "réel" : r.layer === "parent" ? "projeté par le scénario parent" : "projeté"}) : ${formatEuros(r.cost)}`}</title>
                 </rect>
                 <text x={x + 14} y={y(r.cost) - 5} textAnchor="middle" fontSize="10" fill="var(--ink)">{fmtFixed({ num: r.cost, den: 100000 }, 1)}</text>
               </>
@@ -87,7 +92,13 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
             <dt>Atterrissage {landing.year} (coût employeur)</dt>
             <dd className={landing.kind === "nd" ? "nd" : undefined}>{landing.kind === "nd" ? `n.d. — ${landing.reason}` : formatEuros(landing.total)}</dd>
             {landing.kind === "value" && (
-              <span className="tile-foot" data-testid="proj-tile-landing-split">réel {landing.actualMonths.length ? `${monthShort(landing.actualMonths[0])}–${monthShort(landing.actualMonths.at(-1)!)}` : "—"} {formatEuros(landing.actual)} + projeté {landing.projectedMonths.length ? `${monthShort(landing.projectedMonths[0])}–${monthShort(landing.projectedMonths.at(-1)!)}` : "—"} {formatEuros(landing.projected)}</span>
+              <span className="tile-foot" data-testid="proj-tile-landing-split">
+                {[
+                  landing.actualMonths.length ? `réel ${monthShort(landing.actualMonths[0])}–${monthShort(landing.actualMonths.at(-1)!)} ${formatEuros(landing.actual)}` : null,
+                  landing.priorMonths.length ? `projeté par « ${base.origin?.scenarioName ?? "parent"} » ${monthShort(landing.priorMonths[0])}–${monthShort(landing.priorMonths.at(-1)!)} ${formatEuros(landing.prior)}` : null,
+                  landing.projectedMonths.length ? `projeté ${monthShort(landing.projectedMonths[0])}–${monthShort(landing.projectedMonths.at(-1)!)} ${formatEuros(landing.projected)}` : null,
+                ].filter(Boolean).join(" + ")}
+              </span>
             )}
             <span className="tile-foot"><a href="#def-atterrissage">Définition</a></span>
           </div>
@@ -113,7 +124,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
               {rows.map((r) => (
                 <tr key={r.month} data-month={r.month} data-layer={r.layer}>
                   <td>{r.layer === "projete" && r.cost !== null ? <a href={`${href}&mois=${r.month}#proj-detail`}>{formatMonth(r.month)}</a> : formatMonth(r.month)}</td>
-                  <td>{r.layer === "reel" ? "Réel" : "Projeté"}</td>
+                  <td>{r.layer === "reel" ? "Réel" : r.layer === "parent" ? `Projeté — « ${base.origin?.scenarioName ?? "parent"} »` : "Projeté"}</td>
                   <td className="num">{eur(r.brut)}</td>
                   <td className="num">{eur(r.charges)}</td>
                   <td className="num" data-col="cost" title={r.nd ?? undefined}>{r.cost === null ? "n.d." : formatEuros(r.cost)}</td>

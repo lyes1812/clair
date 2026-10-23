@@ -188,3 +188,69 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     expect(buildBase({ input: { ...input, openMonths: ["2026-09"] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" })).toMatchObject({ kind: "nd", reason: expect.stringContaining("non clôturée") });
   });
 });
+
+describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas écrits à la main)", async () => {
+  const { budgetSeries, bridge, gap, scenarioSeries, shifted, total } = await import("@/lib/budget/series");
+  const { chainBase } = await import("@/lib/budget/chain");
+  const one = (key: string, cost: number, etp4: number | null, month = "2026-10") => ({ key, label: key, points: new Map([[month, { month, kind: "value" as const, cost, etp4, etpNd: null, layer: "projete" as const }]]) });
+  it("pont : 3 ETP pour 10 000 € contre 2 ETP pour 7 000 € → volume +3 500 €, coût moyen −500 €, somme = +3 000 €", () => {
+    expect(bridge(one("a", 1000000, 30000), one("b", 700000, 20000), ["2026-10"])).toEqual({ kind: "value", a: { cost: 1000000, etpMonths4: 30000 }, b: { cost: 700000, etpMonths4: 20000 }, delta: 300000, volume: 350000, averageCost: -50000 });
+    // Demi-centime : volume 3 500,005 € arrondi à 3 500,01 € ; le coût moyen porte le reste (−500,02 €).
+    expect(bridge(one("a", 1000000, 30000), one("b", 700001, 20000), ["2026-10"])).toMatchObject({ volume: 350001, averageCost: -50002, delta: 299999 });
+    expect(bridge(one("a", 1000000, null), one("b", 700000, 20000), ["2026-10"])).toMatchObject({ kind: "nd", reason: expect.stringContaining("ETP n.d.") });
+  });
+  it("budget saisi : un mois non saisi rend le total n.d. ; écart en € et en % du budget", () => {
+    const amounts = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`2026-${String(i + 1).padStart(2, "0")}`, 1000000])) as Record<string, number | null>;
+    const b = budgetSeries("b", "Budget 2026", "2026", amounts);
+    expect(total(b, ["2026-01", "2026-02"])).toEqual({ kind: "value", cost: 2000000 });
+    expect(total(budgetSeries("b", "B", "2026", { ...amounts, "2026-02": null }), ["2026-01", "2026-02"])).toEqual({ kind: "nd", reason: "montant du budget non saisi (2026-02)" });
+    expect(bridge(one("a", 1, 10000, "2026-01"), b, ["2026-01", "2026-02", "2026-03"])).toMatchObject({ kind: "nd" });
+    expect(gap(one("s", 1100000, null, "2026-01"), b, ["2026-01"])).toEqual({ kind: "value", a: 1100000, b: 1000000, delta: 100000, pct: { num: 100000, den: 1000000 } });
+  });
+  it("raisons groupées : mois consécutifs en plage", async () => {
+    const { groupReasons } = await import("@/lib/budget/series");
+    expect(groupReasons([{ month: "2026-11", reason: "x" }, { month: "2026-12", reason: "x" }, { month: "2027-01", reason: "x" }, { month: "2027-03", reason: "x" }, { month: "2026-05", reason: "y" }])).toBe("x (2026-11 → 2027-01, 2027-03) ; y (2026-05)");
+  });
+  it("N-1 : série décalée de 12 mois", () => {
+    const s = shifted(one("s", 5, 1, "2025-10"), 12, "n1", "N-1");
+    expect(s.points.get("2026-10")).toMatchObject({ month: "2026-10", cost: 5 });
+  });
+  it("base dérivée fin décembre (simulateur N+1) : A augmenté de 2 %, B parti, C corrigé, embauche reprise en mois complet", () => {
+    const hyps: Hypothesis[] = [
+      fixC,
+      { id: "g2", kind: "augmentation", label: "Générale 2 %", from: "2026-11", rateBps: 200, scope: { kind: "global" } },
+      { id: "dB", kind: "depart", label: "Départ B", contractKey: "B", lastPaidDate: "2026-11-15", exitCost: null },
+      { id: "h", kind: "embauche", label: "Remplaçant B", service: "SALES", start: "2026-11-16", end: null, grossFullTimeCents: 360000, quotaBps: 8000, chargesBps: 4500, counted: true, replaces: "dB" },
+      { id: "dA", kind: "depart", label: "Départ A 2027", contractKey: "A", lastPaidDate: "2027-02-28", exitCost: null },
+    ];
+    const parent = { id: "P", name: "Révisé", firstMonth: "2026-10", lastMonth: "2026-12", conventions: conv };
+    const pr = project(base, "2026-10", "2026-12", hyps.slice(0, 4), conv);
+    const r = chainBase(parent, base, hyps.slice(0, 4), pr, "2026-10-23");
+    if (r.kind !== "value") throw new Error(r.reason);
+    const c = (k: string) => r.base.contracts.find((x) => x.contractKey === k);
+    // A : 3 000 € × 1,02 = 3 060 € au taux 40 % ; C : 2 500 € × 1,02 = 2 550 € à 42 % ; embauche : 3 600 € × 80 % = 2 880 € à 45 %.
+    expect(c("A")?.base).toEqual({ salaryCents: 306000, refBrutCents: 330000, refCotisationsCents: 132000 });
+    expect(c("B")).toBeUndefined();
+    expect(c("C")?.base).toEqual({ salaryCents: 255000, refBrutCents: 10000, refCotisationsCents: 4200 });
+    expect(c("embauche:h")).toMatchObject({ base: { salaryCents: 288000, refBrutCents: 10000, refCotisationsCents: 4500 }, etp4: 8000, service: "SALES", startDate: "2026-11-16" });
+    // Décembre du parent = 4 284 € + 3 621 € + 4 176 € = 12 081 € = base dérivée (aucun élément ponctuel).
+    expect(r.base).toMatchObject({ refMonth: "2026-12", refMasse: 1208100, refBaseCost: 1208100, origin: { scenarioName: "Révisé", month: "2026-12", notCarried: [] } });
+    const child = project(r.base, "2027-01", "2027-12", [], conv);
+    expect(month(child, "2027-01")).toMatchObject({ cost: 1208100, headcount: 3, etp4: 28000 });
+    // Atterrissage 2027 = 12 × 12 081 € ; atterrissage 2026 vu du budget N+1 = réel janv.–sept. + projeté du parent.
+    expect(landing(r.base, child, "2027")).toMatchObject({ kind: "value", total: 12 * 1208100, prior: 0 });
+    // Parent : octobre 10 650 € ; novembre A 4 284 € + B 1 479 € (15/30, après 2 %) + C 3 621 € + embauche 2 088 € (15/30)
+    // = 11 472 € ; décembre 12 081 €.
+    expect(landing(r.base, child, "2026")).toMatchObject({ kind: "value", actual: 6300000, priorMonths: ["2026-10", "2026-11", "2026-12"], prior: 1065000 + 1147200 + 1208100 });
+    const n1 = shifted(scenarioSeries("c", "Budget 2027", r.base, child), 12, "n1", "N-1");
+    expect(n1.points.get("2027-12")).toMatchObject({ cost: 1208100, layer: "projete-parent" });
+    // Un départ postérieur à décembre n'est pas repris : signalé.
+    const r2 = chainBase(parent, base, hyps, project(base, "2026-10", "2026-12", hyps, conv), "2026-10-23");
+    expect(r2.kind === "value" && r2.base.contracts.find((x) => x.contractKey === "A")?.base?.salaryCents).toBe(306000);
+    expect(r2.kind === "value" && r2.base.origin?.notCarried).toEqual(["départ « Départ A 2027 » du 2027-02-28 (postérieur à 2026-12)"]);
+    // Départ le 31 décembre : le contrat n'est plus présent en janvier, il n'est pas repris.
+    const h3 = [...hyps.slice(0, 4), { ...hyps[4], lastPaidDate: "2026-12-31" } as Hypothesis];
+    const r3 = chainBase(parent, base, h3, project(base, "2026-10", "2026-12", h3, conv), "2026-10-23");
+    expect(r3.kind === "value" && r3.base.contracts.map((x) => x.contractKey)).toEqual(["C", "embauche:h"].sort((x, y) => x.localeCompare(y)) && expect.not.arrayContaining(["A"]));
+  });
+});

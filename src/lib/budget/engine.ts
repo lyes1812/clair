@@ -243,30 +243,36 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
   return { kind: "value", months };
 }
 
-// Atterrissage d'une année : réel des mois figés + projection des mois suivants, jusqu'à décembre.
-export type Landing = { kind: "value"; year: string; actual: number; projected: number; total: number; actualMonths: string[]; projectedMonths: string[] } | { kind: "nd"; year: string; reason: string };
+// Atterrissage d'une année : réel des mois figés + mois projetés par le(s) scénario(s) parent(s) (base dérivée) +
+// projection du scénario, jusqu'à décembre.
+export type Landing =
+  | { kind: "value"; year: string; actual: number; prior: number; projected: number; total: number; actualMonths: string[]; priorMonths: string[]; projectedMonths: string[] }
+  | { kind: "nd"; year: string; reason: string };
 export function landing(base: BaseSnapshot, proj: Projection, year: string): Landing {
   if (proj.kind === "error") return { kind: "nd", year, reason: "projection refusée (hypothèses en erreur)" };
   const months = monthRange(`${year}-01`, `${year}-12`);
-  const act = months.filter((m) => m <= base.refMonth);
-  const pro = months.filter((m) => m > base.refMonth);
   const reasons: string[] = [];
-  let actual = 0;
-  for (const m of act) {
+  const out = { actual: 0, prior: 0, projected: 0, actualMonths: [] as string[], priorMonths: [] as string[], projectedMonths: [] as string[] };
+  for (const m of months) {
+    if (m > base.refMonth) {
+      const p = proj.months.find((x) => x.month === m);
+      if (!p) reasons.push(`${m} : hors de l'horizon du scénario`);
+      else if (p.kind === "nd") reasons.push(`${m} : ${p.reasons.join(" ; ")}`);
+      else (out.projected += p.cost), out.projectedMonths.push(m);
+      continue;
+    }
     const a = base.actuals.find((x) => x.month === m);
-    if (!a) reasons.push(`${m} : réel non lu`);
-    else if (a.kind === "nd") reasons.push(`${m} : ${a.reason}`);
-    else actual += a.masse;
-  }
-  let projected = 0;
-  for (const m of pro) {
-    const p = proj.months.find((x) => x.month === m);
-    if (!p) reasons.push(`${m} : hors de l'horizon du scénario`);
-    else if (p.kind === "nd") reasons.push(`${m} : ${p.reasons.join(" ; ")}`);
-    else projected += p.cost;
+    const pr = base.prior?.find((x) => x.month === m);
+    if (a) {
+      if (a.kind === "nd") reasons.push(`${m} : ${a.reason}`);
+      else (out.actual += a.masse), out.actualMonths.push(m);
+    } else if (pr) {
+      if (pr.kind === "nd") reasons.push(`${m} : ${pr.reason}`);
+      else (out.prior += pr.cost), out.priorMonths.push(m);
+    } else reasons.push(`${m} : réel non lu`);
   }
   if (reasons.length) return { kind: "nd", year, reason: reasons.join(" ; ") };
-  return { kind: "value", year, actual, projected, total: actual + projected, actualMonths: act, projectedMonths: pro };
+  return { kind: "value", year, ...out, total: out.actual + out.prior + out.projected };
 }
 
 export const contractOf = (base: BaseSnapshot, key: string): BaseContract | undefined => base.contracts.find((c) => c.contractKey === key);

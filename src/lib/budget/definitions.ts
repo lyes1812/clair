@@ -37,6 +37,24 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
       "Masse salariale chargée de l'année du premier mois projeté : réel figé de janvier au mois de référence + mois projetés jusqu'à décembre. n.d. si un mois réel est n.d. ou si l'horizon s'arrête avant décembre.",
   },
   {
+    id: "derivee",
+    title: "Base dérivée (simulateur N+1)",
+    text:
+      "Base d'un scénario créé à partir d'un autre : état projeté de ce dernier au dernier mois de son horizon. Contrats encore présents ce mois-là au salaire du mois complet (augmentations comprises) et à leur taux de charges, embauches reprises comme contrats, départs effectués exclus. Les éléments ponctuels et les hypothèses postérieures à ce mois ne sont pas repris (listés). Les mois projetés du scénario parent servent de N-1 et d'atterrissage de l'année en cours.",
+  },
+  {
+    id: "budget-saisi",
+    title: "Budget saisi",
+    text:
+      "Coût employeur global par mois d'une année, saisi dans Clair (budget préparé hors de Clair). Un mois vide est non saisi (n.d.), jamais 0. Sans ETP ni ventilation par service : le pont d'écart n'est pas calculable face à un budget saisi.",
+  },
+  {
+    id: "pont",
+    title: "Pont d'écart volume / coût moyen",
+    text:
+      "Écart de coût employeur entre deux lectures sur les mêmes mois, décomposé en effet volume = (ETP-mois de ce scénario − ETP-mois de la lecture comparée) × coût par ETP-mois de la lecture comparée, et effet coût moyen = (coût par ETP-mois de ce scénario − coût par ETP-mois comparé) × ETP-mois de ce scénario. ETP-mois = somme des ETP fin de mois. Calcul exact ; l'effet volume est arrondi au centime et l'effet coût moyen porte le reste : la somme égale l'écart. L'effet de structure (mix) n'est pas calculé : il exige des données individuelles datées des deux lectures. n.d. si un mois n'a pas d'ETP.",
+  },
+  {
     id: "effectif",
     title: "Effectif et ETP projetés",
     text:

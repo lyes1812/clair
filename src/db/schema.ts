@@ -474,3 +474,22 @@ export const budgetHypothesis = pgTable(
   },
   (t) => [index("budget_hypothesis_scenario_idx").on(t.scenarioId, t.createdAt), workspaceIsolation("budget_hypothesis")],
 ).enableRLS();
+
+// Budget saisi (module 5) : montants chargés globaux par mois d'une année (budget fait hors de Clair) ; un mois sans
+// montant est n.d. Sert de référence aux comparaisons.
+export const budgetReference = pgTable(
+  "budget_reference",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: wsRef(),
+    name: text("name").notNull(),
+    year: text("year").notNull(), // AAAA
+    amounts: jsonb("amounts").$type<Record<string, number | null>>().notNull(), // AAAA-MM → centimes (null : non saisi)
+    currency: text("currency").notNull(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: ts("created_at").defaultNow().notNull(),
+    updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+    updatedAt: ts("updated_at").defaultNow().notNull(),
+  },
+  (t) => [index("budget_reference_ws_idx").on(t.workspaceId, t.year), workspaceIsolation("budget_reference")],
+).enableRLS();

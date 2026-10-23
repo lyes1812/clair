@@ -74,6 +74,12 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
     <>
       <section className="panel" data-testid="hyp-base">
         <h2>Base figée — {formatMonth(base.refMonth).toLowerCase()} <span className="desc">— <a href="#def-base-contrat">coût de référence d'un contrat</a></span></h2>
+        {base.origin && (
+          <p className="notice" data-testid="hyp-base-origin">
+            Base dérivée du scénario « {base.origin.scenarioName} » : état projeté fin {formatMonth(base.origin.month).toLowerCase()} (salaires du mois complet, augmentations comprises ; embauches reprises ; départs et éléments ponctuels non repris).
+            {base.origin.notCarried.length ? ` Non repris car postérieurs à ${formatMonth(base.origin.month).toLowerCase()} : ${base.origin.notCarried.join(" ; ")} — à ressaisir ici si besoin.` : ""}
+          </p>
+        )}
         <dl className="facts">
           <div data-testid="hyp-base-total">
             <dt>Coût mensuel de la base ({base.contracts.filter((c) => !enteredAfter(base, c)).length} contrats présents fin {formatMonth(base.refMonth).toLowerCase()})</dt>

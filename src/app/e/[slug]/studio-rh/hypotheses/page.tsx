@@ -3,15 +3,21 @@ import { dateTimeFmt } from "@/lib/connectors/labels";
 import { addMonths, formatMonth, monthEnd } from "@/lib/dates";
 import { BUDGET_DEFINITIONS } from "@/lib/budget/definitions";
 import { landing, project } from "@/lib/budget/engine";
+import type { BaseSnapshot, Projection } from "@/lib/budget/types";
+import type { ScenarioRow } from "@/lib/budget/store";
 import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
-import { getScenario, KIND_LABELS, listScenarios } from "@/lib/budget/store";
+import { getScenario, KIND_LABELS, listBudgets, listScenarios, type BudgetRow } from "@/lib/budget/store";
+import { budgetSeries, liveSeries, scenarioSeries, shifted, type Series } from "@/lib/budget/series";
+import { monthRange } from "@/lib/connectors/months";
+import { formatEuros } from "@/lib/money";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { monthPayroll } from "@/lib/payroll/engine";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { ActionForm } from "./ActionForm";
-import { createScenarioAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction } from "./actions";
+import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
+import { ComparisonView, type Option } from "./ComparisonView";
 import { HypothesesView } from "./HypothesesView";
 import { ProjectionView } from "./ProjectionView";
 
@@ -48,6 +54,110 @@ function Definitions() {
   );
 }
 
+// Onglet Comparaison : lectures choisies (paramètre « cmp ») ; par défaut réel courant, N-1 et budgets saisis de l'année.
+async function comparison(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, proj: Projection, sp: Search) {
+  const years = [...new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)))];
+  const year = years.includes(one(sp.annee)) ? one(sp.annee) : years[0];
+  const [budgets, scenarios] = await Promise.all([listBudgets(workspaceId), listScenarios(workspaceId)]);
+  const options: Option[] = [
+    { value: "reel", label: "Réel courant (lecture PayFit appliquée)" },
+    { value: "n1", label: "N-1 (réel figé du scénario, projeté du parent le cas échéant)" },
+    ...budgets.filter((b: BudgetRow) => b.year === year).map((b) => ({ value: `budget:${b.id}`, label: `Budget saisi « ${b.name} » (${b.year})` })),
+    ...scenarios.filter((x) => x.scenario.id !== s.id).map((x) => ({ value: `scenario:${x.scenario.id}`, label: `Scénario « ${x.scenario.name} » (${KIND_LABELS[x.scenario.kind]}, ${x.scenario.status === "fige" ? "figé" : "brouillon"})` })),
+  ];
+  const raw = Array.isArray(sp.cmp) ? sp.cmp : sp.cmp ? [sp.cmp] : null;
+  const selected = (raw ?? ["reel", "n1", ...options.filter((o) => o.value.startsWith("budget:")).map((o) => o.value)]).filter((v) => options.some((o) => o.value === v)).slice(0, 3);
+  const principal = scenarioSeries(s.id, s.name, base, proj);
+  const compared: Series[] = [];
+  for (const v of selected) {
+    if (v === "n1") compared.push(shifted(principal, 12, "n1", "N-1"));
+    else if (v === "reel") {
+      const ctx = await loadPayrollContext(slug);
+      compared.push(ctx.input ? liveSeries("reel", "Réel courant", ctx.input, ctx.kpi.input) : { key: "reel", label: "Réel courant", points: new Map() });
+    } else if (v.startsWith("budget:")) {
+      const b = budgets.find((x) => x.id === v.slice(7));
+      if (b) compared.push(budgetSeries(`budget-${b.id.slice(0, 8)}`, `Budget « ${b.name} »`, b.year, b.amounts));
+    } else if (v.startsWith("scenario:")) {
+      const o = await getScenario(workspaceId, v.slice(9));
+      if (o) compared.push(scenarioSeries(`scenario-${o.scenario.id.slice(0, 8)}`, `« ${o.scenario.name} »`, o.base, project(o.base, o.scenario.firstMonth, o.scenario.lastMonth, o.hypotheses, o.scenario.conventions)));
+    }
+  }
+  return <ComparisonView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} years={years} year={year} principal={principal} compared={compared} options={options} selected={selected} refMonth={base.refMonth} />;
+}
+
+// Budgets saisis : montants chargés globaux par mois (budget fait hors de Clair), référence des comparaisons.
+function BudgetForm({ slug, budget, testid }: { slug: string; budget: BudgetRow | null; testid: string }) {
+  const y = budget?.year ?? String(new Date().getFullYear());
+  return (
+    <ActionForm action={saveBudgetAction.bind(null, slug, budget?.id ?? null)} submit={budget ? "Enregistrer les montants" : "Créer le budget"} testid={testid}>
+      <div className="filters">
+        <div className="field-row">
+          <label htmlFor={`${testid}-name`}>Nom</label>
+          <input className="input" id={`${testid}-name`} name="name" defaultValue={budget?.name ?? ""} maxLength={120} required />
+        </div>
+        <div className="field-row">
+          <label htmlFor={`${testid}-year`}>Année</label>
+          <input className="input" id={`${testid}-year`} name="year" defaultValue={y} pattern="\d{4}" required />
+        </div>
+      </div>
+      <div className="filters">
+        {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")).map((mm) => (
+          <div className="field-row" key={mm}>
+            <label htmlFor={`${testid}-m${mm}`}>{formatMonth(`${y}-${mm}`).split(" ")[0]} (€ chargés)</label>
+            <input className="input" id={`${testid}-m${mm}`} name={`m${mm}`} inputMode="decimal" defaultValue={budget?.amounts[`${y}-${mm}`] != null ? String(budget.amounts[`${y}-${mm}`]! / 100).replace(".", ",") : ""} />
+          </div>
+        ))}
+      </div>
+      <p className="tile-foot">Mois vide : non saisi (n.d.), jamais compté pour 0. Saisir 0 pour un montant nul.</p>
+    </ActionForm>
+  );
+}
+
+function BudgetsSection({ slug, budgets, canEdit }: { slug: string; budgets: BudgetRow[]; canEdit: boolean }) {
+  const totalOf = (b: BudgetRow) => {
+    const v = Object.values(b.amounts);
+    return v.length === 12 && v.every((x) => x !== null) ? formatEuros(v.reduce((s, x) => s! + x!, 0)!) : `n.d. — ${12 - v.filter((x) => x !== null).length} mois non saisi(s)`;
+  };
+  return (
+    <section className="panel" data-testid="hyp-budgets">
+      <h2>Budgets saisis <span className="desc">— référence des comparaisons : coût employeur global par mois</span></h2>
+      {budgets.length === 0 ? (
+        <p className="desc">Aucun budget saisi.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="data-table" data-testid="hyp-budgets-table">
+            <thead><tr><th>Budget</th><th>Année</th><th className="num">Total annuel</th><th>Modifié le</th></tr></thead>
+            <tbody>
+              {budgets.map((b) => (
+                <tr key={b.id} data-budget={b.name}>
+                  <td>
+                    {canEdit ? (
+                      <details>
+                        <summary>{b.name}</summary>
+                        <BudgetForm slug={slug} budget={b} testid={`budget-edit-${b.id.slice(0, 8)}`} />
+                        <ActionForm action={deleteBudgetAction.bind(null, slug, b.id)} submit="Supprimer ce budget" testid={`budget-delete-${b.id.slice(0, 8)}`} className="inline-form" danger />
+                      </details>
+                    ) : b.name}
+                  </td>
+                  <td>{b.year}</td>
+                  <td className="num" data-col="total">{totalOf(b)}</td>
+                  <td>{dateTimeFmt.format(b.updatedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {canEdit && (
+        <details>
+          <summary>Saisir un budget</summary>
+          <BudgetForm slug={slug} budget={null} testid="budget-create" />
+        </details>
+      )}
+    </section>
+  );
+}
+
 export default async function HypothesesPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -60,7 +170,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
     const full = await getScenario(workspace.id, scenarioId);
     if (!full) notFound();
     const s = full.scenario;
-    const vue = one(sp.vue) === "hypotheses" ? "hypotheses" : "projection";
+    const vue = one(sp.vue) === "hypotheses" ? "hypotheses" : one(sp.vue) === "comparaison" ? "comparaison" : "projection";
     const proj = project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions);
     const year = s.firstMonth.slice(0, 4);
     const draft = s.status === "brouillon";
@@ -71,7 +181,9 @@ export default async function HypothesesPage({ params, searchParams }: { params:
         <section className="panel" data-testid="hyp-scenario">
           <h2>{s.name} <span className="tag">{KIND_LABELS[s.kind]}</span> <span className="tag" data-testid="hyp-status">{STATUS[s.status]}</span></h2>
           <p className="desc" data-testid="hyp-context">
-            Base figée sur {formatMonth(full.base.refMonth).toLowerCase()} (lecture PayFit du {full.base.readAt}) · projection {formatMonth(s.firstMonth).toLowerCase()} → {formatMonth(s.lastMonth).toLowerCase()} ·
+            {full.base.origin
+              ? <>Base dérivée du scénario « {full.base.origin.scenarioName} » (état projeté fin {formatMonth(full.base.origin.month).toLowerCase()}, le {full.base.origin.at}) ·</>
+              : <>Base figée sur {formatMonth(full.base.refMonth).toLowerCase()} (lecture PayFit du {full.base.readAt}) ·</>} projection {formatMonth(s.firstMonth).toLowerCase()} → {formatMonth(s.lastMonth).toLowerCase()} ·
             prorata : {s.conventions.prorata === "calendaire" ? "jours calendaires" : "aucun"} · {full.hypotheses.length} hypothèse(s) · créé le {dateTimeFmt.format(s.createdAt)}
             {s.frozenAt ? ` · figé le ${dateTimeFmt.format(s.frozenAt)}` : ""} · <a href="#definitions">Définitions</a>
           </p>
@@ -89,13 +201,43 @@ export default async function HypothesesPage({ params, searchParams }: { params:
               {draft && <ActionForm action={deleteScenarioAction.bind(null, slug, s.id)} submit="Supprimer le brouillon" testid="hyp-delete" className="inline-form" danger />}
             </div>
           )}
+          {canEdit && (
+            <details style={{ marginTop: 12 }}>
+              <summary>Préparer le budget suivant (simulateur N+1)</summary>
+              <p className="desc">Nouveau scénario dont la base est l'état projeté de celui-ci fin {formatMonth(s.lastMonth).toLowerCase()} : contrats encore présents au salaire du mois complet (augmentations comprises), embauches reprises, départs et éléments ponctuels non repris. Projection à partir de {formatMonth(addMonths(s.lastMonth, 1)).toLowerCase()}.</p>
+              <ActionForm action={createChainedScenarioAction.bind(null, slug, s.id)} submit="Créer le scénario dérivé" testid="hyp-chain">
+                <div className="filters">
+                  <div className="field-row">
+                    <label htmlFor="chain-name">Nom</label>
+                    <input className="input" id="chain-name" name="name" maxLength={120} required />
+                  </div>
+                  <div className="field-row">
+                    <label htmlFor="chain-kind">Type</label>
+                    <select className="select" id="chain-kind" name="kind" defaultValue="">
+                      <option value="" disabled>Choisir…</option>
+                      <option value="budget">Budget</option>
+                      <option value="revise">Révisé</option>
+                      <option value="simulation">Simulation</option>
+                    </select>
+                  </div>
+                  <div className="field-row">
+                    <label htmlFor="chain-last">Dernier mois projeté</label>
+                    <input className="input" type="month" id="chain-last" name="lastMonth" defaultValue={`${addMonths(s.lastMonth, 1).slice(0, 4)}-12`} required />
+                  </div>
+                </div>
+              </ActionForm>
+            </details>
+          )}
         </section>
         <nav className="tabs" data-testid="hyp-tabs">
           <a href={href("projection")} aria-current={vue === "projection" ? "page" : undefined}>Projection</a>
           <a href={href("hypotheses")} aria-current={vue === "hypotheses" ? "page" : undefined}>Hypothèses</a>
+          <a href={href("comparaison")} aria-current={vue === "comparaison" ? "page" : undefined}>Comparaison</a>
         </nav>
         {vue === "projection" ? (
           <ProjectionView slug={slug} scenario={s} base={full.base} proj={proj} landing={landing(full.base, proj, year)} month={one(sp.mois)} />
+        ) : vue === "comparaison" ? (
+          await comparison(slug, workspace.id, s, full.base, proj, sp)
         ) : (
           <HypothesesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} proj={proj} canEdit={canEdit && draft} />
         )}
@@ -105,7 +247,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
   }
 
   // Liste des scénarios et création.
-  const [rows, conv, ctx] = await Promise.all([listScenarios(workspace.id), getConventions(workspace.id), loadPayrollContext(slug)]);
+  const [rows, conv, ctx, budgets] = await Promise.all([listScenarios(workspace.id), getConventions(workspace.id), loadPayrollContext(slug), listBudgets(workspace.id)]);
   const input = ctx.source === "payfit" ? ctx.input : null;
   // Mois de référence possibles : paie clôturée, journal lu, et mois fini à la date de lecture du référentiel.
   const refDate = ctx.kpi.input?.data.build.referenceDate ?? null;
@@ -138,6 +280,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
           </div>
         )}
       </section>
+      <BudgetsSection slug={slug} budgets={budgets} canEdit={canEdit} />
       <section className="panel" data-testid="hyp-create">
         <h2>Nouveau scénario</h2>
         {unavailable ? (

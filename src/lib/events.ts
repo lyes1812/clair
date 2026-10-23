@@ -23,7 +23,9 @@ export type EventKind =
   | "budget.scenario_frozen"
   | "budget.scenario_deleted"
   | "budget.hypothesis_added"
-  | "budget.hypothesis_deleted";
+  | "budget.hypothesis_deleted"
+  | "budget.reference_saved"
+  | "budget.reference_deleted";
 
 export async function recordEvent(
   workspaceId: string,

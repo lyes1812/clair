@@ -139,4 +139,62 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   expect(await txt(row("2026-12"))).toBe("24 005,80 €");
   await page.goto(hyp);
   await expect(page.getByTestId("hyp-scenarios").locator("tbody tr")).toHaveCount(2);
+
+  // Lot 2 — budget saisi 2026 : 24 000,00 € par mois sauf décembre non saisi (n.d.), puis complété.
+  await page.getByTestId("hyp-budgets").getByText("Saisir un budget").click();
+  const bf = page.getByTestId("budget-create");
+  await bf.getByLabel("Nom").fill("Budget 2026");
+  await bf.getByLabel("Année").fill("2026");
+  for (const mm of ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11"]) await bf.locator(`input[name='m${mm}']`).fill("24000");
+  await bf.getByRole("button").click();
+  await expect(bf.getByRole("status")).toContainText("Budget « Budget 2026 » enregistré");
+  await page.reload();
+  await expect(page.getByTestId("hyp-budgets-table").locator("tr[data-budget='Budget 2026'] td[data-col='total']")).toContainText("n.d. — 1 mois non saisi");
+  await page.getByTestId("hyp-budgets-table").locator("tr[data-budget='Budget 2026'] summary").click();
+  const be = page.getByTestId("hyp-budgets-table").locator("form[data-testid^='budget-edit-']");
+  await be.locator("input[name='m12']").fill("24000");
+  await be.getByRole("button").click();
+  await expect(be.getByRole("status")).toContainText("enregistré");
+  await page.reload();
+  expect(await txt(page.getByTestId("hyp-budgets-table").locator("tr[data-budget='Budget 2026'] td[data-col='total']"))).toBe("288 000,00 €");
+
+  // Comparaison du révisé figé : budget, réel courant et N-1 cochés par défaut.
+  await page.getByTestId("hyp-scenarios").getByRole("link", { name: "Révisé T4 2026" }).click();
+  await page.getByTestId("hyp-tabs").getByRole("link", { name: "Comparaison" }).click();
+  const cmp = (m: string, col: string) => page.getByTestId("cmp-table").locator(`tr[data-month='${m}'] td[data-col='${col}']`);
+  const budgetCol = (await page.getByTestId("cmp-table").locator("thead th").allTextContents()).findIndex((t) => t.includes("Budget « Budget 2026 »"));
+  expect(budgetCol).toBeGreaterThan(0);
+  // Année : 281 250,10 € projetés contre 288 000,00 € de budget → −6 749,90 € ; janv.–sept. : 211 260,00 € contre 216 000,00 €.
+  const tileB = page.locator("[data-testid^='cmp-tile-budget-']");
+  await expect(tileB.locator("dd")).toContainText("-6 749,90 €");
+  await expect(page.locator("[data-testid^='cmp-ytd-budget-']")).toContainText("-4 740,00 €");
+  // N-1 : février 2025 = 18 230,00 € (module 4) ; réel courant : septembre 2026 lu, octobre non lu.
+  expect(await txt(cmp("2026-02", "n1"))).toContain("18 230,00 €");
+  expect(await txt(cmp("2026-09", "reel"))).toContain("24 600,00 €");
+  expect(await txt(cmp("2026-10", "reel"))).toBe("n.d.");
+  // Pont vs N-1 : volume + coût moyen = écart ; vs budget saisi : n.d. (pas d'ETP).
+  const br = page.getByTestId("cmp-bridge");
+  await expect(br.locator("tr[data-bridge^='budget-']")).toContainText("budget saisi sans ETP");
+  const eur = (t: string) => Number(t.replace(/[^\d,-]/g, "").replace(",", "."));
+  const [bd, bv, bc] = await Promise.all(["delta", "volume", "cout-moyen"].map((k) => txt(br.locator(`tr[data-bridge='n1'] td[data-col='${k}']`))));
+  expect(Math.round((eur(bv) + eur(bc)) * 100)).toBe(Math.round(eur(bd) * 100));
+  await page.screenshot({ path: `${CAPTURES}/5-04-comparaison.png`, fullPage: true });
+
+  // Simulateur N+1 : budget 2027 dérivé de l'état de décembre 2026 du révisé (sans l'élément ponctuel de décembre) :
+  // 21 205,80 € (6 contrats après 2 %) + 1 500,00 € (remplaçant à 50 %) = 22 705,80 € par mois.
+  await page.getByTestId("hyp-scenario").getByText("Préparer le budget suivant (simulateur N+1)").click();
+  const ch = page.getByTestId("hyp-chain");
+  await ch.getByLabel("Nom").fill("Budget 2027");
+  await ch.getByLabel("Type").selectOption("budget");
+  await expect(ch.getByLabel("Dernier mois projeté")).toHaveValue("2027-12");
+  await ch.getByRole("button").click();
+  await expect(page.getByTestId("hyp-context")).toContainText("Base dérivée du scénario « Révisé T4 2026 »");
+  expect(await txt(row("2027-01"))).toBe("22 705,80 €");
+  expect(await txt(page.getByTestId("proj-tile-landing").locator("dd"))).toBe("272 469,60 €");
+  expect(await txt(page.getByTestId("proj-tile-headcount").locator("dd"))).toBe("7 · 6,10 ETP");
+  await page.screenshot({ path: `${CAPTURES}/5-05-budget-n1.png`, fullPage: true });
+  // Budget 2027 contre 2026 (réel janv.–sept. + projeté du révisé oct.–déc. = 281 250,10 €) : −8 780,50 €.
+  await page.getByTestId("hyp-tabs").getByRole("link", { name: "Comparaison" }).click();
+  await expect(page.getByTestId("cmp-tile-n1").locator("dd")).toContainText("-8 780,50 €");
+  expect(await txt(cmp("2027-12", "n1"))).toContain("projeté (parent)");
 });

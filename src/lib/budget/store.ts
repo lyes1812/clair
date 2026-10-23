@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { budgetBase, budgetHypothesis, budgetScenario } from "@/db/schema";
+import { budgetBase, budgetHypothesis, budgetReference, budgetScenario } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isMonth } from "@/lib/connectors/months";
@@ -163,4 +163,44 @@ export async function deleteScenario(workspaceId: string, scenarioId: string): P
     const others = await tx.select({ id: budgetScenario.id }).from(budgetScenario).where(eq(budgetScenario.baseId, s.baseId)).limit(1);
     if (!others.length) await tx.delete(budgetBase).where(eq(budgetBase.id, s.baseId));
   });
+}
+
+// --- Budgets saisis (référence des comparaisons) : montants chargés globaux par mois d'une année ; un mois vide est n.d.
+const year = z.string().regex(/^\d{4}$/);
+export const amountsSchema = z.record(z.string().refine(isMonth), cents.nonnegative().nullable());
+export type BudgetRow = typeof budgetReference.$inferSelect;
+
+export async function listBudgets(workspaceId: string): Promise<BudgetRow[]> {
+  return withWorkspace(workspaceId, (tx) => tx.select().from(budgetReference).orderBy(desc(budgetReference.year), asc(budgetReference.name)));
+}
+
+export async function getBudget(workspaceId: string, id: string): Promise<BudgetRow | null> {
+  if (!z.string().uuid().safeParse(id).success) return null;
+  const [row] = await withWorkspace(workspaceId, (tx) => tx.select().from(budgetReference).where(eq(budgetReference.id, id)));
+  return row ?? null;
+}
+
+function checkAmounts(y: string, amounts: Record<string, number | null>) {
+  year.parse(y);
+  const parsed = amountsSchema.parse(amounts);
+  if (Object.keys(parsed).some((m) => !m.startsWith(`${y}-`))) throw new BudgetError(`Montants hors de l'année ${y}.`);
+  return parsed;
+}
+
+export async function saveBudget(workspaceId: string, actor: string, input: { id?: string; name: string; year: string; amounts: Record<string, number | null> }): Promise<string> {
+  const amounts = checkAmounts(input.year, input.amounts);
+  return withWorkspace(workspaceId, async (tx) => {
+    if (input.id) {
+      const done = await tx.update(budgetReference).set({ name: input.name, year: input.year, amounts, updatedBy: actor, updatedAt: new Date() }).where(eq(budgetReference.id, input.id)).returning({ id: budgetReference.id });
+      if (!done.length) throw new BudgetError("Budget introuvable.");
+      return done[0].id;
+    }
+    const [row] = await tx.insert(budgetReference).values({ workspaceId, name: input.name, year: input.year, amounts, currency: CURRENCY, createdBy: actor, updatedBy: actor }).returning({ id: budgetReference.id });
+    return row.id;
+  });
+}
+
+export async function deleteBudget(workspaceId: string, id: string): Promise<void> {
+  const gone = await withWorkspace(workspaceId, (tx) => tx.delete(budgetReference).where(eq(budgetReference.id, id)).returning({ id: budgetReference.id }));
+  if (!gone.length) throw new BudgetError("Budget introuvable.");
 }

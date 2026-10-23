@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/db/client";
 import { budgetBase, budgetHypothesis, budgetScenario, organization, user } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
-import { addHypothesis, BudgetError, createScenario, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario } from "@/lib/budget/store";
+import { addHypothesis, BudgetError, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getBudget, getScenario, listBudgets, saveBudget } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 
 // Module 5 : garde-fous du stockage (base PostgreSQL de test, rôle non superutilisateur).
@@ -86,6 +86,17 @@ describe("scénarios : gel, duplication, base figée", () => {
     const after = (await getScenario(W, id))!;
     expect(after.scenario).toMatchObject({ status: "fige", createdBy: null, frozenBy: null });
     expect(after.hypotheses).toHaveLength(1);
+  });
+  it("budget saisi : mois vide conservé n.d. (null), modification, refus d'un mois hors de l'année, suppression", async () => {
+    const id = await saveBudget(W, actor, { name: "Budget 2026", year: "2026", amounts: { "2026-01": 1000000, "2026-02": null } });
+    expect((await getBudget(W, id))?.amounts).toEqual({ "2026-01": 1000000, "2026-02": null });
+    await saveBudget(W, actor, { id, name: "Budget 2026 v2", year: "2026", amounts: { "2026-01": 1000000, "2026-02": 0 } });
+    expect(await getBudget(W, id)).toMatchObject({ name: "Budget 2026 v2", amounts: { "2026-02": 0 }, currency: "EUR" });
+    await expect(saveBudget(W, actor, { name: "X", year: "2026", amounts: { "2027-01": 1 } })).rejects.toThrow("hors de l'année");
+    await expect(saveBudget(W, actor, { name: "X", year: "2026", amounts: { "2026-01": -1 } })).rejects.toThrow();
+    expect((await listBudgets(W)).map((b) => b.name)).toContain("Budget 2026 v2");
+    await deleteBudget(W, id);
+    await expect(deleteBudget(W, id)).rejects.toThrow("Budget introuvable");
   });
   it("gel refusé tant qu'un mois projeté est n.d. (base à compléter)", async () => {
     const nd: BaseSnapshot = { ...base, refBaseCost: null, contracts: [{ ...base.contracts[0], base: null, baseNd: "entré le 2026-09-16 : mois de référence incomplet" }] };

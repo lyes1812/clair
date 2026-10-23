@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { buildBase } from "@/lib/budget/base";
 import { getConventions } from "@/lib/budget/settings";
 import { z } from "zod";
-import { addHypothesis, BudgetError, createScenario, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, type ScenarioKind } from "@/lib/budget/store";
+import { addHypothesis, BudgetError, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
+import { chainBase } from "@/lib/budget/chain";
+import { project } from "@/lib/budget/engine";
 import type { Amount, Hypothesis, HypothesisKind, Scope } from "@/lib/budget/types";
 import { isMonth, monthRange } from "@/lib/connectors/months";
 import { addMonths } from "@/lib/dates";
@@ -204,4 +206,75 @@ export async function deleteHypothesisAction(slug: string, scenarioId: string, h
   }
   revalidatePath(page(slug));
   return { ok: "Hypothèse supprimée." };
+}
+
+// --- Simulateur N+1 : nouveau scénario dont la base est l'état projeté de ce scénario au dernier mois de son horizon.
+export async function createChainedScenarioAction(slug: string, parentId: string, _prev: FormState, f: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(parentId)) return { error: "Scénario introuvable." };
+  const parent = await getScenario(workspace.id, parentId);
+  if (!parent) return { error: "Scénario introuvable." };
+  const name = str(f, "name");
+  const kind = str(f, "kind") as ScenarioKind;
+  const lastMonth = str(f, "lastMonth");
+  const p = parent.scenario;
+  const firstMonth = addMonths(p.lastMonth, 1);
+  if (!name || name.length > 120) return { error: "Nom du scénario requis (120 caractères au plus)." };
+  if (!["budget", "revise", "simulation"].includes(kind)) return { error: "Type de scénario invalide." };
+  if (!isMonth(lastMonth) || lastMonth < firstMonth) return { error: `Dernier mois projeté requis, à partir de ${firstMonth}.` };
+  if (monthRange(firstMonth, lastMonth).length > MAX_HORIZON) return { error: `Horizon de ${MAX_HORIZON} mois au plus.` };
+  const proj = project(parent.base, p.firstMonth, p.lastMonth, parent.hypotheses, p.conventions);
+  const b = chainBase({ id: p.id, name: p.name, firstMonth: p.firstMonth, lastMonth: p.lastMonth, conventions: p.conventions }, parent.base, parent.hypotheses, proj, new Date().toISOString().slice(0, 10));
+  if (b.kind === "nd") return { error: `Base dérivée impossible : ${b.reason}.` };
+  let id: string;
+  try {
+    id = await createScenario(workspace.id, session.user.id, { name, kind, firstMonth, lastMonth }, b.base, p.conventions);
+    await recordEvent(workspace.id, session.user.id, "budget.scenario_created", { scenarioId: id, from: p.id, refMonth: p.lastMonth, firstMonth, lastMonth });
+  } catch (e) {
+    return fail(e);
+  }
+  revalidatePath(page(slug));
+  redirect(`${page(slug)}?scenario=${id}`);
+}
+
+// --- Budgets saisis.
+export async function saveBudgetAction(slug: string, budgetId: string | null, _prev: FormState, f: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (budgetId !== null && !isUuid(budgetId)) return { error: "Budget introuvable." };
+  const name = str(f, "name");
+  const year = str(f, "year");
+  if (!name || name.length > 120) return { error: "Nom du budget requis (120 caractères au plus)." };
+  if (!/^\d{4}$/.test(year)) return { error: "Année requise (AAAA)." };
+  const amounts: Record<string, number | null> = {};
+  for (const m of monthRange(`${year}-01`, `${year}-12`)) {
+    const raw = str(f, `m${m.slice(5)}`);
+    if (raw === "") {
+      amounts[m] = null;
+      continue;
+    }
+    const c = toCents(raw);
+    if (c === null || c < 0) return { error: `${m} : montant en euros positif ou nul (ex. 140 000,00), ou vide pour « non saisi ».` };
+    amounts[m] = c;
+  }
+  try {
+    const id = await saveBudget(workspace.id, session.user.id, { id: budgetId ?? undefined, name, year, amounts });
+    await recordEvent(workspace.id, session.user.id, "budget.reference_saved", { budgetId: id, year });
+  } catch (e) {
+    return fail(e);
+  }
+  revalidatePath(page(slug));
+  return { ok: `Budget « ${name} » enregistré.` };
+}
+
+export async function deleteBudgetAction(slug: string, budgetId: string, _prev: FormState, _f: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(budgetId)) return { error: "Budget introuvable." };
+  try {
+    await deleteBudget(workspace.id, budgetId);
+    await recordEvent(workspace.id, session.user.id, "budget.reference_deleted", { budgetId });
+  } catch (e) {
+    return fail(e);
+  }
+  revalidatePath(page(slug));
+  return { ok: "Budget supprimé." };
 }

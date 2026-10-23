@@ -38,7 +38,16 @@ export type BaseSnapshot = {
   refMasse: number;
   refBaseCost: number | null; // null si une base de contrat est n.d.
   etpNote: string | null; // limite des ETP de la base (ex. quotités PayFit à la date de lecture, non historisées)
+  // Base dérivée d'un scénario (budget N+1) : état projeté du scénario parent à la fin de son horizon. Absent : base
+  // figée sur le réel PayFit.
+  origin?: BaseOrigin;
+  prior?: PriorMonth[]; // mois projetés par le(s) scénario(s) parent(s) entre leur bascule et le mois de référence
 };
+
+export type BaseOrigin = { kind: "scenario"; scenarioId: string; scenarioName: string; month: string; at: string; notCarried: string[] };
+export type PriorMonth =
+  | { month: string; kind: "value"; cost: number; headcount: number; etp4: number | null; etpNd: string | null; source: string }
+  | { month: string; kind: "nd"; reason: string; source: string };
 
 // --- Hypothèses datées saisies dans Clair.
 export type Scope = { kind: "global" } | { kind: "service"; service: string } | { kind: "contrat"; key: string };
