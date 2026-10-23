@@ -167,7 +167,16 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
     const amount = amountOf(f, "amount", "Montant");
     if (!amount) throw new Error("Montant requis.");
     const svc = str(f, "service");
-    return { id, kind, label, month, amount, service: svc || null };
+    return { id, kind, label, month, amount, service: svc || null, ...(str(f, "nonRecurring") === "oui" ? { nonRecurring: true } : {}) };
+  }
+  if (kind === "realise") {
+    const month = str(f, "month");
+    if (!isMonth(month)) throw new Error("Mois réalisé requis (AAAA-MM).");
+    const category = str(f, "category");
+    if (!category) throw new Error("Catégorie requise.");
+    const costCents = euros(f, "cost", "Montant chargé");
+    if (costCents < 0) throw new Error("Montant positif ou nul requis.");
+    return { id, kind, label, category, month, costCents };
   }
   const contractKey = str(f, "contractKey");
   if (!contractKey) throw new Error("Contrat requis.");

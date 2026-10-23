@@ -3,7 +3,7 @@ import { dateTimeFmt } from "@/lib/connectors/labels";
 import { addMonths, formatMonth, monthEnd } from "@/lib/dates";
 import { BUDGET_DEFINITIONS } from "@/lib/budget/definitions";
 import { landing, project } from "@/lib/budget/engine";
-import type { BaseSnapshot, Projection } from "@/lib/budget/types";
+import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
 import { getScenario, KIND_LABELS, listBudgets, listScenarios, type BudgetRow } from "@/lib/budget/store";
@@ -18,6 +18,9 @@ import { requireWorkspace } from "@/lib/workspace";
 import { ActionForm } from "./ActionForm";
 import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
 import { ComparisonView, type Option } from "./ComparisonView";
+import { LandingView, variantOptions } from "./LandingView";
+import { measures, retraite, sensitivities, type Variant, type VariantKind } from "@/lib/budget/lot3";
+import { toCents } from "@/lib/money";
 import { HypothesesView } from "./HypothesesView";
 import { ProjectionView } from "./ProjectionView";
 
@@ -51,6 +54,33 @@ function Definitions() {
         ))}
       </dl>
     </details>
+  );
+}
+
+// Onglet Atterrissage : retraité, mesures de management, sensibilités (variations lues dans l'URL, jamais enregistrées).
+function landingTab(slug: string, s: ScenarioRow, base: BaseSnapshot, hyps: Hypothesis[], proj: Projection, sp: Search) {
+  const year = s.firstMonth.slice(0, 4);
+  const options = variantOptions(hyps);
+  const svs = (Array.isArray(sp.sv) ? sp.sv : sp.sv ? [sp.sv] : []).map(String);
+  const sds = (Array.isArray(sp.sd) ? sp.sd : sp.sd ? [sp.sd] : []).map(String);
+  const chosen: { value: string; delta: string }[] = [];
+  const variants: Variant[] = [];
+  const bad: string[] = [];
+  svs.slice(0, 5).forEach((v, i) => {
+    if (!v) return;
+    const delta = (sds[i] ?? "").trim();
+    chosen.push({ value: v, delta });
+    const [id, kind] = v.split("|") as [string, VariantKind];
+    const c = kind === "jours" ? (/^[+-]?\d+$/.test(delta) ? Number(delta) : null) : toCents(delta);
+    if (!options.some((o) => o.value === v) || c === null || c === 0) bad.push(`variation ${i + 1} ignorée (valeur manquante, nulle ou invalide)`);
+    else variants.push({ hypothesisId: id, kind, delta: c });
+  });
+  const { reference, landing: land, rows } = sensitivities(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year, variants);
+  return (
+    <>
+      {bad.map((b) => <p key={b} className="notice">{b}</p>)}
+      <LandingView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} year={year} landing={land} retraite={reference} measures={measures(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year)} sens={rows} options={options} chosen={chosen} />
+    </>
   );
 }
 
@@ -174,7 +204,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
     const full = await getScenario(workspace.id, scenarioId);
     if (!full) notFound();
     const s = full.scenario;
-    const vue = one(sp.vue) === "hypotheses" ? "hypotheses" : one(sp.vue) === "comparaison" ? "comparaison" : "projection";
+    const vue = one(sp.vue) === "hypotheses" ? "hypotheses" : one(sp.vue) === "comparaison" ? "comparaison" : one(sp.vue) === "atterrissage" ? "atterrissage" : "projection";
     const proj = project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions);
     const year = s.firstMonth.slice(0, 4);
     const draft = s.status === "brouillon";
@@ -238,9 +268,12 @@ export default async function HypothesesPage({ params, searchParams }: { params:
           <a href={href("projection")} aria-current={vue === "projection" ? "page" : undefined}>Projection</a>
           <a href={href("hypotheses")} aria-current={vue === "hypotheses" ? "page" : undefined}>Hypothèses</a>
           <a href={href("comparaison")} aria-current={vue === "comparaison" ? "page" : undefined}>Comparaison</a>
+          <a href={href("atterrissage")} aria-current={vue === "atterrissage" ? "page" : undefined}>Atterrissage</a>
         </nav>
         {vue === "projection" ? (
           <ProjectionView slug={slug} scenario={s} base={full.base} proj={proj} landing={landing(full.base, proj, year)} month={one(sp.mois)} />
+        ) : vue === "atterrissage" ? (
+          landingTab(slug, s, full.base, full.hypotheses, proj, sp)
         ) : vue === "comparaison" ? (
           await comparison(slug, workspace.id, s, full.base, proj, sp)
         ) : (

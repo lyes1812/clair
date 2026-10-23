@@ -114,6 +114,7 @@ export function validate(base: BaseSnapshot, firstMonth: string, lastMonth: stri
       if (h.replaces !== null && !hyps.some((x) => x.id === h.replaces && x.kind === "depart")) errors.push(`« ${h.label} » : le départ remplacé n'existe pas`);
     }
     if (h.kind === "ponctuel" && !inHorizon(h.month)) errors.push(`« ${h.label} » : mois ${h.month} hors de l'horizon ${firstMonth} → ${lastMonth}`);
+    if (h.kind === "realise" && !base.actuals.some((x) => x.month === h.month && x.kind === "value")) errors.push(`« ${h.label} » : ${h.month} n'est pas un mois réalisé de la base figée (pour un mois à venir, utilisez un élément ponctuel)`);
   }
   return errors;
 }
@@ -201,7 +202,12 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       const rate: Frac = { n: B(h.chargesBps), d: TEN_K };
       const list = effective(augFor.get(hireKey(h.id)) ?? []);
       const lv = levels(S, list, p, rate);
-      contributions.push({ hypothesisId: h.id, kind: "embauche", label: h.label, contractKey: hireKey(h.id), who: h.label, service: h.service, brut: lv[0].brut, charges: lv[0].charges, cost: lv[0].brut + lv[0].charges });
+      // Tuilage : coût de l'entrant (augmentations comprises) pendant les jours où le salarié remplacé est encore payé.
+      const rep = h.replaces ? deps.get(base.contracts.find((c) => deps.get(c.contractKey)?.id === h.replaces)?.contractKey ?? "") : undefined;
+      const overlapEnd = rep ? [rep.lastPaidDate, h.end].filter((x): x is string => x !== null).sort()[0] : null;
+      const po = overlapEnd && overlapEnd >= h.start ? presence(m, h.start, overlapEnd, conv.prorata) : null;
+      const tl = po && po.n > 0n ? levels(S, list, po, rate).at(-1)! : null;
+      contributions.push({ hypothesisId: h.id, kind: "embauche", label: h.label, contractKey: hireKey(h.id), who: h.label, service: h.service, brut: lv[0].brut, charges: lv[0].charges, cost: lv[0].brut + lv[0].charges, ...(tl ? { nonRecurringCents: tl.brut + tl.charges } : {}) });
       list.forEach((a, i) => {
         const b = lv[i + 1].brut - lv[i].brut;
         const ch = lv[i + 1].charges - lv[i].charges;
@@ -219,10 +225,14 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       return { brut: a.brutCents, charges: ch, cost: a.brutCents + ch };
     };
     for (const h of hyps) {
-      if (h.kind === "ponctuel" && h.month === m) contributions.push({ hypothesisId: h.id, kind: "ponctuel", label: h.label, contractKey: null, who: h.service ?? "toute l'entreprise", service: h.service, ...amount(h.amount) });
+      if (h.kind === "ponctuel" && h.month === m) {
+        const a = amount(h.amount);
+        contributions.push({ hypothesisId: h.id, kind: "ponctuel", label: h.label, contractKey: null, who: h.service ?? "toute l'entreprise", service: h.service, ...a, ...(h.nonRecurring ? { nonRecurringCents: a.cost } : {}) });
+      }
       if (h.kind === "depart" && h.exitCost && h.lastPaidDate.slice(0, 7) === m) {
         const c = base.contracts.find((x) => x.contractKey === h.contractKey)!;
-        contributions.push({ hypothesisId: h.id, kind: "sortie", label: `${h.label} — coûts de sortie`, contractKey: c.contractKey, who: c.label, service: c.service, ...amount(h.exitCost) });
+        const a = amount(h.exitCost);
+        contributions.push({ hypothesisId: h.id, kind: "sortie", label: `${h.label} — coûts de sortie`, contractKey: c.contractKey, who: c.label, service: c.service, ...a, nonRecurringCents: a.cost });
       }
     }
 

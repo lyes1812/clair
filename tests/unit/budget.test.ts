@@ -294,3 +294,52 @@ describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas �
     expect(r3.kind === "value" && r3.base.contracts.map((x) => x.contractKey)).toEqual(["C", "embauche:h"].sort((x, y) => x.localeCompare(y)) && expect.not.arrayContaining(["A"]));
   });
 });
+
+describe("lot 3 : atterrissage retraité, mesures de management, sensibilités (cas écrits à la main)", async () => {
+  const { retraite, measures, sensitivities } = await import("@/lib/budget/lot3");
+  // Base de test ci-dessus : A 4 200 €, B 2 900 €, C corrigé 3 550 € par mois. Départ de B le 15/11 (sortie 1 000 € brut à
+  // 20 %), remplaçant à 80 % de 3 600 € (charges 45 %) arrivé le 11/11 : recouvrement du 11 au 15 novembre (5 jours).
+  const hyps: Hypothesis[] = [
+    fixC,
+    { id: "dB", kind: "depart", label: "Départ B", contractKey: "B", lastPaidDate: "2026-11-15", exitCost: { mode: "brut", brutCents: 100000, chargesBps: 2000 } },
+    { id: "h", kind: "embauche", label: "Remplaçant B", service: "SALES", start: "2026-11-11", end: null, grossFullTimeCents: 360000, quotaBps: 8000, chargesBps: 4500, counted: true, replaces: "dB" },
+    { id: "pon", kind: "ponctuel", label: "Prime exceptionnelle", month: "2026-12", amount: { mode: "charge", costCents: 30000 }, service: null, nonRecurring: true },
+    { id: "rea", kind: "realise", label: "Rupture conventionnelle", category: "Ruptures", month: "2026-03", costCents: 50000 },
+  ];
+  const proj = project(base, "2026-10", "2026-12", hyps, conv);
+  it("atterrissage retraité : 9 906 000 − (500 + 1 200 + 696 + 300 = 2 696 €) = 96 364,00 €", () => {
+    // Projeté : octobre 10 650 € ; novembre 13 184 € (A 4 200 + B 1 450 + C 3 550 + sortie 1 200 + remplaçant 2 784) ; décembre 12 226 €.
+    expect(landing(base, proj, "2026")).toMatchObject({ kind: "value", actual: 6300000, projected: 1065000 + 1318400 + 1222600 });
+    const r = retraite(base, proj, hyps, "2026");
+    expect(r).toMatchObject({ kind: "value", atterrissage: 9906000, realised: 50000, projected: 120000 + 69600 + 30000, total: 269600, retraite: 9636400 });
+    expect(r.kind === "value" && r.rows.map((x) => [x.label, x.realised, x.projected])).toEqual([
+      ["Coûts de sortie (hypothèses de départ)", 0, 120000],
+      ["Éléments ponctuels non récurrents", 0, 30000],
+      ["Ruptures", 50000, 0],
+      ["Tuilages (coût de l'entrant pendant le recouvrement)", 0, 69600],
+    ]);
+  });
+  it("hypothèse « réalisé » sur un mois à venir : refusée ; elle ne change pas la projection", () => {
+    expect(project(base, "2026-10", "2026-12", [fixC, { id: "r", kind: "realise", label: "x", category: "c", month: "2026-11", costCents: 1 }], conv)).toMatchObject({ kind: "error", errors: [expect.stringContaining("n'est pas un mois réalisé")] });
+    const sans = project(base, "2026-10", "2026-12", hyps.filter((h) => h.kind !== "realise"), conv);
+    expect(landing(base, sans, "2026")).toEqual(landing(base, proj, "2026"));
+  });
+  it("mesure de management du départ de B : paie évitée 4 350 € (novembre 1 450 + décembre 2 900), sortie 1 200 €, remplaçant 6 960 € → net −3 810 € ; année pleine 12 × (2 900 − 4 176) = −15 312 €", () => {
+    const m = measures(base, "2026-10", "2026-12", hyps, conv, "2026");
+    expect(m).toMatchObject({ kind: "value", rows: [{ id: "dB", avoided: 435000, exit: 120000, replacement: 696000, net: -381000, fullYear: { kind: "value", cents: -1531200 } }] });
+  });
+  it("sensibilités : départ décalé de +10 jours → atterrissage +966,67 € (B payé 25/30 en novembre), retraité −425,33 € (tuilage 15 jours : +1 392 €)", () => {
+    const s = sensitivities(base, "2026-10", "2026-12", hyps, conv, "2026", [
+      { hypothesisId: "dB", kind: "jours", delta: 10 },
+      { hypothesisId: "dB", kind: "sortie-pct", delta: 1000 },
+      { hypothesisId: "pon", kind: "pct", delta: -5000 },
+      { hypothesisId: "dB", kind: "taux", delta: 5 },
+    ]);
+    expect(s.rows[0].effect).toEqual({ kind: "value", atterrissage: 96667, retraite: 96667 - 139200, total: 9906000 + 96667 });
+    // Coûts de sortie +10 % : +120 € chargés ; retraité inchangé (coût non récurrent retiré en entier).
+    expect(s.rows[1].effect).toMatchObject({ kind: "value", atterrissage: 12000, retraite: 0 });
+    // Prime exceptionnelle −50 % : −150 € ; retraité inchangé.
+    expect(s.rows[2].effect).toMatchObject({ kind: "value", atterrissage: -15000, retraite: 0 });
+    expect(s.rows[3].effect).toMatchObject({ kind: "nd", reason: expect.stringContaining("non applicable") });
+  });
+});

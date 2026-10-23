@@ -78,7 +78,10 @@ export type Hypothesis =
       replaces: string | null; // id de l'hypothèse de départ remplacée (lien documentaire)
     }
   | { id: string; kind: "depart"; label: string; contractKey: string; lastPaidDate: string; exitCost: Amount | null }
-  | { id: string; kind: "ponctuel"; label: string; month: string; amount: Amount; service: string | null }
+  | { id: string; kind: "ponctuel"; label: string; month: string; amount: Amount; service: string | null; nonRecurring?: boolean }
+  // Élément non récurrent déjà passé en comptabilité (mois réalisé) : le journal PayFit ne le distingue pas, il est saisi
+  // à la main (catégorie libre) et sert seulement à l'atterrissage retraité ; il ne change pas la projection.
+  | { id: string; kind: "realise"; label: string; category: string; month: string; costCents: number }
   | { id: string; kind: "base"; label: string; contractKey: string; salaryCents: number; chargesBps: number };
 
 export type HypothesisKind = Hypothesis["kind"];
@@ -99,6 +102,7 @@ export type Contribution = {
   brut: number | null; // null : saisi en coût chargé, sans ventilation brut / charges
   charges: number | null;
   cost: number;
+  nonRecurringCents?: number; // part non récurrente de cette contribution (coûts de sortie, ponctuel marqué, tuilage)
 };
 
 export type ProjectedMonth =

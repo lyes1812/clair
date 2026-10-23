@@ -55,6 +55,24 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
       "Écart de coût employeur entre deux lectures sur les mêmes mois, décomposé en effet volume = (ETP-mois de ce scénario − ETP-mois de la lecture comparée) × coût par ETP-mois de la lecture comparée, et effet coût moyen = (coût par ETP-mois de ce scénario − coût par ETP-mois comparé) × ETP-mois de ce scénario. ETP-mois = somme des ETP fin de mois. Calcul exact ; l'effet volume est arrondi au centime et l'effet coût moyen porte le reste : la somme égale l'écart. L'effet de structure (mix) n'est pas calculé : il exige des données individuelles datées des deux lectures. n.d. si un mois n'a pas d'ETP.",
   },
   {
+    id: "retraite",
+    title: "Atterrissage retraité",
+    text:
+      "Atterrissage de l'année − éléments non récurrents. Déjà en comptabilité : éléments saisis à la main (le journal PayFit passe les indemnités de rupture et de congés payés avec les autres lignes du compte 6414 et ne les distingue pas), avec leur montant chargé. D'ici décembre : coûts de sortie des hypothèses de départ, éléments ponctuels marqués « non récurrent » et tuilages (coût de l'entrant, augmentations comprises, pendant les jours où le salarié remplacé est encore payé). Les catégories sont libres.",
+  },
+  {
+    id: "mesures",
+    title: "Mesures de management",
+    text:
+      "Pour chaque départ, comparaison de la projection avec et sans lui. Paie évitée = coût du contrat concerné dans la projection sans le départ − avec le départ, sur les mois projetés de l'année (hors coûts de sortie). Économie nette = paie évitée − coûts de sortie − coût du remplaçant lié (embauche qui remplace ce départ, tuilage compris). Année pleine = 12 × (coût du mois complet de décembre du contrat − celui du remplaçant) ; n.d. si décembre est hors horizon ou si le remplaçant arrive après le 1er décembre.",
+  },
+  {
+    id: "sensibilites",
+    title: "Sensibilités",
+    text:
+      "Effet sur l'atterrissage de l'année (et sur le retraité) d'une variation d'une hypothèse, calculée seule : décalage d'une date en jours, variation d'un taux d'augmentation en points de %, variation d'un montant ou de coûts de sortie en %. Effet = atterrissage avec la variation − atterrissage avec l'hypothèse retenue. Aucune valeur de variation n'est proposée par défaut ; rien n'est enregistré.",
+  },
+  {
     id: "effectif",
     title: "Effectif et ETP projetés",
     text:

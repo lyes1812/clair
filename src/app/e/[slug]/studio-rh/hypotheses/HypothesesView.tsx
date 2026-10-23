@@ -9,7 +9,7 @@ import { addHypothesisAction, deleteHypothesisAction } from "./actions";
 
 const pct = (bps: number) => `${fmtFixed({ num: bps, den: 100 }, 2)} %`;
 const amountText = (a: Amount) => (a.mode === "brut" ? `${formatEuros(a.brutCents)} brut + charges ${pct(a.chargesBps)}` : `${formatEuros(a.costCents)} chargés`);
-const KIND = { augmentation: "Augmentation", embauche: "Embauche", depart: "Départ", ponctuel: "Élément ponctuel", base: "Correction de base" } as const;
+const KIND = { augmentation: "Augmentation", embauche: "Embauche", depart: "Départ", ponctuel: "Élément ponctuel", realise: "Non récurrent réalisé", base: "Correction de base" } as const;
 
 function scopeText(s: Scope, base: BaseSnapshot, hyps: Hypothesis[]) {
   if (s.kind === "global") return "toute l'entreprise (hors embauches et entrées après la base)";
@@ -31,7 +31,9 @@ function detailOf(h: Hypothesis, base: BaseSnapshot, hyps: Hypothesis[]): string
     case "depart":
       return `${who(h.contractKey)} · dernier jour payé ${h.lastPaidDate}${h.exitCost ? ` · coûts de sortie ${amountText(h.exitCost)}` : ""}`;
     case "ponctuel":
-      return `${formatMonth(h.month)} · ${amountText(h.amount)} · ${h.service ?? "toute l'entreprise"}`;
+      return `${formatMonth(h.month)} · ${amountText(h.amount)} · ${h.service ?? "toute l'entreprise"}${h.nonRecurring ? " · non récurrent" : ""}`;
+    case "realise":
+      return `${formatMonth(h.month)} · ${h.category} · ${formatEuros(h.costCents)} chargés, déjà en comptabilité (atterrissage retraité seulement)`;
     case "base":
       return `${who(h.contractKey)} · salaire ${formatEuros(h.salaryCents)} · charges ${pct(h.chargesBps)}`;
   }
@@ -271,6 +273,19 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
                 </Field>
               </div>
               <div className="filters"><AmountFields prefix="amount" idp="pon-amount" /></div>
+              <label className="check"><input type="checkbox" name="nonRecurring" value="oui" /><span>Non récurrent (retiré de l'atterrissage retraité)</span></label>
+            </ActionForm>
+          </details>
+          <details>
+            <summary>Élément non récurrent déjà passé en comptabilité (rupture, solde de congés…)</summary>
+            <p className="desc">Le journal PayFit ne distingue pas ces éléments (ils sont dans le brut). Saisis-les ici avec leur montant chargé : ils servent uniquement à l'atterrissage retraité et ne changent pas la projection.</p>
+            <ActionForm action={add("realise")} submit="Ajouter l'élément réalisé" testid="hyp-form-realise">
+              <div className="filters">
+                <Text id="rea-label" name="label" label="Libellé" maxLength={200} required />
+                <Text id="rea-cat" name="category" label="Catégorie (libre)" maxLength={100} required />
+                <Text id="rea-month" name="month" label="Mois réalisé" type="month" max={base.refMonth} required />
+                <Text id="rea-cost" name="cost" label="Montant chargé (€)" inputMode="decimal" required />
+              </div>
             </ActionForm>
           </details>
         </section>

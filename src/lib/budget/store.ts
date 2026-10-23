@@ -37,7 +37,8 @@ export const hypothesisSchema: z.ZodType<Hypothesis> = z.discriminatedUnion("kin
     grossFullTimeCents: cents.positive(), quotaBps: z.number().int().min(1).max(10_000), chargesBps: bps.min(0), counted: z.boolean(), replaces: id.nullable(),
   }),
   z.object({ id, kind: z.literal("depart"), label, contractKey: z.string().min(1).max(300), lastPaidDate: date, exitCost: amount.nullable() }),
-  z.object({ id, kind: z.literal("ponctuel"), label, month, amount, service: z.string().min(1).max(200).nullable() }),
+  z.object({ id, kind: z.literal("ponctuel"), label, month, amount, service: z.string().min(1).max(200).nullable(), nonRecurring: z.boolean().optional() }),
+  z.object({ id, kind: z.literal("realise"), label, category: z.string().trim().min(1).max(100), month, costCents: cents.nonnegative() }),
   z.object({ id, kind: z.literal("base"), label, contractKey: z.string().min(1).max(300), salaryCents: cents.nonnegative(), chargesBps: bps.min(0) }),
 ]) as z.ZodType<Hypothesis>;
 
