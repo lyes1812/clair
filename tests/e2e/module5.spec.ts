@@ -4,6 +4,7 @@ import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
 // Module 5 (lot 1) : scénario sur le journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle).
 // Valeurs recalculées à la main depuis ref/fixtures/clair-test-generic-v1.json (voir tests/unit/budget.test.ts).
 const run = Date.now().toString(36);
+const slow = { timeout: 30_000 }; // environnement déployé : actions serveur parfois lentes
 const txt = async (l: Locator) => ((await l.textContent()) ?? "").replace(/\s+/g, " ").trim();
 
 test("Hypothèses budgétaires : base figée, hypothèses datées, projection traçable", async ({ page }) => {
@@ -19,7 +20,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await page.goto(`/e/${slug}/donnees/payfit`);
   await page.getByLabel("Clé API PayFit").fill("fixture-A-1");
   await page.getByRole("button", { name: "Vérifier et enregistrer" }).click();
-  await expect(page.getByRole("status")).toContainText("Connexion vérifiée");
+  await expect(page.getByRole("status")).toContainText("Connexion vérifiée", slow);
   await page.getByLabel("Du mois").fill("2024-10");
   await page.getByLabel("Au mois").fill("2026-09");
   await page.getByRole("button", { name: "Synchroniser" }).click();
@@ -34,7 +35,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await expect(page.getByTestId("setting-projection-origin")).toContainText("Non renseignée");
   await page.getByTestId("setting-projection-calendaire").check();
   await page.getByTestId("setting-projection-save").click();
-  await expect(page.getByTestId("setting-projection").getByRole("status")).toContainText("Règle de prorata enregistrée");
+  await expect(page.getByTestId("setting-projection").getByRole("status")).toContainText("Règle de prorata enregistrée", slow);
 
   // Création : base figée sur septembre 2026, projection octobre → décembre 2026.
   await page.goto(hyp);
@@ -65,7 +66,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await form("augmentation").getByLabel("À compter de (mois)").fill("2026-11");
   await form("augmentation").getByLabel("Périmètre").selectOption("global");
   await form("augmentation").getByRole("button").click();
-  await expect(form("augmentation").getByRole("status")).toContainText("Générale 2 %");
+  await expect(form("augmentation").getByRole("status")).toContainText("Générale 2 %", slow);
 
   await page.getByTestId("hyp-add").getByText("Départ", { exact: true }).click();
   await form("depart").getByLabel("Libellé").fill("Départ 008");
@@ -75,7 +76,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await form("depart").getByLabel("Brut (€)").fill("1000");
   await form("depart").getByLabel("Taux de charges (%)").fill("20");
   await form("depart").getByRole("button").click();
-  await expect(form("depart").getByRole("status")).toContainText("Départ 008");
+  await expect(form("depart").getByRole("status")).toContainText("Départ 008", slow);
 
   await page.getByTestId("hyp-add").getByText("Embauche", { exact: true }).click();
   await form("embauche").getByLabel("Poste").fill("Remplaçant 008");
@@ -87,7 +88,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await form("embauche").getByLabel("Effectif").selectOption("oui");
   await form("embauche").getByLabel("Remplace").selectOption({ label: "Départ 008" });
   await form("embauche").getByRole("button").click();
-  await expect(form("embauche").getByRole("status")).toContainText("Remplaçant 008");
+  await expect(form("embauche").getByRole("status")).toContainText("Remplaçant 008", slow);
 
   await page.getByTestId("hyp-add").getByText("Élément ponctuel (prime, régularisation…)").click();
   await form("ponctuel").getByLabel("Libellé").fill("Primes de fin d'année");
@@ -96,7 +97,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await form("ponctuel").getByLabel("Brut (€)").fill("1000");
   await form("ponctuel").getByLabel("Taux de charges (%)").fill("30");
   await form("ponctuel").getByRole("button").click();
-  await expect(form("ponctuel").getByRole("status")).toContainText("Primes de fin d'année");
+  await expect(form("ponctuel").getByRole("status")).toContainText("Primes de fin d'année", slow);
 
   // Une hypothèse incohérente est refusée avec sa raison (deux augmentations générales le même mois).
   await form("augmentation").getByLabel("Libellé").fill("Doublon");
@@ -104,7 +105,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await form("augmentation").getByLabel("À compter de (mois)").fill("2026-11");
   await form("augmentation").getByLabel("Périmètre").selectOption("global");
   await form("augmentation").getByRole("button").click();
-  await expect(form("augmentation").getByRole("alert")).toContainText("en conflit en 2026-11");
+  await expect(form("augmentation").getByRole("alert")).toContainText("en conflit en 2026-11", slow);
   await page.reload();
   await expect(page.getByTestId("hyp-hypotheses").locator("tbody tr")).toHaveCount(4);
   await page.screenshot({ path: `${CAPTURES}/5-01-hypotheses.png`, fullPage: true });
@@ -147,14 +148,14 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await bf.getByLabel("Année").fill("2026");
   for (const mm of ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11"]) await bf.locator(`input[name='m${mm}']`).fill("24000");
   await bf.getByRole("button").click();
-  await expect(bf.getByRole("status")).toContainText("Budget « Budget 2026 » enregistré");
+  await expect(bf.getByRole("status")).toContainText("Budget « Budget 2026 » enregistré", slow);
   await page.reload();
   await expect(page.getByTestId("hyp-budgets-table").locator("tr[data-budget='Budget 2026'] td[data-col='total']")).toContainText("n.d. — 1 mois non saisi");
   await page.getByTestId("hyp-budgets-table").locator("tr[data-budget='Budget 2026'] summary").click();
   const be = page.getByTestId("hyp-budgets-table").locator("form[data-testid^='budget-edit-']");
   await be.locator("input[name='m12']").fill("24000");
   await be.getByRole("button").click();
-  await expect(be.getByRole("status")).toContainText("enregistré");
+  await expect(be.getByRole("status")).toContainText("enregistré", slow);
   await page.reload();
   expect(await txt(page.getByTestId("hyp-budgets-table").locator("tr[data-budget='Budget 2026'] td[data-col='total']"))).toBe("288 000,00 €");
 
@@ -162,8 +163,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await page.getByTestId("hyp-scenarios").getByRole("link", { name: "Révisé T4 2026" }).click();
   await page.getByTestId("hyp-tabs").getByRole("link", { name: "Comparaison" }).click();
   const cmp = (m: string, col: string) => page.getByTestId("cmp-table").locator(`tr[data-month='${m}'] td[data-col='${col}']`);
-  const budgetCol = (await page.getByTestId("cmp-table").locator("thead th").allTextContents()).findIndex((t) => t.includes("Budget « Budget 2026 »"));
-  expect(budgetCol).toBeGreaterThan(0);
+  await expect(page.getByTestId("cmp-table").locator("thead")).toContainText("Budget « Budget 2026 »");
   // Année : 281 250,10 € projetés contre 288 000,00 € de budget → −6 749,90 € ; janv.–sept. : 211 260,00 € contre 216 000,00 €.
   const tileB = page.locator("[data-testid^='cmp-tile-budget-']");
   await expect(tileB.locator("dd")).toContainText("-6 749,90 €");

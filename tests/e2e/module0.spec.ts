@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { TOTP } from "otpauth";
-import { CAPTURES, PASSWORD, signUp } from "./helpers";
+import { CAPTURES, freshTotp, PASSWORD, signUp } from "./helpers";
 
 // Acceptation du module 0 : connexion, création d'espace, menu figé, accès croisé refusé, rôle lecteur.
 // Comptes jetables à adresses fictives ; aucune donnée réelle.
@@ -17,7 +16,7 @@ let slug = "";
 let totpSecret = "";
 
 function totpCode() {
-  return new TOTP({ secret: totpSecret, digits: 6, period: 30 }).generate();
+  return freshTotp(totpSecret);
 }
 
 test.describe.serial("Module 0 — socle", () => {
@@ -39,7 +38,7 @@ test.describe.serial("Module 0 — socle", () => {
     await page.getByLabel("Mot de passe").fill(PASSWORD);
     await page.getByRole("button", { name: "Configurer" }).click();
     totpSecret = (await page.getByTestId("totp-secret").textContent())!.trim();
-    await page.getByLabel("Code à 6 chiffres").fill(totpCode());
+    await page.getByLabel("Code à 6 chiffres").fill(await totpCode());
     await page.getByRole("button", { name: "Activer" }).click();
     await expect(page.getByTestId("totp-enabled")).toBeVisible();
     await page.getByRole("button", { name: "Continuer" }).click();
@@ -107,7 +106,7 @@ test.describe.serial("Module 0 — socle", () => {
     await admin.getByLabel("Mot de passe").fill(PASSWORD);
     await admin.getByRole("button", { name: "Se connecter" }).click();
     await expect(admin).toHaveURL(/\/connexion\/totp/);
-    await admin.getByLabel("Code").fill(totpCode());
+    await admin.getByLabel("Code").fill(await totpCode());
     await admin.getByRole("button", { name: "Vérifier" }).click();
     await expect(admin).toHaveURL(/\/espaces$/);
 

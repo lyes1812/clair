@@ -23,6 +23,14 @@ export async function signUp(page: Page, u: { name: string; email: string }) {
   }
 }
 
+// Code TOTP généré loin d'un changement de fenêtre de 30 s (horloges du poste de test et du serveur légèrement
+// décalées) : si moins de 10 s restent dans la fenêtre courante, on attend la suivante.
+export async function freshTotp(secret: string): Promise<string> {
+  const left = 30 - (Math.floor(Date.now() / 1000) % 30);
+  if (left < 10) await new Promise((r) => setTimeout(r, (left + 1) * 1000));
+  return new TOTP({ secret, digits: 6, period: 30 }).generate();
+}
+
 // Crée un espace et active le TOTP de l'administrateur ; renvoie le slug et le secret TOTP.
 export async function createWorkspaceAsAdmin(page: Page, name: string) {
   await page.getByLabel(/Nom de l'espace/).fill(name);
@@ -31,7 +39,7 @@ export async function createWorkspaceAsAdmin(page: Page, name: string) {
   await page.getByLabel("Mot de passe").fill(PASSWORD);
   await page.getByRole("button", { name: "Configurer" }).click();
   const secret = (await page.getByTestId("totp-secret").textContent())!.trim();
-  await page.getByLabel("Code à 6 chiffres").fill(new TOTP({ secret, digits: 6, period: 30 }).generate());
+  await page.getByLabel("Code à 6 chiffres").fill(await freshTotp(secret));
   await page.getByRole("button", { name: "Activer" }).click();
   await expect(page.getByTestId("totp-enabled")).toBeVisible();
   await page.getByRole("button", { name: "Continuer" }).click();
