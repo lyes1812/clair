@@ -6,9 +6,10 @@ import type { Conventions, Prorata } from "./types";
 export const PROJECTION_PRORATA_KEY = "rh.projection.prorata";
 export const PRORATA_LABELS: Record<Prorata, string> = {
   calendaire: "Jours calendaires : jours payés du mois ÷ nombre de jours du mois (entrée et sortie en cours de mois)",
+  ouvres: "Jours ouvrés : jours ouvrés payés ÷ jours ouvrés du mois (lundi à vendredi hors jours fériés légaux français, calculés pour toute année)",
   aucun: "Aucun prorata : un mois commencé ou terminé compte entier",
 };
-export const parseProrata = (v: unknown): Prorata | null => (v === "calendaire" || v === "aucun" ? v : null);
+export const parseProrata = (v: unknown): Prorata | null => (v === "calendaire" || v === "ouvres" || v === "aucun" ? v : null);
 
 export async function getConventions(workspaceId: string): Promise<{ conventions: Conventions; updatedAt: Date } | null> {
   const meta = await getSettingMeta(workspaceId, PROJECTION_PRORATA_KEY, parseProrata);

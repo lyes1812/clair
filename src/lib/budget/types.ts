@@ -5,6 +5,11 @@ export const CURRENCY = "EUR";
 
 // --- Base figée : copie, à la création du scénario, du réel jusqu'au mois de référence (mois qui précède la bascule)
 // et du coût de référence de chaque contrat présent à la fin de ce mois. Jamais recalculée ensuite.
+// Catégories de contrat suivies dans les effectifs et les ETP.
+export type CategoryId = "cdi" | "cdd" | "apprenti" | "stagiaire";
+export const CATEGORY_IDS: CategoryId[] = ["cdi", "cdd", "apprenti", "stagiaire"];
+export const CATEGORY_LABELS: Record<CategoryId, string> = { cdi: "CDI", cdd: "CDD", apprenti: "Apprenti", stagiaire: "Stagiaire" };
+
 export type BaseContract = {
   contractKey: string;
   externalId: string;
@@ -16,6 +21,9 @@ export type BaseContract = {
   counted: boolean; // nature comptée dans l'effectif (paramètre KPI de l'espace)
   etp4: number | null; // ETP fin du mois de référence
   etpNd: string | null;
+  nature?: string | null; // code de nature DSN du contrat
+  category?: CategoryId | null; // catégorie proposée depuis la nature (modifiable par une hypothèse « catégorie »)
+  baseNote?: string | null; // base reconstituée par une règle (ex. entrée en cours du mois de référence)
   // Base de coût : rubriques Salaires (et gratifications de stage) du mois de référence ; charges au taux observé du
   // contrat ce mois-là (cotisations ÷ brut total). n.d. avec raison si le mois de référence ne la donne pas.
   base: { salaryCents: number; refBrutCents: number; refCotisationsCents: number } | null;
@@ -64,6 +72,10 @@ export type Amount = { mode: "brut"; brutCents: number; chargesBps: number } | {
 
 export type Hypothesis =
   | { id: string; kind: "augmentation"; label: string; from: string; rateBps: number; scope: Scope }
+  // Congé non payé ou partiellement payé (congé sans solde, congé supplémentaire pris en charge par un tiers…) : jours
+  // de la période (bornes incluses) payés à paidBps du salaire (0 = aucun salaire, charges proportionnelles).
+  | { id: string; kind: "absence"; label: string; contractKey: string; from: string; to: string; paidBps: number }
+  | { id: string; kind: "categorie"; label: string; contractKey: string; category: CategoryId }
   | {
       id: string;
       kind: "embauche";
@@ -75,10 +87,11 @@ export type Hypothesis =
       quotaBps: number; // quotité (10 000 = temps plein)
       chargesBps: number; // taux de charges patronales
       counted: boolean; // compté dans l'effectif
+      category?: CategoryId | null; // CDI, CDD, apprenti, stagiaire
       replaces: string | null; // id de l'hypothèse de départ remplacée (lien documentaire)
     }
-  | { id: string; kind: "depart"; label: string; contractKey: string; lastPaidDate: string; exitCost: Amount | null }
-  | { id: string; kind: "ponctuel"; label: string; month: string; amount: Amount; service: string | null; nonRecurring?: boolean }
+  | { id: string; kind: "depart"; label: string; contractKey: string; lastPaidDate: string; exitCost: Amount | null; motif?: string }
+  | { id: string; kind: "ponctuel"; label: string; month: string; amount: Amount; service: string | null; nonRecurring?: boolean; contractKey?: string | null }
   // Élément non récurrent déjà passé en comptabilité (mois réalisé) : le journal PayFit ne le distingue pas, il est saisi
   // à la main (catégorie libre) et sert seulement à l'atterrissage retraité ; il ne change pas la projection.
   | { id: string; kind: "realise"; label: string; category: string; month: string; costCents: number }
@@ -87,11 +100,11 @@ export type Hypothesis =
 export type HypothesisKind = Hypothesis["kind"];
 
 // Conventions de calcul : paramètre de l'espace, copié dans le scénario à sa création.
-export type Prorata = "calendaire" | "aucun";
+export type Prorata = "calendaire" | "ouvres" | "aucun";
 export type Conventions = { prorata: Prorata };
 
 // --- Résultat.
-export type ContributionKind = "base" | "augmentation" | "depart" | "fin-contrat" | "entree" | "embauche" | "ponctuel" | "sortie";
+export type ContributionKind = "base" | "augmentation" | "absence" | "depart" | "fin-contrat" | "entree" | "embauche" | "ponctuel" | "sortie";
 export type Contribution = {
   hypothesisId: string | null; // null : base figée ou fin de contrat connue
   kind: ContributionKind;
@@ -103,10 +116,22 @@ export type Contribution = {
   charges: number | null;
   cost: number;
   nonRecurringCents?: number; // part non récurrente de cette contribution (coûts de sortie, ponctuel marqué, tuilage)
+  nonRecurringLabel?: string; // catégorie de l'élément non récurrent (motif du départ)
 };
 
 export type ProjectedMonth =
-  | { month: string; kind: "value"; brut: number | null; charges: number | null; cost: number; headcount: number; etp4: number | null; etpNd: string | null; contributions: Contribution[] }
+  | {
+      month: string;
+      kind: "value";
+      brut: number | null;
+      charges: number | null;
+      cost: number;
+      headcount: number;
+      etp4: number | null;
+      etpNd: string | null;
+      byCategory?: Record<string, { headcount: number; etp4: number | null }>; // clé : catégorie, ou « nc » (non classé)
+      contributions: Contribution[];
+    }
   | { month: string; kind: "nd"; reasons: string[] };
 
 export type Projection = { kind: "value"; months: ProjectedMonth[] } | { kind: "error"; errors: string[] };

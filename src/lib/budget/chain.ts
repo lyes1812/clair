@@ -27,6 +27,7 @@ export function chainBase(
   const childEnd = monthLast(childLastMonth);
   const augs = hyps.filter((h): h is Aug => h.kind === "augmentation");
   const deps = new Map(hyps.flatMap((h) => (h.kind === "depart" ? [[h.contractKey, h] as const] : [])));
+  const cats = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
   const fixes = new Map(hyps.flatMap((h) => (h.kind === "base" ? [[h.contractKey, h] as const] : [])));
   const contracts: BaseContract[] = [];
   const notCarried: string[] = [];
@@ -48,7 +49,7 @@ export function chainBase(
     const brut = own.reduce((s, x) => s + (x.brut ?? 0), 0);
     const charges = own.reduce((s, x) => s + (x.charges ?? 0), 0);
     const b = baseOf(brut, charges, fixes.get(c.contractKey)?.chargesBps ?? null);
-    contracts.push({ ...c, base: b, baseNd: ndOf(b) });
+    contracts.push({ ...c, category: cats.get(c.contractKey) ?? c.category ?? null, base: b, baseNd: ndOf(b) });
     carried.add(c.contractKey);
   }
   for (const h of hyps) {
@@ -74,7 +75,7 @@ export function chainBase(
     hireInM += pm.contributions.filter((x) => x.contractKey === key).reduce((s, x) => s + x.cost, 0);
     contracts.push({
       contractKey: key, externalId: key, label: h.label, service: h.service, serviceNd: h.service ? null : "embauche sans service", startDate: h.start, endDate: h.end,
-      counted: h.counted, etp4: h.counted ? h.quotaBps : null, etpNd: h.counted ? null : "non compté dans l'effectif",
+      nature: null, category: cats.get(key) ?? h.category ?? null, counted: h.counted, etp4: h.counted ? h.quotaBps : null, etpNd: h.counted ? null : "non compté dans l'effectif",
       base: baseOf(brut, charges, h.chargesBps), baseNd: ndOf(baseOf(brut, charges, h.chargesBps)),
     });
     carried.add(key);

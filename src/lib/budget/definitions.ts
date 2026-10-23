@@ -22,7 +22,25 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
     id: "prorata",
     title: "Prorata d'entrée et de sortie",
     text:
-      "Règle choisie dans Paramètres › Projection et copiée dans le scénario à sa création. Jours calendaires : jours payés du mois ÷ nombre de jours du mois. Aucun : un mois commencé ou terminé compte entier. Embauche : premier jour payé ; départ : dernier jour payé.",
+      "Règle choisie dans Paramètres › Projection et copiée dans le scénario à sa création. Jours calendaires : jours payés du mois ÷ nombre de jours du mois. Jours ouvrés : jours ouvrés payés ÷ jours ouvrés du mois (lundi à vendredi hors jours fériés légaux français — 1er janvier, lundis de Pâques et de Pentecôte, 1er mai, 8 mai, Ascension, 14 juillet, 15 août, 1er et 11 novembre, 25 décembre — calculés pour toute année ; ni jours fériés locaux d'Alsace-Moselle, ni ponts). Aucun : un mois commencé ou terminé compte entier. Embauche : premier jour payé ; départ : dernier jour payé.",
+  },
+  {
+    id: "absence",
+    title: "Congé non payé",
+    text:
+      "Période (bornes incluses) pendant laquelle un salarié est payé à une part de son salaire (0 % : aucun salaire, par exemple un congé pris en charge par l'assurance maladie ; les charges patronales sont proportionnelles au salaire payé). Les jours non payés sont comptés selon la règle de prorata du scénario (calendaires, ou ouvrés ; sans prorata, en jours calendaires). Le salarié reste dans l'effectif. Une ligne « congé non payé » apparaît dans le détail du mois.",
+  },
+  {
+    id: "categories",
+    title: "Catégories CDI, CDD, apprenti, stagiaire",
+    text:
+      "Catégorie proposée depuis le code de nature du contrat (table de Paramètres › Projection ; valeur proposée : 01 CDI, 02 CDD, 29 convention de stage), corrigée salarié par salarié par une hypothèse « catégorie » (PayFit code certains apprentis en CDD). Une embauche porte sa catégorie. Effectif et ETP de fin de mois sont ventilés par catégorie ; un contrat sans catégorie est « non classé ».",
+  },
+  {
+    id: "entrant",
+    title: "Entrée en cours du mois de référence",
+    text:
+      "Un contrat entré pendant le mois de référence, avec des lignes de salaire et de cotisations, a pour base le salaire de ce mois ramené au mois complet : salaire ÷ part de présence (règle de prorata du scénario, ex. 18 jours ouvrés sur 22 pour une entrée le 7 septembre). Le calcul est indiqué sur le salarié ; il reste corrigeable par une base saisie.",
   },
   {
     id: "contribution",

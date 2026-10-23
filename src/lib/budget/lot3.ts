@@ -28,7 +28,7 @@ export function retraite(base: BaseSnapshot, proj: Projection, hyps: Hypothesis[
     if (!m.month.startsWith(year) || m.kind !== "value") continue;
     for (const c of m.contributions) {
       if (!c.nonRecurringCents) continue;
-      add(c.kind === "sortie" ? "Coûts de sortie (hypothèses de départ)" : c.kind === "embauche" ? "Tuilages (coût de l'entrant pendant le recouvrement)" : `Éléments ponctuels non récurrents`, "projected", c.nonRecurringCents);
+      add(c.kind === "sortie" ? (c.nonRecurringLabel ?? "Coûts de sortie (hypothèses de départ)") : c.kind === "embauche" ? "Tuilages (coût de l'entrant pendant le recouvrement)" : `Éléments ponctuels non récurrents`, "projected", c.nonRecurringCents);
     }
   }
   const list = [...rows.values()].sort((a, b) => a.label.localeCompare(b.label));

@@ -1,4 +1,5 @@
 import { monthRange } from "@/lib/connectors/months";
+import { workdays } from "./calendar";
 import type { BaseContract, BaseSnapshot, Contribution, Conventions, Hypothesis, ProjectedMonth, Projection, Scope } from "./types";
 
 // Moteur de projection de la masse salariale (module 5) : calcul pur, déterministe, en centimes.
@@ -27,15 +28,17 @@ export const monthLast = (month: string) => `${month}-${String(daysInMonth(month
 const dayOf = (date: string) => Number(date.slice(8, 10));
 
 // Part de présence dans le mois d'un intervalle de jours payés [from, to] (bornes incluses, to null = sans fin).
-// « calendaire » : jours présents ÷ jours du mois ; « aucun » : mois entier dès un jour de présence.
+// « calendaire » : jours présents ÷ jours du mois ; « ouvres » : jours ouvrés présents ÷ jours ouvrés du mois (lundi à
+// vendredi hors jours fériés légaux, voir calendar.ts) ; « aucun » : mois entier dès un jour de présence.
 export function presence(month: string, from: string, to: string | null, prorata: Conventions["prorata"]): Frac {
   const first = monthStart(month);
   const last = monthLast(month);
   if (from > last || (to !== null && to < first)) return { n: 0n, d: 1n };
-  const a = from < first ? 1 : dayOf(from);
-  const b = to === null || to > last ? daysInMonth(month) : dayOf(to);
+  const a = from < first ? first : from;
+  const b = to === null || to > last ? last : to;
   if (prorata === "aucun") return { n: 1n, d: 1n };
-  return { n: B(b - a + 1), d: B(daysInMonth(month)) };
+  if (prorata === "ouvres") return { n: B(workdays(a, b)), d: B(workdays(first, last)) };
+  return { n: B(dayOf(b) - dayOf(a) + 1), d: B(daysInMonth(month)) };
 }
 
 const specificity = (s: Scope) => (s.kind === "contrat" ? 3 : s.kind === "service" ? 2 : 1);
@@ -47,6 +50,7 @@ type Aug = Extract<Hypothesis, { kind: "augmentation" }>;
 type Hire = Extract<Hypothesis, { kind: "embauche" }>;
 type Dep = Extract<Hypothesis, { kind: "depart" }>;
 type Fix = Extract<Hypothesis, { kind: "base" }>;
+type Abs = Extract<Hypothesis, { kind: "absence" }>;
 type Target = { key: string; service: string | null; isHire: boolean };
 
 // Augmentations retenues pour une cible : pour chaque mois d'effet, la plus ciblée (contrat > service > toute
@@ -114,6 +118,21 @@ export function validate(base: BaseSnapshot, firstMonth: string, lastMonth: stri
       if (h.replaces !== null && !hyps.some((x) => x.id === h.replaces && x.kind === "depart")) errors.push(`« ${h.label} » : le départ remplacé n'existe pas`);
     }
     if (h.kind === "ponctuel" && !inHorizon(h.month)) errors.push(`« ${h.label} » : mois ${h.month} hors de l'horizon ${firstMonth} → ${lastMonth}`);
+    if (h.kind === "ponctuel" && h.contractKey && !keys.has(h.contractKey) && !hyps.some((x) => x.kind === "embauche" && hireKey(x.id) === h.contractKey)) errors.push(`« ${h.label} » : salarié inconnu`);
+    if (h.kind === "absence") {
+      if (!keys.has(h.contractKey)) errors.push(`« ${h.label} » : salarié absent de la base figée (un congé sur une embauche n'est pas géré : décalez sa date d'arrivée)`);
+      if (h.to < h.from) errors.push(`« ${h.label} » : fin de l'absence antérieure à son début`);
+      if (h.to < monthStart(firstMonth) || h.from > monthLast(lastMonth)) errors.push(`« ${h.label} » : absence hors de l'horizon ${firstMonth} → ${lastMonth}`);
+      if (h.paidBps < 0 || h.paidBps > 10_000) errors.push(`« ${h.label} » : part payée entre 0 et 100 %`);
+      const c = base.contracts.find((x) => x.contractKey === h.contractKey);
+      if (c?.startDate && h.to < c.startDate) errors.push(`« ${h.label} » : absence antérieure à l'entrée du salarié`);
+      const other = hyps.find((x) => x.kind === "absence" && x.id !== h.id && x.contractKey === h.contractKey && x.from <= h.to && h.from <= x.to);
+      if (other) errors.push(`« ${h.label} » : chevauche « ${other.label} » pour le même salarié`);
+    }
+    if (h.kind === "categorie") {
+      if (!keys.has(h.contractKey) && !hyps.some((x) => x.kind === "embauche" && hireKey(x.id) === h.contractKey)) errors.push(`« ${h.label} » : salarié inconnu`);
+      if (hyps.some((x) => x.kind === "categorie" && x.id !== h.id && x.contractKey === h.contractKey)) errors.push(`« ${h.label} » : deux catégories pour le même salarié`);
+    }
     if (h.kind === "realise" && !base.actuals.some((x) => x.month === h.month && x.kind === "value")) errors.push(`« ${h.label} » : ${h.month} n'est pas un mois réalisé de la base figée (pour un mois à venir, utilisez un élément ponctuel)`);
   }
   return errors;
@@ -126,6 +145,9 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
   const hires = hyps.filter((h): h is Hire => h.kind === "embauche");
   const deps = new Map(hyps.filter((h): h is Dep => h.kind === "depart").map((h) => [h.contractKey, h]));
   const fixes = new Map(hyps.filter((h): h is Fix => h.kind === "base").map((h) => [h.contractKey, h]));
+  const absFor = new Map<string, Abs[]>();
+  for (const h of hyps) if (h.kind === "absence") absFor.set(h.contractKey, [...(absFor.get(h.contractKey) ?? []), h].sort((x, y) => x.from.localeCompare(y.from)));
+  const catOf = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
   const conflicts = new Set<string>();
   const augFor = new Map<string, Aug[]>();
   // Un contrat entré après le mois de référence a une base saisie à son entrée : comme une embauche, il ne reçoit que
@@ -141,6 +163,15 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
     let headcount = 0;
     let etp = 0;
     const etpNd: string[] = [];
+    const cats = new Map<string, { headcount: number; etp: number; nd: boolean }>();
+    const countIn = (cat: string | null | undefined, etp4: number | null) => {
+      const k = cat ?? "nc";
+      const e = cats.get(k) ?? { headcount: 0, etp: 0, nd: false };
+      e.headcount += 1;
+      if (etp4 === null) e.nd = true;
+      else e.etp += etp4;
+      cats.set(k, e);
+    };
     const end = monthLast(m);
     const effective = (list: Aug[]) => list.filter((a) => a.from <= m);
 
@@ -169,15 +200,29 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
         const ch = full[i + 1].charges - full[i].charges;
         contributions.push({ hypothesisId: a.id, kind: "augmentation", label: a.label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
       });
-      if (p.n !== p.d) {
-        // Mois incomplet : réductions successives, chacune rattachée à sa cause — entrée après le mois de référence,
-        // puis fin de contrat connue, puis départ saisi. Chaque ligne = différence de deux niveaux arrondis.
+      {
+        // Réductions successives, chacune rattachée à sa cause — entrée après le mois de référence, fin de contrat
+        // connue, départ saisi, puis absences non payées. Chaque ligne = différence de deux niveaux arrondis.
         const endKnown = c.endDate !== null && c.endDate <= end ? c.endDate : null;
         const depDate = dep !== null && dep.lastPaidDate <= end ? dep.lastPaidDate : null;
-        const steps: { p: Frac; kind: "entree" | "fin-contrat" | "depart"; label: string; id: string | null }[] = [];
+        const steps: { p: Frac; kind: "entree" | "fin-contrat" | "depart" | "absence"; label: string; id: string | null }[] = [];
         if (from > monthStart(m)) steps.push({ p: presence(m, from, null, conv.prorata), kind: "entree", label: `Entrée le ${from}`, id: null });
         if (endKnown) steps.push({ p: presence(m, from, endKnown, conv.prorata), kind: "fin-contrat", label: `Fin de contrat connue le ${endKnown}`, id: null });
-        if (depDate) steps.push({ p: presence(m, from, [depDate, endKnown].filter((x): x is string => x !== null).sort()[0], conv.prorata), kind: "depart", label: dep!.label, id: dep!.id });
+        const stopIn = [depDate, endKnown].filter((x): x is string => x !== null).sort()[0] ?? null;
+        if (depDate) steps.push({ p: presence(m, from, stopIn, conv.prorata), kind: "depart", label: dep!.label, id: dep!.id });
+        // Absences : jours non payés dans la période de présence (calendaires, ou ouvrés selon la règle).
+        let run = p;
+        for (const ab of absFor.get(c.contractKey) ?? []) {
+          const lo = [ab.from, from, monthStart(m)].sort().at(-1)!;
+          const hi = [ab.to, stopIn ?? end, end].sort()[0];
+          if (lo > hi) continue;
+          const days = conv.prorata === "ouvres" ? workdays(lo, hi) : dayOf(hi) - dayOf(lo) + 1;
+          if (days <= 0) continue;
+          const D = conv.prorata === "ouvres" ? workdays(monthStart(m), end) : daysInMonth(m);
+          const unpaid = B(days) * B(10_000 - ab.paidBps);
+          run = { n: run.n * TEN_K * B(D) - unpaid * run.d, d: run.d * TEN_K * B(D) };
+          steps.push({ p: run, kind: "absence", label: ab.label, id: ab.id });
+        }
         let prev = full.at(-1)!;
         for (const st of steps) {
           const lv = levels(S, list, st.p, rate).at(-1)!;
@@ -190,6 +235,7 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       const atEnd = from <= end && (stop === null || stop >= end);
       if (atEnd && c.counted) {
         headcount += 1;
+        countIn(catOf.get(c.contractKey) ?? c.category ?? null, c.etp4);
         if (c.etp4 === null) etpNd.push(`${c.label} : ${c.etpNd ?? "ETP n.d."}`);
         else etp += c.etp4;
       }
@@ -215,6 +261,7 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       });
       if (h.counted && (h.end === null || h.end >= end) && h.start <= end) {
         headcount += 1;
+        countIn(catOf.get(hireKey(h.id)) ?? h.category ?? null, h.quotaBps);
         etp += h.quotaBps;
       }
     }
@@ -227,12 +274,17 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
     for (const h of hyps) {
       if (h.kind === "ponctuel" && h.month === m) {
         const a = amount(h.amount);
-        contributions.push({ hypothesisId: h.id, kind: "ponctuel", label: h.label, contractKey: null, who: h.service ?? "toute l'entreprise", service: h.service, ...a, ...(h.nonRecurring ? { nonRecurringCents: a.cost } : {}) });
+        const target = h.contractKey ? base.contracts.find((x) => x.contractKey === h.contractKey) : null;
+        const hire = h.contractKey && !target ? hires.find((x) => hireKey(x.id) === h.contractKey) : null;
+        contributions.push({
+          hypothesisId: h.id, kind: "ponctuel", label: h.label, contractKey: h.contractKey ?? null, who: target?.label ?? hire?.label ?? h.service ?? "toute l'entreprise",
+          service: h.service ?? target?.service ?? hire?.service ?? null, ...a, ...(h.nonRecurring ? { nonRecurringCents: a.cost } : {}),
+        });
       }
       if (h.kind === "depart" && h.exitCost && h.lastPaidDate.slice(0, 7) === m) {
         const c = base.contracts.find((x) => x.contractKey === h.contractKey)!;
         const a = amount(h.exitCost);
-        contributions.push({ hypothesisId: h.id, kind: "sortie", label: `${h.label} — coûts de sortie`, contractKey: c.contractKey, who: c.label, service: c.service, ...a, nonRecurringCents: a.cost });
+        contributions.push({ hypothesisId: h.id, kind: "sortie", label: `${h.label} — coûts de sortie`, contractKey: c.contractKey, who: c.label, service: c.service, ...a, nonRecurringCents: a.cost, ...(h.motif?.trim() ? { nonRecurringLabel: h.motif.trim() } : {}) });
       }
     }
 
@@ -247,6 +299,7 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       headcount,
       etp4: etpNd.length ? null : etp,
       etpNd: etpNd.length ? etpNd.join(" ; ") : null,
+      byCategory: Object.fromEntries([...cats].map(([k, v]) => [k, { headcount: v.headcount, etp4: v.nd ? null : v.etp }])),
       contributions,
     };
   });

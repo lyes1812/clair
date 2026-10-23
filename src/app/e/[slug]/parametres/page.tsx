@@ -19,6 +19,8 @@ import { ServiceAxisForm } from "./ServiceAxisForm";
 import { gridRubrics } from "@/lib/payroll/grid";
 import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
 import { ProrataForm } from "./ProrataForm";
+import { CategoryNaturesForm } from "./CategoryNaturesForm";
+import { getCategoryNatures } from "@/lib/budget/categories";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +42,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const axes = await journalAxes(workspace.id);
   const serviceAxis = await getServiceAxis(workspace.id, axes);
   const [natures, row, history, historyAt, payroll, projection] = await Promise.all([getHeadcountNatures(workspace.id), updatedAt(HEADCOUNT_NATURES_KEY), getPayfitHistoryMode(workspace.id), updatedAt(PAYFIT_HISTORY_KEY), getPayrollGrid(workspace.id), getConventions(workspace.id)]);
+  const categories = await getCategoryNatures(workspace.id);
 
   return (
     <>
@@ -125,6 +128,11 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           {projection ? `Règle : ${PRORATA_LABELS[projection.conventions.prorata]} — modifiée le ${dateTimeFmt.format(projection.updatedAt)}.` : "Non renseignée : aucun scénario ne peut être créé."}
         </p>
         <ProrataForm slug={slug} current={projection?.conventions.prorata ?? null} labels={PRORATA_LABELS} disabled={!isAdmin} />
+        <h3>Catégories de contrat</h3>
+        <p className="desc" data-testid="setting-category-origin">
+          {categories.origin === "default" ? "Valeur proposée (nomenclature DSN : 01 CDI, 02 CDD, 29 convention de stage), modifiable. Aucun code n'est rattaché à « apprenti » : PayFit code certains apprentis en CDD, corrigez-les salarié par salarié dans le scénario." : "Modifié par un administrateur."} Un contrat dont la nature n'est dans aucune catégorie est « non classé ».
+        </p>
+        <CategoryNaturesForm slug={slug} natures={categories.natures} disabled={!isAdmin} />
       </section>
     </>
   );

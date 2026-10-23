@@ -80,7 +80,8 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
 
   await page.getByTestId("hyp-add").getByText("Embauche", { exact: true }).click();
   await form("embauche").getByLabel("Poste").fill("Remplaçant 008");
-  await form("embauche").getByLabel("Service").selectOption("TEST-SVC-C");
+  await form("embauche").getByLabel("Centre de coûts (service)").fill("TEST-SVC-C");
+  await form("embauche").getByLabel("Catégorie").selectOption("cdi");
   await form("embauche").getByLabel("Premier jour payé").fill("2026-11-16");
   await form("embauche").getByLabel("Brut mensuel temps plein (€)").fill("2500");
   await form("embauche").getByLabel("Quotité (%)").fill("50");
@@ -142,6 +143,28 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await expect(page.getByTestId("hyp-chain-frozen-only")).toBeVisible();
   await page.goto(hyp);
   await expect(page.getByTestId("hyp-scenarios").locator("tbody tr")).toHaveCount(2);
+
+  // Salariés : on cherche un salarié, on lui crée un congé non payé (26 octobre → 25 novembre, 0 %) sur la copie (brouillon).
+  await page.getByTestId("hyp-scenarios").getByRole("link", { name: "Variante sans prime" }).click();
+  await page.getByTestId("hyp-tabs").getByRole("link", { name: "Salariés" }).click();
+  await page.getByTestId("sal-search").getByLabel("Rechercher (nom, service)").fill("a-001");
+  await page.getByTestId("sal-search").getByRole("button", { name: "Rechercher" }).click();
+  await expect(page.getByTestId("sal-table").locator("tbody tr")).toHaveCount(1);
+  await page.getByTestId("sal-table").getByRole("link").first().click();
+  await expect(page.getByTestId("sal-fiche")).toContainText("CDI");
+  await page.getByTestId("sal-add").getByText("Congé non payé ou partiellement payé").click();
+  const ab = page.getByTestId("sal-form-absence");
+  await ab.getByLabel("Du", { exact: true }).fill("2026-10-26");
+  await ab.getByLabel("Au (inclus)").fill("2026-11-25");
+  await ab.getByLabel(/Part du salaire payée/).fill("0");
+  await ab.getByRole("button").click();
+  await expect(ab.getByRole("status")).toContainText("enregistrée", slow);
+  await page.reload();
+  // Octobre : payé 25/31 de 3 780,00 € = 3 048,39 € ; novembre : 275 400 € ×... (+2 %) payé 5/30 = 642,60 €.
+  expect(await txt(page.getByTestId("sal-months").locator("tr[data-month='2026-10'] td[data-col='cost']"))).toBe("3 048,39 €");
+  expect(await txt(page.getByTestId("sal-months").locator("tr[data-month='2026-11'] td[data-col='cost']"))).toBe("642,60 €");
+  await page.screenshot({ path: `${CAPTURES}/5-06-salarie.png`, fullPage: true });
+  await page.goto(hyp);
 
   // Lot 2 — budget saisi 2026 : 24 000,00 € par mois sauf décembre non saisi (n.d.), puis complété.
   await page.getByTestId("hyp-budgets").getByText("Saisir un budget").click();

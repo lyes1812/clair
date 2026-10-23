@@ -19,6 +19,7 @@ import { ActionForm } from "./ActionForm";
 import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
 import { ComparisonView, type Option } from "./ComparisonView";
 import { LandingView, variantOptions } from "./LandingView";
+import { SalariesView } from "./SalariesView";
 import { measures, retraite, sensitivities, type Variant, type VariantKind } from "@/lib/budget/lot3";
 import { toCents } from "@/lib/money";
 import { HypothesesView } from "./HypothesesView";
@@ -204,7 +205,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
     const full = await getScenario(workspace.id, scenarioId);
     if (!full) notFound();
     const s = full.scenario;
-    const vue = one(sp.vue) === "hypotheses" ? "hypotheses" : one(sp.vue) === "comparaison" ? "comparaison" : one(sp.vue) === "atterrissage" ? "atterrissage" : "projection";
+    const vue = one(sp.vue) === "hypotheses" ? "hypotheses" : one(sp.vue) === "comparaison" ? "comparaison" : one(sp.vue) === "atterrissage" ? "atterrissage" : one(sp.vue) === "salaries" ? "salaries" : "projection";
     const proj = project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions);
     const year = s.firstMonth.slice(0, 4);
     const draft = s.status === "brouillon";
@@ -218,7 +219,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
             {full.base.origin
               ? <>Base dérivée du scénario « {full.base.origin.scenarioName} » (état projeté fin {formatMonth(full.base.origin.month).toLowerCase()}, le {full.base.origin.at}) ·</>
               : <>Base figée sur {formatMonth(full.base.refMonth).toLowerCase()} (lecture PayFit du {full.base.readAt}) ·</>} projection {formatMonth(s.firstMonth).toLowerCase()} → {formatMonth(s.lastMonth).toLowerCase()} ·
-            prorata : {s.conventions.prorata === "calendaire" ? "jours calendaires" : "aucun"} · {full.hypotheses.length} hypothèse(s) · créé le {dateTimeFmt.format(s.createdAt)}
+            prorata : {s.conventions.prorata === "calendaire" ? "jours calendaires" : s.conventions.prorata === "ouvres" ? "jours ouvrés" : "aucun"} · {full.hypotheses.length} hypothèse(s) · créé le {dateTimeFmt.format(s.createdAt)}
             {s.frozenAt ? ` · figé le ${dateTimeFmt.format(s.frozenAt)}` : ""} · <a href="#definitions">Définitions</a>
           </p>
           {canEdit && (
@@ -266,12 +267,15 @@ export default async function HypothesesPage({ params, searchParams }: { params:
         </section>
         <nav className="tabs" data-testid="hyp-tabs">
           <a href={href("projection")} aria-current={vue === "projection" ? "page" : undefined}>Projection</a>
+          <a href={href("salaries")} aria-current={vue === "salaries" ? "page" : undefined}>Salariés</a>
           <a href={href("hypotheses")} aria-current={vue === "hypotheses" ? "page" : undefined}>Hypothèses</a>
           <a href={href("comparaison")} aria-current={vue === "comparaison" ? "page" : undefined}>Comparaison</a>
           <a href={href("atterrissage")} aria-current={vue === "atterrissage" ? "page" : undefined}>Atterrissage</a>
         </nav>
         {vue === "projection" ? (
           <ProjectionView slug={slug} scenario={s} base={full.base} proj={proj} landing={landing(full.base, proj, year)} month={one(sp.mois)} />
+        ) : vue === "salaries" ? (
+          <SalariesView slug={slug} scenario={s} base={full.base} hyps={full.hypotheses} proj={proj} q={one(sp.q)} selected={one(sp.salarie)} canEdit={canEdit && draft} />
         ) : vue === "atterrissage" ? (
           landingTab(slug, s, full.base, full.hypotheses, proj, sp)
         ) : vue === "comparaison" ? (

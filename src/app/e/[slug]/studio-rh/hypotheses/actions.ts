@@ -4,11 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { buildBase } from "@/lib/budget/base";
 import { getConventions } from "@/lib/budget/settings";
+import { getCategoryNatures } from "@/lib/budget/categories";
 import { z } from "zod";
 import { addHypothesis, BudgetError, MAX_MONTH_CENTS, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
 import { chainBase } from "@/lib/budget/chain";
 import { project } from "@/lib/budget/engine";
-import type { Amount, Hypothesis, HypothesisKind, Scope } from "@/lib/budget/types";
+import { CATEGORY_IDS, type Amount, type CategoryId, type Hypothesis, type HypothesisKind, type Scope } from "@/lib/budget/types";
 import { isMonth, monthRange } from "@/lib/connectors/months";
 import { addMonths } from "@/lib/dates";
 import { recordEvent } from "@/lib/events";
@@ -45,7 +46,7 @@ export async function createScenarioAction(slug: string, _prev: FormState, f: Fo
   const ctx = await loadPayrollContext(slug);
   if (ctx.source !== "payfit" || !ctx.input || !ctx.read || !ctx.kpi.input) return { error: `Base indisponible : ${ctx.unavailable ?? "journal de paie PayFit et référentiel Collaborateurs requis"}.` };
   const refMonth = addMonths(firstMonth, -1);
-  const b = buildBase({ input: ctx.input, kpi: ctx.kpi.input, refMonth, lastMonth, syncId: ctx.read.syncId, readAt: ctx.read.startedAt.toISOString().slice(0, 10) });
+  const b = buildBase({ input: ctx.input, kpi: ctx.kpi.input, refMonth, lastMonth, syncId: ctx.read.syncId, readAt: ctx.read.startedAt.toISOString().slice(0, 10), conventions: conv.conventions, categoryNatures: (await getCategoryNatures(workspace.id)).natures });
   if (b.kind === "nd") return { error: `Base figée impossible : ${b.reason}.` };
   let id: string;
   try {
@@ -148,8 +149,10 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
     const quotaBps = pct(f, "quota", "Quotité");
     if (quotaBps <= 0 || quotaBps > 10_000) throw new Error("Quotité entre 0 et 100 %.");
     const svc = str(f, "service");
+    const category = str(f, "category");
+    if (!CATEGORY_IDS.includes(category as CategoryId)) throw new Error("Catégorie requise (CDI, CDD, apprenti ou stagiaire).");
     return {
-      id, kind, label, service: svc || null, start, end: end || null,
+      id, kind, label, service: svc || null, category: category as CategoryId, start, end: end || null,
       grossFullTimeCents: euros(f, "gross", "Brut mensuel temps plein"), quotaBps, chargesBps: pct(f, "charges", "Taux de charges"),
       counted: counted === "oui", replaces: str(f, "replaces") || null,
     };
@@ -159,7 +162,9 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
     if (!isDate(lastPaidDate)) throw new Error("Dernier jour payé requis (date).");
     const contractKey = str(f, "contractKey");
     if (!contractKey) throw new Error("Contrat requis.");
-    return { id, kind, label, contractKey, lastPaidDate, exitCost: amountOf(f, "exit", "Coûts de sortie") };
+    const motif = str(f, "motif");
+    if (motif.length > 100) throw new Error("Motif de 100 caractères au plus.");
+    return { id, kind, label, contractKey, lastPaidDate, exitCost: amountOf(f, "exit", "Coûts de sortie"), ...(motif ? { motif } : {}) };
   }
   if (kind === "ponctuel") {
     const month = str(f, "month");
@@ -167,7 +172,25 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
     const amount = amountOf(f, "amount", "Montant");
     if (!amount) throw new Error("Montant requis.");
     const svc = str(f, "service");
-    return { id, kind, label, month, amount, service: svc || null, ...(str(f, "nonRecurring") === "oui" ? { nonRecurring: true } : {}) };
+    const target = str(f, "contractKey");
+    return { id, kind, label, month, amount, service: svc || null, ...(target ? { contractKey: target } : {}), ...(str(f, "nonRecurring") === "oui" ? { nonRecurring: true } : {}) };
+  }
+  if (kind === "absence") {
+    const contractKey = str(f, "contractKey");
+    const from = str(f, "from");
+    const to = str(f, "to");
+    if (!contractKey) throw new Error("Salarié requis.");
+    if (!isDate(from) || !isDate(to)) throw new Error("Dates de début et de fin requises.");
+    const paidBps = pct(f, "paid", "Part du salaire payée");
+    if (paidBps < 0 || paidBps > 10_000) throw new Error("Part payée entre 0 et 100 % (0 : aucun salaire).");
+    return { id, kind, label, contractKey, from, to, paidBps };
+  }
+  if (kind === "categorie") {
+    const contractKey = str(f, "contractKey");
+    const category = str(f, "category");
+    if (!contractKey) throw new Error("Salarié requis.");
+    if (!CATEGORY_IDS.includes(category as CategoryId)) throw new Error("Catégorie requise (CDI, CDD, apprenti ou stagiaire).");
+    return { id, kind, label, contractKey, category: category as CategoryId };
   }
   if (kind === "realise") {
     const month = str(f, "month");

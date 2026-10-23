@@ -6,7 +6,7 @@ import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isMonth } from "@/lib/connectors/months";
 import { hireKey, project } from "./engine";
-import { CURRENCY, type BaseSnapshot, type Conventions, type Hypothesis } from "./types";
+import { CATEGORY_IDS, CURRENCY, type BaseSnapshot, type Conventions, type Hypothesis } from "./types";
 
 // Stockage des scénarios (module 5). Une base figée n'est jamais modifiée (déclencheur SQL, empreinte revérifiée à la
 // lecture) ; un scénario figé n'accepte plus d'hypothèse (déclencheur SQL). Chaque écriture vérifie l'espace (RLS) et
@@ -34,10 +34,12 @@ export const hypothesisSchema: z.ZodType<Hypothesis> = z.discriminatedUnion("kin
   z.object({ id, kind: z.literal("augmentation"), label, from: month, rateBps: bps.refine((v) => v !== 0), scope }),
   z.object({
     id, kind: z.literal("embauche"), label, service: z.string().min(1).max(200).nullable(), start: date, end: date.nullable(),
-    grossFullTimeCents: cents.positive(), quotaBps: z.number().int().min(1).max(10_000), chargesBps: bps.min(0), counted: z.boolean(), replaces: id.nullable(),
+    grossFullTimeCents: cents.positive(), quotaBps: z.number().int().min(1).max(10_000), chargesBps: bps.min(0), counted: z.boolean(), replaces: id.nullable(), category: (z.enum(CATEGORY_IDS as [string, ...string[]]) as unknown as z.ZodType<(typeof CATEGORY_IDS)[number]>).nullable().optional(),
   }),
-  z.object({ id, kind: z.literal("depart"), label, contractKey: z.string().min(1).max(300), lastPaidDate: date, exitCost: amount.nullable() }),
-  z.object({ id, kind: z.literal("ponctuel"), label, month, amount, service: z.string().min(1).max(200).nullable(), nonRecurring: z.boolean().optional() }),
+  z.object({ id, kind: z.literal("depart"), label, contractKey: z.string().min(1).max(300), lastPaidDate: date, exitCost: amount.nullable(), motif: z.string().trim().max(100).optional() }),
+  z.object({ id, kind: z.literal("absence"), label, contractKey: z.string().min(1).max(300), from: date, to: date, paidBps: z.number().int().min(0).max(10_000) }),
+  z.object({ id, kind: z.literal("categorie"), label, contractKey: z.string().min(1).max(300), category: z.enum(CATEGORY_IDS as [string, ...string[]]) as unknown as z.ZodType<(typeof CATEGORY_IDS)[number]> }),
+  z.object({ id, kind: z.literal("ponctuel"), label, month, amount, service: z.string().min(1).max(200).nullable(), nonRecurring: z.boolean().optional(), contractKey: z.string().min(1).max(300).nullable().optional() }),
   z.object({ id, kind: z.literal("realise"), label, category: z.string().trim().min(1).max(100), month, costCents: cents.nonnegative() }),
   z.object({ id, kind: z.literal("base"), label, contractKey: z.string().min(1).max(300), salaryCents: cents.nonnegative(), chargesBps: bps.min(0) }),
 ]) as z.ZodType<Hypothesis>;

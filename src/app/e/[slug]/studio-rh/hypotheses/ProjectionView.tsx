@@ -2,12 +2,12 @@ import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import type { Landing } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
-import type { BaseSnapshot, Contribution, ProjectedMonth, Projection } from "@/lib/budget/types";
+import { CATEGORY_IDS, CATEGORY_LABELS, type BaseSnapshot, type CategoryId, type Contribution, type ProjectedMonth, type Projection } from "@/lib/budget/types";
 import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
 import { monthShort } from "../masse-salariale/components";
 
 const KIND: Record<Contribution["kind"], string> = {
-  base: "Base", augmentation: "Augmentation", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
+  base: "Base", augmentation: "Augmentation", absence: "Congé non payé", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
 };
 const eur = (v: number | null) => (v === null ? "n.d." : formatEuros(v));
 type Row = { month: string; layer: "reel" | "parent" | "projete"; source?: string; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
@@ -155,8 +155,43 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
           <p className="tile-foot">Brut ou charges n.d. sur un mois projeté : un élément saisi en coût chargé n'est pas ventilé entre brut et charges ; le coût employeur reste exact.</p>
         )}
       </section>
+      <CategoriesTable proj={proj} base={base} />
       {detail && detail.kind === "value" && <Detail month={detail} />}
     </>
+  );
+}
+
+// Effectif et ETP de fin de mois par catégorie (CDI, CDD, apprenti, stagiaire) ; « non classé » : nature sans catégorie.
+function CategoriesTable({ proj, base }: { proj: Projection; base: BaseSnapshot }) {
+  if (proj.kind === "error") return null;
+  const months = proj.months.filter((m): m is Extract<ProjectedMonth, { kind: "value" }> => m.kind === "value" && m.byCategory !== undefined);
+  if (!months.length) return null;
+  const keys = [...CATEGORY_IDS, "nc"].filter((k) => months.some((m) => m.byCategory![k]));
+  const ref = base.contracts.filter((c) => c.counted);
+  return (
+    <section className="panel" data-testid="proj-categories">
+      <h2>Effectif et ETP par catégorie <span className="desc">— fin de mois, contrats comptés dans l'effectif</span></h2>
+      <div className="table-wrap">
+        <table className="data-table" data-testid="proj-categories-table">
+          <thead>
+            <tr><th>Mois</th>{keys.map((k) => <th key={k} className="num">{k === "nc" ? "Non classé" : CATEGORY_LABELS[k as CategoryId]}</th>)}<th className="num">Total</th></tr>
+          </thead>
+          <tbody>
+            {months.map((m) => (
+              <tr key={m.month} data-month={m.month}>
+                <td>{formatMonth(m.month)}</td>
+                {keys.map((k) => {
+                  const c = m.byCategory![k];
+                  return <td key={k} className="num" data-col={k}>{c ? `${c.headcount} · ${c.etp4 === null ? "ETP n.d." : `${fmtEtp4(c.etp4)} ETP`}` : "—"}</td>;
+                })}
+                <td className="num" data-col="total">{m.headcount} · {m.etp4 === null ? "ETP n.d." : `${fmtEtp4(m.etp4)} ETP`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="tile-foot">Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée par salarié dans l'onglet Salariés. {ref.some((c) => !c.category) ? `${ref.filter((c) => !c.category).length} contrat(s) sans catégorie (nature non reconnue).` : ""}</p>
+    </section>
   );
 }
 

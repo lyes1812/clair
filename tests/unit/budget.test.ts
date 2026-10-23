@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { landing, presence, project, roundDiv } from "@/lib/budget/engine";
+import { DEFAULT_CATEGORY_NATURES } from "@/lib/budget/categories";
 import type { BaseContract, BaseSnapshot, Hypothesis, ProjectedMonth } from "@/lib/budget/types";
 
 // Module 5 — moteur de projection : cas écrits à la main (montants en centimes).
@@ -155,7 +156,7 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     .map((r) => ({ key: r.key, month: String(r.data.month), accountId: String(r.data.accountId), accountName: (r.data.accountName as string) ?? null, debitCents: r.data.debitCents as number | null, creditCents: r.data.creditCents as number | null, contractId: (r.data.contractId as string) ?? null, analytic: r.data.analyticCodes as never }));
   const input = { lines, months: PAYFIT_MONTHS, openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
   const kpi = kpiInput(await payfitFixtureBuild(), DSN_ABSENCES);
-  const r = buildBase({ input, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "sync-test", readAt: "2026-10-21" });
+  const r = buildBase({ input, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "sync-test", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
   const b = r.kind === "value" ? r.base : null;
   it("7 contrats présents fin septembre (003, CDD fini en 2025, exclu) ; base = 90 % du brut (10 % de primes sur objectif exclus), charges au taux observé", () => {
     expect(b?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
@@ -172,23 +173,23 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     expect(month(p, "2026-10")).toMatchObject({ brut: 1685700, charges: 528300, cost: 2214000, headcount: 7, etp4: 61000 });
   });
   it("référence janvier 2026 : 004, entré le 15 février et connu de PayFit, est repris avec une base à saisir ; contrat sur deux services → non ventilé", () => {
-    const r1 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-03", syncId: "s", readAt: "2026-10-21" });
+    const r1 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-03", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
     const b1 = r1.kind === "value" ? r1.base : null;
     expect(b1?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
     expect(b1?.contracts.find((c) => c.externalId.endsWith("004"))).toMatchObject({ base: null, baseNd: "entré le 2026-02-15, après le mois de référence : base à saisir", etp4: 10000 });
     expect(b1?.etpNote).toContain("quotités PayFit à la date de lecture");
     // Horizon arrêté en janvier : 004 (entrée en février) est gardé pour une base dérivée, hors des contrats projetés.
-    const r0 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-01", syncId: "s", readAt: "2026-10-21" });
+    const r0 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-01", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
     expect(r0.kind === "value" && [r0.base.contracts.length, r0.base.upcoming?.map((c) => c.externalId.slice(-3))]).toEqual([6, ["004"]]);
     // Rapprochement de janvier sur les seuls contrats présents fin janvier : pas de prime en janvier, base = masse.
     expect(b1).toMatchObject({ refMasse: 1953000, refBaseCost: 1953000 });
     const extra = { ...lines[0], key: "extra", month: "2026-09", accountId: "641100", debitCents: 0, creditCents: null, contractId: "TEST-A-CONTRACT-001", analytic: [{ type: "Service", code: "TEST-SVC-Z", value: "Z" }] as never };
-    const r2 = buildBase({ input: { ...input, lines: [...lines, extra] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" });
+    const r2 = buildBase({ input: { ...input, lines: [...lines, extra] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
     expect(r2.kind === "value" && r2.base.contracts.find((c) => c.externalId.endsWith("001"))).toMatchObject({ service: null, serviceNd: expect.stringContaining("plusieurs services") });
   });
   it("mois de référence hors lecture ou non clos : refus avec la raison", () => {
-    expect(buildBase({ input, kpi, refMonth: "2026-10", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" })).toMatchObject({ kind: "nd", reason: expect.stringContaining("hors de la lecture") });
-    expect(buildBase({ input: { ...input, openMonths: ["2026-09"] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21" })).toMatchObject({ kind: "nd", reason: expect.stringContaining("non clôturée") });
+    expect(buildBase({ input, kpi, refMonth: "2026-10", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES })).toMatchObject({ kind: "nd", reason: expect.stringContaining("hors de la lecture") });
+    expect(buildBase({ input: { ...input, openMonths: ["2026-09"] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES })).toMatchObject({ kind: "nd", reason: expect.stringContaining("non clôturée") });
   });
 });
 
@@ -341,5 +342,80 @@ describe("lot 3 : atterrissage retraité, mesures de management, sensibilités (
     // Prime exceptionnelle −50 % : −150 € ; retraité inchangé.
     expect(s.rows[2].effect).toMatchObject({ kind: "value", atterrissage: -15000, retraite: 0 });
     expect(s.rows[3].effect).toMatchObject({ kind: "nd", reason: expect.stringContaining("non applicable") });
+  });
+});
+
+describe("jours ouvrés, congé non payé, entrée en cours de mois, catégories (cas écrits à la main)", async () => {
+  const { easter, holidays, workdays } = await import("@/lib/budget/calendar");
+  const ouvres = { prorata: "ouvres" as const };
+  it("Pâques et jours fériés mobiles : 2026-04-05, 2027-03-28, 2028-04-16, 2029-04-01", () => {
+    expect([2026, 2027, 2028, 2029].map(easter)).toEqual(["2026-04-05", "2027-03-28", "2028-04-16", "2029-04-01"]);
+    // 2026 : lundi de Pâques 6 avril, Ascension 14 mai, lundi de Pentecôte 25 mai.
+    expect([...holidays(2026)].sort()).toEqual(["2026-01-01", "2026-04-06", "2026-05-01", "2026-05-08", "2026-05-14", "2026-05-25", "2026-07-14", "2026-08-15", "2026-11-01", "2026-11-11", "2026-12-25"]);
+    expect([...holidays(2028)].filter((d) => d.startsWith("2028-04") || d.startsWith("2028-05-25") || d.startsWith("2028-06")).sort()).toEqual(["2028-04-17", "2028-05-25", "2028-06-05"]);
+  });
+  it("jours ouvrés 2026 : septembre 22, octobre 22, novembre 20 (11 novembre férié), décembre 22 (25 décembre férié)", () => {
+    expect(["2026-09", "2026-10", "2026-11", "2026-12"].map((m) => workdays(`${m}-01`, `${m}-${m === "2026-09" || m === "2026-11" ? 30 : 31}`))).toEqual([22, 22, 20, 22]);
+    expect(workdays("2026-09-07", "2026-09-30")).toBe(18);
+  });
+  it("embauche le 16 novembre 2026 en jours ouvrés : 11 jours ouvrés sur 20 (16 au 30 novembre, 11 novembre déjà passé)", () => {
+    const h: Hypothesis = { id: "h", kind: "embauche", label: "Recrue", service: null, start: "2026-11-16", end: null, grossFullTimeCents: 200000, quotaBps: 10000, chargesBps: 5000, counted: true, replaces: null, category: "cdi" };
+    const n = month(project(base, "2026-10", "2026-12", [fixC, h], ouvres), "2026-11");
+    // 16–20 (5) + 23–27 (5) + 30 (1) = 11 jours ouvrés : brut 2 000 € × 11/20 = 1 100 € ; charges 550 € → 1 650 €.
+    expect(n.contributions.find((c) => c.hypothesisId === "h")).toMatchObject({ brut: 110000, charges: 55000 });
+    expect(n.byCategory).toMatchObject({ cdi: { headcount: 1, etp4: 10000 } });
+  });
+  it("congé non payé du 26 octobre au 25 novembre (salaire 0), contrat A à 4 200 € : jours ouvrés → octobre 3 245,45 €, novembre 630,00 €", () => {
+    const ab: Hypothesis = { id: "ab", kind: "absence", label: "Congé de naissance", contractKey: "A", from: "2026-10-26", to: "2026-11-25", paidBps: 0 };
+    const p = project(base, "2026-10", "2026-12", [fixC, ab], ouvres);
+    // Octobre : 5 jours ouvrés non payés (26–30) sur 22 → payé 17/22 ; novembre : 17 jours ouvrés non payés sur 20 → payé 3/20.
+    const a = (m: string) => month(p, m).contributions.filter((c) => c.contractKey === "A").reduce((s, c) => s + c.cost, 0);
+    expect([a("2026-10"), a("2026-11"), a("2026-12")]).toEqual([324545, 63000, 420000]);
+    // Novembre : contribution « absence » = 630,00 € − 4 200,00 € = −3 570,00 € (brut −2 550,00 € ; charges −1 020,00 €).
+    expect(month(p, "2026-11").contributions.find((c) => c.kind === "absence")).toMatchObject({ hypothesisId: "ab", brut: -255000, charges: -102000, cost: -357000 });
+    expect(month(p, "2026-11")).toMatchObject({ headcount: 3 }); // en congé non payé, le salarié reste dans l'effectif
+    // Calendaire : octobre 6/31 non payé (26–31) → 25/31 payé = 3 387,09 € (brut 2 419,35 + charges 967,74).
+    const pc = project(base, "2026-10", "2026-12", [fixC, ab], conv);
+    expect(month(pc, "2026-10").contributions.filter((c) => c.contractKey === "A").reduce((s, c) => s + c.cost, 0)).toBe(241935 + 96774);
+  });
+  it("congé payé à 50 % et départ le même mois : réductions successives, somme exacte", () => {
+    const ab: Hypothesis = { id: "ab", kind: "absence", label: "Mi-temps thérapeutique", contractKey: "A", from: "2026-10-01", to: "2026-10-31", paidBps: 5000 };
+    const dep: Hypothesis = { id: "d", kind: "depart", label: "Départ A", contractKey: "A", lastPaidDate: "2026-10-15", exitCost: null, motif: "Rupture conventionnelle" };
+    const o = month(project(base, "2026-10", "2026-10", [fixC, ab, dep], conv), "2026-10");
+    // Départ : 15/31 de 4 200 ; absence : moitié de cette présence.
+    const a = o.contributions.filter((c) => c.contractKey === "A");
+    expect(a.map((c) => c.kind)).toEqual(["base", "depart", "absence"]);
+    expect(a.reduce((s, c) => s + c.cost, 0)).toBe(Math.round((300000 * 15) / 31 / 2) + Math.round((120000 * 15) / 31 / 2));
+    expect(o.contributions.reduce((s, c) => s + c.cost, 0)).toBe(o.cost);
+    const dbl = project(base, "2026-10", "2026-10", [fixC, ab, { ...ab, id: "ab2", from: "2026-10-20" }], conv);
+    expect(dbl.kind === "error" && dbl.errors.some((e) => e.includes("chevauche"))).toBe(true);
+  });
+  it("catégories : proposée par la nature, corrigée par hypothèse (apprentie codée CDD) ; effectif et ETP par catégorie", () => {
+    const b3 = { ...base, contracts: [contract("A", { service: "TECH", category: "cdi", base: { salaryCents: 300000, refBrutCents: 330000, refCotisationsCents: 132000 } }), contract("B", { category: "cdd", etp4: 10000, base: { salaryCents: 200000, refBrutCents: 200000, refCotisationsCents: 12400 } }), contract("S", { category: "stagiaire", etp4: 5000, base: { salaryCents: 60000, refBrutCents: 60000, refCotisationsCents: 3000 } }), contract("N", { category: null, base: { salaryCents: 10000, refBrutCents: 10000, refCotisationsCents: 0 } })] };
+    const sans = month(project(b3, "2026-10", "2026-10", [], conv), "2026-10");
+    expect(sans.byCategory).toEqual({ cdi: { headcount: 1, etp4: 10000 }, cdd: { headcount: 1, etp4: 10000 }, stagiaire: { headcount: 1, etp4: 5000 }, nc: { headcount: 1, etp4: 10000 } });
+    const avec = month(project(b3, "2026-10", "2026-10", [{ id: "c", kind: "categorie", label: "Apprentie", contractKey: "B", category: "apprenti" }], conv), "2026-10");
+    expect(avec.byCategory).toMatchObject({ apprenti: { headcount: 1, etp4: 10000 } });
+    expect(avec.byCategory?.cdd).toBeUndefined();
+  });
+  it("base d'un contrat entré le 7 septembre (ouvrés) : salaire de septembre 1 800 € ramené au mois complet = 1 800 × 22/18 = 2 200 € ; note de reconstitution", async () => {
+    const { buildBase } = await import("@/lib/budget/base");
+    const { payfitFixtureBuild, PAYFIT_MONTHS } = await import("./helpers/rh");
+    const { kpiInput, DSN_ABSENCES } = await import("./helpers/kpi");
+    const { DEFAULT_PREFIXES } = await import("@/lib/payroll/grid");
+    const data = await payfitFixtureBuild();
+    const c4 = data.contracts.find((c) => c.externalId.endsWith("004"))!;
+    // Contrat 004 de la fixture : entrée le 15 février 2026 ; on le fait entrer le 7 septembre 2026 pour ce cas.
+    const moved = { ...data, contracts: data.contracts.map((c) => (c === c4 ? { ...c, startDate: "2026-09-07" } : c)) };
+    const line = (acc: string, debit: number | null, credit: number | null) => ({ key: `k${acc}${debit}`, month: "2026-09", accountId: acc, accountName: "x", debitCents: debit, creditCents: credit, contractId: c4.externalId, analytic: [] as never });
+    const lines = [line("641100", 180000, null), line("645100", 72000, null)];
+    const input = { lines, months: PAYFIT_MONTHS, openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: null };
+    const r = buildBase({ input, kpi: kpiInput(moved, DSN_ABSENCES), refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: ouvres, categoryNatures: DEFAULT_CATEGORY_NATURES });
+    expect(r.kind).toBe("value");
+    if (r.kind !== "value") return;
+    const c = r.base.contracts.find((x) => x.externalId === c4.externalId)!;
+    expect(c.base).toEqual({ salaryCents: 220000, refBrutCents: 180000, refCotisationsCents: 72000 });
+    expect(c.baseNote).toContain("÷ 18/22 jours ouvrés");
+    expect(c.baseNd).toBeNull();
   });
 });

@@ -9,6 +9,8 @@ import { parsePayfitHistoryMode, setHeadcountNatures, setPayfitHistoryMode } fro
 import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
 import { requireWorkspace } from "@/lib/workspace";
 import { setProrata } from "@/lib/budget/settings";
+import { setCategoryNatures } from "@/lib/budget/categories";
+import { CATEGORY_IDS } from "@/lib/budget/types";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -129,4 +131,22 @@ export async function saveProrata(slug: string, _prev: FormState, formData: Form
   }
   revalidatePath(`/e/${slug}`, "layout");
   return { ok: "Règle de prorata enregistrée." };
+}
+
+export async function saveCategoryNatures(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  const v: Record<string, string[]> = {};
+  for (const id of CATEGORY_IDS) {
+    v[id] = String(formData.get(id) ?? "")
+      .split(/[\s,;]+/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+  }
+  try {
+    await setCategoryNatures(workspace.id, v, session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: "Catégories de contrat enregistrées (scénarios créés ensuite)." };
 }

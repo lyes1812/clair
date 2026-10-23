@@ -2,14 +2,14 @@ import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { enteredAfter, hireKey, roundDiv } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
-import type { Amount, BaseSnapshot, Hypothesis, Projection, Scope } from "@/lib/budget/types";
+import { CATEGORY_IDS, CATEGORY_LABELS, type Amount, type BaseSnapshot, type Hypothesis, type Projection, type Scope } from "@/lib/budget/types";
 import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
 import { ActionForm } from "./ActionForm";
 import { addHypothesisAction, deleteHypothesisAction } from "./actions";
 
 const pct = (bps: number) => `${fmtFixed({ num: bps, den: 100 }, 2)} %`;
 const amountText = (a: Amount) => (a.mode === "brut" ? `${formatEuros(a.brutCents)} brut + charges ${pct(a.chargesBps)}` : `${formatEuros(a.costCents)} chargés`);
-const KIND = { augmentation: "Augmentation", embauche: "Embauche", depart: "Départ", ponctuel: "Élément ponctuel", realise: "Non récurrent réalisé", base: "Correction de base" } as const;
+const KIND = { augmentation: "Augmentation", embauche: "Embauche", depart: "Départ", ponctuel: "Élément ponctuel", absence: "Congé non payé", categorie: "Catégorie", realise: "Non récurrent réalisé", base: "Correction de base" } as const;
 
 function scopeText(s: Scope, base: BaseSnapshot, hyps: Hypothesis[]) {
   if (s.kind === "global") return "toute l'entreprise (hors embauches et entrées après la base)";
@@ -29,9 +29,13 @@ function detailOf(h: Hypothesis, base: BaseSnapshot, hyps: Hypothesis[]): string
       return `${h.service ?? "Non ventilé"} · du ${h.start}${h.end ? ` au ${h.end}` : ""} · ${formatEuros(h.grossFullTimeCents)} brut temps plein × ${pct(h.quotaBps)} · charges ${pct(h.chargesBps)} · ${h.counted ? "compté" : "non compté"} dans l'effectif${rep ? ` · remplace « ${rep.label} »` : ""}`;
     }
     case "depart":
-      return `${who(h.contractKey)} · dernier jour payé ${h.lastPaidDate}${h.exitCost ? ` · coûts de sortie ${amountText(h.exitCost)}` : ""}`;
+      return `${who(h.contractKey)} · ${h.motif ? `${h.motif} · ` : ""}dernier jour payé ${h.lastPaidDate}${h.exitCost ? ` · coûts de sortie ${amountText(h.exitCost)}` : ""}`;
     case "ponctuel":
       return `${formatMonth(h.month)} · ${amountText(h.amount)} · ${h.service ?? "toute l'entreprise"}${h.nonRecurring ? " · non récurrent" : ""}`;
+    case "absence":
+      return `${who(h.contractKey)} · du ${h.from} au ${h.to} · payé à ${fmtFixed({ num: h.paidBps, den: 100 }, 0)} % du salaire`;
+    case "categorie":
+      return `${who(h.contractKey)} · ${CATEGORY_LABELS[h.category]}`;
     case "realise":
       return `${formatMonth(h.month)} · ${h.category} · ${formatEuros(h.costCents)} chargés, déjà en comptabilité (atterrissage retraité seulement)`;
     case "base":
@@ -188,6 +192,7 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
         )}
       </section>
 
+      <datalist id="hyp-services">{services.map((x) => <option key={x} value={x} />)}</datalist>
       {canEdit ? (
         <section className="panel" data-testid="hyp-add">
           <h2>Ajouter une hypothèse <span className="desc">— chaque hypothèse est contrôlée par le moteur avant enregistrement</span></h2>
@@ -215,10 +220,13 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
             <ActionForm action={add("embauche")} submit="Ajouter l'embauche" testid="hyp-form-embauche">
               <div className="filters">
                 <Text id="hire-label" name="label" label="Poste" maxLength={200} required />
-                <Field id="hire-service" label="Service">
-                  <select className="select" id="hire-service" name="service" defaultValue="">
-                    <option value="">Non ventilé</option>
-                    {services.map((s) => <option key={s} value={s}>{s}</option>)}
+                <Field id="hire-service" label="Centre de coûts (service)">
+                  <input className="input" id="hire-service" name="service" list="hyp-services" placeholder="Existant ou nouveau (vide : non ventilé)" maxLength={200} />
+                </Field>
+                <Field id="hire-category" label="Catégorie">
+                  <select className="select" id="hire-category" name="category" defaultValue="">
+                    <option value="" disabled>Choisir…</option>
+                    {CATEGORY_IDS.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
                   </select>
                 </Field>
                 <Text id="hire-start" name="start" label="Premier jour payé" type="date" required />
@@ -254,6 +262,9 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
                   </select>
                 </Field>
                 <Text id="dep-date" name="lastPaidDate" label="Dernier jour payé" type="date" required />
+                <Field id="dep-motif" label="Motif (ex. licenciement, rupture conventionnelle)">
+                  <input className="input" id="dep-motif" name="motif" maxLength={100} />
+                </Field>
               </div>
               <p className="label">Coûts de sortie (mois du départ, facultatif)</p>
               <div className="filters"><AmountFields prefix="exit" idp="dep-exit" optional /></div>
@@ -265,11 +276,8 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
               <div className="filters">
                 <Text id="pon-label" name="label" label="Libellé" maxLength={200} required />
                 <Text id="pon-month" name="month" label="Mois" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required />
-                <Field id="pon-service" label="Service">
-                  <select className="select" id="pon-service" name="service" defaultValue="">
-                    <option value="">Toute l'entreprise</option>
-                    {services.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                <Field id="pon-service" label="Service (vide : toute l'entreprise)">
+                  <input className="input" id="pon-service" name="service" list="hyp-services" maxLength={200} />
                 </Field>
               </div>
               <div className="filters"><AmountFields prefix="amount" idp="pon-amount" /></div>
