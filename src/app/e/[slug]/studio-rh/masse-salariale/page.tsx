@@ -177,6 +177,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         {(Object.keys(VUES) as (keyof typeof VUES)[]).map((v) => (
           <a key={v} href={q(year, from, to, "", svcParam, v === "synthese" ? "" : `&vue=${v}`)} aria-current={v === vue ? "page" : undefined}>{VUES[v]}</a>
         ))}
+        <a href={`${base}/ecart`}>Écart budgétaire</a>
+        <a href={`${base}/analyse`}>Analyse des écarts</a>
       </nav>
       <form method="get" className="filters" data-testid="ms-filters">
         {vue !== "synthese" && <input type="hidden" name="vue" value={vue} />}
