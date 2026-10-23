@@ -147,4 +147,16 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   expect(await txt(page.getByTestId("pont-volume").locator("dd"))).toBe("+3 629,51 €");
   expect(await txt(page.getByTestId("pont-cout").locator("dd"))).toBe("-79,51 €");
   await page.screenshot({ path: `${CAPTURES}/6-03-analyse.png`, fullPage: true });
+
+  // Entrées « Prévu » de Masse salariale (croisée, par organisation, écart réel, suivi réel / budget) : ouvertes, étiquetées, sans simulation.
+  const ms = `/e/${slug}/studio-rh/masse-salariale`;
+  for (const [vue, label, marker] of [["croisee", "Masse salariale croisée", "non réalisé"], ["organisation", "MS par organisation", "non réalisée"], ["reel", "Écart réel", "rubrique de bulletin"], ["suivi", "Suivi réel / budget", "reste à préciser"]] as const) {
+    await page.goto(`${ms}/${vue}`);
+    await expect(page.getByTestId("ms-tabs").getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByTestId("prevu")).toContainText(marker);
+    await expect(page.getByTestId("prevu")).toContainText("Prévu");
+  }
+  await expect(page.getByTestId("ms-tabs").locator(".soon")).toHaveCount(4);
+  await page.screenshot({ path: `${CAPTURES}/6-04-ms-prevu.png`, fullPage: true });
+  expect((await page.request.get(`${ms}/inconnue`)).status()).toBe(404);
 });

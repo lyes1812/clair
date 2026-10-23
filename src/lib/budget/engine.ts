@@ -41,8 +41,10 @@ export function presence(month: string, from: string, to: string | null, prorata
   return { n: B(dayOf(b) - dayOf(a) + 1), d: B(daysInMonth(month)) };
 }
 
-const specificity = (s: Scope) => (s.kind === "contrat" ? 3 : s.kind === "service" ? 2 : 1);
-const scopeText = (s: Scope) => (s.kind === "global" ? "toute l'entreprise" : s.kind === "service" ? `service ${s.service}` : "contrat ciblé");
+// Le statut (cadres dirigeants, autres salariés) est au même niveau qu'un service : deux augmentations de ces niveaux le même mois pour un même
+// salarié sont en conflit (message explicite), jamais composées ni départagées en silence.
+const specificity = (s: Scope) => (s.kind === "contrat" ? 3 : s.kind === "service" || s.kind === "statut" ? 2 : 1);
+const scopeText = (s: Scope) => (s.kind === "global" ? "toute l'entreprise" : s.kind === "service" ? `service ${s.service}` : s.kind === "statut" ? (s.executive ? "cadres dirigeants" : "hors cadres dirigeants") : "contrat ciblé");
 export const hireKey = (id: string) => `embauche:${id}`;
 export const enteredAfter = (base: BaseSnapshot, c: BaseContract) => c.startDate !== null && c.startDate > monthLast(base.refMonth);
 
@@ -52,14 +54,14 @@ type Dep = Extract<Hypothesis, { kind: "depart" }>;
 type Fix = Extract<Hypothesis, { kind: "base" }>;
 type Abs = Extract<Hypothesis, { kind: "absence" }>;
 type Chg = Extract<Hypothesis, { kind: "changement" }>;
-type Target = { key: string; service: string | null; isHire: boolean };
+type Target = { key: string; service: string | null; isHire: boolean; executive?: boolean | null };
 
 // Augmentations retenues pour une cible : pour chaque mois d'effet, la plus ciblée (contrat > service > toute
 // l'entreprise) ; deux hypothèses de même niveau le même mois sont en conflit. Les embauches ne reçoivent que les
 // augmentations qui les visent directement. Taux successifs composés.
 function augmentationsFor(t: Target, augs: Aug[], errors: Set<string>): Aug[] {
   const applies = (a: Aug) =>
-    a.scope.kind === "contrat" ? a.scope.key === t.key : t.isHire ? false : a.scope.kind === "global" ? true : a.scope.service === t.service;
+    a.scope.kind === "contrat" ? a.scope.key === t.key : t.isHire ? false : a.scope.kind === "global" ? true : a.scope.kind === "statut" ? t.executive === a.scope.executive : a.scope.service === t.service;
   const byMonth = new Map<string, Aug[]>();
   for (const a of augs) if (applies(a)) byMonth.set(a.from, [...(byMonth.get(a.from) ?? []), a]);
   const chosen: Aug[] = [];
@@ -198,7 +200,7 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
   const augFor = new Map<string, Aug[]>();
   // Un contrat entré après le mois de référence a une base saisie à son entrée : comme une embauche, il ne reçoit que
   // les augmentations qui le visent directement.
-  for (const c of base.contracts) augFor.set(c.contractKey, augmentationsFor({ key: c.contractKey, service: c.service, isHire: enteredAfter(base, c) }, augs, conflicts));
+  for (const c of base.contracts) augFor.set(c.contractKey, augmentationsFor({ key: c.contractKey, service: c.service, isHire: enteredAfter(base, c), executive: c.executive ?? null }, augs, conflicts));
   for (const h of hires) augFor.set(hireKey(h.id), augmentationsFor({ key: hireKey(h.id), service: h.service, isHire: true }, augs, conflicts));
   if (conflicts.size) return { kind: "error", errors: [...conflicts] };
 

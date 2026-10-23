@@ -12,8 +12,10 @@ type Cst = Extract<Hypothesis, { kind: "constante" }>;
 type Fix = Extract<Hypothesis, { kind: "base" }>;
 
 const blank = (v: string | undefined) => (v ?? "").trim() === "";
-export const scopeKeyOf = (s: Aug["scope"]): string | null => (s.kind === "global" ? "global" : s.kind === "service" ? `service:${s.service}` : null);
-export const scopeLabelOf = (key: string) => (key === "global" ? "toute l'entreprise" : `service ${key.slice(8)}`);
+export const scopeKeyOf = (s: Aug["scope"]): string | null => (s.kind === "global" ? "global" : s.kind === "service" ? `service:${s.service}` : s.kind === "statut" ? (s.executive ? "statut:dirigeant" : "statut:autres") : null);
+export const scopeLabelOf = (key: string) => (key === "global" ? "toute l'entreprise" : key === "statut:dirigeant" ? "cadres dirigeants" : key === "statut:autres" ? "hors cadres dirigeants" : `service ${key.slice(8)}`);
+const parseScope = (key: string): Aug["scope"] | null =>
+  key === "global" ? { kind: "global" } : key === "statut:dirigeant" ? { kind: "statut", executive: true } : key === "statut:autres" ? { kind: "statut", executive: false } : key.startsWith("service:") && key.length > 8 ? { kind: "service", service: key.slice(8) } : null;
 
 // --- Taux d'augmentation : une ligne par périmètre (toute l'entreprise, chaque service), une colonne par mois.
 // Chaque cellule renseignée est une hypothèse d'augmentation distincte ; 0 ou vide : aucune augmentation ce mois-là.
@@ -27,7 +29,8 @@ export function planRates(existing: Hypothesis[], cells: RateCell[], newId: () =
   }
   const out: GridChange = { put: [], remove: [] };
   for (const c of cells) {
-    if (c.scope !== "global" && !(c.scope.startsWith("service:") && c.scope.length > 8)) throw new Error("Périmètre de la grille invalide.");
+    const scope = parseScope(c.scope);
+    if (!scope) throw new Error("Périmètre de la grille invalide.");
     const prior = at.get(`${c.scope}|${c.month}`);
     const bps = blank(c.raw) ? 0 : toCents(c.raw);
     if (bps === null) throw new Error(`${scopeLabelOf(c.scope)}, ${c.month} : taux en pourcentage requis (ex. 2,5).`);
@@ -36,7 +39,6 @@ export function planRates(existing: Hypothesis[], cells: RateCell[], newId: () =
       continue;
     }
     if (prior?.rateBps === bps) continue;
-    const scope: Aug["scope"] = c.scope === "global" ? { kind: "global" } : { kind: "service", service: c.scope.slice(8) };
     out.put.push(prior ? { ...prior, rateBps: bps } : { id: newId(), kind: "augmentation", label: `Augmentation ${scopeLabelOf(c.scope)} ${c.month}`, from: c.month, rateBps: bps, scope });
   }
   return out;

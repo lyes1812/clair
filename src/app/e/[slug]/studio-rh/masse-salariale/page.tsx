@@ -11,6 +11,7 @@ import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { Composition, eurosOf, monthShort, TrendChart } from "./components";
 import { DsnView } from "./DsnView";
+import { MS_PREVU } from "./EcartParts";
 import { FixeVariableView, PaieComptaView } from "./Lot2Views";
 
 export const dynamic = "force-dynamic";
@@ -177,6 +178,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         {(Object.keys(VUES) as (keyof typeof VUES)[]).map((v) => (
           <a key={v} href={q(year, from, to, "", svcParam, v === "synthese" ? "" : `&vue=${v}`)} aria-current={v === vue ? "page" : undefined}>{VUES[v]}</a>
         ))}
+        {MS_PREVU.map((t) => <a key={t.key} href={`${base}${t.path}`}>{t.label}<span className="soon">Prévu</span></a>)}
         <a href={`${base}/ecart`}>Écart budgétaire</a>
         <a href={`${base}/analyse`}>Analyse des écarts</a>
       </nav>

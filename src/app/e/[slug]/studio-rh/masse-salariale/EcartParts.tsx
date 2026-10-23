@@ -4,21 +4,40 @@ import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { monthShort } from "./components";
 import { NV, type Loaded } from "./ecart-data";
 
-export type MsTab = "synthese" | "fixe-variable" | "paie-compta" | "ecart" | "analyse";
+export type MsTab = "synthese" | "fixe-variable" | "paie-compta" | "croisee" | "organisation" | "reel" | "suivi" | "ecart" | "analyse";
 
-// Onglets de la famille Masse salariale : les trois écrans existants puis l'écart budgétaire et l'analyse des écarts.
+// Entrées de la famille Masse salariale : les trois écrans existants, puis les entrées du cahier dans son ordre. Une entrée
+// « Prévu » est visible mais n'a pas encore de comportement établi : sa page dit où trouver l'existant et ce qui reste à préciser.
+export const MS_PREVU = [
+  { key: "croisee", label: "Masse salariale croisée", path: "/croisee" },
+  { key: "organisation", label: "MS par organisation", path: "/organisation" },
+  { key: "reel", label: "Écart réel", path: "/reel" },
+  { key: "suivi", label: "Suivi réel / budget", path: "/suivi" },
+] as const;
+
+export function MsHeader({ title, summary }: { title: string; summary: string }) {
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <span className="label">Studio RH</span>
+      <h1>{title}</h1>
+      <p className="desc">{summary}</p>
+    </div>
+  );
+}
+
 export function MsTabs({ slug, current, extra = "" }: { slug: string; current: MsTab; extra?: string }) {
   const base = `/e/${slug}/studio-rh/masse-salariale`;
-  const tabs: { key: MsTab; label: string; href: string }[] = [
+  const tabs: { key: MsTab; label: string; href: string; soon?: boolean }[] = [
     { key: "synthese", label: "Synthèse", href: `${base}${extra}` },
     { key: "fixe-variable", label: "Fixe & variable", href: `${base}?vue=fixe-variable${extra.replace("?", "&")}` },
     { key: "paie-compta", label: "Paie & comptabilité", href: `${base}?vue=paie-compta${extra.replace("?", "&")}` },
+    ...MS_PREVU.map((t) => ({ key: t.key as MsTab, label: t.label, href: `${base}${t.path}`, soon: true })),
     { key: "ecart", label: "Écart budgétaire", href: `${base}/ecart` },
     { key: "analyse", label: "Analyse des écarts", href: `${base}/analyse` },
   ];
   return (
     <nav className="tabs" aria-label="Vues" data-testid="ms-tabs">
-      {tabs.map((t) => <a key={t.key} href={t.href} aria-current={t.key === current ? "page" : undefined}>{t.label}</a>)}
+      {tabs.map((t) => <a key={t.key} href={t.href} aria-current={t.key === current ? "page" : undefined}>{t.label}{t.soon && <span className="soon">Prévu</span>}</a>)}
     </nav>
   );
 }

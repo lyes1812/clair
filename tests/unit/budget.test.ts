@@ -73,6 +73,35 @@ describe("projection", () => {
     expect(d.cost).toBe(312090 + 124836 + 206040 + 92718 + 260075 + 109232);
     for (const m of [n, d]) expect(m.contributions.reduce((s, c) => s + c.cost, 0)).toBe(m.cost);
   });
+  it("augmentation par statut : cadres dirigeants 5 % prime sur le global 2 % ; les autres et le statut inconnu restent au global", () => {
+    // A cadre dirigeant, B non, C statut non renseigné (null) : un taux « cadres dirigeants » ne touche jamais C.
+    const st = { ...base, contracts: base.contracts.map((c) => ({ ...c, executive: c.contractKey === "A" ? true : c.contractKey === "B" ? false : null })) };
+    const hyps: Hypothesis[] = [
+      fixC,
+      { id: "g2", kind: "augmentation", label: "Générale 2 %", from: "2026-11", rateBps: 200, scope: { kind: "global" } },
+      { id: "c5", kind: "augmentation", label: "Cadres dirigeants 5 %", from: "2026-11", rateBps: 500, scope: { kind: "statut", executive: true } },
+    ];
+    const n = month(project(st, "2026-10", "2026-11", hyps, conv), "2026-11");
+    // A : 3 000 × 5 % = 150,00 € brut ; charges 1 200 × 5 % = 60,00 €. B : 2 000 × 2 % = 40,00 € ; 900 × 2 % = 18,00 €.
+    // C (statut inconnu) : 2 500 × 2 % = 50,00 € ; 1 050 × 2 % = 21,00 €.
+    expect(by(n, "c5")).toHaveLength(1);
+    expect(by(n, "c5", "A")[0]).toMatchObject({ brut: 15000, charges: 6000 });
+    expect(by(n, "g2", "A")).toHaveLength(0);
+    expect(by(n, "g2", "B")[0]).toMatchObject({ brut: 4000, charges: 1800 });
+    expect(by(n, "g2", "C")[0]).toMatchObject({ brut: 5000, charges: 2100 });
+    expect(n.cost).toBe(1065000 + 21000 + 5800 + 7100);
+    // Hors dirigeants 3 % le même mois que le global : B prend le taux du statut, jamais les deux.
+    const nc: Hypothesis = { id: "n3", kind: "augmentation", label: "Hors dirigeants 3 %", from: "2026-11", rateBps: 300, scope: { kind: "statut", executive: false } };
+    const n2 = month(project(st, "2026-10", "2026-11", [...hyps, nc], conv), "2026-11");
+    expect(by(n2, "n3", "B")[0]).toMatchObject({ brut: 6000, charges: 2700 });
+    expect(by(n2, "g2", "B")).toHaveLength(0);
+  });
+  it("refus : un statut et un service au même niveau le même mois pour un même salarié sont en conflit ; cadres dirigeants et autres ne le sont pas", () => {
+    const st = { ...base, contracts: base.contracts.map((c) => ({ ...c, executive: c.contractKey !== "B" })) };
+    const aug = (id: string, scope: Extract<Hypothesis, { kind: "augmentation" }>["scope"]): Hypothesis => ({ id, kind: "augmentation", label: id, from: "2026-11", rateBps: 100, scope });
+    expect(project(st, "2026-10", "2026-12", [fixC, aug("s", { kind: "statut", executive: true }), aug("t", { kind: "service", service: "TECH" })], conv)).toMatchObject({ kind: "error", errors: [expect.stringContaining("en conflit en 2026-11")] });
+    expect(project(st, "2026-10", "2026-12", [fixC, aug("s", { kind: "statut", executive: true }), aug("n", { kind: "statut", executive: false })], conv).kind).toBe("value");
+  });
   it("départ de B le 15 novembre (coûts de sortie 1 000 € brut à 20 %) remplacé par une embauche à 80 % le 16", () => {
     const hyps: Hypothesis[] = [
       fixC,
@@ -167,6 +196,9 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     // Masse de septembre 24 600 € = 18 730 € de brut + 5 870 € de cotisations ; base : 16 857 € + 5 283 € = 22 140 €.
     expect(b).toMatchObject({ refMonth: "2026-09", refMasse: 2460000, refBaseCost: 2214000 });
     expect(b!.actuals.find((a) => a.month === "2026-09")).toMatchObject({ kind: "value", masse: 2460000, etp4: 61000 });
+  });
+  it("le statut « cadre dirigeant » du référentiel (fixture : false pour tous) est conservé dans la base figée", () => {
+    expect(b!.contracts.every((c) => c.executive === false)).toBe(true);
   });
   it("projection sans hypothèse : octobre = base des 7 contrats, 22 140,00 €, 7 présents, 6,1 ETP", () => {
     const p = project(b!, "2026-10", "2026-12", [], conv);

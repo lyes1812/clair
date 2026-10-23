@@ -106,9 +106,22 @@ describe("scénario : mois projetés par catégorie et par service", () => {
     expect(grid(r).total("2026-11")).toEqual({ kind: "value", v: 420000 + 31500 + 145000 });
     expect(row(g("masse", "contrat"), "Embauche prévisionnelle", ["2026-11"])).toEqual([31500]);
   });
-  it("établissement et statut : n.d. pour les mois projetés avec la raison (non conservés dans la base du scénario)", () => {
-    const r = g("etp", "statut");
+  it("établissement : n.d. pour les mois projetés avec la raison (non conservé dans la base du scénario)", () => {
+    const r = g("etp", "etablissement");
     expect(r.kind).toBe("nd");
-    expect(r.kind === "nd" && r.reason).toContain("statut cadre non conservé");
+    expect(r.kind === "nd" && r.reason).toContain("établissement non conservé");
+  });
+  it("statut : A cadre dirigeant, B non (base figée) ; l'embauche prévisionnelle, sans statut connu, est « Statut n.d. »", () => {
+    const withStatut = (c: BaseContract, executive: boolean | null): BaseContract => ({ ...c, executive });
+    const b2: BaseSnapshot = { ...base, contracts: [withStatut(A, true), withStatut(B, false)] };
+    const p2 = project(b2, "2026-10", "2026-12", hyps, { prorata: "calendaire" });
+    const r = monthlyGrid({ measure: "etp", axis: "statut", year: "2026", real, scenario: { base: b2, hyps, proj: p2 } });
+    expect(row(r, "Cadre dirigeant", ["2026-10", "2026-11", "2026-12"])).toEqual([10000, 10000, 10000]);
+    expect(row(r, "Hors cadre dirigeant", ["2026-10", "2026-11"])).toEqual([5000, 0]);
+    expect(row(r, "Statut n.d.", ["2026-10", "2026-11", "2026-12"])).toEqual([0, 10000, 10000]);
+    const m = monthlyGrid({ measure: "masse", axis: "statut", year: "2026", real, scenario: { base: b2, hyps, proj: p2 } });
+    expect(row(m, "Cadre dirigeant", ["2026-11"])).toEqual([420000]);
+    expect(row(m, "Hors cadre dirigeant", ["2026-11"])).toEqual([145000]);
+    expect(row(m, "Statut n.d.", ["2026-11"])).toEqual([31500]);
   });
 });

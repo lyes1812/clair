@@ -28,6 +28,7 @@ const amount = z.discriminatedUnion("mode", [
 const scope = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("global") }),
   z.object({ kind: z.literal("service"), service: z.string().min(1).max(200) }),
+  z.object({ kind: z.literal("statut"), executive: z.boolean() }),
   z.object({ kind: z.literal("contrat"), key: z.string().min(1).max(300) }),
 ]);
 const id = z.string().uuid();

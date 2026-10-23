@@ -192,6 +192,27 @@ describe("lot 5 : grilles et duplication avec liens vers des embauches", () => {
     await freezeScenario(W, actor, id);
     await expect(applyChanges(W, actor, id, { put: [aug(uuid(), "Après gel", "2026-12")], remove: [] })).rejects.toThrow("Scénario figé");
   });
+  it("augmentation par statut : enregistrée avec son périmètre, conservée à la duplication ; un statut absent de la base figée n'est jamais deviné", async () => {
+    const st: BaseSnapshot = { ...base, contracts: base.contracts.map((c) => ({ ...c, executive: true })) };
+    const id = await createScenario(W, actor, { name: "Statut", kind: "budget", ...horizon }, st, conv);
+    const dir: Hypothesis = { id: uuid(), kind: "augmentation", label: "Cadres dirigeants 4 %", from: "2026-11", rateBps: 400, scope: { kind: "statut", executive: true } };
+    await addHypothesis(W, actor, id, dir);
+    const s = (await getScenario(W, id))!;
+    expect(s.base.contracts[0].executive).toBe(true);
+    expect(s.hypotheses[0]).toMatchObject({ kind: "augmentation", scope: { kind: "statut", executive: true } });
+    // A cadre dirigeant : 3 000 × 4 % = 120,00 € brut, 1 200 × 4 % = 48,00 € de charges → 4 200 + 168 = 4 368,00 €
+    const p = project(s.base, "2026-10", "2026-11", s.hypotheses, s.scenario.conventions);
+    expect(p.kind === "value" && p.months[1]).toMatchObject({ kind: "value", cost: 436800 });
+    const copy = (await getScenario(W, (await duplicateScenario(W, actor, id, "Copie statut"))!))!;
+    expect(copy.hypotheses[0]).toMatchObject({ kind: "augmentation", scope: { kind: "statut", executive: true } });
+    expect(copy.base.contracts[0].executive).toBe(true);
+    // Base figée sans statut (scénario antérieur) : l'augmentation par statut ne touche personne, aucun coût inventé.
+    const old = await createScenario(W, actor, { name: "Ancienne base", kind: "budget", ...horizon }, base, conv);
+    await addHypothesis(W, actor, old, { ...dir, id: uuid() });
+    const o = (await getScenario(W, old))!;
+    const po = project(o.base, "2026-10", "2026-11", o.hypotheses, o.scenario.conventions);
+    expect(po.kind === "value" && po.months[1]).toMatchObject({ kind: "value", cost: 420000 });
+  });
   it("duplication : une prime, une catégorie, un changement et une augmentation visant une embauche suivent la copie de l'embauche (la projection de la copie reste calculable)", async () => {
     const id = await createScenario(W, actor, { name: "Source liens", kind: "budget", ...horizon }, base, conv);
     const hire: Hypothesis = { id: uuid(), kind: "embauche", label: "Dév", service: "TECH", start: "2026-11-01", end: null, grossFullTimeCents: 400000, quotaBps: 5000, chargesBps: 2000, counted: true, category: "cdi", replaces: null };

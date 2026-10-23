@@ -16,7 +16,25 @@ const BLANK_ROWS = 3;
 export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; canEdit: boolean }) {
   const months = monthRange(scenario.firstMonth, scenario.lastMonth);
   const services = [...new Set([...base.contracts.map((c) => c.service), ...hypotheses.map((h) => (h.kind === "embauche" ? h.service : h.kind === "augmentation" && h.scope.kind === "service" ? h.scope.service : null))].filter((s): s is string => s !== null))].sort();
-  const scopes = [{ key: "global", label: "Toute l'entreprise (hors embauches et entrées après la base)" }, ...services.map((s) => ({ key: `service:${s}`, label: `Service ${s}` }))];
+  // Statut « cadre dirigeant » de PayFit : lu dans le référentiel Collaborateurs et conservé dans la base figée du scénario.
+  const dirigeants = base.contracts.filter((c) => c.executive === true).length;
+  const autres = base.contracts.filter((c) => c.executive === false).length;
+  const unknown = base.contracts.length - dirigeants - autres;
+  const oldBase = base.contracts.every((c) => c.executive === undefined);
+  const hasStatutHyp = hypotheses.some((h) => h.kind === "augmentation" && h.scope.kind === "statut");
+  const showStatut = dirigeants + autres > 0 || hasStatutHyp;
+  const statutNote = oldBase
+    ? "Statut cadre dirigeant absent de la base figée de ce scénario (créé avant sa conservation) : créez un nouveau scénario pour l'utiliser."
+    : dirigeants + autres === 0
+      ? "Statut cadre dirigeant non renseigné dans les données lues (PayFit : champ estCadreDirigeant vide pour tous les contrats) : aucune ligne par statut."
+      : unknown > 0
+        ? `${unknown} contrat(s) sans statut renseigné ne reçoivent aucune augmentation par statut (seulement celles de leur service, de toute l'entreprise ou saisies sur eux).`
+        : null;
+  const scopes = [
+    { key: "global", label: "Toute l'entreprise (hors embauches et entrées après la base)" },
+    ...services.map((s) => ({ key: `service:${s}`, label: `Service ${s}` })),
+    ...(showStatut ? [{ key: "statut:dirigeant", label: `Cadres dirigeants (${dirigeants} contrat${dirigeants > 1 ? "s" : ""})` }, { key: "statut:autres", label: `Hors cadres dirigeants (${autres} contrat${autres > 1 ? "s" : ""})` }] : []),
+  ];
   const rate = new Map<string, number>();
   for (const h of hypotheses) {
     if (h.kind !== "augmentation") continue;
@@ -84,7 +102,7 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
       <section className="panel" data-testid="glob-rates">
         <h2>Taux d'augmentation par mois <span className="desc">— une ligne par périmètre · <a href="#def-globales">règle</a></span></h2>
         <p className="desc">
-          Chaque cellule renseignée est une augmentation distincte, appliquée au 1er du mois en pourcentage du salaire déjà augmenté (les taux successifs se composent). Cellule vide ou 0 : aucune augmentation ce mois-là. Sur un même mois, la plus ciblée s'applique seule : l'augmentation d'un contrat prime sur celle d'un service, qui prime sur celle de toute l'entreprise (celle d'un contrat se saisit dans Modifications de postes).
+          Chaque cellule renseignée est une augmentation distincte, appliquée au 1er du mois en pourcentage du salaire déjà augmenté (les taux successifs se composent). Cellule vide ou 0 : aucune augmentation ce mois-là. Sur un même mois, la plus ciblée s'applique seule : l'augmentation d'un contrat prime sur celle d'un service ou d'un statut, qui prime sur celle de toute l'entreprise (celle d'un contrat se saisit dans Modifications de postes). Un service et un statut sont au même niveau : deux augmentations de ces niveaux le même mois pour un même salarié sont refusées avec leur raison.
         </p>
         {canEdit ? (
           <ActionForm action={saveRatesAction.bind(null, slug, scenario.id)} submit="Enregistrer les taux" testid="glob-rates-form">
@@ -92,6 +110,7 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
             {ratesGrid}
           </ActionForm>
         ) : ratesGrid}
+        {statutNote && <p className="tile-foot" data-testid="glob-statut-note">{statutNote}</p>}
         {targeted.length > 0 && (
           <details>
             <summary>Augmentations ciblées sur un contrat ou une embauche ({targeted.length}) — hors grille</summary>
@@ -111,7 +130,7 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
             {constGrid}
           </ActionForm>
         ) : constGrid}
-        <p className="tile-foot">Multidevise : différé (euros seulement). Taux par statut cadre / non-cadre et par société : à préciser (le statut n'est pas dans la base figée, une seule société par espace).</p>
+        <p className="tile-foot">Multidevise : différé (euros seulement). Taux par statut cadre / non-cadre de la classification : PayFit ne fournit à Clair que l'indicateur « cadre dirigeant » (disponible ci-dessus) ; le statut cadre / non-cadre demande une autre source. Taux par société : une seule société par espace.</p>
       </section>
     </>
   );

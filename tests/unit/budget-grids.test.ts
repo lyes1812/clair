@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planBases, planConstants, planEnvelopes, planRates } from "@/lib/budget/grids";
+import { planBases, planConstants, planEnvelopes, planRates, scopeKeyOf, scopeLabelOf } from "@/lib/budget/grids";
 import type { Hypothesis } from "@/lib/budget/types";
 
 // Lot 5 : lecture des grilles de saisie — cas écrits à la main.
@@ -34,6 +34,23 @@ describe("grille des taux d'augmentation", () => {
   it("taux illisible ou périmètre inconnu : la grille entière est refusée avec la cellule en cause", () => {
     expect(() => planRates(existing, [{ scope: "service:SALES", month: "2026-10", raw: "abc" }], ids())).toThrow("service SALES, 2026-10 : taux en pourcentage requis");
     expect(() => planRates(existing, [{ scope: "contrat:A", month: "2026-10", raw: "1" }], ids())).toThrow("Périmètre de la grille invalide");
+  });
+  it("statuts : cadres dirigeants 4 % créé, autres 3,5 % → 3,6 % en conservant le libellé, cadres dirigeants décembre 0 retiré ; statut inconnu refusé", () => {
+    const withStatut: Hypothesis[] = [...existing, aug("s1", "2026-11", 350, { kind: "statut", executive: false }, "Hors dirigeants 3,5 %"), aug("s2", "2026-12", 100, { kind: "statut", executive: true })];
+    const r = planRates(withStatut, [
+      { scope: "statut:dirigeant", month: "2026-11", raw: "4" },
+      { scope: "statut:autres", month: "2026-11", raw: "3,6" },
+      { scope: "statut:dirigeant", month: "2026-12", raw: "0" },
+    ], ids());
+    expect(r.put).toEqual([
+      { id: "n1", kind: "augmentation", label: "Augmentation cadres dirigeants 2026-11", from: "2026-11", rateBps: 400, scope: { kind: "statut", executive: true } },
+      aug("s1", "2026-11", 360, { kind: "statut", executive: false }, "Hors dirigeants 3,5 %"),
+    ]);
+    expect(r.remove).toEqual(["s2"]);
+    expect(() => planRates(withStatut, [{ scope: "statut:autre", month: "2026-11", raw: "1" }], ids())).toThrow("Périmètre de la grille invalide");
+    expect(scopeKeyOf({ kind: "statut", executive: true })).toBe("statut:dirigeant");
+    expect(scopeKeyOf({ kind: "statut", executive: false })).toBe("statut:autres");
+    expect(scopeLabelOf("statut:autres")).toBe("hors cadres dirigeants");
   });
 });
 

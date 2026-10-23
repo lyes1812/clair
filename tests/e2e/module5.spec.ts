@@ -365,4 +365,20 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await expect(imp.getByRole("status")).toContainText("0 hypothèse reprise", slow);
   await expect(page.getByTestId("hyp-import-form-details")).toContainText("Non reprise — Départ 008");
   await page.screenshot({ path: `${CAPTURES}/5-08-reprise.png`, fullPage: true });
+
+  // Taux par statut « cadre dirigeant » (indicateur PayFit) : les 6 contrats repris de la base dérivée sont tous « hors cadre
+  // dirigeant » (fixture) ; le taux « cadres dirigeants » ne touche personne. Janvier 2027 : 3 % de 21 205,80 € = 636,17 €
+  // (à quelques centimes d'arrondi par contrat près), jamais appliqué à l'embauche ; total 22 705,80 € + 636,17 €.
+  await tab("Hypothèses globales").click();
+  const gr = page.getByTestId("glob-rates-table");
+  await expect(gr).toContainText("Cadres dirigeants (0 contrat)");
+  await expect(gr).toContainText("Hors cadres dirigeants (6 contrats)");
+  await gr.locator("input[name='rate|statut:autres|2027-01']").fill("3");
+  await gr.locator("input[name='rate|statut:dirigeant|2027-01']").fill("5");
+  await page.getByTestId("glob-rates-form").getByRole("button", { name: "Enregistrer les taux" }).click();
+  await expect(page.getByTestId("glob-rates-form").getByRole("status")).toContainText("2 lignes écrites", slow);
+  await page.screenshot({ path: `${CAPTURES}/5-11-taux-par-statut.png`, fullPage: true });
+  await tab("Résultat").click();
+  const jan = eur(await txt(row("2027-01")));
+  expect(Math.abs(jan - (22705.8 + 636.17))).toBeLessThan(0.06);
 });

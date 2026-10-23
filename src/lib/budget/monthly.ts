@@ -22,7 +22,7 @@ export const AXES: { key: Axis; label: string }[] = [
   { key: "categorie", label: "Catégorie (CDI, CDD, apprenti, stagiaire)" },
   { key: "contrat", label: "Contrat (nature)" },
   { key: "etablissement", label: "Établissement (SIRET)" },
-  { key: "statut", label: "Statut (cadre / non cadre)" },
+  { key: "statut", label: "Statut (cadre dirigeant / autres)" },
   { key: "service", label: "Service (code analytique du journal)" },
 ];
 // Axes du modèle observé que les données lues ne fournissent pas : listés avec leur raison, jamais inventés.
@@ -64,7 +64,7 @@ function realGroup(c: ContractLike, axis: Exclude<Axis, "service">, src: RealSou
   }
   if (axis === "contrat") return c.nature ? contractNatureLabel(c.nature) : "Nature n.d.";
   if (axis === "etablissement") return c.establishmentId ?? "Établissement n.d.";
-  return c.executive === true ? "Cadre" : c.executive === false ? "Non cadre" : "Statut n.d.";
+  return c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "Statut n.d.";
 }
 
 function realMonth(src: RealSource, m: string, measure: Measure, axis: Axis): MonthResult {
@@ -143,13 +143,13 @@ function scenarioMonth(src: ScenarioSource, m: string, measure: Measure, axis: A
   const catOverride = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
   const hireBy = new Map<string, Extract<Hypothesis, { kind: "embauche" }>>(hyps.flatMap((h) => (h.kind === "embauche" ? [[`embauche:${h.id}`, h] as [string, Extract<Hypothesis, { kind: "embauche" }>]] : [])));
   const label = (c: CategoryId | null | undefined) => (c ? CATEGORY_LABELS[c] : NO_CATEGORY);
-  const unavailable = axis === "etablissement" || axis === "statut" ? nd(`${axis === "statut" ? "statut cadre" : "établissement"} non conservé dans la base du scénario : lisible pour le réel seulement`) : null;
-  if (unavailable) return unavailable;
+  if (axis === "etablissement") return nd("établissement non conservé dans la base du scénario : lisible pour le réel seulement");
   const out = new Map<string, number>();
   const keyGroup = (key: string, person?: PresentPerson): string => {
     if (axis === "service") return person ? (person.service ?? "Non ventilé") : (baseBy.get(key)?.service ?? hireBy.get(key)?.service ?? "Non ventilé");
     if (axis === "categorie") return person ? label((person.category as CategoryId | null) ?? null) : label(catOverride.get(key) ?? baseBy.get(key)?.category ?? hireBy.get(key)?.category);
     const c = baseBy.get(key);
+    if (axis === "statut") return c?.executive === true ? "Cadre dirigeant" : c?.executive === false ? "Hors cadre dirigeant" : "Statut n.d.";
     return c ? (c.nature ? contractNatureLabel(c.nature) : "Nature n.d.") : hireBy.has(key) ? "Embauche prévisionnelle" : "Nature n.d.";
   };
   if (measure === "masse") {

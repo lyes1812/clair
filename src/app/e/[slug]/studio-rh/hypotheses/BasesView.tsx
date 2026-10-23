@@ -63,7 +63,7 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
             <table className="data-table month-grid" data-testid="hyp-base-contracts">
               <thead>
                 <tr>
-                  <th>Contrat</th><th>Service</th><th>Entrée</th><th>Fin connue</th><th className="num">ETP</th><th className="num">Salaire</th><th className="num">Taux de charges</th><th className="num">Coût mensuel</th>
+                  <th>Contrat</th><th>Service</th><th>Statut</th><th>Entrée</th><th>Fin connue</th><th className="num">ETP</th><th className="num">Salaire</th><th className="num">Taux de charges</th><th className="num">Coût mensuel</th>
                   {canEdit && <><th>Salaire corrigé (€)</th><th>Charges corrigées (%)</th></>}
                   <th>État</th>
                 </tr>
@@ -75,6 +75,7 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
                     <tr key={c.contractKey} data-contract={c.externalId}>
                       <td>{c.label}{canEdit && <input type="hidden" name={`key_${i}`} value={c.contractKey} />}</td>
                       <td>{c.service ?? <span title={c.serviceNd ?? undefined}>Non ventilé{c.serviceNd ? " ⚠" : ""}</span>}</td>
+                      <td>{c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "n.d."}</td>
                       <td>{c.startDate ?? "n.d."}</td>
                       <td>{c.endDate ?? "—"}</td>
                       <td className="num">{c.etp4 === null ? <span title={c.etpNd ?? undefined}>n.d.</span> : fmtEtp4(c.etp4)}</td>

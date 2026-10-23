@@ -22,6 +22,7 @@ export type BaseContract = {
   etp4: number | null; // ETP fin du mois de référence
   etpNd: string | null;
   nature?: string | null; // code de nature DSN du contrat
+  executive?: boolean | null; // cadre dirigeant (true) ou non (false), champ « estCadreDirigeant » de PayFit via le référentiel Collaborateurs (ce n'est pas le statut cadre / non cadre de la classification) ; null : non renseigné ; absent : base figée avant sa conservation
   category?: CategoryId | null; // catégorie proposée depuis la nature (modifiable par une hypothèse « catégorie »)
   baseNote?: string | null; // base reconstituée par une règle (ex. entrée en cours du mois de référence)
   // Base de coût : rubriques Salaires (et gratifications de stage) du mois de référence ; charges au taux observé du
@@ -67,7 +68,7 @@ export type PriorMonth =
   | { month: string; kind: "nd"; reason: string; source: string };
 
 // --- Hypothèses datées saisies dans Clair.
-export type Scope = { kind: "global" } | { kind: "service"; service: string } | { kind: "contrat"; key: string };
+export type Scope = { kind: "global" } | { kind: "service"; service: string } | { kind: "statut"; executive: boolean } | { kind: "contrat"; key: string };
 export type Amount = { mode: "brut"; brutCents: number; chargesBps: number } | { mode: "charge"; costCents: number };
 
 export type Hypothesis =

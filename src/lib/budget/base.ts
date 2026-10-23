@@ -110,6 +110,7 @@ export function buildBase({ input, kpi, refMonth, lastMonth, syncId, readAt, con
       etp4,
       etpNd,
       nature: c.nature,
+      executive: c.executive,
       category: categoryOfContract(c.externalId, c.nature, categoryNatures, categoryOverrides),
       base: baseNd || !a ? null : { salaryCents: entering ? roundDiv(BigInt(a.recurring) * entering.d, entering.n) : a.recurring, refBrutCents: a.brut, refCotisationsCents: a.cot },
       baseNote: !baseNd && entering ? `entré le ${c.startDate} : salaire de ${refMonth} ramené au mois complet (÷ ${entering.n}/${entering.d} ${conventions.prorata === "ouvres" ? "jours ouvrés" : conventions.prorata === "calendaire" ? "jours calendaires" : "(aucun prorata)"})` : null,

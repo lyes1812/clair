@@ -13,6 +13,7 @@ export const KIND = { augmentation: "Augmentation", embauche: "Embauche", depart
 export function scopeText(s: Scope, base: BaseSnapshot, hyps: Hypothesis[]) {
   if (s.kind === "global") return "toute l'entreprise (hors embauches et entrées après la base)";
   if (s.kind === "service") return `service ${s.service} (hors embauches et entrées après la base)`;
+  if (s.kind === "statut") return `${s.executive ? "cadres dirigeants" : "hors cadres dirigeants"} (hors embauches et entrées après la base ; statut du référentiel Collaborateurs)`;
   const c = base.contracts.find((x) => x.contractKey === s.key);
   const h = hyps.find((x) => hireKey(x.id) === s.key);
   return `contrat : ${c?.label ?? h?.label ?? s.key}`;
