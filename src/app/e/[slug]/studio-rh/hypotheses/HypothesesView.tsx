@@ -92,7 +92,13 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
                 <dt>Coût projeté de {formatMonth(base.refMonth).toLowerCase()} par « {base.origin.scenarioName} »</dt>
                 <dd>{formatEuros(base.refMasse)}</dd>
                 <span className="tile-foot" data-testid="hyp-base-gap">
-                  {base.refBaseCost === null ? "écart avec la base : n.d." : (base.origin.gap ?? []).length === 0 ? "égal à la base dérivée" : `non repris dans la base : ${(base.origin.gap ?? []).map((g) => `${g.label} ${formatEuros(g.cost)}`).join(" ; ")}`}
+                  {base.refBaseCost === null
+                    ? "écart avec la base : n.d."
+                    : base.origin.gap === undefined
+                      ? `écart avec la base : ${formatEuros(base.refMasse - base.refBaseCost)} (non ventilé : base dérivée créée avant la ventilation par nature)`
+                      : base.origin.gap.length === 0
+                        ? "égal à la base dérivée"
+                        : `non repris dans la base : ${base.origin.gap.map((g) => `${g.label} ${formatEuros(g.cost)}`).join(" ; ")}`}
                 </span>
               </>
             ) : (

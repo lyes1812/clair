@@ -52,7 +52,7 @@ export type BaseOrigin = {
   month: string;
   at: string;
   notCarried: string[];
-  gap: { label: string; cost: number }[]; // coût projeté du mois − base dérivée, par nature (non repris)
+  gap?: { label: string; cost: number }[]; // coût projeté du mois − base dérivée, par nature (absent : base antérieure)
 };
 export type PriorMonth =
   | { month: string; kind: "value"; cost: number; brut: number | null; charges: number | null; headcount: number; etp4: number | null; etpNd: string | null; source: string }

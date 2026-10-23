@@ -3,6 +3,8 @@ import { TOTP } from "otpauth";
 
 export const PASSWORD = "Fictif-Test-2026!";
 export const CAPTURES = process.env.CAPTURES_DIR ?? "captures";
+// Navigations après une action serveur : l'environnement déployé peut répondre lentement (démarrage à froid).
+const NAV = { timeout: 30_000 };
 
 // Better Auth limite les inscriptions à 3 par 10 s et par adresse IP : on attend la fenêtre si besoin.
 export async function signUp(page: Page, u: { name: string; email: string }) {
@@ -35,14 +37,14 @@ export async function freshTotp(secret: string): Promise<string> {
 export async function createWorkspaceAsAdmin(page: Page, name: string) {
   await page.getByLabel(/Nom de l'espace/).fill(name);
   await page.getByRole("button", { name: "Créer l'espace" }).click();
-  await expect(page).toHaveURL(/\/securite\?retour=/);
+  await expect(page).toHaveURL(/\/securite\?retour=/, NAV);
   await page.getByLabel("Mot de passe").fill(PASSWORD);
   await page.getByRole("button", { name: "Configurer" }).click();
   const secret = (await page.getByTestId("totp-secret").textContent())!.trim();
   await page.getByLabel("Code à 6 chiffres").fill(await freshTotp(secret));
   await page.getByRole("button", { name: "Activer" }).click();
-  await expect(page.getByTestId("totp-enabled")).toBeVisible();
+  await expect(page.getByTestId("totp-enabled")).toBeVisible(NAV);
   await page.getByRole("button", { name: "Continuer" }).click();
-  await expect(page).toHaveURL(/\/e\/[a-z0-9-]+\/donnees$/);
+  await expect(page).toHaveURL(/\/e\/[a-z0-9-]+\/donnees$/, NAV);
   return { slug: page.url().match(/\/e\/([a-z0-9-]+)\//)![1], secret };
 }

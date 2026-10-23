@@ -85,12 +85,12 @@ export function ComparisonView({
                 return (
                   <tr key={m} data-month={m}>
                     <td>{formatMonth(m)}</td>
-                    <td className="num" data-col="principal" title={why(a)}>{cell(a)}{a?.kind === "value" ? <span className="tile-foot"> {LAYER[a.layer]}</span> : null}</td>
+                    <td className="num" data-col="principal" title={why(a)}>{cell(a)}{a?.kind === "value" ? <span className="tile-foot"> {a.source ?? LAYER[a.layer]}</span> : null}</td>
                     {compared.map((c) => {
                       const b = c.points.get(m);
                       const e = a?.kind === "value" && b?.kind === "value" ? signed(a.cost - b.cost) : "n.d.";
                       return [
-                        <td key={c.key} className="num" data-col={c.key} title={why(b)}>{cell(b)}{b?.kind === "value" && b.layer !== "budget" ? <span className="tile-foot"> {LAYER[b.layer]}</span> : null}</td>,
+                        <td key={c.key} className="num" data-col={c.key} title={why(b)}>{cell(b)}{b?.kind === "value" && b.layer !== "budget" ? <span className="tile-foot"> {b.source ?? LAYER[b.layer]}</span> : null}</td>,
                         <td key={`${c.key}-e`} className="num" data-col={`${c.key}-ecart`} title={why(a) ?? why(b)}>{e}</td>,
                       ];
                     })}
@@ -114,7 +114,7 @@ export function ComparisonView({
             </tfoot>
           </table>
         </div>
-        <p className="tile-foot">Un total est n.d. dès qu'un de ses mois l'est (raison au survol de la cellule). « projeté (parent) » : mois projeté par le scénario dont ce budget est dérivé.</p>
+        <p className="tile-foot">Un total est n.d. dès qu'un de ses mois l'est (raison au survol de la cellule). « projeté — scénario « X » » : mois projeté par le scénario X dont ce budget est dérivé (directement ou par une dérivation antérieure).</p>
       </section>
 
       {compared.length > 0 && (

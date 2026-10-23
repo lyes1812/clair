@@ -241,6 +241,14 @@ describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas �
     const short = chainBase({ id: "P", name: "Révisé", firstMonth: "2026-10", lastMonth: "2026-12", conventions: conv }, b2, hyps, pr, "2026-10-23", "2027-02");
     expect(short.kind === "value" && short.base.upcoming?.map((c) => c.contractKey)).toEqual(["U"]);
   });
+  it("base dérivée : brut du mois complet nul avec charges non nulles → base n.d. à saisir (rien n'est perdu) ; base parent ancienne sans contrats à venir signalée", () => {
+    const tiny: Hypothesis = { id: "t", kind: "embauche", label: "Micro", service: null, start: "2026-10-01", end: null, grossFullTimeCents: 1000, quotaBps: 1, chargesBps: 100000, counted: false, replaces: null };
+    // Brut = 10 € × 0,01 % = 0,001 € → 0 ; charges = 0,001 € × 1 000 % = 0,01 € → 1 centime.
+    const pr = project(base, "2026-10", "2026-12", [fixC, tiny], conv);
+    const r = chainBase({ id: "P", name: "P", firstMonth: "2026-10", lastMonth: "2026-12", conventions: conv }, base, [fixC, tiny], pr, "2026-10-23", "2027-12");
+    expect(r.kind === "value" && r.base.contracts.find((c) => c.contractKey === "embauche:t")).toMatchObject({ base: null, baseNd: expect.stringContaining("charges non nulles") });
+    expect(r.kind === "value" && r.base.origin?.notCarried).toContain("contrats PayFit commençant après l'horizon du parent non connus (base du parent figée avant leur conservation) : vérifiez les entrées à venir");
+  });
   it("N-1 : série décalée de 12 mois", () => {
     const s = shifted(one("s", 5, 1, "2025-10"), 12, "n1", "N-1");
     expect(s.points.get("2026-10")).toMatchObject({ month: "2026-10", cost: 5 });
@@ -254,8 +262,9 @@ describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas �
       { id: "dA", kind: "depart", label: "Départ A 2027", contractKey: "A", lastPaidDate: "2027-02-28", exitCost: null },
     ];
     const parent = { id: "P", name: "Révisé", firstMonth: "2026-10", lastMonth: "2026-12", conventions: conv };
+    const modern: BaseSnapshot = { ...base, upcoming: [] }; // base récente : contrats à venir conservés (aucun ici)
     const pr = project(base, "2026-10", "2026-12", hyps.slice(0, 4), conv);
-    const r = chainBase(parent, base, hyps.slice(0, 4), pr, "2026-10-23", "2027-12");
+    const r = chainBase(parent, modern, hyps.slice(0, 4), pr, "2026-10-23", "2027-12");
     if (r.kind !== "value") throw new Error(r.reason);
     const c = (k: string) => r.base.contracts.find((x) => x.contractKey === k);
     // A : 3 000 € × 1,02 = 3 060 € au taux 40 % ; C : 2 500 € × 1,02 = 2 550 € à 42 % ; embauche : 3 600 € × 80 % = 2 880 € à 45 %.
@@ -276,12 +285,12 @@ describe("lot 2 : comparaisons, pont volume / coût moyen, base dérivée (cas �
     const n1 = shifted(scenarioSeries("c", "Budget 2027", r.base, child), 12, "n1", "N-1");
     expect(n1.points.get("2027-12")).toMatchObject({ cost: 1208100, layer: "projete-parent" });
     // Un départ postérieur à décembre n'est pas repris : signalé.
-    const r2 = chainBase(parent, base, hyps, project(base, "2026-10", "2026-12", hyps, conv), "2026-10-23", "2027-12");
+    const r2 = chainBase(parent, modern, hyps, project(base, "2026-10", "2026-12", hyps, conv), "2026-10-23", "2027-12");
     expect(r2.kind === "value" && r2.base.contracts.find((x) => x.contractKey === "A")?.base?.salaryCents).toBe(306000);
     expect(r2.kind === "value" && r2.base.origin?.notCarried).toEqual(["départ « Départ A 2027 » du 2027-02-28 (postérieur à 2026-12)"]);
     // Départ le 31 décembre : le contrat n'est plus présent en janvier, il n'est pas repris.
     const h3 = [...hyps.slice(0, 4), { ...hyps[4], lastPaidDate: "2026-12-31" } as Hypothesis];
-    const r3 = chainBase(parent, base, h3, project(base, "2026-10", "2026-12", h3, conv), "2026-10-23", "2027-12");
+    const r3 = chainBase(parent, modern, h3, project(base, "2026-10", "2026-12", h3, conv), "2026-10-23", "2027-12");
     expect(r3.kind === "value" && r3.base.contracts.map((x) => x.contractKey)).toEqual(["C", "embauche:h"].sort((x, y) => x.localeCompare(y)) && expect.not.arrayContaining(["A"]));
   });
 });

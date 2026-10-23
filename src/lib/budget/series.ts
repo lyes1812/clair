@@ -9,7 +9,7 @@ import type { BaseSnapshot, Projection } from "./types";
 // scénario, budget saisi, réel courant, N-1 — comparées sur les mêmes mois. Une valeur absente est n.d. avec sa
 // raison, jamais 0 ; un total est n.d. dès qu'un de ses mois l'est.
 export type Layer = "reel" | "projete-parent" | "projete" | "budget";
-export type Point = { month: string; kind: "value"; cost: number; etp4: number | null; etpNd: string | null; layer: Layer } | { month: string; kind: "nd"; reason: string };
+export type Point = { month: string; kind: "value"; cost: number; etp4: number | null; etpNd: string | null; layer: Layer; source?: string } | { month: string; kind: "nd"; reason: string };
 export type Series = { key: string; label: string; points: Map<string, Point> };
 
 const put = (s: Series, p: Point) => s.points.set(p.month, p);
@@ -20,7 +20,7 @@ export function scenarioSeries(key: string, label: string, base: BaseSnapshot, p
   for (const a of base.actuals) put(s, a.kind === "nd" ? { month: a.month, kind: "nd", reason: a.reason } : { month: a.month, kind: "value", cost: a.masse, etp4: a.etp4, etpNd: a.etpNd, layer: "reel" });
   for (const p of base.prior ?? []) {
     if (s.points.has(p.month)) continue;
-    put(s, p.kind === "nd" ? { month: p.month, kind: "nd", reason: p.reason } : { month: p.month, kind: "value", cost: p.cost, etp4: p.etp4, etpNd: p.etpNd, layer: "projete-parent" });
+    put(s, p.kind === "nd" ? { month: p.month, kind: "nd", reason: p.reason } : { month: p.month, kind: "value", cost: p.cost, etp4: p.etp4, etpNd: p.etpNd, layer: "projete-parent", source: p.source });
   }
   if (proj.kind === "error") return s;
   for (const p of proj.months) put(s, p.kind === "nd" ? { month: p.month, kind: "nd", reason: p.reasons.join(" ; ") } : { month: p.month, kind: "value", cost: p.cost, etp4: p.etp4, etpNd: p.etpNd, layer: "projete" });

@@ -21,7 +21,7 @@ function rowsOf(base: BaseSnapshot, proj: Projection, scenario: ScenarioRow): Ro
   // Base dérivée : mois projetés par le scénario parent dans l'année (coût et effectif seulement).
   const prior: Row[] = (base.prior ?? [])
     .filter((p) => p.month.startsWith(year) && p.month < scenario.firstMonth && !base.actuals.some((a) => a.month === p.month))
-    .map((p) => (p.kind === "nd" ? { month: p.month, layer: "parent", source: p.source, brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reason, etpNd: null } : { month: p.month, layer: "parent", source: p.source, brut: p.brut ?? null, charges: p.charges ?? null, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
+    .map((p) => (p.kind === "nd" ? { month: p.month, layer: "parent", source: p.source, brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reason, etpNd: null } : { month: p.month, layer: "parent", source: p.source, brut: p.brut ?? null, charges: p.charges ?? null, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: p.brut === undefined ? "brut et charges non conservés par la base dérivée (créée avant leur reprise)" : null, etpNd: p.etpNd }));
   const projected: Row[] = proj.kind === "error" ? [] : proj.months.map((p: ProjectedMonth) => (p.kind === "nd" ? { month: p.month, layer: "projete", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: p.reasons.join(" ; "), etpNd: null } : { month: p.month, layer: "projete", brut: p.brut, charges: p.charges, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: p.etpNd }));
   return [...actual, ...prior, ...projected];
 }
@@ -151,7 +151,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
         {rows.some((r) => r.nd || r.etpNd) && (
           <p className="tile-foot nd" data-testid="proj-nd-reasons">n.d. : {[...new Set(rows.flatMap((r) => [r.nd && `${r.month} : ${r.nd}`, r.etpNd && `${r.month} : ${r.etpNd}`]).filter(Boolean))].join(" ; ")}</p>
         )}
-        {rows.some((r) => r.layer === "projete" && r.cost !== null && (r.brut === null || r.charges === null)) && (
+        {rows.some((r) => r.layer !== "reel" && r.cost !== null && (r.brut === null || r.charges === null)) && (
           <p className="tile-foot">Brut ou charges n.d. sur un mois projeté : un élément saisi en coût chargé n'est pas ventilé entre brut et charges ; le coût employeur reste exact.</p>
         )}
       </section>

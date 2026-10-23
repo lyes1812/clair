@@ -204,5 +204,5 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   // Budget 2027 contre 2026 (réel janv.–sept. + projeté du révisé oct.–déc. = 281 250,10 €) : −8 780,50 €.
   await page.getByTestId("hyp-tabs").getByRole("link", { name: "Comparaison" }).click();
   await expect(page.getByTestId("cmp-tile-n1").locator("dd")).toContainText("-8 780,50 €");
-  expect(await txt(cmp("2027-12", "n1"))).toContain("projeté (parent)");
+  expect(await txt(cmp("2027-12", "n1"))).toContain("projeté — scénario « Révisé T4 2026 »");
 });

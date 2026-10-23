@@ -32,7 +32,10 @@ export function chainBase(
   const notCarried: string[] = [];
   const carried = new Set<string>();
   // Base dérivée : brut et charges du mois complet ; taux de charges = charges ÷ brut (ou taux saisi si brut nul).
-  const baseOf = (brut: number, charges: number, bps: number | null) => (brut > 0 ? { salaryCents: brut, refBrutCents: brut, refCotisationsCents: charges } : { salaryCents: 0, refBrutCents: 10_000, refCotisationsCents: bps ?? 0 });
+  // Brut nul : base nulle au taux saisi si les charges le sont aussi ; sinon n.d. (le taux ne se déduit pas d'un brut nul).
+  const baseOf = (brut: number, charges: number, bps: number | null) =>
+    brut > 0 ? { salaryCents: brut, refBrutCents: brut, refCotisationsCents: charges } : brut === 0 && charges === 0 ? { salaryCents: 0, refBrutCents: 10_000, refCotisationsCents: bps ?? 0 } : null;
+  const ndOf = (b: ReturnType<typeof baseOf>) => (b ? null : `brut du mois complet de ${M} nul ou négatif avec des charges non nulles : base à saisir`);
   let hireFull = 0;
   let hireInM = 0;
   for (const c of base.contracts) {
@@ -44,7 +47,8 @@ export function chainBase(
     if (!own.length) return { kind: "nd", reason: `contrat ${c.label} : coût de ${M} introuvable dans la projection` };
     const brut = own.reduce((s, x) => s + (x.brut ?? 0), 0);
     const charges = own.reduce((s, x) => s + (x.charges ?? 0), 0);
-    contracts.push({ ...c, base: baseOf(brut, charges, fixes.get(c.contractKey)?.chargesBps ?? null), baseNd: null });
+    const b = baseOf(brut, charges, fixes.get(c.contractKey)?.chargesBps ?? null);
+    contracts.push({ ...c, base: b, baseNd: ndOf(b) });
     carried.add(c.contractKey);
   }
   for (const h of hyps) {
@@ -71,7 +75,7 @@ export function chainBase(
     contracts.push({
       contractKey: key, externalId: key, label: h.label, service: h.service, serviceNd: h.service ? null : "embauche sans service", startDate: h.start, endDate: h.end,
       counted: h.counted, etp4: h.counted ? h.quotaBps : null, etpNd: h.counted ? null : "non compté dans l'effectif",
-      base: baseOf(brut, charges, h.chargesBps), baseNd: null,
+      base: baseOf(brut, charges, h.chargesBps), baseNd: ndOf(baseOf(brut, charges, h.chargesBps)),
     });
     carried.add(key);
   }
@@ -82,6 +86,8 @@ export function chainBase(
     else upcoming.push(c);
   }
   for (const h of hyps) if (h.kind === "ponctuel" && h.month > M) notCarried.push(`élément « ${h.label} » de ${h.month}`);
+  // Base du parent figée avant la conservation des contrats à venir : ceux-ci sont inconnus, on le dit.
+  if (base.upcoming === undefined) notCarried.push("contrats PayFit commençant après l'horizon du parent non connus (base du parent figée avant leur conservation) : vérifiez les entrées à venir");
   contracts.sort((x, y) => x.label.localeCompare(y.label) || x.contractKey.localeCompare(y.contractKey));
 
   // Écart entre le coût projeté de M et la base dérivée, par nature (éléments non repris dans la base).
@@ -92,7 +98,7 @@ export function chainBase(
     { label: `contrats sortis en ${M} (non repris)`, cost: sum((k, key) => k !== "ponctuel" && k !== "sortie" && key !== null && !carried.has(key)) },
     { label: `prorata d'entrée en ${M} des contrats repris`, cost: sum((k, key) => k === "entree" && key !== null && carried.has(key)) + (hireInM - hireFull) },
   ].filter((g) => g.cost !== 0);
-  const refBaseCost = contracts.filter((c) => c.base).reduce((s, c) => s + c.base!.salaryCents + roundDiv(BigInt(c.base!.salaryCents) * BigInt(c.base!.refCotisationsCents), BigInt(c.base!.refBrutCents)), 0);
+  const refBaseCost = contracts.filter((c) => c.base && carried.has(c.contractKey)).reduce((s, c) => s + c.base!.salaryCents + roundDiv(BigInt(c.base!.salaryCents) * BigInt(c.base!.refCotisationsCents), BigInt(c.base!.refBrutCents)), 0);
   const residual = pm.cost - refBaseCost - gapItems.reduce((s, g) => s + g.cost, 0);
   if (residual !== 0) gapItems.push({ label: "écart non ventilé", cost: residual });
 
