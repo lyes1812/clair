@@ -1,3 +1,4 @@
+import { FamilyTabs } from "@/components/FamilyTabs";
 import type { ReactNode } from "react";
 import { SourceBadge } from "@/components/SourceBadge";
 import { dateTimeFmt } from "@/lib/connectors/labels";
@@ -12,9 +13,16 @@ import { EVENT_FLAG_LABELS, personLabel, type CollabContext, type Shown } from "
 
 // Composants partagés des écrans Collaborateurs : en-tête (source, base de calcul, définitions), valeurs tracées, constats.
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/collaborateurs")!;
+// Entrées de la famille Collaborateurs, dans l'ordre du cahier ; « Mouvements » (entrées et sorties datées) est conservé.
+// Une entrée « Prévu » est visible mais n'a pas encore de comportement établi.
 export const TABS = [
-  { id: "mois", label: "Mois", path: "" },
-  { id: "annee", label: "Année", path: "/annee" },
+  { id: "fiche", label: "Fiche collaborateur", path: "/fiche" },
+  { id: "tree", label: "Tree-View", path: "/tree", soon: true },
+  { id: "mois", label: "Liste mensuelle des collaborateurs", path: "" },
+  { id: "annee", label: "Liste annuelle des collaborateurs", path: "/annee" },
+  { id: "rubrique", label: "Collaborateurs par rubrique de paie", path: "/rubrique", soon: true },
+  { id: "pointage", label: "Pointage des collaborateurs", path: "/pointage", soon: true },
+  { id: "pivot", label: "Pivot · liste mensuelle", path: "/pivot", soon: true },
   { id: "mouvements", label: "Mouvements", path: "/mouvements" },
 ] as const;
 export type TabId = (typeof TABS)[number]["id"];
@@ -110,11 +118,7 @@ export function CollabHeader({ ctx, tab, children }: { ctx: CollabContext; tab: 
         </section>
       )}
       {ctx.data && tab && (
-        <nav className="tabs" aria-label="Vues">
-          {TABS.map((t) => (
-            <a key={t.id} href={`${base(slug)}${t.path}`} aria-current={t.id === tab ? "page" : undefined}>{t.label}</a>
-          ))}
-        </nav>
+        <FamilyTabs label="Entrées Collaborateurs" testid="collab-tabs" current={tab} tabs={TABS.map((t) => ({ key: t.id, label: t.label, href: `${base(slug)}${t.path}`, soon: "soon" in t ? t.soon : false }))} />
       )}
       {children}
       {ctx.data && <Definitions ctx={ctx} />}

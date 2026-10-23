@@ -44,6 +44,10 @@ import {
   TurnoverDetail,
   turnoverShown,
 } from "./components";
+import { FamilyTabs } from "@/components/FamilyTabs";
+import { Prevu } from "@/components/Prevu";
+import { EffectifsMensuels } from "./EffectifsMensuels";
+import { KPI_VUES, resolveKpiVue } from "./tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -137,6 +141,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   // Paramètres GET : une valeur invalide est remplacée par le défaut, et l'écran le dit.
   const notices: string[] = [];
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
+  const vue = resolveKpiVue(one(sp.vue));
   const rawMode = one(sp.mode);
   const mode = rawMode === "civil" ? "civil" : "glissant";
   if (rawMode && rawMode !== "civil" && rawMode !== "glissant") ignore("mode", rawMode, "valeurs possibles : glissant, civil");
@@ -189,6 +194,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
 
   const query = (extra: Record<string, string>) => {
     const p = new URLSearchParams();
+    if (vue !== "suivi") p.set("vue", vue);
     if (mode === "civil") {
       p.set("mode", "civil");
       p.set("annee", String(year));
@@ -275,15 +281,30 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
 
   const [catNatures, catOverrides] = await Promise.all([getCategoryNatures(ctx.collab.workspace.id), getContractCategories(ctx.collab.workspace.id)]);
   const catMonths = w.months.map((m) => categoryMonth(ctx.input!, m, catNatures.natures, catOverrides));
+  const tileOn = (id: string) => vue === "suivi" || (vue === "turnover" ? id === "turnover" || id === "headcount-avg" : id === "absenteeism");
+  const colOn = (c: string) => vue === "suivi" || (vue === "turnover" ? ["coverage", "headcount", "entries", "exits"].includes(c) : ["coverage", "theoretical", "absence-days", "absenteeism", "absenteeism-n1"].includes(c));
   const catKeys = [...CATEGORY_IDS, "nc"].filter((k) => catMonths.some((c) => c.kind === "value" && c.byCategory[k]));
   return (
     <KpiHeader ctx={ctx} closedMonth={last}>
       <PayfitNotice ctx={ctx} />
+      <FamilyTabs label="Entrées KPI RH" testid="kpi-tabs" current={vue} tabs={KPI_VUES.map((v) => ({ key: v.key, label: v.label, href: v.key === "suivi" ? "?" : `?vue=${v.key}`, soon: "soon" in v ? v.soon : false }))} />
+      {vue === "pyramide" || vue === "salaires" || vue === "livre" || vue === "publisher" ? (
+        <Prevu title={KPI_VUES.find((x) => x.key === vue)!.label}>
+          {vue === "pyramide" && <p>Pyramide des âges et de l'ancienneté : la date de naissance n'est pas lue dans le référentiel Collaborateurs (PayFit et DSN lus) ; l'ancienneté se déduit de la date d'entrée du contrat. Le découpage des tranches et la règle d'ancienneté (contrat ou personne) restent à préciser avec toi avant toute réalisation ; rien n'est simulé ici.</p>}
+          {vue === "salaires" && <p>Analyse des salaires par collaborateur (médianes, écarts, rapports) : non réalisée. La lecture de la rémunération par rubrique (salaires, primes, indemnités, gratifications) existe dans <a href={`/e/${slug}/studio-rh/masse-salariale?vue=fixe-variable`}>Masse salariale › Fixe & variable</a>. Les indicateurs individuels exigent des règles d'anonymat et de droits à préciser avec toi.</p>}
+          {vue === "livre" && <p>Livre de paie par collaborateur et rubrique de bulletin : non réalisé. L'API PayFit ne renvoie les bulletins qu'en PDF, sans rubrique ; le journal comptable de paie par compte se lit dans <a href={`/e/${slug}/studio-rh/masse-salariale?vue=paie-compta`}>Masse salariale › Paie & comptabilité</a>.</p>}
+          {vue === "publisher" && <p>Entrée seulement nommée dans le menu de l'outil observé : son comportement n'est pas établi (cahier, 12.12). À préciser avec toi avant toute réalisation.</p>}
+        </Prevu>
+      ) : vue === "effectifs" ? (
+        <EffectifsMensuels slug={slug} workspaceId={ctx.collab.workspace.id} kpi={ctx.input} search={{ mesure: one(sp.mesure), axe: one(sp.axe), version: one(sp.version), annee: one(sp.annee) }} />
+      ) : (
+      <>
       {notices.map((n) => (
         <p key={n} className="notice" data-testid="kpi-param-notice">{n}</p>
       ))}
 
       <form method="get" className="filters" data-testid="kpi-filters">
+        {vue !== "suivi" && <input type="hidden" name="vue" value={vue} />}
         <div className="field-row">
           <label htmlFor="mode">Période</label>
           <select className="select" id="mode" name="mode" defaultValue={mode}>
@@ -340,6 +361,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <dl className="facts" data-testid="kpi-tiles">
           <KpiTile
             id="etp-end"
+            visible={tileOn("etp-end")}
             label={`ETP contractuel fin ${monthLabel(w.to)}`}
             shown={etpShown(t.etpEnd.current)}
             title={etpTitle(t.etpEnd.current)}
@@ -354,6 +376,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           />
           <KpiTile
             id="etp-avg"
+            visible={tileOn("etp-avg")}
             label="ETP moyen"
             shown={averageShown(t.etpAverage.current)}
             title={ratioTitle(t.etpAverage.current)}
@@ -368,6 +391,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           />
           <KpiTile
             id="headcount-avg"
+            visible={tileOn("headcount-avg")}
             label="Effectif moyen (personnes)"
             shown={averageShown(t.headcountAverage.current)}
             title={ratioTitle(t.headcountAverage.current)}
@@ -381,6 +405,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           />
           <KpiTile
             id="turnover"
+            visible={tileOn("turnover")}
             label="Turnover"
             shown={turnoverShown(toCur)}
             title={ratioTitle(toCur)}
@@ -395,6 +420,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           />
           <KpiTile
             id="absenteeism"
+            visible={tileOn("absenteeism")}
             label="Absentéisme"
             shown={absenteeismShown(absCur)}
             title={ratioTitle(absCur)}
@@ -425,40 +451,49 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           <table className="data-table" data-testid="kpi-monthly-table">
             <thead>
               <tr>
-                <th>Mois</th><th>Couverture</th><th className="num wrap">Effectif fin de mois</th><th className="num wrap">ETP fin de mois</th><th className="num">Entrées</th><th className="num">Sorties</th>
-                <th className="num wrap">Jours théoriques</th><th className="num wrap">Jours d'absence</th><th className="num">Absentéisme</th><th className="num">ETP N-1</th><th className="num wrap">Absentéisme N-1</th>
+                <th>Mois</th>
+                {colOn("coverage") && <th>Couverture</th>}
+                {colOn("headcount") && <th className="num wrap">Effectif fin de mois</th>}
+                {colOn("etp") && <th className="num wrap">ETP fin de mois</th>}
+                {colOn("entries") && <th className="num">Entrées</th>}
+                {colOn("exits") && <th className="num">Sorties</th>}
+                {colOn("theoretical") && <th className="num wrap">Jours théoriques</th>}
+                {colOn("absence-days") && <th className="num wrap">Jours d'absence</th>}
+                {colOn("absenteeism") && <th className="num">Absentéisme</th>}
+                {colOn("etp-n1") && <th className="num">ETP N-1</th>}
+                {colOn("absenteeism-n1") && <th className="num wrap">Absentéisme N-1</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map(({ r, cells: c }) => (
                 <tr key={r.month} data-month={r.month}>
                   <td>{r.month}</td>
-                  <Cell col="coverage" shown={c.coverage} href={null} />
-                  <Cell col="headcount" shown={c.headcount} href={detailHref("headcount", r.month)} />
-                  <Cell col="etp" shown={c.etp} href={detailHref("etp-end", r.month)} />
-                  <Cell col="entries" shown={c.entries} href={detailHref("entries", r.month)} />
-                  <Cell col="exits" shown={c.exits} href={detailHref("exits", r.month)} />
-                  <Cell col="theoretical" shown={c.theoretical} href={detailHref("theoretical", r.month)} />
-                  <Cell col="absence-days" shown={c.absenceDays} href={detailHref("absenteeism", r.month)} />
-                  <Cell col="absenteeism" shown={c.absenteeism} href={detailHref("absenteeism", r.month)} />
-                  <Cell col="etp-n1" shown={c.etpN1} href={detailHref("etp-end", r.previous.month)} />
-                  <Cell col="absenteeism-n1" shown={c.absenteeismN1} href={detailHref("absenteeism", r.previous.month)} />
+                  {colOn("coverage") && <Cell col="coverage" shown={c.coverage} href={null} />}
+                  {colOn("headcount") && <Cell col="headcount" shown={c.headcount} href={detailHref("headcount", r.month)} />}
+                  {colOn("etp") && <Cell col="etp" shown={c.etp} href={detailHref("etp-end", r.month)} />}
+                  {colOn("entries") && <Cell col="entries" shown={c.entries} href={detailHref("entries", r.month)} />}
+                  {colOn("exits") && <Cell col="exits" shown={c.exits} href={detailHref("exits", r.month)} />}
+                  {colOn("theoretical") && <Cell col="theoretical" shown={c.theoretical} href={detailHref("theoretical", r.month)} />}
+                  {colOn("absence-days") && <Cell col="absence-days" shown={c.absenceDays} href={detailHref("absenteeism", r.month)} />}
+                  {colOn("absenteeism") && <Cell col="absenteeism" shown={c.absenteeism} href={detailHref("absenteeism", r.month)} />}
+                  {colOn("etp-n1") && <Cell col="etp-n1" shown={c.etpN1} href={detailHref("etp-end", r.previous.month)} />}
+                  {colOn("absenteeism-n1") && <Cell col="absenteeism-n1" shown={c.absenteeismN1} href={detailHref("absenteeism", r.previous.month)} />}
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr data-testid="kpi-monthly-foot">
                 <td>Période</td>
-                <td />
-                <Cell col="headcount" shown={averageShown(t.headcountAverage.current)} href={detailHref("headcount-avg", null)} />
-                <Cell col="etp" shown={averageShown(t.etpAverage.current)} href={detailHref("etp-avg", null)} />
-                <Cell col="entries" shown={show(dash.movements.entries, (x) => String(x.value))} href={detailHref("turnover", null)} />
-                <Cell col="exits" shown={show(dash.movements.exits, (x) => String(x.value))} href={detailHref("turnover", null)} />
-                <Cell col="theoretical" shown={show(dash.theoretical, (x) => fmtHalfDays(x.half))} href={detailHref("absenteeism", null)} />
-                <Cell col="absence-days" shown={show(absCur, (x) => fmtHalfDays(x.ratio.num))} href={detailHref("absenteeism", null)} />
-                <Cell col="absenteeism" shown={show(absCur, (x) => fmtPercent(x.ratio))} href={detailHref("absenteeism", null)} />
-                <Cell col="etp-n1" shown={averageShown(t.etpAverage.previous)} href={detailHref("etp-avg", null, true)} />
-                <Cell col="absenteeism-n1" shown={absenteeismShown(t.absenteeism.previous)} href={detailHref("absenteeism", null, true)} />
+                {colOn("coverage") && <td />}
+                {colOn("headcount") && <Cell col="headcount" shown={averageShown(t.headcountAverage.current)} href={detailHref("headcount-avg", null)} />}
+                {colOn("etp") && <Cell col="etp" shown={averageShown(t.etpAverage.current)} href={detailHref("etp-avg", null)} />}
+                {colOn("entries") && <Cell col="entries" shown={show(dash.movements.entries, (x) => String(x.value))} href={detailHref("turnover", null)} />}
+                {colOn("exits") && <Cell col="exits" shown={show(dash.movements.exits, (x) => String(x.value))} href={detailHref("turnover", null)} />}
+                {colOn("theoretical") && <Cell col="theoretical" shown={show(dash.theoretical, (x) => fmtHalfDays(x.half))} href={detailHref("absenteeism", null)} />}
+                {colOn("absence-days") && <Cell col="absence-days" shown={show(absCur, (x) => fmtHalfDays(x.ratio.num))} href={detailHref("absenteeism", null)} />}
+                {colOn("absenteeism") && <Cell col="absenteeism" shown={show(absCur, (x) => fmtPercent(x.ratio))} href={detailHref("absenteeism", null)} />}
+                {colOn("etp-n1") && <Cell col="etp-n1" shown={averageShown(t.etpAverage.previous)} href={detailHref("etp-avg", null, true)} />}
+                {colOn("absenteeism-n1") && <Cell col="absenteeism-n1" shown={absenteeismShown(t.absenteeism.previous)} href={detailHref("absenteeism", null, true)} />}
               </tr>
             </tfoot>
           </table>
@@ -469,6 +504,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <NdReasons items={ndItems} />
       </section>
 
+      {vue === "suivi" && (
       <section className="panel" data-testid="kpi-categories">
         <h2>Effectif et ETP par catégorie <span className="desc">— fin de mois ; CDI, CDD, apprenti, stagiaire</span></h2>
         <div className="table-wrap">
@@ -500,6 +536,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           Catégorie proposée depuis la nature du contrat, corrigée contrat par contrat dans <a href={`/e/${slug}/parametres#projection`}>Paramètres › Catégories de contrat</a> (PayFit code certains apprentis en CDD). La somme des catégories est l'ETP contractuel de fin de mois ci-dessus ; « non classé » : nature sans catégorie.
         </p>
       </section>
+      )}
 
       {detail && detailId && (
         <section className="panel" id="kpi-detail" data-testid="kpi-detail">
@@ -517,6 +554,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={inDetail} />}
           {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={inDetail} natureAt={natureAt} />}
         </section>
+      )}
+      </>
       )}
 
       <KpiDefinitions slug={slug} params={paramList(ctx.settings, ctx.collab.natures)} />

@@ -137,8 +137,10 @@ export function KpiTile(props: {
   detail: string;
   detailN1: string;
   children?: ReactNode;
+  visible?: boolean;
 }) {
-  const { id, label, shown, title, n1, delta, deltaCalc, params, qualifiers = [], def, detail, detailN1, children } = props;
+  const { id, label, shown, title, n1, delta, deltaCalc, params, qualifiers = [], def, detail, detailN1, children, visible = true } = props;
+  if (!visible) return null;
   return (
     <div data-testid={`kpi-tile-${id}`}>
       <dt>{label}</dt>
