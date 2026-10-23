@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/db/client";
 import { budgetBase, budgetHypothesis, budgetScenario, organization, user } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
-import { addHypotheses, addHypothesis, BudgetError, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getBudget, getScenario, importHypotheses, listBudgets, saveBudget } from "@/lib/budget/store";
+import { addHypotheses, addHypothesis, applyChanges, BudgetError, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getBudget, getScenario, importHypotheses, listBudgets, saveBudget } from "@/lib/budget/store";
+import { project } from "@/lib/budget/engine";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 
 // Module 5 : garde-fous du stockage (base PostgreSQL de test, rôle non superutilisateur).
@@ -166,3 +167,56 @@ describe("lot 4 : saisie groupée et reprise d'hypothèses", () => {
     await expect(addHypotheses(W, actor, a, [aug(uuid(), "Après gel")], "all")).rejects.toThrow("Scénario figé");
   });
 });
+
+describe("lot 5 : grilles et duplication avec liens vers des embauches", () => {
+  const horizon = { firstMonth: "2026-10", lastMonth: "2026-12" };
+  const env = (label: string, target: string, monthly: Record<string, number>): Hypothesis => ({ id: uuid(), kind: "enveloppe", label, axis: "service", target, monthly, chargesBps: null });
+  it("applyChanges : remplacement, ajout et suppression en une transaction ; un scénario final incalculable annule tout", async () => {
+    const id = await createScenario(W, actor, { name: "Grille", kind: "budget", ...horizon }, base, conv);
+    const a = aug(uuid(), "Taux novembre", "2026-11");
+    const e1 = env("Enveloppe TECH", "TECH", { "2026-11": 100000 });
+    await applyChanges(W, actor, id, { put: [a, e1], remove: [] });
+    expect((await getScenario(W, id))!.hypotheses.map((h) => h.label).sort()).toEqual(["Enveloppe TECH", "Taux novembre"]);
+    // remplace l'enveloppe (même identifiant, autres mois) et retire l'augmentation
+    const e1b = { ...e1, monthly: { "2026-12": 55555 } } as Hypothesis;
+    const r = await applyChanges(W, actor, id, { put: [e1b], remove: [a.id] });
+    expect(r).toEqual({ put: 1, removed: 1 });
+    const after = await hypsOf2(id);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ id: e1.id, kind: "enveloppe", monthly: { "2026-12": 55555 } });
+    // incalculable (même cible deux fois) : rien ne change, l'enveloppe existante est conservée
+    await expect(applyChanges(W, actor, id, { put: [env("Doublon", "TECH", { "2026-11": 1 })], remove: [] })).rejects.toThrow(/déjà l'enveloppe du centre de coûts TECH/);
+    expect(await hypsOf2(id)).toHaveLength(1);
+    // suppression d'une hypothèse inexistante : refusée
+    await expect(applyChanges(W, actor, id, { put: [], remove: [uuid()] })).rejects.toThrow("n'existe plus");
+    await freezeScenario(W, actor, id);
+    await expect(applyChanges(W, actor, id, { put: [aug(uuid(), "Après gel", "2026-12")], remove: [] })).rejects.toThrow("Scénario figé");
+  });
+  it("duplication : une prime, une catégorie, un changement et une augmentation visant une embauche suivent la copie de l'embauche (la projection de la copie reste calculable)", async () => {
+    const id = await createScenario(W, actor, { name: "Source liens", kind: "budget", ...horizon }, base, conv);
+    const hire: Hypothesis = { id: uuid(), kind: "embauche", label: "Dév", service: "TECH", start: "2026-11-01", end: null, grossFullTimeCents: 400000, quotaBps: 5000, chargesBps: 2000, counted: true, category: "cdi", replaces: null };
+    const key = `embauche:${hire.id}`;
+    const dep: Hypothesis = { id: uuid(), kind: "depart", label: "Départ A", contractKey: "A", lastPaidDate: "2026-12-15", exitCost: null };
+    const linked: Hypothesis[] = [
+      { id: uuid(), kind: "augmentation", label: "Aug embauche", from: "2026-12", rateBps: 300, scope: { kind: "contrat", key } },
+      { id: uuid(), kind: "ponctuel", label: "Prime embauche", month: "2026-12", amount: { mode: "charge", costCents: 50000 }, service: null, contractKey: key },
+      { id: uuid(), kind: "categorie", label: "Catégorie embauche", contractKey: key, category: "cdd" },
+      { id: uuid(), kind: "changement", label: "Quotité embauche", contractKey: key, from: "2026-12", quotaBps: 10000 },
+    ];
+    await addHypotheses(W, actor, id, [dep, { ...hire, replaces: dep.id } as Hypothesis, ...linked], "all");
+    const copy = (await duplicateScenario(W, actor, id, "Copie liens"))!;
+    const c = (await getScenario(W, copy))!;
+    expect(c.hypotheses).toHaveLength(6);
+    const newHire = c.hypotheses.find((h) => h.kind === "embauche")!;
+    expect(newHire.id).not.toBe(hire.id);
+    const newKey = `embauche:${newHire.id}`;
+    for (const label of ["Prime embauche", "Catégorie embauche", "Quotité embauche"]) {
+      const h = c.hypotheses.find((x) => x.label === label)!;
+      expect(h.kind === "ponctuel" || h.kind === "categorie" || h.kind === "changement" ? h.contractKey : null).toBe(newKey);
+    }
+    const a2 = c.hypotheses.find((x) => x.label === "Aug embauche")!;
+    expect(a2.kind === "augmentation" && a2.scope).toEqual({ kind: "contrat", key: newKey });
+    expect(project(c.base, c.scenario.firstMonth, c.scenario.lastMonth, c.hypotheses, c.scenario.conventions).kind).toBe("value");
+  });
+});
+const hypsOf2 = async (id: string) => (await getScenario(W, id))!.hypotheses;

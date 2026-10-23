@@ -19,11 +19,18 @@ import { ActionForm } from "./ActionForm";
 import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
 import { ComparisonView, type Option } from "./ComparisonView";
 import { LandingView, variantOptions } from "./LandingView";
-import { SalariesView } from "./SalariesView";
 import { measures, retraite, sensitivities, type Variant, type VariantKind } from "@/lib/budget/lot3";
 import { toCents } from "@/lib/money";
-import { HypothesesView } from "./HypothesesView";
 import { ProjectionView } from "./ProjectionView";
+import { FamilyTabs } from "@/components/FamilyTabs";
+import { Prevu } from "@/components/Prevu";
+import { BasesView } from "./BasesView";
+import { ControlesChangements, ControlesEffectifs } from "./ControlesView";
+import { EmbauchesView } from "./EmbauchesView";
+import { EnveloppesView } from "./EnveloppesView";
+import { GlobalesView } from "./GlobalesView";
+import { PostesView } from "./PostesView";
+import { resolveVue, SOUS, VUES } from "./tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -205,11 +212,11 @@ export default async function HypothesesPage({ params, searchParams }: { params:
     const full = await getScenario(workspace.id, scenarioId);
     if (!full) notFound();
     const s = full.scenario;
-    const vue = one(sp.vue) === "hypotheses" ? "hypotheses" : one(sp.vue) === "comparaison" ? "comparaison" : one(sp.vue) === "atterrissage" ? "atterrissage" : one(sp.vue) === "salaries" ? "salaries" : "projection";
+    const { vue, sous } = resolveVue(one(sp.vue), one(sp.sous));
     const proj = project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions);
     const year = s.firstMonth.slice(0, 4);
     const draft = s.status === "brouillon";
-    const href = (v: string) => `${base}?scenario=${s.id}${v === "projection" ? "" : `&vue=${v}`}`;
+    const href = (v: string) => `${base}?scenario=${s.id}${v === "resultat" ? "" : `&vue=${v}`}`;
     return (
       <Header>
         <p className="desc"><a href={base}>← Tous les scénarios</a></p>
@@ -265,23 +272,38 @@ export default async function HypothesesPage({ params, searchParams }: { params:
           )}
           {canEdit && draft && <p className="tile-foot" data-testid="hyp-chain-frozen-only">Simulateur N+1 : figez ce scénario pour en dériver le budget suivant.</p>}
         </section>
-        <nav className="tabs" data-testid="hyp-tabs">
-          <a href={href("projection")} aria-current={vue === "projection" ? "page" : undefined}>Projection</a>
-          <a href={href("salaries")} aria-current={vue === "salaries" ? "page" : undefined}>Salariés</a>
-          <a href={href("hypotheses")} aria-current={vue === "hypotheses" ? "page" : undefined}>Hypothèses</a>
-          <a href={href("comparaison")} aria-current={vue === "comparaison" ? "page" : undefined}>Comparaison</a>
-          <a href={href("atterrissage")} aria-current={vue === "atterrissage" ? "page" : undefined}>Atterrissage</a>
-        </nav>
-        {vue === "projection" ? (
-          <ProjectionView slug={slug} scenario={s} base={full.base} proj={proj} landing={landing(full.base, proj, year)} month={one(sp.mois)} />
-        ) : vue === "salaries" ? (
-          <SalariesView slug={slug} scenario={s} base={full.base} hyps={full.hypotheses} proj={proj} q={one(sp.q)} selected={one(sp.salarie)} canEdit={canEdit && draft} />
-        ) : vue === "atterrissage" ? (
-          landingTab(slug, s, full.base, full.hypotheses, proj, sp)
-        ) : vue === "comparaison" ? (
-          await comparison(slug, workspace.id, s, full.base, proj, sp)
+        <FamilyTabs label="Entrées du scénario" testid="hyp-tabs" current={vue} tabs={VUES.map((v) => ({ key: v.key, label: v.label, href: href(v.key), soon: "soon" in v ? v.soon : false }))} />
+        {vue === "postes" ? (
+          <PostesView slug={slug} scenario={s} base={full.base} hyps={full.hypotheses} proj={proj} q={one(sp.q)} selected={one(sp.salarie)} canEdit={canEdit && draft} />
+        ) : vue === "embauches" ? (
+          <EmbauchesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={canEdit && draft} par={one(sp.par)} />
+        ) : vue === "bases" ? (
+          <BasesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={canEdit && draft} />
+        ) : vue === "env-service" || vue === "env-rubrique" ? (
+          <EnveloppesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} axis={vue === "env-service" ? "service" : "rubrique"} canEdit={canEdit && draft} />
+        ) : vue === "globales" ? (
+          <GlobalesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={canEdit && draft} />
+        ) : vue === "societes" ? (
+          <Prevu title="Hypothèses par société">
+            <p>Un espace Clair correspond aujourd'hui à une seule société : des hypothèses propres à chaque société n'ont de sens qu'avec plusieurs sociétés dans l'espace. Le périmètre et la priorité entre hypothèse de société et hypothèse globale restent à préciser avec toi avant toute réalisation ; rien n'est simulé ici.</p>
+          </Prevu>
+        ) : vue === "ctrl-effectifs" ? (
+          <ControlesEffectifs base={full.base} hypotheses={full.hypotheses} proj={proj} />
+        ) : vue === "ctrl-changements" ? (
+          <ControlesChangements slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} proj={proj} canEdit={canEdit && draft} others={canEdit && draft ? (await listScenarios(workspace.id)).filter((x) => x.scenario.id !== s.id).map((x) => ({ id: x.scenario.id, name: x.scenario.name, label: `${x.scenario.name} (${KIND_LABELS[x.scenario.kind]}, ${x.scenario.status === "fige" ? "figé" : "brouillon"}, ${x.scenario.firstMonth} → ${x.scenario.lastMonth})` })) : []} />
         ) : (
-          <HypothesesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} proj={proj} canEdit={canEdit && draft} others={canEdit && draft ? (await listScenarios(workspace.id)).filter((x) => x.scenario.id !== s.id).map((x) => ({ id: x.scenario.id, name: x.scenario.name, label: `${x.scenario.name} (${KIND_LABELS[x.scenario.kind]}, ${x.scenario.status === "fige" ? "figé" : "brouillon"}, ${x.scenario.firstMonth} → ${x.scenario.lastMonth})` })) : []} />
+          <>
+            <nav className="tabs" aria-label="Résultat du scénario" data-testid="res-tabs">
+              {SOUS.map((x) => <a key={x.key} href={`${base}?scenario=${s.id}&vue=resultat&sous=${x.key}`} aria-current={x.key === sous ? "page" : undefined}>{x.label}</a>)}
+            </nav>
+            {sous === "projection" ? (
+              <ProjectionView slug={slug} scenario={s} base={full.base} proj={proj} landing={landing(full.base, proj, year)} month={one(sp.mois)} />
+            ) : sous === "atterrissage" ? (
+              landingTab(slug, s, full.base, full.hypotheses, proj, sp)
+            ) : (
+              await comparison(slug, workspace.id, s, full.base, proj, sp)
+            )}
+          </>
         )}
         <Definitions />
       </Header>

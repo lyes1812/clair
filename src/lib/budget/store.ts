@@ -5,7 +5,7 @@ import { budgetBase, budgetHypothesis, budgetReference, budgetScenario } from "@
 import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isMonth } from "@/lib/connectors/months";
-import { planImport } from "./bulk";
+import { IMPORTABLE_KINDS, planImport } from "./bulk";
 import { hireKey, project } from "./engine";
 import { CATEGORY_IDS, CURRENCY, type BaseSnapshot, type Conventions, type Hypothesis, type HypothesisKind } from "./types";
 
@@ -44,6 +44,15 @@ export const hypothesisSchema: z.ZodType<Hypothesis> = z.discriminatedUnion("kin
   z.object({ id, kind: z.literal("ponctuel"), label, month, amount, service: z.string().min(1).max(200).nullable(), nonRecurring: z.boolean().optional(), contractKey: z.string().min(1).max(300).nullable().optional() }),
   z.object({ id, kind: z.literal("realise"), label, category: z.string().trim().min(1).max(100), month, costCents: cents.nonnegative() }),
   z.object({ id, kind: z.literal("base"), label, contractKey: z.string().min(1).max(300), salaryCents: cents.nonnegative(), chargesBps: bps.min(0) }),
+  z.object({
+    id, kind: z.literal("enveloppe"), label, axis: z.enum(["service", "rubrique"]), target: z.string().trim().min(1).max(200),
+    monthly: z.record(z.string().refine(isMonth), cents.min(-100_000_000_000_000).max(100_000_000_000_000)), chargesBps: bps.min(0).nullable(), nonRecurring: z.boolean().optional(),
+  }),
+  z.object({ id, kind: z.literal("constante"), label, unit: z.enum(["eur", "pct", "nombre"]), values: z.record(z.string().refine(isMonth), cents), source: z.string().trim().max(300) }),
+  z.object({
+    id, kind: z.literal("changement"), label, contractKey: z.string().min(1).max(300), from: month, service: z.string().trim().min(1).max(200).optional(),
+    quotaBps: z.number().int().min(1).max(10_000).optional(), poste: z.string().trim().max(200).optional(),
+  }),
 ]) as z.ZodType<Hypothesis>;
 
 export type ScenarioKind = "budget" | "revise" | "simulation";
@@ -89,17 +98,13 @@ export async function createScenario(
   });
 }
 
-// Duplication : même base figée, hypothèses recopiées avec de nouveaux identifiants (liens remplacés en conséquence).
+// Duplication : même base figée, hypothèses recopiées avec de nouveaux identifiants (tous les liens vers des embauches
+// ou des départs sont remplacés en conséquence, comme pour une reprise complète).
 export async function duplicateScenario(workspaceId: string, actor: string, scenarioId: string, name: string): Promise<string | null> {
   const src = await getScenario(workspaceId, scenarioId);
   if (!src) return null;
-  const ids = new Map(src.hypotheses.map((h) => [h.id, randomUUID()]));
-  const remap = (h: Hypothesis): Hypothesis => {
-    const n = { ...h, id: ids.get(h.id)! } as Hypothesis;
-    if (n.kind === "embauche" && n.replaces) n.replaces = ids.get(n.replaces) ?? null;
-    if (n.kind === "augmentation" && n.scope.kind === "contrat" && n.scope.key.startsWith("embauche:")) n.scope = { kind: "contrat", key: hireKey(ids.get(n.scope.key.slice(9)) ?? n.scope.key.slice(9)) };
-    return n;
-  };
+  const plan = planImport(src.hypotheses, new Set(IMPORTABLE_KINDS), randomUUID);
+  if (plan.dropped.length) throw new BudgetError(`Duplication impossible : ${plan.dropped.map((d) => `« ${d.label} » (${d.reason})`).join(", ")}.`);
   return withWorkspace(workspaceId, async (tx) => {
     const s = src.scenario;
     const [locked] = await tx.select({ id: budgetBase.id }).from(budgetBase).where(eq(budgetBase.id, s.baseId)).for("update");
@@ -108,8 +113,7 @@ export async function duplicateScenario(workspaceId: string, actor: string, scen
       .insert(budgetScenario)
       .values({ workspaceId, baseId: s.baseId, name, kind: s.kind, firstMonth: s.firstMonth, lastMonth: s.lastMonth, conventions: s.conventions, status: "brouillon", duplicatedFrom: s.id, createdBy: actor })
       .returning({ id: budgetScenario.id });
-    const copies = src.hypotheses.map(remap);
-    if (copies.length) await tx.insert(budgetHypothesis).values(copies.map((h) => ({ id: h.id, workspaceId, scenarioId: row.id, kind: h.kind, data: h, currency: CURRENCY, createdBy: actor })));
+    if (plan.items.length) await tx.insert(budgetHypothesis).values(plan.items.map((h) => ({ id: h.id, workspaceId, scenarioId: row.id, kind: h.kind, data: h, currency: CURRENCY, createdBy: actor })));
     return row.id;
   });
 }
@@ -176,6 +180,28 @@ export async function addHypotheses(workspaceId: string, actor: string, scenario
     if (mode === "all" && r.skipped.length) throw new BudgetError(`Rien n'a été enregistré. ${r.skipped.map((x) => `${x.label} : ${x.reason}`).join(" ; ")}.`);
     await insertAll(tx, workspaceId, scenarioId, actor, r.added);
     return r;
+  });
+}
+
+// Enregistrement d'une grille (taux, enveloppes, constantes) : les lignes modifiées remplacent les anciennes, les lignes
+// retirées sont supprimées, le tout dans une transaction contrôlée par le moteur sur l'ensemble final. Rien n'est
+// enregistré si le scénario final est incalculable.
+export type GridChange = { put: Hypothesis[]; remove: string[] };
+export async function applyChanges(workspaceId: string, actor: string, scenarioId: string, change: GridChange): Promise<{ put: number; removed: number }> {
+  const put = change.put.map((h) => hypothesisSchema.parse(h));
+  return withWorkspace(workspaceId, async (tx) => {
+    const { scenario: s, base, hypotheses } = await lockDraft(tx, scenarioId);
+    const gone = new Set([...change.remove, ...put.map((h) => h.id)]);
+    const known = new Set(hypotheses.map((h) => h.id));
+    const missing = change.remove.filter((id) => !known.has(id));
+    if (missing.length) throw new BudgetError("Une hypothèse à supprimer n'existe plus : rechargez la page.");
+    const final = [...hypotheses.filter((h) => !gone.has(h.id)), ...put];
+    const check = project(base, s.firstMonth, s.lastMonth, final, s.conventions);
+    if (check.kind === "error") throw new BudgetError(`Saisie refusée : ${check.errors.join(" ; ")}.`);
+    const ids = [...gone].filter((id) => known.has(id));
+    for (const id of ids) await tx.delete(budgetHypothesis).where(and(eq(budgetHypothesis.scenarioId, scenarioId), eq(budgetHypothesis.id, id)));
+    await insertAll(tx, workspaceId, scenarioId, actor, put);
+    return { put: put.length, removed: change.remove.length };
   });
 }
 

@@ -24,6 +24,7 @@ export type EventKind =
   | "budget.scenario_deleted"
   | "budget.hypothesis_added"
   | "budget.hypothesis_deleted"
+  | "budget.grid_saved"
   | "budget.bulk_departures"
   | "budget.bulk_raises"
   | "budget.hypotheses_imported"

@@ -7,6 +7,8 @@ import { getConventions } from "@/lib/budget/settings";
 import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
 import { z } from "zod";
 import { expandHires, IMPORTABLE_KINDS } from "@/lib/budget/bulk";
+import { applyChanges, type GridChange } from "@/lib/budget/store";
+import { planBases, planConstants, planEnvelopes, planRates, type EnvRow } from "@/lib/budget/grids";
 import { addHypotheses, BudgetError, importHypotheses, MAX_MONTH_CENTS, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
 import { chainBase } from "@/lib/budget/chain";
 import { project } from "@/lib/budget/engine";
@@ -198,6 +200,23 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
     if (!CATEGORY_IDS.includes(category as CategoryId)) throw new Error("Catégorie requise (CDI, CDD, apprenti ou stagiaire).");
     return { id, kind, label, contractKey, category: category as CategoryId };
   }
+  if (kind === "changement") {
+    const contractKey = str(f, "contractKey");
+    const from = str(f, "from");
+    const service = str(f, "service");
+    const quota = str(f, "quota");
+    const poste = str(f, "poste");
+    if (!contractKey) throw new Error("Salarié requis.");
+    if (!isMonth(from)) throw new Error("Mois d'effet requis (AAAA-MM).");
+    if (poste.length > 200) throw new Error("Poste de 200 caractères au plus.");
+    let quotaBps: number | undefined;
+    if (quota) {
+      quotaBps = pct(f, "quota", "Nouvelle quotité");
+      if (quotaBps <= 0 || quotaBps > 10_000) throw new Error("Quotité entre 0 et 100 %.");
+    }
+    return { id, kind, label, contractKey, from, ...(service ? { service } : {}), ...(quotaBps !== undefined ? { quotaBps } : {}), ...(poste ? { poste } : {}) };
+  }
+  if (kind === "enveloppe" || kind === "constante") throw new Error("Cette saisie se fait dans sa grille.");
   if (kind === "realise") {
     const month = str(f, "month");
     if (!isMonth(month)) throw new Error("Mois réalisé requis (AAAA-MM).");
@@ -367,6 +386,85 @@ export async function createChainedScenarioAction(slug: string, parentId: string
   }
   revalidatePath(page(slug));
   redirect(`${page(slug)}?scenario=${id}`);
+}
+
+// --- Grilles de saisie mensuelles (taux d'augmentation, enveloppes, constantes, bases individuelles).
+async function saveGrid(slug: string, scenarioId: string, f: FormData, plan: (existing: Hypothesis[], months: string[]) => GridChange, what: string): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
+  const full = await getScenario(workspace.id, scenarioId);
+  if (!full) return { error: "Scénario introuvable." };
+  let change: GridChange;
+  try {
+    change = plan(full.hypotheses, monthRange(full.scenario.firstMonth, full.scenario.lastMonth));
+  } catch (e) {
+    return e instanceof Error && !(e instanceof z.ZodError) ? { error: e.message } : fail(e);
+  }
+  if (change.put.length === 0 && change.remove.length === 0) return { ok: "Aucune modification à enregistrer." };
+  try {
+    const r = await applyChanges(workspace.id, session.user.id, scenarioId, change);
+    await recordEvent(workspace.id, session.user.id, "budget.grid_saved", { scenarioId, grid: what, put: r.put, removed: r.removed });
+    revalidatePath(page(slug));
+    return { ok: `${what} — enregistrement : ${r.put} ligne${r.put > 1 ? "s" : ""} écrite${r.put > 1 ? "s" : ""}, ${r.removed} supprimée${r.removed > 1 ? "s" : ""}.` };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function saveRatesAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
+  return saveGrid(slug, scenarioId, f, (existing, months) => {
+    const cells: { scope: string; month: string; raw: string }[] = [];
+    for (const [name, v] of f.entries()) {
+      if (!name.startsWith("rate|")) continue;
+      const parts = name.split("|");
+      const month = parts.at(-1)!;
+      if (!months.includes(month)) throw new Error(`Mois ${month} hors de l'horizon du scénario.`);
+      cells.push({ scope: parts.slice(1, -1).join("|"), month, raw: String(v) });
+    }
+    return planRates(existing, cells, randomUUID);
+  }, "Taux d'augmentation");
+}
+
+const rowCells = (f: FormData, i: number, months: string[]) => Object.fromEntries(months.map((m) => [m, String(f.get(`m_${i}_${m}`) ?? "")]));
+const rowCount = (f: FormData) => {
+  const n = Number(str(f, "n"));
+  if (!Number.isInteger(n) || n < 0 || n > 500) throw new Error("Saisie invalide.");
+  return n;
+};
+
+export async function saveEnvelopesAction(slug: string, scenarioId: string, axis: "service" | "rubrique", _prev: FormState, f: FormData): Promise<FormState> {
+  return saveGrid(slug, scenarioId, f, (existing, months) => {
+    const rows: EnvRow[] = Array.from({ length: rowCount(f) }, (_, i) => ({
+      id: str(f, `id_${i}`) || null, target: str(f, `target_${i}`), mode: str(f, `mode_${i}`) === "brut" ? "brut" : "charge", taux: str(f, `taux_${i}`),
+      nonRecurring: str(f, `nr_${i}`) === "oui", del: str(f, `del_${i}`) === "oui", cells: rowCells(f, i, months),
+    }));
+    return planEnvelopes(axis, rows, existing, randomUUID);
+  }, axis === "service" ? "Enveloppes par service" : "Enveloppes par rubrique");
+}
+
+export async function saveConstantsAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
+  return saveGrid(slug, scenarioId, f, (existing, months) => {
+    const rows = Array.from({ length: rowCount(f) }, (_, i) => ({
+      id: str(f, `id_${i}`) || null, label: str(f, `label_${i}`), unit: str(f, `unit_${i}`) as "eur" | "pct" | "nombre", source: str(f, `source_${i}`), del: str(f, `del_${i}`) === "oui", cells: rowCells(f, i, months),
+    }));
+    return planConstants(rows, existing, randomUUID);
+  }, "Constantes de référence");
+}
+
+export async function saveBasesAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
+  const { workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
+  const full = await getScenario(workspace.id, scenarioId);
+  if (!full) return { error: "Scénario introuvable." };
+  const labels = new Map(full.base.contracts.map((c) => [c.contractKey, c.label]));
+  return saveGrid(slug, scenarioId, f, (existing) => {
+    const rows = Array.from({ length: rowCount(f) }, (_, i) => {
+      const contractKey = str(f, `key_${i}`);
+      if (!labels.has(contractKey)) throw new Error(`Ligne ${i + 1} : contrat absent de la base figée.`);
+      return { contractKey, label: labels.get(contractKey)!, salary: str(f, `salary_${i}`), charges: str(f, `charges_${i}`) };
+    });
+    return planBases(rows, existing, randomUUID);
+  }, "Bases individuelles");
 }
 
 // --- Budgets saisis.

@@ -16,7 +16,7 @@ const Field = ({ id, label, children }: { id: string; label: string; children: R
 // Hypothèses qui concernent un salarié (contrat de la base ou embauche).
 export function eventsOf(key: string, hyps: Hypothesis[]): Hypothesis[] {
   return hyps.filter((h) => {
-    if (h.kind === "depart" || h.kind === "absence" || h.kind === "categorie" || h.kind === "base") return h.contractKey === key;
+    if (h.kind === "depart" || h.kind === "absence" || h.kind === "categorie" || h.kind === "base" || h.kind === "changement") return h.contractKey === key;
     if (h.kind === "augmentation") return h.scope.kind === "contrat" && h.scope.key === key;
     if (h.kind === "ponctuel") return h.contractKey === key;
     if (h.kind === "embauche") return hireKey(h.id) === key;
@@ -24,7 +24,7 @@ export function eventsOf(key: string, hyps: Hypothesis[]): Hypothesis[] {
   });
 }
 
-const KIND_TEXT: Record<string, string> = { augmentation: "Augmentation", depart: "Départ", absence: "Congé non payé", categorie: "Catégorie", base: "Correction de base", ponctuel: "Prime / élément ponctuel", embauche: "Embauche" };
+const KIND_TEXT: Record<string, string> = { augmentation: "Augmentation", depart: "Départ", absence: "Congé non payé", categorie: "Catégorie", base: "Correction de base", ponctuel: "Prime / élément ponctuel", embauche: "Embauche", changement: "Changement de service / quotité" };
 const detail = (h: Hypothesis): string => {
   switch (h.kind) {
     case "augmentation": return `${h.rateBps > 0 ? "+" : ""}${h.rateBps / 100} % à compter de ${formatMonth(h.from).toLowerCase()}`;
@@ -34,9 +34,21 @@ const detail = (h: Hypothesis): string => {
     case "base": return `salaire ${formatEuros(h.salaryCents)} · charges ${h.chargesBps / 100} %`;
     case "ponctuel": return `${formatMonth(h.month)} · ${h.amount.mode === "brut" ? `${formatEuros(h.amount.brutCents)} brut + ${h.amount.chargesBps / 100} %` : `${formatEuros(h.amount.costCents)} chargés`}${h.nonRecurring ? " · non récurrent" : ""}`;
     case "embauche": return `${h.start}${h.end ? ` → ${h.end}` : ""} · ${formatEuros(h.grossFullTimeCents)} × ${h.quotaBps / 100} %`;
+    case "changement": return `à compter de ${formatMonth(h.from).toLowerCase()}${h.service ? ` · service ${h.service}` : ""}${h.quotaBps !== undefined ? ` · quotité ${h.quotaBps / 100} %` : ""}${h.poste ? ` · poste ${h.poste}` : ""}`;
     default: return "";
   }
 };
+
+// Sortie d'un salarié : départ saisi dans le scénario (date et motif), sinon fin de contrat connue de PayFit.
+function exitOf(r: Row, hyps: Hypothesis[]): { date: string | null; motif: string | null } {
+  const dep = hyps.find((h): h is Extract<Hypothesis, { kind: "depart" }> => h.kind === "depart" && h.contractKey === r.key);
+  if (dep) return { date: dep.lastPaidDate, motif: dep.motif ?? null };
+  if (r.kind === "embauche") {
+    const h = hyps.find((x): x is Extract<Hypothesis, { kind: "embauche" }> => x.kind === "embauche" && hireKey(x.id) === r.key);
+    return h?.end ? { date: h.end, motif: "fin prévue (CDD)" } : { date: null, motif: null };
+  }
+  return r.contract?.endDate ? { date: r.contract.endDate, motif: "fin de contrat connue" } : { date: null, motif: null };
+}
 
 // Saisie en masse : une ligne par salarié de la base, lignes vides ignorées, lot enregistré en entier ou pas du tout.
 function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[] }) {
@@ -97,7 +109,7 @@ function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: S
   );
 }
 
-export function SalariesView({ slug, scenario, base, hyps, proj, q, selected, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[]; proj: Projection; q: string; selected: string; canEdit: boolean }) {
+export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[]; proj: Projection; q: string; selected: string; canEdit: boolean }) {
   const catOver = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
   const rows: Row[] = [
     ...base.contracts.map((c): Row => ({
@@ -108,12 +120,13 @@ export function SalariesView({ slug, scenario, base, hyps, proj, q, selected, ca
   ];
   const shown = q ? rows.filter((r) => fold(r.label).includes(fold(q)) || fold(r.service ?? "").includes(fold(q))) : rows;
   const sel = rows.find((r) => r.key === selected) ?? null;
-  const base_ = `/e/${slug}/studio-rh/hypotheses?scenario=${scenario.id}&vue=salaries`;
+  const services = [...new Set([...base.contracts.map((c) => c.service), ...hyps.map((h) => (h.kind === "embauche" ? h.service : null))].filter((x): x is string => x !== null))].sort();
+  const base_ = `/e/${slug}/studio-rh/hypotheses?scenario=${scenario.id}&vue=postes`;
   const add = (kind: Hypothesis["kind"]) => addHypothesisAction.bind(null, slug, scenario.id, kind);
   return (
     <>
       <section className="panel" data-testid="sal-list">
-        <h2>Salariés du scénario <span className="desc">— cherchez un salarié, puis créez-lui un événement (augmentation, départ, congé non payé, prime…)</span></h2>
+        <h2>Modifications de postes <span className="desc">— cherchez un salarié, puis créez-lui un événement daté (augmentation, départ, congé non payé, changement de service ou de quotité, prime…)</span></h2>
         <form method="get" action={`/e/${slug}/studio-rh/hypotheses`} className="filters" data-testid="sal-search">
           <input type="hidden" name="scenario" value={scenario.id} />
           <input type="hidden" name="vue" value="salaries" />
@@ -125,7 +138,7 @@ export function SalariesView({ slug, scenario, base, hyps, proj, q, selected, ca
         </form>
         <div className="table-wrap">
           <table className="data-table" data-testid="sal-table">
-            <thead><tr><th>Salarié</th><th>Catégorie</th><th>Service</th><th>Entrée</th><th className="num">ETP</th><th className="num">Coût mensuel de base</th><th className="num">Événements</th></tr></thead>
+            <thead><tr><th>Salarié</th><th>Catégorie</th><th>Service</th><th>Entrée</th><th>Date de sortie</th><th>Motif de sortie</th><th className="num">ETP</th><th className="num">Coût mensuel de base</th><th className="num">Événements</th></tr></thead>
             <tbody>
               {shown.map((r) => (
                 <tr key={r.key} data-salarie={r.label} aria-current={r.key === selected ? "true" : undefined}>
@@ -133,12 +146,14 @@ export function SalariesView({ slug, scenario, base, hyps, proj, q, selected, ca
                   <td>{catText(r.category)}{r.category === null && r.contract?.nature ? <span className="tile-foot"> nature {r.contract.nature}</span> : null}</td>
                   <td>{r.service ?? "Non ventilé"}</td>
                   <td>{r.entry ?? "n.d."}</td>
+                  <td>{exitOf(r, hyps).date ?? "—"}</td>
+                  <td>{exitOf(r, hyps).motif ?? "—"}</td>
                   <td className="num">{r.etp4 === null ? "n.d." : fmtEtp4(r.etp4)}</td>
                   <td className="num">{r.monthly === null ? (r.kind === "embauche" ? "—" : "n.d.") : formatEuros(r.monthly)}</td>
                   <td className="num">{eventsOf(r.key, hyps).length}</td>
                 </tr>
               ))}
-              {shown.length === 0 && <tr><td colSpan={7} className="desc">Aucun salarié ne correspond.</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={9} className="desc">Aucun salarié ne correspond.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -275,6 +290,21 @@ export function SalariesView({ slug, scenario, base, hyps, proj, q, selected, ca
                     <Field id="s-p-c" label="Coût chargé (€)"><input className="input" id="s-p-c" name="amountCout" inputMode="decimal" /></Field>
                   </div>
                   <label className="check"><input type="checkbox" name="nonRecurring" value="oui" /><span>Non récurrent (retiré de l'atterrissage retraité)</span></label>
+                </ActionForm>
+              </details>
+              <details>
+                <summary>Changement de service ou de quotité (à compter d'un mois)</summary>
+                <ActionForm action={add("changement")} submit="Ajouter le changement" testid="sal-form-changement">
+                  <input type="hidden" name="contractKey" value={sel.key} />
+                  <div className="filters">
+                    <Field id="s-ch-l" label="Libellé"><input className="input" id="s-ch-l" name="label" defaultValue={`Changement ${sel.label}`} maxLength={200} required /></Field>
+                    <Field id="s-ch-f" label="À compter de (mois)"><input className="input" id="s-ch-f" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
+                    <Field id="s-ch-s" label="Nouveau service (facultatif)"><input className="input" id="s-ch-s" name="service" list="sal-services" maxLength={200} /></Field>
+                    <Field id="s-ch-q" label="Nouvelle quotité (%, facultatif)"><input className="input" id="s-ch-q" name="quota" inputMode="decimal" /></Field>
+                    <Field id="s-ch-p" label="Poste (facultatif, descriptif)"><input className="input" id="s-ch-p" name="poste" maxLength={200} /></Field>
+                  </div>
+                  <datalist id="sal-services">{services.map((x) => <option key={x} value={x} />)}</datalist>
+                  <p className="tile-foot">Service : les coûts de ce salarié sont attribués au nouveau service à compter du mois choisi (les augmentations ciblées par service continuent de suivre le service de la base). Quotité : salaire proportionnel (nouvelle quotité ÷ quotité actuelle), même taux de charges, ETP au nouveau niveau. Effet au 1er jour du mois.</p>
                 </ActionForm>
               </details>
               <details>

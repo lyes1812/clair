@@ -18,7 +18,7 @@ export function expandHires(h: Hire, count: number, newId: () => string): Hire[]
 
 // Ordre d'enregistrement d'une reprise : un lien pointe toujours vers une hypothèse déjà enregistrée (le départ avant
 // l'embauche qui le remplace, l'embauche avant l'augmentation qui la vise).
-const ORDER: HypothesisKind[] = ["depart", "embauche", "augmentation", "absence", "categorie", "base", "ponctuel", "realise"];
+const ORDER: HypothesisKind[] = ["depart", "embauche", "augmentation", "absence", "categorie", "changement", "base", "ponctuel", "enveloppe", "constante", "realise"];
 export const IMPORTABLE_KINDS = ORDER;
 
 export type ImportPlan = { items: Hypothesis[]; dropped: { label: string; reason: string }[] };
@@ -50,7 +50,7 @@ export function planImport(src: Hypothesis[], kinds: ReadonlySet<HypothesisKind>
       const k = keyOf(h.contractKey);
       if (k === null) gone(h);
       else items.push({ ...h, id, contractKey: k });
-    } else if (h.kind === "absence" || h.kind === "categorie" || h.kind === "base" || h.kind === "depart") {
+    } else if (h.kind === "absence" || h.kind === "categorie" || h.kind === "changement" || h.kind === "base" || h.kind === "depart") {
       const k = keyOf(h.contractKey);
       if (k === null) gone(h);
       else items.push({ ...h, id, contractKey: k });

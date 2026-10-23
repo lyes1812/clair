@@ -165,7 +165,7 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 .check input { width: 16px; height: 16px; }
 
 /* Module Collaborateurs */
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
 .tabs a { padding: 10px 14px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); text-decoration: none; font-size: var(--clair-type-form); font-weight: 500; }
 .tabs a[aria-current="page"] { color: var(--blue); border-bottom-color: var(--blue); }
 .prov { display: inline-block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; text-decoration: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
@@ -191,3 +191,14 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 .defs dt { font-weight: 600; font-size: var(--clair-type-form); }
 .defs dd { margin: 2px 0 0; color: var(--muted); font-size: var(--clair-type-form); line-height: 1.55; }
 .contract-months { margin-top: 8px; }
+
+/* Entrées du cahier pas encore construites : mention « Prévu » dans l'onglet. */
+.tabs a .soon { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--muted); }
+
+/* Grilles de saisie mensuelles (taux, enveloppes, constantes, bases). */
+.month-grid input.input { width: 92px; padding: 6px 8px; text-align: right; }
+.month-grid input.input.wide { width: 170px; text-align: left; }
+.month-grid select.select { padding: 6px 8px; }
+.month-grid th, .month-grid td { white-space: nowrap; }
+.grid-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.btn.small { padding: 4px 8px; font-size: 12px; }

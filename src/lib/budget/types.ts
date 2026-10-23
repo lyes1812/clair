@@ -99,7 +99,17 @@ export type Hypothesis =
   // Élément non récurrent déjà passé en comptabilité (mois réalisé) : le journal PayFit ne le distingue pas, il est saisi
   // à la main (catégorie libre) et sert seulement à l'atterrissage retraité ; il ne change pas la projection.
   | { id: string; kind: "realise"; label: string; category: string; month: string; costCents: number }
-  | { id: string; kind: "base"; label: string; contractKey: string; salaryCents: number; chargesBps: number };
+  | { id: string; kind: "base"; label: string; contractKey: string; salaryCents: number; chargesBps: number }
+  // Enveloppe budgétaire saisie par mois, par centre de coûts (axis « service ») ou par rubrique libre (axis « rubrique »).
+  // Montants des mois renseignés seulement (un mois absent n'a pas d'enveloppe) : en brut si chargesBps est fourni
+  // (charges = brut × taux), sinon en coût chargé non ventilé.
+  | { id: string; kind: "enveloppe"; label: string; axis: "service" | "rubrique"; target: string; monthly: Record<string, number>; chargesBps: number | null; nonRecurring?: boolean }
+  // Constante de référence saisie par mois (taux légal, plafond, horaire…), en centièmes de l'unité (€ → centimes,
+  // % → points de base, nombre → centièmes). Documentaire : aucune règle de calcul ne la lit.
+  | { id: string; kind: "constante"; label: string; unit: "eur" | "pct" | "nombre"; values: Record<string, number>; source: string }
+  // Changement d'affectation ou de quotité d'un salarié à compter du 1er jour d'un mois : nouveau service (les coûts
+  // suivants lui sont attribués) et/ou nouvelle quotité (salaire proportionnel à la quotité, ETP au nouveau niveau).
+  | { id: string; kind: "changement"; label: string; contractKey: string; from: string; service?: string; quotaBps?: number; poste?: string };
 
 export type HypothesisKind = Hypothesis["kind"];
 
@@ -108,7 +118,7 @@ export type Prorata = "calendaire" | "ouvres" | "aucun";
 export type Conventions = { prorata: Prorata };
 
 // --- Résultat.
-export type ContributionKind = "base" | "augmentation" | "absence" | "depart" | "fin-contrat" | "entree" | "embauche" | "ponctuel" | "sortie";
+export type ContributionKind = "base" | "augmentation" | "quotite" | "absence" | "depart" | "fin-contrat" | "entree" | "embauche" | "ponctuel" | "enveloppe" | "sortie";
 export type Contribution = {
   hypothesisId: string | null; // null : base figée ou fin de contrat connue
   kind: ContributionKind;
@@ -121,7 +131,11 @@ export type Contribution = {
   cost: number;
   nonRecurringCents?: number; // part non récurrente de cette contribution (coûts de sortie, ponctuel marqué, tuilage)
   nonRecurringLabel?: string; // catégorie de l'élément non récurrent (motif du départ)
+  rubric?: string; // rubrique libre d'une enveloppe « par rubrique »
 };
+
+// Salarié compté présent le dernier jour d'un mois projeté (effectifs, entrées et sorties par différence de deux mois).
+export type PresentPerson = { etp4: number | null; category: string | null; service: string | null };
 
 export type ProjectedMonth =
   | {
@@ -134,6 +148,7 @@ export type ProjectedMonth =
       etp4: number | null;
       etpNd: string | null;
       byCategory?: Record<string, { headcount: number; etp4: number | null }>; // clé : catégorie, ou « nc » (non classé)
+      people?: Record<string, PresentPerson>; // clé : contrat ou embauche, salariés comptés présents en fin de mois
       contributions: Contribution[];
     }
   | { month: string; kind: "nd"; reasons: string[] };

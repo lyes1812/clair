@@ -1,6 +1,6 @@
-import { monthRange } from "@/lib/connectors/months";
+import { isMonth, monthRange } from "@/lib/connectors/months";
 import { workdays } from "./calendar";
-import type { BaseContract, BaseSnapshot, Contribution, Conventions, Hypothesis, ProjectedMonth, Projection, Scope } from "./types";
+import type { BaseContract, BaseSnapshot, Contribution, Conventions, Hypothesis, PresentPerson, ProjectedMonth, Projection, Scope } from "./types";
 
 // Moteur de projection de la masse salariale (module 5) : calcul pur, déterministe, en centimes.
 // Pour chaque mois projeté et chaque contrat, le coût est la somme de contributions rattachées chacune à une hypothèse
@@ -51,6 +51,7 @@ type Hire = Extract<Hypothesis, { kind: "embauche" }>;
 type Dep = Extract<Hypothesis, { kind: "depart" }>;
 type Fix = Extract<Hypothesis, { kind: "base" }>;
 type Abs = Extract<Hypothesis, { kind: "absence" }>;
+type Chg = Extract<Hypothesis, { kind: "changement" }>;
 type Target = { key: string; service: string | null; isHire: boolean };
 
 // Augmentations retenues pour une cible : pour chaque mois d'effet, la plus ciblée (contrat > service > toute
@@ -133,9 +134,53 @@ export function validate(base: BaseSnapshot, firstMonth: string, lastMonth: stri
       if (!keys.has(h.contractKey) && !hyps.some((x) => x.kind === "embauche" && hireKey(x.id) === h.contractKey)) errors.push(`« ${h.label} » : salarié inconnu`);
       if (hyps.some((x) => x.kind === "categorie" && x.id !== h.id && x.contractKey === h.contractKey)) errors.push(`« ${h.label} » : deux catégories pour le même salarié`);
     }
+    if (h.kind === "enveloppe") {
+      const months = Object.keys(h.monthly);
+      if (!h.target.trim()) errors.push(`« ${h.label} » : ${h.axis === "service" ? "centre de coûts" : "rubrique"} requis`);
+      if (months.length === 0) errors.push(`« ${h.label} » : aucun montant renseigné`);
+      for (const mo of months) {
+        if (!isMonth(mo)) errors.push(`« ${h.label} » : mois ${mo} invalide`);
+        else if (!inHorizon(mo)) errors.push(`« ${h.label} » : mois ${mo} hors de l'horizon ${firstMonth} → ${lastMonth}`);
+      }
+      const twin = hyps.find((x) => x.kind === "enveloppe" && x.id < h.id && x.axis === h.axis && x.target.trim().toLowerCase() === h.target.trim().toLowerCase());
+      if (twin) errors.push(`« ${h.label} » : « ${twin.label} » est déjà l'enveloppe ${h.axis === "service" ? "du centre de coûts" : "de la rubrique"} ${h.target.trim()} — modifiez-la`);
+    }
+    if (h.kind === "constante") {
+      for (const mo of Object.keys(h.values)) if (!isMonth(mo)) errors.push(`« ${h.label} » : mois ${mo} invalide`);
+    }
+    if (h.kind === "changement") {
+      const c = base.contracts.find((x) => x.contractKey === h.contractKey);
+      const hire = hyps.find((x): x is Extract<Hypothesis, { kind: "embauche" }> => x.kind === "embauche" && hireKey(x.id) === h.contractKey);
+      if (!c && !hire) errors.push(`« ${h.label} » : salarié inconnu`);
+      if (!inHorizon(h.from)) errors.push(`« ${h.label} » : mois d'effet ${h.from} hors de l'horizon ${firstMonth} → ${lastMonth}`);
+      if (h.service === undefined && h.quotaBps === undefined) errors.push(`« ${h.label} » : nouveau service ou nouvelle quotité requis`);
+      if (h.service !== undefined && !h.service.trim()) errors.push(`« ${h.label} » : service vide`);
+      if (h.quotaBps !== undefined) {
+        if (h.quotaBps < 1 || h.quotaBps > 10_000) errors.push(`« ${h.label} » : quotité entre 0,01 et 100 %`);
+        const q = c ? c.etp4 : hire?.quotaBps;
+        if ((c || hire) && !q) errors.push(`« ${h.label} » : quotité actuelle du salarié n.d. — le salaire proportionnel à la quotité ne peut pas être calculé`);
+      }
+      if (hyps.some((x) => x.kind === "changement" && x.id < h.id && x.contractKey === h.contractKey && x.from === h.from)) errors.push(`« ${h.label} » : deux changements le même mois pour le même salarié`);
+    }
     if (h.kind === "realise" && !base.actuals.some((x) => x.month === h.month && x.kind === "value")) errors.push(`« ${h.label} » : ${h.month} n'est pas un mois réalisé de la base figée (pour un mois à venir, utilisez un élément ponctuel)`);
   }
   return errors;
+}
+
+// Service et quotité d'un salarié un mois donné : dernier changement de chaque sorte à compter d'un mois antérieur ou égal.
+export function assignmentsOf(hyps: Hypothesis[]) {
+  const chgFor = new Map<string, Chg[]>();
+  for (const h of hyps) if (h.kind === "changement") chgFor.set(h.contractKey, [...(chgFor.get(h.contractKey) ?? []), h].sort((x, y) => x.from.localeCompare(y.from)));
+  return (key: string, m: string) => {
+    let service: string | undefined;
+    let quota: { bps: number; id: string; label: string } | undefined;
+    for (const x of chgFor.get(key) ?? []) {
+      if (x.from > m) break;
+      if (x.service !== undefined) service = x.service.trim();
+      if (x.quotaBps !== undefined) quota = { bps: x.quotaBps, id: x.id, label: x.label };
+    }
+    return { service, quota };
+  };
 }
 
 export function project(base: BaseSnapshot, firstMonth: string, lastMonth: string, hyps: Hypothesis[], conv: Conventions): Projection {
@@ -148,6 +193,7 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
   const absFor = new Map<string, Abs[]>();
   for (const h of hyps) if (h.kind === "absence") absFor.set(h.contractKey, [...(absFor.get(h.contractKey) ?? []), h].sort((x, y) => x.from.localeCompare(y.from)));
   const catOf = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
+  const currentOf = assignmentsOf(hyps);
   const conflicts = new Set<string>();
   const augFor = new Map<string, Aug[]>();
   // Un contrat entré après le mois de référence a une base saisie à son entrée : comme une embauche, il ne reçoit que
@@ -164,6 +210,7 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
     let etp = 0;
     const etpNd: string[] = [];
     const cats = new Map<string, { headcount: number; etp: number; nd: boolean }>();
+    const people: Record<string, PresentPerson> = {};
     const countIn = (cat: string | null | undefined, etp4: number | null) => {
       const k = cat ?? "nc";
       const e = cats.get(k) ?? { headcount: 0, etp: 0, nd: false };
@@ -193,12 +240,17 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       const list = effective(augFor.get(c.contractKey) ?? []);
       const full = levels(S, list, { n: 1n, d: 1n }, rate);
       const who = c.label;
+      const cur = currentOf(c.contractKey, m);
+      const svc = cur.service ?? c.service;
+      // Quotité modifiée : salaire proportionnel (nouvelle quotité ÷ quotité de la base), même taux de charges.
+      const ratio: Frac = cur.quota && c.etp4 ? { n: B(cur.quota.bps), d: B(c.etp4) } : { n: 1n, d: 1n };
+      const S2: Frac = { n: S.n * ratio.n, d: S.d * ratio.d };
       const sourceLabel = fix ? `Base corrigée — « ${fix.label} »` : `Base figée ${base.refMonth}`;
-      contributions.push({ hypothesisId: fix?.id ?? null, kind: "base", label: sourceLabel, contractKey: c.contractKey, who, service: c.service, brut: full[0].brut, charges: full[0].charges, cost: full[0].brut + full[0].charges });
+      contributions.push({ hypothesisId: fix?.id ?? null, kind: "base", label: sourceLabel, contractKey: c.contractKey, who, service: svc, brut: full[0].brut, charges: full[0].charges, cost: full[0].brut + full[0].charges });
       list.forEach((a, i) => {
         const b = full[i + 1].brut - full[i].brut;
         const ch = full[i + 1].charges - full[i].charges;
-        contributions.push({ hypothesisId: a.id, kind: "augmentation", label: a.label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
+        contributions.push({ hypothesisId: a.id, kind: "augmentation", label: a.label, contractKey: c.contractKey, who, service: svc, brut: b, charges: ch, cost: b + ch });
       });
       {
         // Réductions successives, chacune rattachée à sa cause — entrée après le mois de référence, fin de contrat
@@ -224,20 +276,29 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
           steps.push({ p: run, kind: "absence", label: ab.label, id: ab.id });
         }
         let prev = full.at(-1)!;
+        if (cur.quota && ratio.n !== ratio.d) {
+          const lq = levels(S2, list, { n: 1n, d: 1n }, rate).at(-1)!;
+          const b = lq.brut - prev.brut;
+          const ch = lq.charges - prev.charges;
+          if (b !== 0 || ch !== 0) contributions.push({ hypothesisId: cur.quota.id, kind: "quotite", label: cur.quota.label, contractKey: c.contractKey, who, service: svc, brut: b, charges: ch, cost: b + ch });
+          prev = lq;
+        }
         for (const st of steps) {
-          const lv = levels(S, list, st.p, rate).at(-1)!;
+          const lv = levels(S2, list, st.p, rate).at(-1)!;
           const b = lv.brut - prev.brut;
           const ch = lv.charges - prev.charges;
-          if (b !== 0 || ch !== 0) contributions.push({ hypothesisId: st.id, kind: st.kind, label: st.label, contractKey: c.contractKey, who, service: c.service, brut: b, charges: ch, cost: b + ch });
+          if (b !== 0 || ch !== 0) contributions.push({ hypothesisId: st.id, kind: st.kind, label: st.label, contractKey: c.contractKey, who, service: svc, brut: b, charges: ch, cost: b + ch });
           prev = lv;
         }
       }
       const atEnd = from <= end && (stop === null || stop >= end);
       if (atEnd && c.counted) {
+        const etpNow = cur.quota ? cur.quota.bps : c.etp4;
         headcount += 1;
-        countIn(catOf.get(c.contractKey) ?? c.category ?? null, c.etp4);
-        if (c.etp4 === null) etpNd.push(`${c.label} : ${c.etpNd ?? "ETP n.d."}`);
-        else etp += c.etp4;
+        countIn(catOf.get(c.contractKey) ?? c.category ?? null, etpNow);
+        people[c.contractKey] = { etp4: etpNow, category: catOf.get(c.contractKey) ?? c.category ?? null, service: svc };
+        if (etpNow === null) etpNd.push(`${c.label} : ${c.etpNd ?? "ETP n.d."}`);
+        else etp += etpNow;
       }
     }
 
@@ -248,21 +309,32 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       const rate: Frac = { n: B(h.chargesBps), d: TEN_K };
       const list = effective(augFor.get(hireKey(h.id)) ?? []);
       const lv = levels(S, list, p, rate);
+      const cur = currentOf(hireKey(h.id), m);
+      const svc = cur.service ?? h.service;
+      const Seff: Frac = cur.quota ? { n: B(h.grossFullTimeCents) * B(cur.quota.bps), d: TEN_K } : S;
       // Tuilage : coût de l'entrant (augmentations comprises) pendant les jours où le salarié remplacé est encore payé.
       const rep = h.replaces ? deps.get(base.contracts.find((c) => deps.get(c.contractKey)?.id === h.replaces)?.contractKey ?? "") : undefined;
       const overlapEnd = rep ? [rep.lastPaidDate, h.end].filter((x): x is string => x !== null).sort()[0] : null;
       const po = overlapEnd && overlapEnd >= h.start ? presence(m, h.start, overlapEnd, conv.prorata) : null;
-      const tl = po && po.n > 0n ? levels(S, list, po, rate).at(-1)! : null;
-      contributions.push({ hypothesisId: h.id, kind: "embauche", label: h.label, contractKey: hireKey(h.id), who: h.label, service: h.service, brut: lv[0].brut, charges: lv[0].charges, cost: lv[0].brut + lv[0].charges, ...(tl ? { nonRecurringCents: tl.brut + tl.charges } : {}) });
+      const tl = po && po.n > 0n ? levels(Seff, list, po, rate).at(-1)! : null;
+      contributions.push({ hypothesisId: h.id, kind: "embauche", label: h.label, contractKey: hireKey(h.id), who: h.label, service: svc, brut: lv[0].brut, charges: lv[0].charges, cost: lv[0].brut + lv[0].charges, ...(tl ? { nonRecurringCents: tl.brut + tl.charges } : {}) });
       list.forEach((a, i) => {
         const b = lv[i + 1].brut - lv[i].brut;
         const ch = lv[i + 1].charges - lv[i].charges;
-        contributions.push({ hypothesisId: a.id, kind: "augmentation", label: a.label, contractKey: hireKey(h.id), who: h.label, service: h.service, brut: b, charges: ch, cost: b + ch });
+        contributions.push({ hypothesisId: a.id, kind: "augmentation", label: a.label, contractKey: hireKey(h.id), who: h.label, service: svc, brut: b, charges: ch, cost: b + ch });
       });
+      if (cur.quota && cur.quota.bps !== h.quotaBps) {
+        const lq = levels(Seff, list, p, rate).at(-1)!;
+        const b = lq.brut - lv.at(-1)!.brut;
+        const ch = lq.charges - lv.at(-1)!.charges;
+        if (b !== 0 || ch !== 0) contributions.push({ hypothesisId: cur.quota.id, kind: "quotite", label: cur.quota.label, contractKey: hireKey(h.id), who: h.label, service: svc, brut: b, charges: ch, cost: b + ch });
+      }
       if (h.counted && (h.end === null || h.end >= end) && h.start <= end) {
+        const etpNow = cur.quota ? cur.quota.bps : h.quotaBps;
         headcount += 1;
-        countIn(catOf.get(hireKey(h.id)) ?? h.category ?? null, h.quotaBps);
-        etp += h.quotaBps;
+        countIn(catOf.get(hireKey(h.id)) ?? h.category ?? null, etpNow);
+        people[hireKey(h.id)] = { etp4: etpNow, category: catOf.get(hireKey(h.id)) ?? h.category ?? null, service: svc };
+        etp += etpNow;
       }
     }
 
@@ -279,6 +351,13 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
         contributions.push({
           hypothesisId: h.id, kind: "ponctuel", label: h.label, contractKey: h.contractKey ?? null, who: target?.label ?? hire?.label ?? h.service ?? "toute l'entreprise",
           service: h.service ?? target?.service ?? hire?.service ?? null, ...a, ...(h.nonRecurring ? { nonRecurringCents: a.cost } : {}),
+        });
+      }
+      if (h.kind === "enveloppe" && h.monthly[m] !== undefined) {
+        const a = h.chargesBps === null ? { brut: null, charges: null, cost: h.monthly[m] } : amount({ mode: "brut", brutCents: h.monthly[m], chargesBps: h.chargesBps });
+        contributions.push({
+          hypothesisId: h.id, kind: "enveloppe", label: h.label, contractKey: null, who: h.axis === "service" ? `Enveloppe ${h.target.trim()}` : `Enveloppe ${h.target.trim()}`,
+          service: h.axis === "service" ? h.target.trim() : null, ...a, ...(h.axis === "rubrique" ? { rubric: h.target.trim() } : {}), ...(h.nonRecurring ? { nonRecurringCents: a.cost } : {}),
         });
       }
       if (h.kind === "depart" && h.exitCost && h.lastPaidDate.slice(0, 7) === m) {
@@ -300,6 +379,7 @@ export function project(base: BaseSnapshot, firstMonth: string, lastMonth: strin
       etp4: etpNd.length ? null : etp,
       etpNd: etpNd.length ? etpNd.join(" ; ") : null,
       byCategory: Object.fromEntries([...cats].map(([k, v]) => [k, { headcount: v.headcount, etp4: v.nd ? null : v.etp }])),
+      people,
       contributions,
     };
   });

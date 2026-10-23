@@ -1,4 +1,4 @@
-import { hireKey, monthLast, roundDiv } from "./engine";
+import { assignmentsOf, hireKey, monthLast, roundDiv } from "./engine";
 import type { BaseContract, BaseSnapshot, Conventions, Hypothesis, PriorMonth, Projection } from "./types";
 
 // Simulateur N+1 : base d'un nouveau scénario dérivée de l'état projeté d'un scénario parent figé au dernier mois de
@@ -29,6 +29,7 @@ export function chainBase(
   const deps = new Map(hyps.flatMap((h) => (h.kind === "depart" ? [[h.contractKey, h] as const] : [])));
   const cats = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
   const fixes = new Map(hyps.flatMap((h) => (h.kind === "base" ? [[h.contractKey, h] as const] : [])));
+  const currentOf = assignmentsOf(hyps);
   const contracts: BaseContract[] = [];
   const notCarried: string[] = [];
   const carried = new Set<string>();
@@ -44,12 +45,14 @@ export function chainBase(
     const stop = [dep?.lastPaidDate ?? null, c.endDate].filter((x): x is string => x !== null).sort()[0] ?? null;
     if (stop !== null && stop <= end) continue; // parti au plus tard le dernier jour de M
     if (dep && dep.lastPaidDate > end) notCarried.push(`départ « ${dep.label} » du ${dep.lastPaidDate} (postérieur à ${M})`);
-    const own = pm.contributions.filter((x) => x.contractKey === c.contractKey && (x.kind === "base" || x.kind === "augmentation"));
+    const own = pm.contributions.filter((x) => x.contractKey === c.contractKey && (x.kind === "base" || x.kind === "augmentation" || x.kind === "quotite"));
     if (!own.length) return { kind: "nd", reason: `contrat ${c.label} : coût de ${M} introuvable dans la projection` };
     const brut = own.reduce((s, x) => s + (x.brut ?? 0), 0);
     const charges = own.reduce((s, x) => s + (x.charges ?? 0), 0);
     const b = baseOf(brut, charges, fixes.get(c.contractKey)?.chargesBps ?? null);
-    contracts.push({ ...c, category: cats.get(c.contractKey) ?? c.category ?? null, base: b, baseNd: ndOf(b) });
+    // Service et quotité à M (changements effectifs) : ils deviennent ceux du contrat dans la base dérivée.
+    const cur = currentOf(c.contractKey, M);
+    contracts.push({ ...c, service: cur.service ?? c.service, etp4: cur.quota ? cur.quota.bps : c.etp4, category: cats.get(c.contractKey) ?? c.category ?? null, base: b, baseNd: ndOf(b) });
     carried.add(c.contractKey);
   }
   for (const h of hyps) {
@@ -62,8 +65,10 @@ export function chainBase(
     // Embauche : brut et charges du mois complet à M (brut temps plein × quotité, augmentations ciblées comprises),
     // calculés comme le moteur (fraction exacte, un arrondi par niveau).
     const key = hireKey(h.id);
+    const cur = currentOf(key, M);
+    const quota = cur.quota ? cur.quota.bps : h.quotaBps;
     const list = augs.filter((a) => a.scope.kind === "contrat" && a.scope.key === key && a.from <= M).sort((x, y) => x.from.localeCompare(y.from));
-    let n = BigInt(h.grossFullTimeCents) * BigInt(h.quotaBps);
+    let n = BigInt(h.grossFullTimeCents) * BigInt(quota);
     let d = TEN_K;
     for (const a of list) {
       n *= TEN_K + BigInt(a.rateBps);
@@ -73,9 +78,10 @@ export function chainBase(
     const charges = roundDiv(n * BigInt(h.chargesBps), d * TEN_K);
     hireFull += brut + charges;
     hireInM += pm.contributions.filter((x) => x.contractKey === key).reduce((s, x) => s + x.cost, 0);
+    const svc = cur.service ?? h.service;
     contracts.push({
-      contractKey: key, externalId: key, label: h.label, service: h.service, serviceNd: h.service ? null : "embauche sans service", startDate: h.start, endDate: h.end,
-      nature: null, category: cats.get(key) ?? h.category ?? null, counted: h.counted, etp4: h.counted ? h.quotaBps : null, etpNd: h.counted ? null : "non compté dans l'effectif",
+      contractKey: key, externalId: key, label: h.label, service: svc, serviceNd: svc ? null : "embauche sans service", startDate: h.start, endDate: h.end,
+      nature: null, category: cats.get(key) ?? h.category ?? null, counted: h.counted, etp4: h.counted ? quota : null, etpNd: h.counted ? null : "non compté dans l'effectif",
       base: baseOf(brut, charges, h.chargesBps), baseNd: ndOf(baseOf(brut, charges, h.chargesBps)),
     });
     carried.add(key);
@@ -86,7 +92,12 @@ export function chainBase(
     if (c.startDate !== null && c.startDate <= childEnd) contracts.push({ ...c, base: null, baseNd: `entré le ${c.startDate}, après le mois de référence : base à saisir` });
     else upcoming.push(c);
   }
-  for (const h of hyps) if (h.kind === "ponctuel" && h.month > M) notCarried.push(`élément « ${h.label} » de ${h.month}`);
+  for (const h of hyps) {
+    if (h.kind === "ponctuel" && h.month > M) notCarried.push(`élément « ${h.label} » de ${h.month}`);
+    if (h.kind === "enveloppe") notCarried.push(`enveloppe « ${h.label} » (${h.axis === "service" ? "centre de coûts" : "rubrique"} ${h.target})`);
+    if (h.kind === "constante") notCarried.push(`constante de référence « ${h.label} »`);
+    if (h.kind === "changement" && h.from > M) notCarried.push(`changement « ${h.label} » à compter de ${h.from}`);
+  }
   // Base du parent figée avant la conservation des contrats à venir : ceux-ci sont inconnus, on le dit.
   if (base.upcoming === undefined) notCarried.push("contrats PayFit commençant après l'horizon du parent non connus (base du parent figée avant leur conservation) : vérifiez les entrées à venir");
   contracts.sort((x, y) => x.label.localeCompare(y.label) || x.contractKey.localeCompare(y.contractKey));
@@ -95,8 +106,9 @@ export function chainBase(
   const sum = (pred: (k: string, key: string | null) => boolean) => pm.contributions.filter((x) => pred(x.kind, x.contractKey)).reduce((s, x) => s + x.cost, 0);
   const gapItems = [
     { label: `éléments ponctuels de ${M}`, cost: sum((k) => k === "ponctuel") },
+    { label: `enveloppes de ${M}`, cost: sum((k) => k === "enveloppe") },
     { label: `coûts de sortie de ${M}`, cost: sum((k) => k === "sortie") },
-    { label: `contrats sortis en ${M} (non repris)`, cost: sum((k, key) => k !== "ponctuel" && k !== "sortie" && key !== null && !carried.has(key)) },
+    { label: `contrats sortis en ${M} (non repris)`, cost: sum((k, key) => k !== "ponctuel" && k !== "sortie" && k !== "enveloppe" && key !== null && !carried.has(key)) },
     { label: `prorata d'entrée en ${M} des contrats repris`, cost: sum((k, key) => k === "entree" && key !== null && carried.has(key)) + (hireInM - hireFull) },
   ].filter((g) => g.cost !== 0);
   const refBaseCost = contracts.filter((c) => c.base && carried.has(c.contractKey)).reduce((s, c) => s + c.base!.salaryCents + roundDiv(BigInt(c.base!.salaryCents) * BigInt(c.base!.refCotisationsCents), BigInt(c.base!.refBrutCents)), 0);

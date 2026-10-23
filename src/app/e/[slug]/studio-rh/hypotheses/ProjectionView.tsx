@@ -7,7 +7,7 @@ import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
 import { monthShort } from "../masse-salariale/components";
 
 const KIND: Record<Contribution["kind"], string> = {
-  base: "Base", augmentation: "Augmentation", absence: "Congé non payé", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
+  base: "Base", augmentation: "Augmentation", quotite: "Changement de quotité", enveloppe: "Enveloppe", absence: "Congé non payé", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
 };
 const eur = (v: number | null) => (v === null ? "n.d." : formatEuros(v));
 type Row = { month: string; layer: "reel" | "parent" | "projete"; source?: string; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
@@ -95,7 +95,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month }: {
     <>
       {ndMonths.length > 0 && (
         <p className="notice" data-testid="proj-nd">
-          Projection n.d. pour {ndMonths.length} mois : {[...new Set(ndMonths.flatMap((p) => (p.kind === "nd" ? p.reasons : [])))].join(" ; ")}. <a href={`${href}&vue=hypotheses`}>Compléter dans Hypothèses</a>.
+          Projection n.d. pour {ndMonths.length} mois : {[...new Set(ndMonths.flatMap((p) => (p.kind === "nd" ? p.reasons : [])))].join(" ; ")}. <a href={`${href}&vue=bases`}>Compléter dans Bases individuelles</a>.
         </p>
       )}
       <section className="panel">

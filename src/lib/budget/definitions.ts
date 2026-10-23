@@ -55,6 +55,30 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
       "Un tableau avec une ligne par salarié de la base : dernier jour payé, motif et coûts de sortie chargés pour les départs ; taux pour les augmentations, avec un mois d'effet commun. Chaque ligne renseignée devient la même hypothèse que celle saisie salarié par salarié ; les lignes vides sont ignorées. Le lot est enregistré en entier ou pas du tout : si le moteur refuse une ligne (date hors horizon, deux augmentations le même mois…), rien n'est enregistré et chaque ligne refusée est nommée avec sa raison.",
   },
   {
+    id: "globales",
+    title: "Hypothèses globales",
+    text:
+      "Grille mensuelle des taux d'augmentation : une ligne par périmètre (toute l'entreprise, chaque service), une colonne par mois du scénario. Chaque cellule renseignée est une hypothèse d'augmentation distincte (visible dans Contrôles des changements), appliquée au 1er du mois en pourcentage du salaire déjà augmenté ; les taux successifs se composent. Une cellule vide ou à 0 n'a pas d'hypothèse. Sur un même mois, la plus ciblée s'applique seule (contrat, puis service, puis toute l'entreprise). Clair ne propose aucune valeur : une cellule vide reste vide. Les constantes de référence (taux légaux, plafonds, horaire théorique, taux de change…) sont saisies par mois avec leur source ; elles sont conservées avec le scénario mais aucune règle de calcul ne les lit.",
+  },
+  {
+    id: "enveloppe",
+    title: "Enveloppes par service et par rubrique",
+    text:
+      "Montants saisis par mois sur l'horizon du scénario, pour un centre de coûts (existant ou nouveau) ou pour une rubrique de votre choix (primes, heures supplémentaires, indemnités…). Chaque mois renseigné ajoute une ligne à la projection, rattachée à l'enveloppe ; un mois vide n'a pas d'enveloppe (jamais compté pour 0). En « Brut + charges », les charges du mois sont le brut × le taux saisi (un arrondi par mois) ; en « Coût chargé », brut et charges du mois restent non ventilés. Une enveloppe peut être marquée non récurrente (retirée de l'atterrissage retraité). Une seule enveloppe par centre de coûts ou par rubrique : on la modifie dans sa ligne.",
+  },
+  {
+    id: "changement",
+    title: "Changement de service ou de quotité",
+    text:
+      "À compter du 1er jour d'un mois, un salarié (contrat de la base ou embauche) change de service — ses coûts sont attribués au nouveau service à partir de ce mois — et/ou de quotité : son salaire devient proportionnel à la nouvelle quotité (salaire × nouvelle quotité ÷ quotité de la base), au même taux de charges, et son ETP prend le nouveau niveau. Une ligne « changement de quotité » apparaît dans le détail du mois. Limites : effet au 1er du mois seulement ; la quotité actuelle du salarié doit être connue ; les augmentations ciblées par service suivent le service de la base figée.",
+  },
+  {
+    id: "controles",
+    title: "Contrôles effectifs et contrôles des changements",
+    text:
+      "Contrôles effectifs : à chaque mois projeté, effectif de début + entrées − sorties = effectif de fin. Les entrées et sorties sont les salariés comptés présents le dernier jour du mois (et non présents le mois précédent, ou l'inverse) ; la base est aussi comparée à l'effectif réel du mois de référence. Contrôles des changements : toutes les hypothèses du scénario, avec le coût que la projection leur attribue sur l'horizon (somme des lignes rattachées), pour repérer ce qui pèse et supprimer ce qui ne doit plus compter.",
+  },
+  {
     id: "recopie",
     title: "Reprise des hypothèses d'un autre scénario",
     text:
