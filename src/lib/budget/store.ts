@@ -5,8 +5,9 @@ import { budgetBase, budgetHypothesis, budgetReference, budgetScenario } from "@
 import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isMonth } from "@/lib/connectors/months";
+import { planImport } from "./bulk";
 import { hireKey, project } from "./engine";
-import { CATEGORY_IDS, CURRENCY, type BaseSnapshot, type Conventions, type Hypothesis } from "./types";
+import { CATEGORY_IDS, CURRENCY, type BaseSnapshot, type Conventions, type Hypothesis, type HypothesisKind } from "./types";
 
 // Stockage des scénarios (module 5). Une base figée n'est jamais modifiée (déclencheur SQL, empreinte revérifiée à la
 // lecture) ; un scénario figé n'accepte plus d'hypothèse (déclencheur SQL). Chaque écriture vérifie l'espace (RLS) et
@@ -35,6 +36,7 @@ export const hypothesisSchema: z.ZodType<Hypothesis> = z.discriminatedUnion("kin
   z.object({
     id, kind: z.literal("embauche"), label, service: z.string().min(1).max(200).nullable(), start: date, end: date.nullable(),
     grossFullTimeCents: cents.positive(), quotaBps: z.number().int().min(1).max(10_000), chargesBps: bps.min(0), counted: z.boolean(), replaces: id.nullable(), category: (z.enum(CATEGORY_IDS as [string, ...string[]]) as unknown as z.ZodType<(typeof CATEGORY_IDS)[number]>).nullable().optional(),
+    motif: z.string().trim().max(100).optional(), metier: z.string().trim().max(100).optional(), copiedFrom: z.string().min(1).max(300).nullable().optional(),
   }),
   z.object({ id, kind: z.literal("depart"), label, contractKey: z.string().min(1).max(300), lastPaidDate: date, exitCost: amount.nullable(), motif: z.string().trim().max(100).optional() }),
   z.object({ id, kind: z.literal("absence"), label, contractKey: z.string().min(1).max(300), from: date, to: date, paidBps: z.number().int().min(0).max(10_000) }),
@@ -131,6 +133,67 @@ export async function addHypothesis(workspaceId: string, actor: string, scenario
     const check = project(base, s.firstMonth, s.lastMonth, [...hypotheses, parsed], s.conventions);
     if (check.kind === "error") throw new BudgetError(`Hypothèse refusée : ${check.errors.join(" ; ")}.`);
     await tx.insert(budgetHypothesis).values({ id: parsed.id, workspaceId, scenarioId, kind: parsed.kind, data: parsed, currency: CURRENCY, createdBy: actor });
+  });
+}
+
+export type Skipped = { label: string; reason: string };
+export type Screened = { added: Hypothesis[]; skipped: Skipped[]; notes: string[] };
+
+// Contrôle les candidates une à une par le moteur, chacune avec celles déjà retenues : celle qui rendrait le scénario
+// incalculable est écartée avec la raison. Le lien « remplace » vers un départ écarté est retiré (lien documentaire).
+function screen(s: ScenarioRow, base: BaseSnapshot, existing: Hypothesis[], candidates: Hypothesis[]): Screened {
+  const kept = [...existing];
+  const out: Screened = { added: [], skipped: [], notes: [] };
+  const dropped = new Set<string>();
+  for (const c of candidates) {
+    let h = c;
+    if (h.kind === "embauche" && h.replaces && dropped.has(h.replaces)) {
+      h = { ...h, replaces: null };
+      out.notes.push(`« ${h.label} » : lien « remplace » retiré, le départ visé n'est pas repris.`);
+    }
+    const check = project(base, s.firstMonth, s.lastMonth, [...kept, h], s.conventions);
+    if (check.kind === "error") {
+      out.skipped.push({ label: c.label, reason: check.errors.join(" ; ") });
+      dropped.add(c.id);
+      continue;
+    }
+    kept.push(h);
+    out.added.push(h);
+  }
+  return out;
+}
+
+const insertAll = (tx: Tx, workspaceId: string, scenarioId: string, actor: string, hs: Hypothesis[]) =>
+  hs.length ? tx.insert(budgetHypothesis).values(hs.map((h) => ({ id: h.id, workspaceId, scenarioId, kind: h.kind, data: h, currency: CURRENCY, createdBy: actor }))) : Promise.resolve();
+
+// Saisie groupée. « all » : tout ou rien (une ligne refusée annule le lot et le message les nomme toutes) ;
+// « valid » : les lignes acceptées sont enregistrées, les autres sont rendues avec leur raison.
+export async function addHypotheses(workspaceId: string, actor: string, scenarioId: string, list: Hypothesis[], mode: "all" | "valid"): Promise<Screened> {
+  const parsed = list.map((h) => hypothesisSchema.parse(h));
+  return withWorkspace(workspaceId, async (tx) => {
+    const { scenario: s, base, hypotheses } = await lockDraft(tx, scenarioId);
+    const r = screen(s, base, hypotheses, parsed);
+    if (mode === "all" && r.skipped.length) throw new BudgetError(`Rien n'a été enregistré. ${r.skipped.map((x) => `${x.label} : ${x.reason}`).join(" ; ")}.`);
+    await insertAll(tx, workspaceId, scenarioId, actor, r.added);
+    return r;
+  });
+}
+
+// Reprise des hypothèses d'un autre scénario de l'espace (base identique ou non) : seules celles qui restent calculables
+// contre la base et l'horizon du scénario cible sont reprises ; les autres sont listées avec leur raison.
+export async function importHypotheses(workspaceId: string, actor: string, targetId: string, sourceId: string, kinds: ReadonlySet<HypothesisKind>): Promise<Screened> {
+  if (targetId === sourceId) throw new BudgetError("Choisissez un autre scénario que celui-ci.");
+  if (!z.string().uuid().safeParse(sourceId).success) throw new BudgetError("Scénario source introuvable.");
+  if (kinds.size === 0) throw new BudgetError("Choisissez au moins un type d'hypothèse à reprendre.");
+  return withWorkspace(workspaceId, async (tx) => {
+    const { scenario: s, base, hypotheses } = await lockDraft(tx, targetId);
+    const [src] = await tx.select({ id: budgetScenario.id }).from(budgetScenario).where(eq(budgetScenario.id, sourceId));
+    if (!src) throw new BudgetError("Scénario source introuvable.");
+    const rows = await tx.select({ data: budgetHypothesis.data }).from(budgetHypothesis).where(eq(budgetHypothesis.scenarioId, sourceId)).orderBy(asc(budgetHypothesis.createdAt), asc(budgetHypothesis.id));
+    const plan = planImport(rows.map((r) => hypothesisSchema.parse(r.data)), kinds, randomUUID);
+    const r = screen(s, base, hypotheses, plan.items);
+    await insertAll(tx, workspaceId, targetId, actor, r.added);
+    return { ...r, skipped: [...plan.dropped, ...r.skipped] };
   });
 }
 

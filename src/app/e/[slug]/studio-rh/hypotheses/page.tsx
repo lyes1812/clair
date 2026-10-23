@@ -281,7 +281,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
         ) : vue === "comparaison" ? (
           await comparison(slug, workspace.id, s, full.base, proj, sp)
         ) : (
-          <HypothesesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} proj={proj} canEdit={canEdit && draft} />
+          <HypothesesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} proj={proj} canEdit={canEdit && draft} others={canEdit && draft ? (await listScenarios(workspace.id)).filter((x) => x.scenario.id !== s.id).map((x) => ({ id: x.scenario.id, name: x.scenario.name, label: `${x.scenario.name} (${KIND_LABELS[x.scenario.kind]}, ${x.scenario.status === "fige" ? "figé" : "brouillon"}, ${x.scenario.firstMonth} → ${x.scenario.lastMonth})` })) : []} />
         )}
         <Definitions />
       </Header>

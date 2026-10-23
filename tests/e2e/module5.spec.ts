@@ -78,8 +78,8 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await form("depart").getByRole("button").click();
   await expect(form("depart").getByRole("status")).toContainText("Départ 008", slow);
 
-  await page.getByTestId("hyp-add").getByText("Embauche", { exact: true }).click();
-  await form("embauche").getByLabel("Poste").fill("Remplaçant 008");
+  await page.getByTestId("hyp-add").getByText(/^Embauche \(/).click();
+  await form("embauche").getByLabel("Poste", { exact: true }).fill("Remplaçant 008");
   await form("embauche").getByLabel("Centre de coûts (service)").fill("TEST-SVC-C");
   await form("embauche").getByLabel("Catégorie").selectOption("cdi");
   await form("embauche").getByLabel("Premier jour payé").fill("2026-11-16");
@@ -164,6 +164,47 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   expect(await txt(page.getByTestId("sal-months").locator("tr[data-month='2026-10'] td[data-col='cost']"))).toBe("3 048,39 €");
   expect(await txt(page.getByTestId("sal-months").locator("tr[data-month='2026-11'] td[data-col='cost']"))).toBe("642,60 €");
   await page.screenshot({ path: `${CAPTURES}/5-06-salarie.png`, fullPage: true });
+
+  // Lot 4 — saisie en masse : un départ (15 décembre, démission) et une augmentation de 3 % en décembre, depuis les tableaux.
+  const bulk = page.getByTestId("sal-bulk");
+  await bulk.getByText(/^Départs \(/).click();
+  await bulk.locator("input[name='date_0']").fill("2026-12-15");
+  await bulk.locator("input[name='motif_0']").fill("Démission");
+  await page.getByTestId("sal-bulk-departs").getByRole("button").click();
+  await expect(page.getByTestId("sal-bulk-departs").getByRole("status")).toContainText("1 hypothèse enregistrée", slow);
+  await bulk.getByText(/^Augmentations \(/).click();
+  await bulk.locator("input[name='from']").fill("2026-12");
+  await bulk.locator("input[name='rate_1']").fill("3");
+  await page.getByTestId("sal-bulk-raises").getByRole("button").click();
+  await expect(page.getByTestId("sal-bulk-raises").getByRole("status")).toContainText("1 hypothèse enregistrée", slow);
+  // Une ligne invalide (taux illisible) refuse le lot entier avec sa raison : rien n'est enregistré (tout ou rien).
+  await bulk.locator("input[name='from']").fill("2026-12");
+  await bulk.locator("input[name='rate_2']").fill("abc");
+  await page.getByTestId("sal-bulk-raises").getByRole("button").click();
+  await expect(page.getByTestId("sal-bulk-raises").getByRole("alert")).toContainText("taux en pourcentage requis", slow);
+
+  // Lot 4 — embauches : deux stagiaires non comptés dans un centre de coûts, profil d'un salarié recopié (valeurs modifiables).
+  await page.getByTestId("hyp-tabs").getByRole("link", { name: "Hypothèses" }).click();
+  await page.getByTestId("hyp-add").getByText(/^Embauche \(/).click();
+  const he = form("embauche");
+  await he.getByLabel("Recopier le profil d'un salarié (facultatif)").selectOption({ index: 1 });
+  await expect(page.getByTestId("hire-copy-note")).toContainText("Profil de");
+  await expect(he.getByLabel("Taux de charges (%)")).not.toHaveValue("");
+  await he.getByLabel("Poste", { exact: true }).fill("Stagiaire tech");
+  await he.getByLabel("Nombre de postes").fill("2");
+  await he.getByLabel("Centre de coûts (service)").fill("TEST-SVC-C");
+  await he.getByLabel("Catégorie").selectOption("stagiaire");
+  await he.getByLabel("Motif d'embauche (facultatif)").fill("Stage");
+  await he.getByLabel("Premier jour payé").fill("2026-11-02");
+  await he.getByLabel("Brut mensuel temps plein (€)").fill("600");
+  await he.getByLabel("Quotité (%)").fill("100");
+  await he.getByLabel("Taux de charges (%)").fill("5");
+  await he.getByLabel("Effectif").selectOption("non");
+  await he.getByRole("button").click();
+  await expect(he.getByRole("status")).toContainText("2 hypothèses enregistrées : « Stagiaire tech (1/2) » à « Stagiaire tech (2/2) »", slow);
+  await page.reload();
+  await expect(page.getByTestId("hyp-hypotheses").locator("tr[data-hyp='Stagiaire tech (2/2)']")).toContainText("Stagiaire · motif : Stage");
+  await page.screenshot({ path: `${CAPTURES}/5-07-lot4-hypotheses.png`, fullPage: true });
   await page.goto(hyp);
 
   // Lot 2 — budget saisi 2026 : 24 000,00 € par mois sauf décembre non saisi (n.d.), puis complété.
@@ -228,4 +269,16 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await page.getByTestId("hyp-tabs").getByRole("link", { name: "Comparaison" }).click();
   await expect(page.getByTestId("cmp-tile-n1").locator("dd")).toContainText("-8 780,50 €");
   expect(await txt(cmp("2027-12", "n1"))).toContain("projeté — scénario « Révisé T4 2026 »");
+
+  // Lot 4 — reprise des hypothèses d'un autre scénario : les départs de la variante (datés de 2026) sont hors de l'horizon
+  // du budget 2027, ils ne sont pas repris et sont listés avec leur raison.
+  await page.getByTestId("hyp-tabs").getByRole("link", { name: "Hypothèses" }).click();
+  const imp = page.getByTestId("hyp-import-form");
+  const source = await imp.locator("select[name='source'] option", { hasText: "Variante sans prime" }).getAttribute("value");
+  await imp.getByLabel("Scénario source").selectOption(source!);
+  await imp.getByLabel("Départs").check();
+  await imp.getByRole("button").click();
+  await expect(imp.getByRole("status")).toContainText("0 hypothèse reprise", slow);
+  await expect(page.getByTestId("hyp-import-form-details")).toContainText("Non reprise — Départ 008");
+  await page.screenshot({ path: `${CAPTURES}/5-08-reprise.png`, fullPage: true });
 });

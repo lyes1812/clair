@@ -12,6 +12,7 @@ export function ActionForm({
     <form className={className ?? "form"} action={run} data-testid={testid}>
       {state?.error && <p className="error" role="alert">{state.error}</p>}
       {state?.ok && <p className="notice" role="status">{state.ok}</p>}
+      {state?.details && <ul className="list" data-testid={`${testid}-details`}>{state.details.map((d) => <li key={d} className="desc">{d}</li>)}</ul>}
       {children}
       <div className="actions">
         <button className={danger ? "btn danger" : "btn primary"} type="submit" disabled={pending}>{pending ? "Enregistrement…" : submit}</button>

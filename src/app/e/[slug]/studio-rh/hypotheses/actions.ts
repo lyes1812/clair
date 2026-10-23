@@ -6,7 +6,8 @@ import { buildBase } from "@/lib/budget/base";
 import { getConventions } from "@/lib/budget/settings";
 import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
 import { z } from "zod";
-import { addHypothesis, BudgetError, MAX_MONTH_CENTS, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
+import { expandHires, IMPORTABLE_KINDS } from "@/lib/budget/bulk";
+import { addHypotheses, BudgetError, importHypotheses, MAX_MONTH_CENTS, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
 import { chainBase } from "@/lib/budget/chain";
 import { project } from "@/lib/budget/engine";
 import { CATEGORY_IDS, type Amount, type CategoryId, type Hypothesis, type HypothesisKind, type Scope } from "@/lib/budget/types";
@@ -17,7 +18,7 @@ import { toCents } from "@/lib/money";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { requireWorkspace } from "@/lib/workspace";
 
-export type FormState = { error?: string; ok?: string } | undefined;
+export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
 const MAX_HORIZON = 24;
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const page = (slug: string) => `/e/${slug}/studio-rh/hypotheses`;
@@ -151,10 +152,15 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
     const svc = str(f, "service");
     const category = str(f, "category");
     if (!CATEGORY_IDS.includes(category as CategoryId)) throw new Error("Catégorie requise (CDI, CDD, apprenti ou stagiaire).");
+    const motif = str(f, "motif");
+    const metier = str(f, "metier");
+    if (motif.length > 100 || metier.length > 100) throw new Error("Motif et métier : 100 caractères au plus.");
+    const copiedFrom = str(f, "copiedFrom");
     return {
       id, kind, label, service: svc || null, category: category as CategoryId, start, end: end || null,
       grossFullTimeCents: euros(f, "gross", "Brut mensuel temps plein"), quotaBps, chargesBps: pct(f, "charges", "Taux de charges"),
       counted: counted === "oui", replaces: str(f, "replaces") || null,
+      ...(motif ? { motif } : {}), ...(metier ? { metier } : {}), ...(copiedFrom ? { copiedFrom } : {}),
     };
   }
   if (kind === "depart") {
@@ -211,20 +217,113 @@ function readHypothesis(kind: HypothesisKind, f: FormData): Hypothesis {
 export async function addHypothesisAction(slug: string, scenarioId: string, kind: HypothesisKind, _prev: FormState, f: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
   if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
-  let h: Hypothesis;
+  let list: Hypothesis[];
   try {
-    h = readHypothesis(kind, f);
+    const h = readHypothesis(kind, f);
+    // Nombre de postes : N embauches indépendantes (les autres types n'ont pas ce champ).
+    list = h.kind === "embauche" ? expandHires(h, Number(str(f, "count") || "1"), randomUUID) : [h];
   } catch (e) {
     return e instanceof Error && !(e instanceof z.ZodError) ? { error: e.message } : fail(e);
   }
   try {
-    await addHypothesis(workspace.id, session.user.id, scenarioId, h);
-    await recordEvent(workspace.id, session.user.id, "budget.hypothesis_added", { scenarioId, hypothesisId: h.id, kind: h.kind });
+    await addHypotheses(workspace.id, session.user.id, scenarioId, list, "all");
+    for (const h of list) await recordEvent(workspace.id, session.user.id, "budget.hypothesis_added", { scenarioId, hypothesisId: h.id, kind: h.kind });
   } catch (e) {
     return fail(e);
   }
   revalidatePath(page(slug));
-  return { ok: `Hypothèse « ${h.label} » enregistrée.` };
+  return { ok: list.length === 1 ? `Hypothèse « ${list[0].label} » enregistrée.` : `${list.length} hypothèses enregistrées : « ${list[0].label} » à « ${list[list.length - 1].label} ».` };
+}
+
+// --- Saisie en masse (une ligne par salarié ; les lignes vides sont ignorées). Tout ou rien : une ligne refusée par le
+// moteur annule le lot et le message nomme chaque ligne refusée avec sa raison.
+async function bulk(slug: string, scenarioId: string, build: (f: FormData, who: (key: string) => string, key: (i: number) => string, n: number) => Hypothesis[], f: FormData, event: "budget.bulk_departures" | "budget.bulk_raises"): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
+  const full = await getScenario(workspace.id, scenarioId);
+  if (!full) return { error: "Scénario introuvable." };
+  const labels = new Map(full.base.contracts.map((c) => [c.contractKey, c.label]));
+  const n = Number(str(f, "n"));
+  if (!Number.isInteger(n) || n < 1 || n > 2000) return { error: "Saisie invalide." };
+  let list: Hypothesis[];
+  try {
+    list = build(f, (k) => labels.get(k) ?? k, (i) => str(f, `key_${i}`), n);
+  } catch (e) {
+    return e instanceof Error && !(e instanceof z.ZodError) ? { error: e.message } : fail(e);
+  }
+  if (list.length === 0) return { error: "Aucune ligne renseignée." };
+  try {
+    await addHypotheses(workspace.id, session.user.id, scenarioId, list, "all");
+    await recordEvent(workspace.id, session.user.id, event, { scenarioId, count: list.length });
+  } catch (e) {
+    return fail(e);
+  }
+  revalidatePath(page(slug));
+  return { ok: `${list.length} hypothèse${list.length > 1 ? "s" : ""} enregistrée${list.length > 1 ? "s" : ""}.` };
+}
+
+export async function bulkDeparturesAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
+  return bulk(slug, scenarioId, (f, who, key, n) => {
+    const out: Hypothesis[] = [];
+    for (let i = 0; i < n; i++) {
+      const date = str(f, `date_${i}`);
+      const cost = str(f, `cost_${i}`);
+      const motif = str(f, `motif_${i}`);
+      if (!date && !cost && !motif) continue;
+      const contractKey = key(i);
+      if (!contractKey) throw new Error(`Ligne ${i + 1} : salarié manquant.`);
+      const name = who(contractKey);
+      if (!isDate(date)) throw new Error(`${name} : dernier jour payé requis (date).`);
+      if (motif.length > 100) throw new Error(`${name} : motif de 100 caractères au plus.`);
+      let exitCost: Amount | null = null;
+      if (cost) {
+        const c = toCents(cost);
+        if (c === null || c < 0) throw new Error(`${name} : coûts de sortie en euros chargés, positifs (ex. 12 500,00).`);
+        exitCost = { mode: "charge", costCents: c };
+      }
+      out.push({ id: randomUUID(), kind: "depart", label: `Départ ${name}`, contractKey, lastPaidDate: date, exitCost, ...(motif ? { motif } : {}) });
+    }
+    return out;
+  }, f, "budget.bulk_departures");
+}
+
+export async function bulkRaisesAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
+  const from = str(f, "from");
+  return bulk(slug, scenarioId, (f, who, key, n) => {
+    const out: Hypothesis[] = [];
+    for (let i = 0; i < n; i++) {
+      const raw = str(f, `rate_${i}`);
+      if (!raw) continue;
+      if (!isMonth(from)) throw new Error("Mois d'effet requis (AAAA-MM).");
+      const contractKey = key(i);
+      if (!contractKey) throw new Error(`Ligne ${i + 1} : salarié manquant.`);
+      const name = who(contractKey);
+      const rateBps = toCents(raw);
+      if (rateBps === null) throw new Error(`${name} : taux en pourcentage requis (ex. 2,5).`);
+      if (rateBps === 0) throw new Error(`${name} : taux d'augmentation nul.`);
+      out.push({ id: randomUUID(), kind: "augmentation", label: `Augmentation ${name}`, from, rateBps, scope: { kind: "contrat", key: contractKey } });
+    }
+    return out;
+  }, f, "budget.bulk_raises");
+}
+
+// --- Reprise des hypothèses d'un autre scénario : seules celles qui restent calculables sont reprises ; les autres
+// sont listées avec leur raison (date hors de l'horizon, contrat absent de la base…).
+export async function importHypothesesAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "editor");
+  if (!isUuid(scenarioId)) return { error: "Scénario introuvable." };
+  const source = str(f, "source");
+  const kinds = new Set(f.getAll("kind").map(String).filter((k): k is HypothesisKind => (IMPORTABLE_KINDS as string[]).includes(k)));
+  let r: Awaited<ReturnType<typeof importHypotheses>>;
+  try {
+    r = await importHypotheses(workspace.id, session.user.id, scenarioId, source, kinds);
+    await recordEvent(workspace.id, session.user.id, "budget.hypotheses_imported", { scenarioId, from: source, added: r.added.length, skipped: r.skipped.length });
+  } catch (e) {
+    return fail(e);
+  }
+  revalidatePath(page(slug));
+  const details = [...r.notes, ...r.skipped.map((x) => `Non reprise — ${x.label} : ${x.reason}`)];
+  return { ok: `${r.added.length} hypothèse${r.added.length > 1 ? "s" : ""} reprise${r.added.length > 1 ? "s" : ""}, ${r.skipped.length} non reprise${r.skipped.length > 1 ? "s" : ""}.`, ...(details.length ? { details } : {}) };
 }
 
 export async function deleteHypothesisAction(slug: string, scenarioId: string, hypothesisId: string, _prev: FormState, _f: FormData): Promise<FormState> {

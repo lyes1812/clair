@@ -43,6 +43,24 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
       "Un contrat entré pendant le mois de référence, avec des lignes de salaire et de cotisations, a pour base le salaire de ce mois ramené au mois complet : salaire ÷ part de présence (règle de prorata du scénario, ex. 18 jours ouvrés sur 22 pour une entrée le 7 septembre). Le calcul est indiqué sur le salarié ; il reste corrigeable par une base saisie.",
   },
   {
+    id: "embauche-postes",
+    title: "Embauches : nombre de postes et profil recopié",
+    text:
+      "Une embauche porte un centre de coûts (existant ou nouveau), une catégorie (CDI, CDD, apprenti, stagiaire), des dates, un brut mensuel temps plein, une quotité et un taux de charges. Avec un nombre de postes N, Clair crée N hypothèses d'embauche identiques numérotées (1/N) à (N/N), chacune modifiable ou supprimable seule ; un remplacement concerne un seul poste. Le profil d'un salarié peut être recopié dans le formulaire : service et catégorie de sa fiche, taux de charges observé, brut temps plein = salaire de référence ÷ ETP (laissé à saisir si l'ETP ou la base est n.d.). Les valeurs sont enregistrées telles que saisies ; le motif d'embauche et le métier sont descriptifs et n'entrent pas dans le calcul.",
+  },
+  {
+    id: "saisie-masse",
+    title: "Saisie en masse",
+    text:
+      "Un tableau avec une ligne par salarié de la base : dernier jour payé, motif et coûts de sortie chargés pour les départs ; taux pour les augmentations, avec un mois d'effet commun. Chaque ligne renseignée devient la même hypothèse que celle saisie salarié par salarié ; les lignes vides sont ignorées. Le lot est enregistré en entier ou pas du tout : si le moteur refuse une ligne (date hors horizon, deux augmentations le même mois…), rien n'est enregistré et chaque ligne refusée est nommée avec sa raison.",
+  },
+  {
+    id: "recopie",
+    title: "Reprise des hypothèses d'un autre scénario",
+    text:
+      "Copie sélective (départs, embauches, augmentations, congés, catégories, corrections de base, éléments ponctuels, non récurrents réalisés) des hypothèses d'un autre scénario de l'espace. Les copies reçoivent de nouveaux identifiants et les liens entre hypothèses (embauche qui remplace un départ, augmentation d'une embauche) sont conservés quand les deux sont repris. Chaque hypothèse est contrôlée contre la base et l'horizon du scénario cible : celles qui ne sont plus calculables ne sont pas reprises et sont listées avec leur raison. Un lien « remplace » vers un départ non repris est retiré.",
+  },
+  {
     id: "contribution",
     title: "Contributions d'un mois projeté",
     text:

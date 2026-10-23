@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "@/db/client";
 import { budgetBase, budgetHypothesis, budgetScenario, organization, user } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
-import { addHypothesis, BudgetError, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getBudget, getScenario, listBudgets, saveBudget } from "@/lib/budget/store";
+import { addHypotheses, addHypothesis, BudgetError, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getBudget, getScenario, importHypotheses, listBudgets, saveBudget } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 
 // Module 5 : garde-fous du stockage (base PostgreSQL de test, rôle non superutilisateur).
@@ -102,5 +102,67 @@ describe("scénarios : gel, duplication, base figée", () => {
     const nd: BaseSnapshot = { ...base, refBaseCost: null, contracts: [{ ...base.contracts[0], base: null, baseNd: "entré le 2026-09-16 : mois de référence incomplet" }] };
     const id = await createScenario(W, actor, { name: "U", kind: "budget", firstMonth: "2026-10", lastMonth: "2026-10" }, nd, conv);
     await expect(freezeScenario(W, actor, id)).rejects.toThrow("projection n.d. pour 2026-10");
+  });
+});
+
+describe("lot 4 : saisie groupée et reprise d'hypothèses", () => {
+  const horizon = { firstMonth: "2026-10", lastMonth: "2026-12" };
+  const depart = (): Hypothesis => ({ id: uuid(), kind: "depart", label: "Départ A", contractKey: "A", lastPaidDate: "2026-11-15", exitCost: null, motif: "Rupture conventionnelle" });
+  const hireOf = (replaces: string | null): Hypothesis => ({ id: uuid(), kind: "embauche", label: "Remplaçant A", service: "TECH", start: "2026-11-16", end: null, grossFullTimeCents: 300000, quotaBps: 10000, chargesBps: 4000, counted: true, category: "cdi", replaces });
+  const hypsOf = async (id: string) => (await getScenario(W, id))!.hypotheses;
+
+  it("tout ou rien : un doublon (deux augmentations générales le même mois) annule le lot entier et le message le nomme", async () => {
+    const id = await createScenario(W, actor, { name: "Lot 4 atomique", kind: "budget", ...horizon }, base, conv);
+    await expect(addHypotheses(W, actor, id, [aug(uuid(), "Première", "2026-11"), aug(uuid(), "Doublon", "2026-11")], "all")).rejects.toThrow(/Rien n'a été enregistré\. Doublon : /);
+    expect(await hypsOf(id)).toHaveLength(0);
+    const ok = await addHypotheses(W, actor, id, [aug(uuid(), "Novembre", "2026-11"), aug(uuid(), "Décembre", "2026-12")], "all");
+    expect(ok.added.map((h) => h.label)).toEqual(["Novembre", "Décembre"]);
+    expect((await hypsOf(id)).map((h) => h.label).sort()).toEqual(["Décembre", "Novembre"]);
+  });
+  it("mode « valid » : la ligne acceptée est enregistrée, la refusée est rendue avec sa raison", async () => {
+    const id = await createScenario(W, actor, { name: "Lot 4 partiel", kind: "budget", ...horizon }, base, conv);
+    const r = await addHypotheses(W, actor, id, [aug(uuid(), "Générale", "2026-11"), aug(uuid(), "Doublon", "2026-11")], "valid");
+    expect(r.added.map((h) => h.label)).toEqual(["Générale"]);
+    expect(r.skipped.map((x) => x.label)).toEqual(["Doublon"]);
+    expect(r.skipped[0].reason.length).toBeGreaterThan(0);
+    expect(await hypsOf(id)).toHaveLength(1);
+  });
+  it("reprise dans un scénario de même base : départ, embauche qui le remplace et augmentation reprises avec de nouveaux identifiants et le lien remplacé", async () => {
+    const src = await createScenario(W, actor, { name: "Source", kind: "revise", ...horizon }, base, conv);
+    const d = depart();
+    await addHypotheses(W, actor, src, [d, hireOf(d.id), aug(uuid(), "Générale", "2026-12")], "all");
+    const dst = await createScenario(W, actor, { name: "Cible", kind: "budget", ...horizon }, base, conv);
+    const r = await importHypotheses(W, actor, dst, src, new Set(["depart", "embauche", "augmentation"]));
+    expect(r.added).toHaveLength(3);
+    expect(r.skipped).toEqual([]);
+    const got = await hypsOf(dst);
+    const newDep = got.find((h) => h.kind === "depart")!;
+    const newHire = got.find((h) => h.kind === "embauche");
+    expect(newDep.id).not.toBe(d.id);
+    expect(newHire?.kind === "embauche" && newHire.replaces).toBe(newDep.id);
+    expect(newDep).toMatchObject({ motif: "Rupture conventionnelle", lastPaidDate: "2026-11-15" });
+  });
+  it("reprise dans un scénario dont la base n'a pas le contrat : départ non repris (raison donnée), embauche reprise sans lien « remplace » (note), augmentation reprise", async () => {
+    const src = await createScenario(W, actor, { name: "Source 2", kind: "revise", ...horizon }, base, conv);
+    const d = depart();
+    await addHypotheses(W, actor, src, [d, hireOf(d.id), aug(uuid(), "Générale", "2026-12")], "all");
+    const other: BaseSnapshot = { ...base, contracts: [{ ...base.contracts[0], contractKey: "B", externalId: "B", label: "B" }] };
+    const dst = await createScenario(W, actor, { name: "Cible 2", kind: "budget", ...horizon }, other, conv);
+    const r = await importHypotheses(W, actor, dst, src, new Set(["depart", "embauche", "augmentation"]));
+    expect(r.added.map((h) => h.label).sort()).toEqual(["Générale", "Remplaçant A"]);
+    expect(r.skipped.map((x) => x.label)).toEqual(["Départ A"]);
+    expect(r.notes).toEqual(["« Remplaçant A » : lien « remplace » retiré, le départ visé n'est pas repris."]);
+    const hire = (await hypsOf(dst)).find((h) => h.kind === "embauche");
+    expect(hire?.kind === "embauche" && hire.replaces).toBeNull();
+  });
+  it("reprise refusée : même scénario, source inconnue, aucun type choisi, cible figée", async () => {
+    const a = await createScenario(W, actor, { name: "A4", kind: "budget", ...horizon }, base, conv);
+    const b = await createScenario(W, actor, { name: "B4", kind: "budget", ...horizon }, base, conv);
+    await expect(importHypotheses(W, actor, a, a, new Set(["depart"]))).rejects.toThrow("Choisissez un autre scénario");
+    await expect(importHypotheses(W, actor, a, uuid(), new Set(["depart"]))).rejects.toThrow("Scénario source introuvable");
+    await expect(importHypotheses(W, actor, a, b, new Set())).rejects.toThrow("au moins un type");
+    await freezeScenario(W, actor, a);
+    await expect(importHypotheses(W, actor, a, b, new Set(["depart"]))).rejects.toThrow("Scénario figé");
+    await expect(addHypotheses(W, actor, a, [aug(uuid(), "Après gel")], "all")).rejects.toThrow("Scénario figé");
   });
 });

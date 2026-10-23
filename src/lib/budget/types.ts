@@ -89,6 +89,10 @@ export type Hypothesis =
       counted: boolean; // compté dans l'effectif
       category?: CategoryId | null; // CDI, CDD, apprenti, stagiaire
       replaces: string | null; // id de l'hypothèse de départ remplacée (lien documentaire)
+      // Descriptifs saisis, sans effet sur le calcul : motif d'embauche, métier, salarié dont le profil a été recopié.
+      motif?: string;
+      metier?: string;
+      copiedFrom?: string | null;
     }
   | { id: string; kind: "depart"; label: string; contractKey: string; lastPaidDate: string; exitCost: Amount | null; motif?: string }
   | { id: string; kind: "ponctuel"; label: string; month: string; amount: Amount; service: string | null; nonRecurring?: boolean; contractKey?: string | null }

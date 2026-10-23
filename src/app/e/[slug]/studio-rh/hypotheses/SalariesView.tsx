@@ -5,7 +5,7 @@ import type { ScenarioRow } from "@/lib/budget/store";
 import { CATEGORY_IDS, CATEGORY_LABELS, type BaseContract, type BaseSnapshot, type CategoryId, type Hypothesis, type Projection } from "@/lib/budget/types";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import { ActionForm } from "./ActionForm";
-import { addHypothesisAction, deleteHypothesisAction } from "./actions";
+import { addHypothesisAction, bulkDeparturesAction, bulkRaisesAction, deleteHypothesisAction } from "./actions";
 
 type Row = { key: string; label: string; kind: "base" | "embauche"; service: string | null; category: CategoryId | null; etp4: number | null; monthly: number | null; entry: string | null; contract: BaseContract | null };
 
@@ -37,6 +37,65 @@ const detail = (h: Hypothesis): string => {
     default: return "";
   }
 };
+
+// Saisie en masse : une ligne par salarié de la base, lignes vides ignorées, lot enregistré en entier ou pas du tout.
+function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[] }) {
+  const departing = new Set(hyps.flatMap((h) => (h.kind === "depart" ? [h.contractKey] : [])));
+  const leavers = base.contracts.filter((c) => !departing.has(c.contractKey));
+  return (
+    <section className="panel" data-testid="sal-bulk">
+      <h2>Saisie en masse <span className="desc">— une ligne par salarié, les lignes vides sont ignorées · <a href="#def-saisie-masse">règle</a></span></h2>
+      <details>
+        <summary>Départs ({leavers.length} salariés sans départ saisi)</summary>
+        <ActionForm action={bulkDeparturesAction.bind(null, slug, scenario.id)} submit="Enregistrer les départs renseignés" testid="sal-bulk-departs">
+          <input type="hidden" name="n" value={leavers.length} />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Salarié</th><th>Service</th><th>Dernier jour payé</th><th>Motif</th><th>Coûts de sortie chargés (€)</th></tr></thead>
+              <tbody>
+                {leavers.map((c, i) => (
+                  <tr key={c.contractKey} data-salarie={c.label}>
+                    <td>{c.label}<input type="hidden" name={`key_${i}`} value={c.contractKey} /></td>
+                    <td>{c.service ?? "Non ventilé"}</td>
+                    <td><input className="input" type="date" name={`date_${i}`} aria-label={`Dernier jour payé de ${c.label}`} /></td>
+                    <td><input className="input" name={`motif_${i}`} list="bulk-motifs" maxLength={100} aria-label={`Motif de départ de ${c.label}`} /></td>
+                    <td><input className="input" name={`cost_${i}`} inputMode="decimal" aria-label={`Coûts de sortie chargés de ${c.label}`} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <datalist id="bulk-motifs"><option value="Licenciement" /><option value="Licenciement pour faute grave" /><option value="Rupture conventionnelle" /><option value="Démission" /><option value="Fin de CDD" /><option value="Fin de stage" /></datalist>
+          <p className="tile-foot">Coûts de sortie en coût chargé, imputés au mois du départ (facultatif). Pour les saisir en brut + taux de charges, utilisez la fiche du salarié.</p>
+        </ActionForm>
+      </details>
+      <details>
+        <summary>Augmentations ({base.contracts.length} salariés)</summary>
+        <ActionForm action={bulkRaisesAction.bind(null, slug, scenario.id)} submit="Enregistrer les augmentations renseignées" testid="sal-bulk-raises">
+          <input type="hidden" name="n" value={base.contracts.length} />
+          <div className="filters">
+            <Field id="bulk-from" label="À compter de (mois), commun à toutes les lignes"><input className="input" id="bulk-from" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} /></Field>
+          </div>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Salarié</th><th>Service</th><th>Catégorie</th><th>Taux d'augmentation (%)</th></tr></thead>
+              <tbody>
+                {base.contracts.map((c, i) => (
+                  <tr key={c.contractKey} data-salarie={c.label}>
+                    <td>{c.label}<input type="hidden" name={`key_${i}`} value={c.contractKey} /></td>
+                    <td>{c.service ?? "Non ventilé"}</td>
+                    <td>{catText(c.category ?? null)}</td>
+                    <td><input className="input" name={`rate_${i}`} inputMode="decimal" aria-label={`Taux d'augmentation de ${c.label}`} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ActionForm>
+      </details>
+    </section>
+  );
+}
 
 export function SalariesView({ slug, scenario, base, hyps, proj, q, selected, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[]; proj: Projection; q: string; selected: string; canEdit: boolean }) {
   const catOver = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
@@ -85,6 +144,8 @@ export function SalariesView({ slug, scenario, base, hyps, proj, q, selected, ca
         </div>
         <p className="tile-foot">Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée ici si besoin (ex. une apprentie codée CDD par PayFit).</p>
       </section>
+
+      {canEdit && <BulkSection slug={slug} scenario={scenario} base={base} hyps={hyps} />}
 
       {sel && (
         <section className="panel" id="sal-fiche" data-testid="sal-fiche">

@@ -5,7 +5,9 @@ import type { ScenarioRow } from "@/lib/budget/store";
 import { CATEGORY_IDS, CATEGORY_LABELS, type Amount, type BaseSnapshot, type Hypothesis, type Projection, type Scope } from "@/lib/budget/types";
 import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
 import { ActionForm } from "./ActionForm";
-import { addHypothesisAction, deleteHypothesisAction } from "./actions";
+import { addHypothesisAction, deleteHypothesisAction, importHypothesesAction } from "./actions";
+import { hireProfiles } from "@/lib/budget/bulk";
+import { HireForm } from "./HireForm";
 
 const pct = (bps: number) => `${fmtFixed({ num: bps, den: 100 }, 2)} %`;
 const amountText = (a: Amount) => (a.mode === "brut" ? `${formatEuros(a.brutCents)} brut + charges ${pct(a.chargesBps)}` : `${formatEuros(a.costCents)} chargés`);
@@ -26,7 +28,8 @@ function detailOf(h: Hypothesis, base: BaseSnapshot, hyps: Hypothesis[]): string
       return `${h.rateBps > 0 ? "+" : ""}${pct(h.rateBps)} à compter de ${formatMonth(h.from).toLowerCase()} · ${scopeText(h.scope, base, hyps)}`;
     case "embauche": {
       const rep = h.replaces ? hyps.find((x) => x.id === h.replaces) : null;
-      return `${h.service ?? "Non ventilé"} · du ${h.start}${h.end ? ` au ${h.end}` : ""} · ${formatEuros(h.grossFullTimeCents)} brut temps plein × ${pct(h.quotaBps)} · charges ${pct(h.chargesBps)} · ${h.counted ? "compté" : "non compté"} dans l'effectif${rep ? ` · remplace « ${rep.label} »` : ""}`;
+      const copied = h.copiedFrom ? (base.contracts.find((c) => c.contractKey === h.copiedFrom)?.label ?? hyps.find((x) => hireKey(x.id) === h.copiedFrom)?.label ?? h.copiedFrom) : null;
+      return `${h.service ?? "Non ventilé"}${h.category ? ` · ${CATEGORY_LABELS[h.category]}` : ""}${h.metier ? ` · ${h.metier}` : ""}${h.motif ? ` · motif : ${h.motif}` : ""} · du ${h.start}${h.end ? ` au ${h.end}` : ""} · ${formatEuros(h.grossFullTimeCents)} brut temps plein × ${pct(h.quotaBps)} · charges ${pct(h.chargesBps)} · ${h.counted ? "compté" : "non compté"} dans l'effectif${rep ? ` · remplace « ${rep.label} »` : ""}${copied ? ` · profil recopié de « ${copied} »` : ""}`;
     }
     case "depart":
       return `${who(h.contractKey)} · ${h.motif ? `${h.motif} · ` : ""}dernier jour payé ${h.lastPaidDate}${h.exitCost ? ` · coûts de sortie ${amountText(h.exitCost)}` : ""}`;
@@ -67,13 +70,21 @@ function AmountFields({ prefix, idp, optional }: { prefix: string; idp: string; 
   );
 }
 
-export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; proj: Projection; canEdit: boolean }) {
+export type OtherScenario = { id: string; name: string; label: string };
+const IMPORT_KINDS: { kind: Hypothesis["kind"]; label: string }[] = [
+  { kind: "depart", label: "Départs" }, { kind: "embauche", label: "Embauches" }, { kind: "augmentation", label: "Augmentations" },
+  { kind: "absence", label: "Congés non payés" }, { kind: "categorie", label: "Catégories" }, { kind: "base", label: "Corrections de base" },
+  { kind: "ponctuel", label: "Éléments ponctuels" }, { kind: "realise", label: "Non récurrents réalisés" },
+];
+
+export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit, others = [] }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; proj: Projection; canEdit: boolean; others?: OtherScenario[] }) {
   const fixes = new Map(hypotheses.filter((h) => h.kind === "base").map((h) => [h.contractKey, h]));
   const departed = new Set(hypotheses.filter((h) => h.kind === "depart").map((h) => h.contractKey));
   const services = [...new Set([...base.contracts.map((c) => c.service), ...hypotheses.map((h) => (h.kind === "embauche" ? h.service : null))].filter((s): s is string => s !== null))].sort();
   const hires = hypotheses.filter((h): h is Extract<Hypothesis, { kind: "embauche" }> => h.kind === "embauche");
   const deps = hypotheses.filter((h): h is Extract<Hypothesis, { kind: "depart" }> => h.kind === "depart");
   const add = (kind: Hypothesis["kind"]) => addHypothesisAction.bind(null, slug, scenario.id, kind);
+  const profiles = hireProfiles(base, hires);
   const toFix = base.contracts.filter((c) => !c.base && !fixes.has(c.contractKey));
   const cost = (c: BaseSnapshot["contracts"][number]) => (c.base ? c.base.salaryCents + roundDiv(BigInt(c.base.salaryCents) * BigInt(c.base.refCotisationsCents), BigInt(c.base.refBrutCents)) : null);
   return (
@@ -194,6 +205,7 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
 
       <datalist id="hyp-services">{services.map((x) => <option key={x} value={x} />)}</datalist>
       {canEdit ? (
+        <>
         <section className="panel" data-testid="hyp-add">
           <h2>Ajouter une hypothèse <span className="desc">— chaque hypothèse est contrôlée par le moteur avant enregistrement</span></h2>
           <details>
@@ -216,39 +228,9 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
             </ActionForm>
           </details>
           <details>
-            <summary>Embauche</summary>
-            <ActionForm action={add("embauche")} submit="Ajouter l'embauche" testid="hyp-form-embauche">
-              <div className="filters">
-                <Text id="hire-label" name="label" label="Poste" maxLength={200} required />
-                <Field id="hire-service" label="Centre de coûts (service)">
-                  <input className="input" id="hire-service" name="service" list="hyp-services" placeholder="Existant ou nouveau (vide : non ventilé)" maxLength={200} />
-                </Field>
-                <Field id="hire-category" label="Catégorie">
-                  <select className="select" id="hire-category" name="category" defaultValue="">
-                    <option value="" disabled>Choisir…</option>
-                    {CATEGORY_IDS.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
-                  </select>
-                </Field>
-                <Text id="hire-start" name="start" label="Premier jour payé" type="date" required />
-                <Text id="hire-end" name="end" label="Dernier jour payé (CDD, facultatif)" type="date" />
-                <Text id="hire-gross" name="gross" label="Brut mensuel temps plein (€)" inputMode="decimal" required />
-                <Text id="hire-quota" name="quota" label="Quotité (%)" inputMode="decimal" required />
-                <Text id="hire-charges" name="charges" label="Taux de charges (%)" inputMode="decimal" required />
-                <Field id="hire-counted" label="Effectif">
-                  <select className="select" id="hire-counted" name="counted" defaultValue="">
-                    <option value="" disabled>Choisir…</option>
-                    <option value="oui">Compté dans l'effectif</option>
-                    <option value="non">Non compté (ex. stagiaire)</option>
-                  </select>
-                </Field>
-                <Field id="hire-replaces" label="Remplace">
-                  <select className="select" id="hire-replaces" name="replaces" defaultValue="">
-                    <option value="">— (création de poste)</option>
-                    {deps.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-                  </select>
-                </Field>
-              </div>
-            </ActionForm>
+            <summary>Embauche (un ou plusieurs postes, par centre de coûts)</summary>
+            <p className="desc">Un centre de coûts existant ou nouveau, une catégorie (CDI, CDD, apprenti, stagiaire) et un nombre de postes : chaque poste devient une hypothèse distincte, modifiable ou supprimable seule. Le profil d'un salarié peut être recopié (service, catégorie, brut temps plein = salaire du mois de référence ÷ ETP, taux de charges observé) ; les valeurs restent modifiables.</p>
+            <HireForm action={add("embauche")} profiles={profiles} deps={deps.map((d) => ({ id: d.id, label: d.label }))} />
           </details>
           <details>
             <summary>Départ</summary>
@@ -297,6 +279,27 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
             </ActionForm>
           </details>
         </section>
+        {others.length > 0 && (
+          <section className="panel" data-testid="hyp-import">
+            <h2>Reprendre des hypothèses d'un autre scénario <span className="desc">— <a href="#def-recopie">règle</a></span></h2>
+            <p className="desc">Copie, dans ce scénario, les hypothèses du type choisi d'un autre scénario. Chacune est contrôlée contre la base et l'horizon de ce scénario : celles qui ne sont plus calculables (date hors horizon, contrat absent de la base…) ne sont pas reprises et sont listées avec leur raison.</p>
+            <ActionForm action={importHypothesesAction.bind(null, slug, scenario.id)} submit="Reprendre ces hypothèses" testid="hyp-import-form">
+              <div className="filters">
+                <Field id="imp-source" label="Scénario source">
+                  <select className="select" id="imp-source" name="source" defaultValue="" required>
+                    <option value="" disabled>Choisir…</option>
+                    {others.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <fieldset className="check-group">
+                <legend className="label">Types à reprendre</legend>
+                {IMPORT_KINDS.map((k) => <label key={k.kind} className="check"><input type="checkbox" name="kind" value={k.kind} /><span>{k.label}</span></label>)}
+              </fieldset>
+            </ActionForm>
+          </section>
+        )}
+        </>
       ) : (
         <p className="desc">{scenario.status === "fige" ? "Scénario figé : dupliquez-le pour préparer une variante." : "Saisie réservée aux éditeurs et administrateurs."}</p>
       )}
