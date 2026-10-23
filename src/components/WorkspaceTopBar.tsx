@@ -17,10 +17,10 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email, families
   return (
     <header className="ws-topbar">
       <div className="topbar-left">
-        <MegaMenu families={families} />
+        <MegaMenu families={families} extras={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Paramètres", href: `/e/${slug}/parametres` }, { label: "Membres et accès", href: `/e/${slug}/membres` }]} />
         <nav className="breadcrumb" aria-label="Fil d'Ariane">
-          <span>Espace {workspaceName}</span>
-          {page && (<><span aria-hidden="true">/</span><strong>{page}</strong></>)}
+          <span className="crumb-space">Espace {workspaceName}</span>
+          {page && (<><span className="crumb-sep" aria-hidden="true">/</span><strong>{page}</strong></>)}
         </nav>
       </div>
       <details className="user-menu">

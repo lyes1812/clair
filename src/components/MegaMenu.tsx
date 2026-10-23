@@ -6,7 +6,7 @@ import type { MenuFamily } from "@/lib/menu";
 
 // Menu général du Studio RH : les cinq familles et toutes leurs entrées sur un seul panneau, comme le menu de l'outil
 // observé. Il s'ajoute au menu latéral (qui garde ses cinq sous-modules) : un clic atteint n'importe quelle entrée.
-export function MegaMenu({ families }: { families: MenuFamily[] }) {
+export function MegaMenu({ families, extras = [] }: { families: MenuFamily[]; extras?: { label: string; href: string }[] }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
@@ -43,7 +43,8 @@ export function MegaMenu({ families }: { families: MenuFamily[] }) {
     <div className="mega">
       <button ref={btn} type="button" className="btn small mega-btn" aria-expanded={open} aria-controls="mega-panel" onClick={() => setOpen((o) => !o)} data-testid="mega-button">
         {open ? <X size={15} strokeWidth={1.75} aria-hidden="true" /> : <LayoutGrid size={15} strokeWidth={1.75} aria-hidden="true" />}
-        Toutes les entrées
+        <span className="mega-long">Toutes les entrées</span>
+        <span className="mega-short">Entrées</span>
       </button>
       {open && (
         <div ref={panel} id="mega-panel" className="mega-panel" role="navigation" aria-label="Toutes les entrées du Studio RH" data-testid="mega-panel">
@@ -59,6 +60,11 @@ export function MegaMenu({ families }: { families: MenuFamily[] }) {
               </ul>
             </section>
           ))}
+          {extras.length > 0 && (
+            <footer className="mega-extras" aria-label="Espace">
+              {extras.map((e) => <a key={e.href} href={e.href}>{e.label}</a>)}
+            </footer>
+          )}
         </div>
       )}
     </div>

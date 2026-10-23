@@ -37,7 +37,7 @@ export function BarChart(p: BarChartProps) {
   const nCat = p.categories.length;
   const values = visible.map(({ s }) => s.values);
   const dom = barDomain(values, nCat, mode);
-  const t = niceTicks(dom.lo, dom.hi, 5, u.integer);
+  const t = niceTicks(dom.lo, Math.max(dom.hi, dom.lo + u.minSpan), 5, u.integer);
   const H = p.height ?? H_DEFAULT;
   const left = labelWidth(t.ticks.map(axisFmt));
   const right = 8;
@@ -58,7 +58,9 @@ export function BarChart(p: BarChartProps) {
     const foot = mode === "stacked" && known.length > 1 ? `Total affiché : ${u.fmt(known.reduce((a, b) => a + b, 0))}` : undefined;
     return { x: left + c * lay.band + lay.band / 2, y: top, title: catTitle(c), rows, foot };
   };
-  const labelBars = lay.barW >= 26 && (mode === "grouped" ? visible.length <= 4 : true);
+  // Étiquette de barre : seulement si le texte tient dans la largeur de la barre (≈ 6,2 px par caractère à 10 px).
+  const textW = lay.bars.reduce((m, b) => Math.max(m, labelFmt(b.v).length), 0) * 6.2 + 4;
+  const labelBars = lay.barW >= textW && (mode === "grouped" ? visible.length <= 4 : true);
   const toggleHidden = (key: string) => setHidden((h) => { const n = new Set(h); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const aria = (c: number) => `${catTitle(c)} : ${p.series.map((s) => `${s.name} ${s.values[c] === null || s.values[c] === undefined ? `n.d.${s.reasons?.[c] ? ` (${s.reasons[c]})` : ""}` : u.fmt(s.values[c] as number)}`).join(", ")}`;
   return (

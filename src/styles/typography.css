@@ -37,14 +37,14 @@
 }
 @media screen and (max-width:720px) {
   :root {
-    --clair-type-page:34px;
+    --clair-type-page:32px;
     --clair-type-panel:17px;
-    --clair-type-description:11px;
+    --clair-type-description:12px;
     --clair-type-kpi:31px;
-    --clair-type-label:10px;
-    --clair-type-note:9px;
-    --clair-type-filter-label:9px;
-    --clair-type-legend:8px;
+    --clair-type-label:11px;
+    --clair-type-note:10px;
+    --clair-type-filter-label:10px;
+    --clair-type-legend:10px;
     --clair-type-secondary:22px;
     --clair-filter-pad-x:8px;
     --clair-filter-pad-y:8px;

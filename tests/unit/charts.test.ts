@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BarChart, DonutChart, LineChart, WaterfallChart } from "@/components/charts";
 import { arcPath, barDomain, barLayout, niceTicks, sliceAngles } from "@/components/charts/scale";
-import { compactEuros, unitFormat } from "@/components/charts/units";
+import { compactEuros, labelEuros, unitFormat } from "@/components/charts/units";
 
 // Graphiques : géométrie et rendu serveur, cas écrits à la main.
 describe("graduations rondes", () => {
@@ -116,5 +116,29 @@ describe("étiquettes dans les barres empilées", () => {
     const html = renderToStaticMarkup(h(BarChart, { testid: "t", label: "Test", unit: "eur", categories: ["a"], series, mode: "stacked", height: 520 }));
     const labels = [...html.matchAll(/<text[^>]*class="val"[^>]*style="fill:([^"]*)"/g)].map((m) => m[1]);
     expect(labels).toEqual(["#fff", "#fff", "#fff", "var(--chart-ink)", "var(--chart-ink)", "var(--chart-ink)", "var(--chart-ink)", "#fff"]);
+  });
+});
+
+describe("cas limites de lecture", () => {
+  it("anneau d'une seule part : deux cercles complets (extérieur et trou), même à petit rayon", () => {
+    const d = arcPath(80, 80, 68.5, 41, 0, Math.PI * 2);
+    expect(d.match(/A /g)?.length).toBe(4);
+    expect(d).toContain("M 80 11.50");
+    expect(d).toContain("M 80 39.00");
+    expect(d).not.toMatch(/NaN/);
+  });
+  it("tout à zéro en pourcentage : graduations toutes différentes (0 %, 0,2 %… 1 %), jamais six fois « 0 % »", () => {
+    const html = renderToStaticMarkup(h(BarChart, { testid: "t", label: "Test", unit: "bps", categories: ["a", "b"], series: [{ key: "s", name: "S", values: [0, 0] }] }));
+    const ticks = [...html.matchAll(/class="tick">([^<]*)</g)].map((m) => m[1]);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    expect(ticks.at(-1)).toContain("1");
+  });
+  it("étiquettes en k€ à une décimale fixe : 24,6 k€, 19,5 k€, 7,0 k€", () => {
+    expect([labelEuros(2_460_000), labelEuros(1_953_000), labelEuros(700_000), labelEuros(85_000)]).toEqual(["24,6 k€", "19,5 k€", "7,0 k€", "850 €"]);
+  });
+  it("étiquette de barre trop large pour la barre : omise (la valeur reste dans l'infobulle et la lecture au clavier)", () => {
+    const wide = renderToStaticMarkup(h(BarChart, { testid: "t", label: "Test", unit: "eur", categories: Array.from({ length: 12 }, (_, i) => `m${i}`), series: [{ key: "s", name: "S", values: Array(12).fill(1_953_000) }] }));
+    expect(wide).not.toContain('class="val"');
+    expect(wide).toContain("19");
   });
 });

@@ -35,6 +35,11 @@ export function DonutChart(p: DonutProps) {
   const size = Math.min(220, Math.max(140, width * 0.5));
   const r = size / 2 - 4;
   const slices = sliceAngles(known.map((x) => x.value));
+  // Total au centre : exact s'il tient dans le trou (rayon intérieur = 0,6 × rayon), sinon version compacte.
+  const hole = r * 0.6 * 2 - 10;
+  const exact = u.fmt(total);
+  const centerText = exact.length * 8.6 <= hole ? exact : exact.length * 7.2 <= hole ? exact : u.label(total);
+  const centerFont = exact.length * 8.6 <= hole ? 15 : exact.length * 7.2 <= hole ? 12.5 : 13;
   const pct = (v: number) => fmtPercent({ num: v, den: total });
   const tipOf = (i: number): Tip => ({ x: size / 2, y: 8, title: known[i].name, rows: [{ color: colorOf(i, known[i].color), name: "Valeur", value: u.fmt(known[i].value), strong: true }, { name: "Part", value: pct(known[i].value) }] });
   return (
@@ -44,7 +49,7 @@ export function DonutChart(p: DonutProps) {
           <div className="donut-svg" style={{ width: size, height: size }}>
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="group" aria-label={p.label}>
               {slices.map((s, k) => (
-                <path key={known[s.index].key} d={arcPath(size / 2, size / 2, r, r * 0.6, s.start, s.end)} fill={colorOf(s.index, known[s.index].color)} stroke="#fff" strokeWidth={known.length > 1 ? 2 : 0} opacity={on !== null && on !== s.index ? 0.5 : 1} tabIndex={rov.tab(k)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${known[s.index].name} : ${u.fmt(known[s.index].value)}, ${pct(known[s.index].value)}`}
+                <path key={known[s.index].key} d={arcPath(size / 2, size / 2, r, r * 0.6, s.start, s.end)} fill={colorOf(s.index, known[s.index].color)} stroke="#fff" strokeWidth={known.length > 1 ? 2 : 0} fillRule="evenodd" opacity={on !== null && on !== s.index ? 0.5 : 1} tabIndex={rov.tab(k)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${known[s.index].name} : ${u.fmt(known[s.index].value)}, ${pct(known[s.index].value)}`}
                   onMouseEnter={() => { setOn(s.index); setTip(tipOf(s.index)); }} onFocus={() => { setOn(s.index); setTip(tipOf(s.index)); }} onBlur={() => { setOn(null); setTip(null); }} data-slice={k} />
               ))}
               <text x={size / 2} y={size / 2 - 2} textAnchor="middle" className="donut-total">{u.fmt(total)}</text>

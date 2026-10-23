@@ -52,9 +52,12 @@ export function barLayout(o: { series: Cell[][]; categories: number; mode: "grou
   const y = (v: number) => plotH - ((v - yMin) / span) * plotH;
   const bars: Bar[] = [];
   const nSer = Math.max(1, series.length);
-  const barW = mode === "stacked" ? inner : Math.max(1, (inner - (nSer - 1) * 2) / nSer);
+  // Largeur plafonnée (72 px au total par catégorie) : une barre unique ne s'étale pas sur toute la largeur de la carte.
+  const MAX_GROUP = 72 * Math.max(1, mode === "stacked" ? 1 : Math.min(nSer, 3));
+  const used = Math.min(inner, MAX_GROUP);
+  const barW = mode === "stacked" ? used : Math.max(1, (used - (nSer - 1) * 2) / nSer);
   for (let c = 0; c < categories; c++) {
-    const x0 = c * band + (band - inner) / 2;
+    const x0 = c * band + (band - used) / 2;
     let up = 0;
     let down = 0;
     series.forEach((s, i) => {
@@ -123,10 +126,13 @@ export function sliceAngles(values: number[]): Slice[] {
 }
 
 export function arcPath(cx: number, cy: number, rOuter: number, rInner: number, start: number, end: number): string {
-  // Un secteur unique de 100 % : deux demi-arcs (un arc de 360° est dégénéré en SVG).
-  const full = end - start >= Math.PI * 2 - 1e-9;
-  const e = full ? start + Math.PI * 2 - 1e-4 : end;
+  // Un secteur de 100 % : deux demi-arcs par cercle (un arc de 360° est dégénéré en SVG, et deux points confondus à l'arrondi
+  // font disparaître l'arc intérieur : le trou de l'anneau). À dessiner avec fill-rule evenodd.
+  if (end - start >= Math.PI * 2 - 1e-9) {
+    const ring = (r: number, sweep: 0 | 1) => `M ${cx} ${(cy - r).toFixed(2)} A ${r} ${r} 0 1 ${sweep} ${cx} ${(cy + r).toFixed(2)} A ${r} ${r} 0 1 ${sweep} ${cx} ${(cy - r).toFixed(2)} Z`;
+    return `${ring(rOuter, 1)} ${ring(rInner, 0)}`;
+  }
   const p = (r: number, a: number) => `${(cx + r * Math.sin(a)).toFixed(2)} ${(cy - r * Math.cos(a)).toFixed(2)}`;
-  const large = e - start > Math.PI ? 1 : 0;
-  return `M ${p(rOuter, start)} A ${rOuter} ${rOuter} 0 ${large} 1 ${p(rOuter, e)} L ${p(rInner, e)} A ${rInner} ${rInner} 0 ${large} 0 ${p(rInner, start)} Z`;
+  const large = end - start > Math.PI ? 1 : 0;
+  return `M ${p(rOuter, start)} A ${rOuter} ${rOuter} 0 ${large} 1 ${p(rOuter, end)} L ${p(rInner, end)} A ${rInner} ${rInner} 0 ${large} 0 ${p(rInner, start)} Z`;
 }

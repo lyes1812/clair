@@ -1,5 +1,5 @@
 "use client";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { niceTicks } from "./scale";
 import { unitFormat, type UnitName } from "./units";
 import { Frame, labelWidth, TipBox, useRoving, useWidth, type Tip } from "./shared";
@@ -17,12 +17,11 @@ export type WaterfallProps = {
   note?: string;
 };
 
-// Cascade (pont) : départ, contributions signées, arrivée. Hausse pleine bleue, baisse hachurée, totaux en noir ; chaque
+// Cascade (pont) : départ, contributions signées, arrivée. Hausse pleine bleue, baisse en aplat gris, totaux en noir ; chaque
 // barre porte sa valeur signée en clair, le sens ne dépend donc pas de la couleur. La baisse n'est pas peinte en rouge : aucune
-// règle métier ne dit qu'une baisse est « défavorable » (elle est hachurée, en teinte neutre). L'axe est tronqué quand les contributions
+// règle métier ne dit qu'une baisse est « défavorable » (aplat gris à contour noir ; la hachure est réservée aux valeurs n.d.). L'axe est tronqué quand les contributions
 // sont petites devant les totaux ; la troncature est écrite sous le graphique.
 export function WaterfallChart(p: WaterfallProps) {
-  const uid = useId().replace(/:/g, "");
   const [ref, width] = useWidth();
   const [tip, setTip] = useState<Tip | null>(null);
   const [on, setOn] = useState<number | null>(null);
@@ -46,25 +45,26 @@ export function WaterfallChart(p: WaterfallProps) {
   const left = labelWidth(t.ticks.map(axisFmt));
   const right = 10;
   const topM = 22;
-  const bottomM = 44;
+  const narrow = (width - left - right) / n < 78;
+  const bottomM = narrow ? 84 : 44;
   const plotW = Math.max(60, width - left - right);
   const plotH = H - topM - bottomM;
   const band = plotW / n;
   const barW = Math.min(64, band * 0.62);
   const Y = (v: number) => plotH - ((v - t.min) / (t.max - t.min || 1)) * plotH;
+  // Bande étroite : libellés complets inclinés à -40° (jamais deux libellés qui se touchent) et valeurs en version courte.
   const short = (s: string) => {
-    const max = Math.max(8, Math.floor(band / 6.2));
+    if (narrow) return s.length > 22 ? `${s.slice(0, 21)}…` : s;
+    const max = Math.max(8, Math.floor(band / 5.4));
     return s.length > max ? `${s.slice(0, max - 1)}…` : s;
   };
+  const valText = (v: number, signed: boolean) => (narrow ? `${signed && v > 0 ? "+" : ""}${u.label(v)}` : `${signed && v > 0 ? "+" : ""}${u.fmt(v)}`);
   const tipOf = (i: number): Tip => ({ x: left + i * band + band / 2, y: topM, title: bars[i].label, rows: [{ name: bars[i].kind === "total" ? "Valeur" : "Contribution", value: bars[i].text, strong: true }] });
   const note = [p.note, truncated ? `Axe tronqué : il commence à ${axisFmt(Math.round(t.min))}.` : null].filter(Boolean).join(" ");
   return (
-    <Frame testid={p.testid} title={p.title} note={note || undefined} legend={<ul className="chart-legend" aria-label="Légende"><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-ink)" }} />Total</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-1)" }} />Hausse</span></li><li><span className="legend-btn static"><i className="swatch hatch" />Baisse</span></li></ul>}>
+    <Frame testid={p.testid} title={p.title} note={note || undefined} legend={<ul className="chart-legend" aria-label="Légende"><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-ink)" }} />Total</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-1)" }} />Hausse</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-5)", border: "1px solid var(--chart-ink)" }} />Baisse</span></li></ul>}>
       <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setOn(null); }}>
         <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={p.label}>
-          <defs>
-            <pattern id={`hd-${uid}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff" /><rect width="3" height="6" fill="var(--chart-2)" /></pattern>
-          </defs>
           <g transform={`translate(${left},${topM})`}>
             {t.ticks.map((v) => (
               <g key={v}>
@@ -81,9 +81,9 @@ export function WaterfallChart(p: WaterfallProps) {
               const x = i * band + (band - barW) / 2;
               return (
                 <g key={`${b.label}-${i}`} opacity={on !== null && on !== i ? 0.55 : 1}>
-                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? "var(--chart-1)" : `url(#hd-${uid})`} stroke={b.kind === "down" ? "var(--chart-2)" : "none"} rx={2} />
-                  <text x={x + barW / 2} y={a - 5} textAnchor="middle" className="val">{b.text}</text>
-                  <text x={x + barW / 2} y={plotH + 16} textAnchor="middle" className="tick cat">{short(b.label)}</text>
+                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? "var(--chart-1)" : "var(--chart-5)"} stroke={b.kind === "down" ? "var(--chart-ink)" : "none"} rx={2} />
+                  <text x={x + barW / 2} y={a - 5} textAnchor="middle" className="val">{valText(b.value, b.kind !== "total")}</text>
+                  <text className="tick cat" textAnchor={narrow ? "end" : "middle"} transform={narrow ? `translate(${x + barW / 2 + 4},${plotH + 14}) rotate(-40)` : `translate(${x + barW / 2},${plotH + 16})`}>{short(b.label)}</text>
                   <rect x={i * band} y={-topM} width={band} height={plotH + topM + bottomM - 4} fill="transparent" tabIndex={rov.tab(i)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${b.label} : ${b.text}`}
                     onMouseEnter={() => { setOn(i); setTip(tipOf(i)); }} onFocus={() => { setOn(i); setTip(tipOf(i)); }} onBlur={() => { setOn(null); setTip(null); }} />
                 </g>

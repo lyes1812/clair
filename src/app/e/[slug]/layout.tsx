@@ -1,4 +1,5 @@
 import { Brand } from "@/components/AuthCard";
+import { SidebarDrawer } from "@/components/SidebarDrawer";
 import { WorkspaceNav } from "@/components/WorkspaceNav";
 import { WorkspaceTopBar } from "@/components/WorkspaceTopBar";
 import { menuFamilies } from "@/lib/menu";
@@ -20,18 +21,20 @@ export default async function WorkspaceLayout({
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar-brand"><Brand /></div>
-        <a className="ws-card" href="/espaces" title="Changer d'espace">
-          <span className="ws-mark" aria-hidden="true">{workspace.name.trim()[0]?.toUpperCase() ?? "?"}</span>
-          <span className="ws">
-            <span className="ws-name" data-testid="workspace-name">{workspace.name}</span>
-            <span className="desc">{ROLE_LABELS[workspace.role]}</span>
-          </span>
-        </a>
-        <WorkspaceNav slug={slug} />
-        <div className="sidebar-foot">
-          <p><span className="dot" aria-hidden="true" />Lecture seule des sources</p>
-          <p className="muted">PayFit dit ce qui s'est passé. Clair dit ce qui va se passer.</p>
-        </div>
+        <SidebarDrawer>
+          <a className="ws-card" href="/espaces" title="Changer d'espace">
+            <span className="ws-mark" aria-hidden="true">{workspace.name.trim()[0]?.toUpperCase() ?? "?"}</span>
+            <span className="ws">
+              <span className="ws-name" data-testid="workspace-name">{workspace.name}</span>
+              <span className="desc">{ROLE_LABELS[workspace.role]}</span>
+            </span>
+          </a>
+          <WorkspaceNav slug={slug} />
+          <div className="sidebar-foot">
+            <p><span className="dot" aria-hidden="true" />Lecture seule des sources</p>
+            <p className="muted">PayFit dit ce qui s'est passé. Clair dit ce qui va se passer.</p>
+          </div>
+        </SidebarDrawer>
       </aside>
       <div className="shell-main">
         <WorkspaceTopBar slug={slug} workspaceName={workspace.name} userName={session.user.name} email={session.user.email} families={menuFamilies(slug)} />

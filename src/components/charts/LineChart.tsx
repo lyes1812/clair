@@ -32,7 +32,9 @@ export function LineChart(p: LineChartProps) {
   const lo = all.length ? Math.min(...all) : 0;
   const hi = all.length ? Math.max(...all) : 1;
   const zero = p.zero ?? false;
-  const t = niceTicks(zero ? Math.min(0, lo) : lo - (hi - lo) * 0.08, zero ? Math.max(0, hi) : hi + (hi - lo) * 0.08, 5, u.integer);
+  // Étendue minimale (unité) : une série constante ou nulle garde des graduations distinctes.
+  const flat = hi - lo < u.minSpan;
+  const t = niceTicks(zero ? Math.min(0, lo) : flat ? lo - u.minSpan / 2 : lo - (hi - lo) * 0.08, zero ? Math.max(0, hi, lo + u.minSpan) : flat ? hi + u.minSpan / 2 : hi + (hi - lo) * 0.08, 5, u.integer);
   const truncated = !zero && t.min > 0;
   const nCat = p.categories.length;
   const H = p.height ?? 260;
