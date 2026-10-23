@@ -9,7 +9,7 @@ import { parsePayfitHistoryMode, setHeadcountNatures, setPayfitHistoryMode } fro
 import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
 import { requireWorkspace } from "@/lib/workspace";
 import { setProrata } from "@/lib/budget/settings";
-import { setCategoryNatures } from "@/lib/budget/categories";
+import { setCategoryNatures, setContractCategories } from "@/lib/budget/categories";
 import { CATEGORY_IDS } from "@/lib/budget/types";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -149,4 +149,25 @@ export async function saveCategoryNatures(slug: string, _prev: FormState, formDa
   }
   revalidatePath(`/e/${slug}`, "layout");
   return { ok: "Catégories de contrat enregistrées (scénarios créés ensuite)." };
+}
+
+// Corrections de catégorie contrat par contrat : un champ « c:<identifiant du contrat> » par contrat listé ; vide = selon la nature.
+// Les corrections des contrats non listés (anciens contrats) sont conservées.
+export async function saveContractCategories(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  const { getContractCategories } = await import("@/lib/budget/categories");
+  const current = await getContractCategories(workspace.id);
+  const listed = new Set(formData.getAll("listed").map(String));
+  const next: Record<string, string> = Object.fromEntries(Object.entries(current).filter(([k]) => !listed.has(k)));
+  for (const k of listed) {
+    const v = String(formData.get(`c:${k}`) ?? "");
+    if (v) next[k] = v;
+  }
+  try {
+    await setContractCategories(workspace.id, next, session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: "Catégories par contrat enregistrées (KPI RH et scénarios créés ensuite)." };
 }

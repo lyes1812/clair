@@ -1,11 +1,13 @@
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, monthEnd } from "@/lib/dates";
+import { categoryMonth, getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
+import { CATEGORY_IDS, CATEGORY_LABELS, type CategoryId } from "@/lib/budget/types";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
 import { coverageAt, gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
 import { KPI_DETAIL_IDS, kpiDashboard, kpiDetail } from "@/lib/rh/kpi/dashboard";
-import { fmtDelta, fmtFraction, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
+import { fmtDelta, fmtEtp4, fmtFraction, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { civilWindow, closedMonths, defaultYear, lastClosedMonth, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
 import type { Compared, KpiDetailId, KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
 import { loadKpiContext } from "@/lib/rh/kpi-context";
@@ -271,6 +273,9 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const toCur = t.turnover.current;
   const absCur = t.absenteeism.current;
 
+  const [catNatures, catOverrides] = await Promise.all([getCategoryNatures(ctx.collab.workspace.id), getContractCategories(ctx.collab.workspace.id)]);
+  const catMonths = w.months.map((m) => categoryMonth(ctx.input!, m, catNatures.natures, catOverrides));
+  const catKeys = [...CATEGORY_IDS, "nc"].filter((k) => catMonths.some((c) => c.kind === "value" && c.byCategory[k]));
   return (
     <KpiHeader ctx={ctx} closedMonth={last}>
       <PayfitNotice ctx={ctx} />
@@ -462,6 +467,38 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           Ligne « Période » : valeurs des indicateurs ci-dessus (moyennes de fin de mois, mouvements comptés, somme des jours), jamais une moyenne de colonne recalculée par l'écran.
         </p>
         <NdReasons items={ndItems} />
+      </section>
+
+      <section className="panel" data-testid="kpi-categories">
+        <h2>Effectif et ETP par catégorie <span className="desc">— fin de mois ; CDI, CDD, apprenti, stagiaire</span></h2>
+        <div className="table-wrap">
+          <table className="data-table" data-testid="kpi-categories-table">
+            <thead>
+              <tr><th>Mois</th>{catKeys.map((k) => <th key={k} className="num">{k === "nc" ? "Non classé" : CATEGORY_LABELS[k as CategoryId]}</th>)}<th className="num">Total</th></tr>
+            </thead>
+            <tbody>
+              {catMonths.map((c) => (
+                <tr key={c.month} data-month={c.month}>
+                  <td>{c.month}</td>
+                  {c.kind === "nd" ? (
+                    <td colSpan={catKeys.length + 1} className="nd wrap">n.d. — {c.reason}</td>
+                  ) : (
+                    <>
+                      {catKeys.map((k) => {
+                        const x = c.byCategory[k];
+                        return <td key={k} className="num" data-col={k}>{x ? `${c.lowerBound ? "≥ " : ""}${x.headcount} · ${x.etp4 === null ? "ETP n.d." : `${fmtEtp4(x.etp4)} ETP`}` : "—"}</td>;
+                      })}
+                      <td className="num" data-col="total">{c.lowerBound ? "≥ " : ""}{Object.values(c.byCategory).reduce((n, x) => n + x.headcount, 0)} · {Object.values(c.byCategory).some((x) => x.etp4 === null) ? "ETP n.d." : `${fmtEtp4(Object.values(c.byCategory).reduce((n, x) => n + (x.etp4 ?? 0), 0))} ETP`}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="desc">
+          Catégorie proposée depuis la nature du contrat, corrigée contrat par contrat dans <a href={`/e/${slug}/parametres#projection`}>Paramètres › Catégories de contrat</a> (PayFit code certains apprentis en CDD). La somme des catégories est l'ETP contractuel de fin de mois ci-dessus ; « non classé » : nature sans catégorie.
+        </p>
       </section>
 
       {detail && detailId && (

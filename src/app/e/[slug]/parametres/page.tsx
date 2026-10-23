@@ -20,7 +20,11 @@ import { gridRubrics } from "@/lib/payroll/grid";
 import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
 import { ProrataForm } from "./ProrataForm";
 import { CategoryNaturesForm } from "./CategoryNaturesForm";
-import { getCategoryNatures } from "@/lib/budget/categories";
+import { categoryOfNature, getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
+import { ContractCategoriesForm } from "./ContractCategoriesForm";
+import { loadCollabContext } from "@/lib/rh/view";
+import { contractNatureLabel } from "@/lib/dsn/labels";
+import { personLabel } from "@/lib/rh/view";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +47,20 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const serviceAxis = await getServiceAxis(workspace.id, axes);
   const [natures, row, history, historyAt, payroll, projection] = await Promise.all([getHeadcountNatures(workspace.id), updatedAt(HEADCOUNT_NATURES_KEY), getPayfitHistoryMode(workspace.id), updatedAt(PAYFIT_HISTORY_KEY), getPayrollGrid(workspace.id), getConventions(workspace.id)]);
   const categories = await getCategoryNatures(workspace.id);
+  const overrides = await getContractCategories(workspace.id);
+  const collab = await loadCollabContext(slug);
+  const ref = collab.data?.build.referenceDate ?? null;
+  const persons = new Map((collab.data?.persons ?? []).map((p) => [p.personKey, p]));
+  const contractRows = (collab.data?.contracts ?? [])
+    .filter((c) => c.endDate === null || ref === null || c.endDate >= ref)
+    .map((c) => ({
+      id: c.externalId,
+      label: (c.personKey ? personLabel(persons.get(c.personKey)) : null) ?? c.externalId,
+      natureLabel: c.nature ? contractNatureLabel(c.nature) : "nature n.d.",
+      proposed: categoryOfNature(c.nature, categories.natures),
+      chosen: overrides[c.externalId] ?? null,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <>
@@ -133,6 +151,9 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           {categories.origin === "default" ? "Valeur proposée (nomenclature DSN : 01 CDI, 02 CDD, 29 convention de stage), modifiable. Aucun code n'est rattaché à « apprenti » : PayFit code certains apprentis en CDD, corrigez-les salarié par salarié dans le scénario." : "Modifié par un administrateur."} Un contrat dont la nature n'est dans aucune catégorie est « non classé ».
         </p>
         <CategoryNaturesForm slug={slug} natures={categories.natures} disabled={!isAdmin} />
+        <h4>Correction contrat par contrat</h4>
+        <p className="desc">Pour les cas que la nature ne distingue pas (ex. une apprentie codée CDD). Utilisée par les KPI RH et par les scénarios créés ensuite.</p>
+        <ContractCategoriesForm slug={slug} rows={contractRows} disabled={!isAdmin} />
       </section>
     </>
   );

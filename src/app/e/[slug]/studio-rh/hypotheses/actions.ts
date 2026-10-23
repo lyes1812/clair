@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { buildBase } from "@/lib/budget/base";
 import { getConventions } from "@/lib/budget/settings";
-import { getCategoryNatures } from "@/lib/budget/categories";
+import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
 import { z } from "zod";
 import { addHypothesis, BudgetError, MAX_MONTH_CENTS, createScenario, deleteBudget, deleteHypothesis, deleteScenario, duplicateScenario, freezeScenario, getScenario, saveBudget, type ScenarioKind } from "@/lib/budget/store";
 import { chainBase } from "@/lib/budget/chain";
@@ -46,7 +46,7 @@ export async function createScenarioAction(slug: string, _prev: FormState, f: Fo
   const ctx = await loadPayrollContext(slug);
   if (ctx.source !== "payfit" || !ctx.input || !ctx.read || !ctx.kpi.input) return { error: `Base indisponible : ${ctx.unavailable ?? "journal de paie PayFit et référentiel Collaborateurs requis"}.` };
   const refMonth = addMonths(firstMonth, -1);
-  const b = buildBase({ input: ctx.input, kpi: ctx.kpi.input, refMonth, lastMonth, syncId: ctx.read.syncId, readAt: ctx.read.startedAt.toISOString().slice(0, 10), conventions: conv.conventions, categoryNatures: (await getCategoryNatures(workspace.id)).natures });
+  const b = buildBase({ input: ctx.input, kpi: ctx.kpi.input, refMonth, lastMonth, syncId: ctx.read.syncId, readAt: ctx.read.startedAt.toISOString().slice(0, 10), conventions: conv.conventions, categoryNatures: (await getCategoryNatures(workspace.id)).natures, categoryOverrides: await getContractCategories(workspace.id) });
   if (b.kind === "nd") return { error: `Base figée impossible : ${b.reason}.` };
   let id: string;
   try {

@@ -156,7 +156,7 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     .map((r) => ({ key: r.key, month: String(r.data.month), accountId: String(r.data.accountId), accountName: (r.data.accountName as string) ?? null, debitCents: r.data.debitCents as number | null, creditCents: r.data.creditCents as number | null, contractId: (r.data.contractId as string) ?? null, analytic: r.data.analyticCodes as never }));
   const input = { lines, months: PAYFIT_MONTHS, openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
   const kpi = kpiInput(await payfitFixtureBuild(), DSN_ABSENCES);
-  const r = buildBase({ input, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "sync-test", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
+  const r = buildBase({ input, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "sync-test", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES, categoryOverrides: {} });
   const b = r.kind === "value" ? r.base : null;
   it("7 contrats présents fin septembre (003, CDD fini en 2025, exclu) ; base = 90 % du brut (10 % de primes sur objectif exclus), charges au taux observé", () => {
     expect(b?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
@@ -173,23 +173,23 @@ describe("base figée sur le journal PayFit fictif (profil A, référence septem
     expect(month(p, "2026-10")).toMatchObject({ brut: 1685700, charges: 528300, cost: 2214000, headcount: 7, etp4: 61000 });
   });
   it("référence janvier 2026 : 004, entré le 15 février et connu de PayFit, est repris avec une base à saisir ; contrat sur deux services → non ventilé", () => {
-    const r1 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-03", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
+    const r1 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-03", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES, categoryOverrides: {} });
     const b1 = r1.kind === "value" ? r1.base : null;
     expect(b1?.contracts.map((c) => c.externalId.slice(-3)).sort()).toEqual(["001", "002", "004", "005", "006", "007", "008"]);
     expect(b1?.contracts.find((c) => c.externalId.endsWith("004"))).toMatchObject({ base: null, baseNd: "entré le 2026-02-15, après le mois de référence : base à saisir", etp4: 10000 });
     expect(b1?.etpNote).toContain("quotités PayFit à la date de lecture");
     // Horizon arrêté en janvier : 004 (entrée en février) est gardé pour une base dérivée, hors des contrats projetés.
-    const r0 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-01", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
+    const r0 = buildBase({ input, kpi, refMonth: "2026-01", lastMonth: "2026-01", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES, categoryOverrides: {} });
     expect(r0.kind === "value" && [r0.base.contracts.length, r0.base.upcoming?.map((c) => c.externalId.slice(-3))]).toEqual([6, ["004"]]);
     // Rapprochement de janvier sur les seuls contrats présents fin janvier : pas de prime en janvier, base = masse.
     expect(b1).toMatchObject({ refMasse: 1953000, refBaseCost: 1953000 });
     const extra = { ...lines[0], key: "extra", month: "2026-09", accountId: "641100", debitCents: 0, creditCents: null, contractId: "TEST-A-CONTRACT-001", analytic: [{ type: "Service", code: "TEST-SVC-Z", value: "Z" }] as never };
-    const r2 = buildBase({ input: { ...input, lines: [...lines, extra] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES });
+    const r2 = buildBase({ input: { ...input, lines: [...lines, extra] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES, categoryOverrides: {} });
     expect(r2.kind === "value" && r2.base.contracts.find((c) => c.externalId.endsWith("001"))).toMatchObject({ service: null, serviceNd: expect.stringContaining("plusieurs services") });
   });
   it("mois de référence hors lecture ou non clos : refus avec la raison", () => {
-    expect(buildBase({ input, kpi, refMonth: "2026-10", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES })).toMatchObject({ kind: "nd", reason: expect.stringContaining("hors de la lecture") });
-    expect(buildBase({ input: { ...input, openMonths: ["2026-09"] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES })).toMatchObject({ kind: "nd", reason: expect.stringContaining("non clôturée") });
+    expect(buildBase({ input, kpi, refMonth: "2026-10", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES, categoryOverrides: {} })).toMatchObject({ kind: "nd", reason: expect.stringContaining("hors de la lecture") });
+    expect(buildBase({ input: { ...input, openMonths: ["2026-09"] }, kpi, refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: conv, categoryNatures: DEFAULT_CATEGORY_NATURES, categoryOverrides: {} })).toMatchObject({ kind: "nd", reason: expect.stringContaining("non clôturée") });
   });
 });
 
@@ -410,12 +410,33 @@ describe("jours ouvrés, congé non payé, entrée en cours de mois, catégories
     const line = (acc: string, debit: number | null, credit: number | null) => ({ key: `k${acc}${debit}`, month: "2026-09", accountId: acc, accountName: "x", debitCents: debit, creditCents: credit, contractId: c4.externalId, analytic: [] as never });
     const lines = [line("641100", 180000, null), line("645100", 72000, null)];
     const input = { lines, months: PAYFIT_MONTHS, openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: null };
-    const r = buildBase({ input, kpi: kpiInput(moved, DSN_ABSENCES), refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: ouvres, categoryNatures: DEFAULT_CATEGORY_NATURES });
+    const r = buildBase({ input, kpi: kpiInput(moved, DSN_ABSENCES), refMonth: "2026-09", lastMonth: "2026-12", syncId: "s", readAt: "2026-10-21", conventions: ouvres, categoryNatures: DEFAULT_CATEGORY_NATURES, categoryOverrides: {} });
     expect(r.kind).toBe("value");
     if (r.kind !== "value") return;
     const c = r.base.contracts.find((x) => x.externalId === c4.externalId)!;
     expect(c.base).toEqual({ salaryCents: 220000, refBrutCents: 180000, refCotisationsCents: 72000 });
     expect(c.baseNote).toContain("÷ 18/22 jours ouvrés");
     expect(c.baseNd).toBeNull();
+  });
+});
+
+describe("catégories dans les KPI RH (fixture PayFit fictive, septembre 2026)", async () => {
+  const { categoryMonth, DEFAULT_CATEGORY_NATURES: NAT } = await import("@/lib/budget/categories");
+  const { payfitFixtureBuild } = await import("./helpers/rh");
+  const { kpiInput, DSN_ABSENCES } = await import("./helpers/kpi");
+  const { etpMonthEnd } = await import("@/lib/rh/kpi/etp");
+  const kpi = kpiInput(await payfitFixtureBuild(), DSN_ABSENCES);
+  it("7 contrats permanents : CDI 7 · 6,10 ETP ; la somme des catégories égale l'ETP du KPI", () => {
+    const r = categoryMonth(kpi, "2026-09", NAT, {});
+    expect(r).toMatchObject({ kind: "value", lowerBound: false, byCategory: { cdi: { headcount: 7, etp4: 61000 } } });
+    expect(Object.keys(r.kind === "value" ? r.byCategory : {})).toEqual(["cdi"]);
+    expect(etpMonthEnd(kpi, "2026-09")).toMatchObject({ etp4: 61000 });
+  });
+  it("correction du contrat 008 (50 %) en apprenti : CDI 6 · 5,60 ETP, apprenti 1 · 0,50 ETP ; nature sans catégorie → non classé", () => {
+    const id = kpi.data.contracts.find((c) => c.externalId.endsWith("008"))!.externalId;
+    const r = categoryMonth(kpi, "2026-09", NAT, { [id]: "apprenti" });
+    expect(r.kind === "value" && r.byCategory).toEqual({ cdi: { headcount: 6, etp4: 56000 }, apprenti: { headcount: 1, etp4: 5000 } });
+    const nc = categoryMonth(kpi, "2026-09", { cdi: [], cdd: ["02"], apprenti: [], stagiaire: [] }, {});
+    expect(nc.kind === "value" && nc.byCategory).toEqual({ nc: { headcount: 7, etp4: 61000 } });
   });
 });

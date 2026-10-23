@@ -5,7 +5,7 @@ import { gateAt, headcountAt, presenceAt } from "@/lib/rh/headcount";
 import { contractEtp, etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { countedOpts } from "@/lib/rh/kpi/period";
 import type { KpiInput } from "@/lib/rh/kpi/types";
-import { categoryOfNature, type CategoryNatures } from "./categories";
+import { categoryOfContract, type CategoryNatures, type ContractCategories } from "./categories";
 import { presence, roundDiv } from "./engine";
 import { CURRENCY, type ActualMonth, type BaseContract, type BaseSnapshot, type Conventions } from "./types";
 
@@ -18,9 +18,9 @@ import { CURRENCY, type ActualMonth, type BaseContract, type BaseSnapshot, type 
 // PayFit), sans ligne de paie ou sans cotisation rattachée a une base n.d. à saisir : rien n'est reconstitué.
 export const BASE_RUBRICS = ["salaires", "stages"] as const;
 
-export type BaseInput = { input: JournalInput; kpi: KpiInput; refMonth: string; lastMonth: string; syncId: string; readAt: string; conventions: Conventions; categoryNatures: CategoryNatures };
+export type BaseInput = { input: JournalInput; kpi: KpiInput; refMonth: string; lastMonth: string; syncId: string; readAt: string; conventions: Conventions; categoryNatures: CategoryNatures; categoryOverrides: ContractCategories };
 
-export function buildBase({ input, kpi, refMonth, lastMonth, syncId, readAt, conventions, categoryNatures }: BaseInput): { kind: "value"; base: BaseSnapshot } | { kind: "nd"; reason: string } {
+export function buildBase({ input, kpi, refMonth, lastMonth, syncId, readAt, conventions, categoryNatures, categoryOverrides }: BaseInput): { kind: "value"; base: BaseSnapshot } | { kind: "nd"; reason: string } {
   if (!input.months.includes(refMonth)) return { kind: "nd", reason: `mois de référence ${refMonth} hors de la lecture PayFit appliquée` };
   if (input.openMonths.includes(refMonth)) return { kind: "nd", reason: `paie de ${refMonth} non clôturée à la lecture : le mois de référence doit être clos` };
   const ref = monthPayroll(input, refMonth);
@@ -110,7 +110,7 @@ export function buildBase({ input, kpi, refMonth, lastMonth, syncId, readAt, con
       etp4,
       etpNd,
       nature: c.nature,
-      category: categoryOfNature(c.nature, categoryNatures),
+      category: categoryOfContract(c.externalId, c.nature, categoryNatures, categoryOverrides),
       base: baseNd || !a ? null : { salaryCents: entering ? roundDiv(BigInt(a.recurring) * entering.d, entering.n) : a.recurring, refBrutCents: a.brut, refCotisationsCents: a.cot },
       baseNote: !baseNd && entering ? `entré le ${c.startDate} : salaire de ${refMonth} ramené au mois complet (÷ ${entering.n}/${entering.d} ${conventions.prorata === "ouvres" ? "jours ouvrés" : conventions.prorata === "calendaire" ? "jours calendaires" : "(aucun prorata)"})` : null,
       baseNd,
