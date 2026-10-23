@@ -1,0 +1,131 @@
+/* Collaborateurs (charte « 101 ») : en-tête de lecture, barre d'outils des listes, tableaux à en-tête et première colonne fixes,
+   pastilles d'état, frise de présence, graphique des mouvements, fiche repliable.
+   Variables et échelle typographique de globals.css / typography.css ; teintes de série de charts.css.
+   Tout est préfixé « collab- » (ou propre à la fiche) : rien ne déborde sur les autres écrans. */
+
+/* Texte réservé aux lecteurs d'écran (légende d'un tableau). */
+.collab-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.collab-panel { min-width: 0; }
+
+/* Titre d'un panneau avec sa phrase de contexte dessous. */
+.collab-title { display: grid; gap: 4px; min-width: 0; }
+.collab-title .desc { max-width: 78ch; }
+.panel-head .collab-title { flex: 1 1 320px; }
+
+/* En-tête : titre, source visible ; le détail de la lecture est replié. */
+.collab-head { display: grid; gap: 8px; }
+.collab-read-details { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.collab-read-details[open] { justify-self: stretch; }
+.collab-read-details > summary { cursor: pointer; padding: 6px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
+.collab-read-details[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
+.collab-read-details > p { padding: 10px 12px 12px; overflow-wrap: anywhere; line-height: 1.55; }
+
+/* Tuiles d'indicateurs : valeur en grand quand elle est courte, raison en texte courant quand elle est n.d. */
+.facts.collab-tiles { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.collab-tiles > .collab-tile { gap: 6px; padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 0; }
+.collab-tile dt { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
+.collab-tile dd { overflow-wrap: anywhere; line-height: 1.45; }
+.collab-tile dd.big { font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.collab-tile dd.nd { font-weight: 500; line-height: 1.5; }
+.collab-tile dd.lower { color: var(--muted); }
+.collab-tile .tile-foot { line-height: 1.45; overflow-wrap: anywhere; }
+
+/* Barre d'outils au-dessus d'un tableau : recherche sur toutes les colonnes, filtres du tableau, lignes par page. */
+.filters.collab-toolbar { align-items: flex-end; gap: 10px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.filters.collab-toolbar .field-row { flex: 0 1 190px; }
+.filters.collab-toolbar .field-row.collab-search { flex: 2 1 300px; }
+.filters.collab-toolbar .field-row.collab-size { flex: 0 0 130px; }
+.filters.collab-toolbar .btn { flex: none; }
+.collab-reset { align-self: center; font-size: var(--clair-type-form); color: var(--muted); }
+.collab-reset:hover { color: var(--blue); }
+.filters.bar.collab-bar .field-row { flex: 1 1 170px; }
+.filters.bar.collab-bar .btn { flex: none; }
+
+/* Tableaux : défilement interne, en-tête et première colonne fixes. */
+.collab-scroll { max-height: 72vh; }
+.data-table.collab-table :is(th, td) { vertical-align: middle; }
+.data-table.collab-table thead th { vertical-align: bottom; }
+.data-table.collab-table code { font-size: 11px; }
+.data-table.collab-table .col-date { font-variant-numeric: tabular-nums; }
+.data-table.collab-table td.col-wide, .data-table.collab-table th.col-wide { min-width: 170px; max-width: 340px; white-space: normal; }
+.data-table.collab-table td.col-nd { min-width: 150px; max-width: 250px; white-space: normal; }
+.data-table.collab-table tbody th { background: #fff; color: var(--ink); font-size: var(--clair-type-table-cell); font-weight: 500; }
+.data-table.collab-table :is(td, th).col-qty, .data-table.collab-table :is(td, th).col-state { min-width: 170px; white-space: normal; }
+.data-table.collab-table.collab-who :is(th, td):first-child { min-width: 230px; }
+.data-table.collab-table.sticky-first tbody tr:hover > td:first-child { background: #f7f8fb; }
+.data-table.collab-table .num { font-variant-numeric: tabular-nums; }
+.collab-contracts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.collab-contracts li { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; }
+.collab-dates { white-space: normal; }
+.collab-dates .col-date { white-space: nowrap; }
+.collab-note { font-size: var(--clair-type-label); color: var(--muted); }
+
+/* Pastilles d'état : le libellé porte l'information, la couleur la renforce. */
+.collab-pill { display: inline-flex; align-items: flex-start; gap: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font-size: var(--clair-type-label); font-weight: 600; line-height: 1.4; text-align: left; }
+.collab-pill::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 0.5em; border-radius: 50%; background: currentColor; }
+.collab-pill.s-present { color: var(--ok); background: #edf8f3; border-color: #cfe9de; }
+.collab-pill.s-entered { color: var(--blue); background: var(--blue-soft); border-color: #d6e3ff; }
+.collab-pill.s-exited { color: var(--danger); background: var(--danger-bg); border-color: #f1d6dc; }
+.collab-pill.s-alert { color: var(--danger); background: #fff; border-color: #f1d6dc; border-style: dashed; }
+.collab-pill.s-counted { color: var(--ink); background: var(--surface); }
+
+/* Frise de présence en fin de mois : douze cases, lues par trimestre. */
+.collab-strip { display: inline-flex; gap: 6px; vertical-align: middle; }
+.collab-strip .q { display: inline-grid; grid-template-columns: repeat(3, 11px); gap: 2px; }
+.collab-strip i { display: block; width: 11px; height: 16px; border: 1px solid #d8dce5; border-radius: 2px; background: #fff; }
+.collab-strip i.present { background: var(--ok); border-color: var(--ok); }
+.collab-strip i.nd { background: repeating-linear-gradient(45deg, #fff, #fff 2px, #dfe3ea 2px, #dfe3ea 4px); border-color: #c7cedd; }
+.collab-strip-scale { display: flex; margin-top: 4px; }
+.collab-strip-scale .q span { display: block; width: 11px; text-align: center; font-size: var(--clair-type-note); font-weight: 500; line-height: 1; color: var(--muted); }
+.collab-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; font-size: var(--clair-type-label); color: var(--muted); }
+.collab-legend .sw { display: inline-block; width: 11px; height: 14px; margin-right: 6px; border: 1px solid #d8dce5; border-radius: 2px; background: #fff; vertical-align: -3px; }
+.collab-legend .sw.present { background: var(--ok); border-color: var(--ok); }
+.collab-legend .sw.nd { background: repeating-linear-gradient(45deg, #fff, #fff 2px, #dfe3ea 2px, #dfe3ea 4px); border-color: #c7cedd; }
+
+/* Mouvements : graphique à gauche, tableau exact à droite (une colonne sous 1100 px). */
+.collab-chart-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(340px, 1fr); gap: 20px 28px; align-items: start; }
+.collab-chart-grid > * { min-width: 0; }
+.collab-chart-grid .table-wrap.scroll { max-height: 380px; }
+.collab-chart .chart > .nd { padding: 10px 0; }
+@media (max-width: 1100px) { .collab-chart-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Sections repliables (fiche, contrats) : une flèche, un titre, le contenu dessous. */
+.collab-fold > summary { display: flex; align-items: center; gap: 8px; padding: 4px 0; list-style: none; cursor: pointer; font-size: var(--clair-type-subheading); font-weight: 550; }
+.collab-fold > summary::-webkit-details-marker { display: none; }
+.collab-fold > summary::before { content: ""; flex: none; width: 7px; height: 7px; margin: 0 4px 2px 2px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; }
+.collab-fold[open] > summary::before { transform: rotate(45deg); margin-bottom: 4px; }
+.collab-fold > summary:focus-visible { outline: 3px solid #8aafff; outline-offset: 3px; border-radius: 4px; }
+.collab-fold > summary h2, .collab-fold > summary h3 { display: inline; font: inherit; letter-spacing: inherit; }
+.collab-fold > summary .desc { font-weight: 400; }
+.collab-fold-body { display: grid; gap: 14px; padding-top: 10px; min-width: 0; }
+.collab-fold.sub { padding-top: 14px; border-top: 1px solid var(--line); }
+.collab-fold.panel > summary { font-size: var(--clair-type-panel); letter-spacing: -0.4px; }
+.fold-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Fiche : identité, contrats, périodes. */
+.person-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px 28px; }
+.person-id { display: grid; gap: 8px; flex: 1 1 320px; min-width: 0; }
+.person-id h2 { font-size: 26px; letter-spacing: -0.6px; line-height: 1.15; overflow-wrap: anywhere; }
+.person-id h2 code { margin-left: 8px; font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; color: var(--muted); }
+.person-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: var(--clair-type-form); color: var(--muted); }
+.person-meta strong { color: var(--ink); font-weight: 600; }
+.person-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; }
+.person-stats > div { display: grid; gap: 2px; align-content: start; min-width: 150px; max-width: 260px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.person-stats dt { font-size: var(--clair-type-label); color: var(--muted); }
+.person-stats dd { margin: 0; font-size: var(--clair-type-subheading); font-weight: 600; font-variant-numeric: tabular-nums; }
+.person-stats dd.nd { font-size: var(--clair-type-form); font-weight: 500; }
+.person-stats dd.tile-foot { font-size: var(--clair-type-label); font-weight: 400; line-height: 1.4; color: var(--muted); }
+.facts.collab-facts { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0 22px; }
+.collab-facts > div { gap: 5px; padding: 10px 0 12px; border-top: 1px solid var(--line); min-width: 0; }
+.collab-facts dd { overflow-wrap: anywhere; line-height: 1.45; }
+.collab-facts .prov { display: block; width: fit-content; max-width: 100%; margin-top: 2px; padding: 0 5px; font-size: 10px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; background: transparent; }
+.collab-contract .table-wrap.scroll { max-height: 420px; }
+
+@media (max-width: 720px) {
+  .data-table.collab-table.collab-who :is(th, td):first-child { min-width: 150px; }
+  .filters.collab-toolbar .field-row, .filters.collab-toolbar .field-row.collab-search, .filters.collab-toolbar .field-row.collab-size { flex: 1 1 100%; }
+  .person-id h2 { font-size: 22px; }
+}
+
+/* Fiche : les blocs se suivent avec le même rythme que les panneaux de la page. */
+.collab-fiche { display: grid; gap: 28px; min-width: 0; }

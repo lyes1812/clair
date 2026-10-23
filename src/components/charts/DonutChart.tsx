@@ -3,7 +3,7 @@ import { useState } from "react";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import { arcPath, sliceAngles } from "./scale";
 import { unitFormat, type UnitName } from "./units";
-import { colorOf, Frame, TipBox, useWidth, type Tip } from "./shared";
+import { colorOf, Frame, TipBox, useRoving, useWidth, type Tip } from "./shared";
 
 export type Part = { key: string; name: string; value: number | null; reason?: string | null; color?: string };
 export type DonutProps = {
@@ -24,10 +24,14 @@ export function DonutChart(p: DonutProps) {
   const [ref, width] = useWidth(360);
   const [tip, setTip] = useState<Tip | null>(null);
   const [on, setOn] = useState<number | null>(null);
-  const known = p.parts.filter((x): x is Part & { value: number } => x.value !== null && x.value > 0);
+  const maxParts = p.maxParts ?? 8;
+  const positive = p.parts.filter((x): x is Part & { value: number } => x.value !== null && x.value > 0);
+  // Au-delà de maxParts : barres horizontales, classées de la plus grande à la plus petite part.
+  const known = positive.length > maxParts ? [...positive].sort((a, b) => b.value - a.value) : positive;
   const nd = p.parts.filter((x) => x.value === null);
   const total = known.reduce((s, x) => s + x.value, 0);
-  const many = known.length > (p.maxParts ?? 8);
+  const rov = useRoving(known.length);
+  const many = known.length > maxParts;
   const size = Math.min(220, Math.max(140, width * 0.5));
   const r = size / 2 - 4;
   const slices = sliceAngles(known.map((x) => x.value));
@@ -40,7 +44,7 @@ export function DonutChart(p: DonutProps) {
           <div className="donut-svg" style={{ width: size, height: size }}>
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="group" aria-label={p.label}>
               {slices.map((s, k) => (
-                <path key={known[s.index].key} d={arcPath(size / 2, size / 2, r, r * 0.6, s.start, s.end)} fill={colorOf(s.index, known[s.index].color)} stroke="#fff" strokeWidth={known.length > 1 ? 2 : 0} opacity={on !== null && on !== s.index ? 0.5 : 1} tabIndex={0} className="hit" aria-label={`${known[s.index].name} : ${u.fmt(known[s.index].value)}, ${pct(known[s.index].value)}`}
+                <path key={known[s.index].key} d={arcPath(size / 2, size / 2, r, r * 0.6, s.start, s.end)} fill={colorOf(s.index, known[s.index].color)} stroke="#fff" strokeWidth={known.length > 1 ? 2 : 0} opacity={on !== null && on !== s.index ? 0.5 : 1} tabIndex={rov.tab(k)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${known[s.index].name} : ${u.fmt(known[s.index].value)}, ${pct(known[s.index].value)}`}
                   onMouseEnter={() => { setOn(s.index); setTip(tipOf(s.index)); }} onFocus={() => { setOn(s.index); setTip(tipOf(s.index)); }} onBlur={() => { setOn(null); setTip(null); }} data-slice={k} />
               ))}
               <text x={size / 2} y={size / 2 - 2} textAnchor="middle" className="donut-total">{u.fmt(total)}</text>

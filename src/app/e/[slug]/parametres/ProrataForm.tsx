@@ -1,14 +1,14 @@
 "use client";
 import { useActionState } from "react";
+import { Feedback } from "./Feedback";
 import { saveProrata } from "./actions";
 
 export function ProrataForm({ slug, current, labels, disabled }: { slug: string; current: "calendaire" | "ouvres" | "aucun" | null; labels: Record<"calendaire" | "ouvres" | "aucun", string>; disabled: boolean }) {
   const [state, action, pending] = useActionState(saveProrata.bind(null, slug), undefined);
   return (
     <form className="form" action={action}>
-      {state?.error && <p className="error" role="alert">{state.error}</p>}
-      {state?.ok && <p className="notice" role="status">{state.ok}</p>}
-      <fieldset className="checks" disabled={disabled}>
+      <Feedback state={state} />
+      <fieldset className="checks pm-checks pm-choices" disabled={disabled}>
         <legend className="label">Prorata d'une entrée ou d'une sortie en cours de mois</legend>
         {(["calendaire", "ouvres", "aucun"] as const).map((v) => (
           <label key={v} className="check">

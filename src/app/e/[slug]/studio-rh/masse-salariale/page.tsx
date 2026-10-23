@@ -1,75 +1,66 @@
+import "@/styles/masse-salariale.css";
+import type { ReactNode } from "react";
+import { BarChart, DonutChart, LineChart } from "@/components/charts";
+import { FamilyTabs } from "@/components/FamilyTabs";
+import { ViewSwitch } from "@/components/ViewSwitch";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { PAYROLL_DEFINITIONS } from "@/lib/payroll/definitions";
 import { dsnBrutWindow } from "@/lib/payroll/dsn";
-import { costPerEtp, evolution, monthPayroll, servicesOf, shiftYear, windowPayroll, withService, type CostPerEtp, type Evolution, type JournalInput, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
+import { costPerEtp, evolution, monthPayroll, servicesOf, shiftYear, windowPayroll, withService, type CostPerEtp, type EtpMonth, type Evolution, type JournalInput, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
 import { gridRubrics } from "@/lib/payroll/grid";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
-import { Composition, eurosOf, monthShort, TrendChart } from "./components";
+import { brutCotisationsSeries, costSeries, monthsAxis, ndGroups, ndLines, reasonLines, serviceMonthSeries, servicesParts } from "@/lib/viz/masse";
+import { AFFICHAGES, ChartGuard, Composition, eurosOf, GraphFoot, isAffichage, MM, MONTH_NAMES, monthlyNote, monthShort, MsHead, NdLines, PanelTitle, PeriodBar, ReadDetails, ScrollTable, Tile, TrendChart, type Affichage } from "./components";
 import { DsnView } from "./DsnView";
-import { MS_PREVU } from "./EcartParts";
 import { FixeVariableView, PaieComptaView } from "./Lot2Views";
+import { MS_PREVU } from "./tabs";
 
 export const dynamic = "force-dynamic";
 
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/masse-salariale")!;
-const MM = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
-const MONTH_NAMES = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 
-const money = (w: PayrollWindow, pick: (x: Extract<PayrollWindow, { kind: "value" }>) => number) => (w.kind === "nd" ? `n.d. — ${w.nd.reason}` : formatEuros(pick(w)));
-const evoText = (e: Evolution) => (e.kind === "nd" ? `n.d. — ${e.nd.reason}` : e.ratio === null ? "n.d. — N-1 nul : % non défini" : `${e.ratio.num > 0 ? "+" : ""}${fmtPercent(e.ratio)}`);
+const money = (w: PayrollWindow, pick: (x: Extract<PayrollWindow, { kind: "value" }>) => number) => (w.kind === "nd" ? "n.d." : formatEuros(pick(w)));
+// Valeur d'une tuile : « n.d. » seul quand une période est n.d. (la raison est écrite une fois sous les tuiles) ; un N-1 nul garde sa raison courte.
+const evoText = (e: Evolution) => (e.kind === "nd" ? "n.d." : e.ratio === null ? "n.d. — N-1 nul : % non défini" : `${e.ratio.num > 0 ? "+" : ""}${fmtPercent(e.ratio)}`);
 const evoEuros = (e: Evolution) => (e.kind === "nd" ? "" : `${e.deltaCents > 0 ? "+" : ""}${formatEuros(e.deltaCents)}`);
-const costText = (c: CostPerEtp) => (c.kind === "nd" ? `n.d. — ${c.nd.reason}` : eurosOf(c.costCents));
+const costText = (c: CostPerEtp) => (c.kind === "nd" ? "n.d." : eurosOf(c.costCents));
 const cell = (r: MonthPayroll, pick: (x: Extract<MonthPayroll, { kind: "value" }>) => number) => (r.kind === "nd" ? "n.d." : formatEuros(pick(r)));
-
-function Header({ children }: { children?: React.ReactNode }) {
-  return (
-    <>
-      <div style={{ display: "grid", gap: 8 }}>
-        <span className="label">Studio RH</span>
-        <h1>{ITEM.label}</h1>
-        <p className="desc">{ITEM.summary}</p>
-      </div>
-      {children}
-    </>
-  );
-}
 
 export default async function MasseSalarialePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
   const sp = await searchParams;
   const ctx = await loadPayrollContext(slug);
   const base = `/e/${slug}/studio-rh/masse-salariale`;
-  if (ctx.source === "dsn") {
-    return (
-      <Header>
-        <DsnView slug={slug} dsn={ctx.dsn} sp={{ annee: one(sp.annee), de: one(sp.de), a: one(sp.a) }} />
-      </Header>
-    );
-  }
+  if (ctx.source === "dsn") return <DsnView slug={slug} dsn={ctx.dsn} sp={{ annee: one(sp.annee), de: one(sp.de), a: one(sp.a), affichage: one(sp.affichage) }} />;
+  const head = (children?: ReactNode) => <MsHead title={ITEM.label} summary={ITEM.summary}>{children}</MsHead>;
   const gridOrigin = ctx.grid.origin === "default" ? "valeur par défaut validée le 22/10/2026" : `modifiée le ${ctx.grid.updatedAt ? dateTimeFmt.format(ctx.grid.updatedAt) : "n.d."}`;
   const sourceLine = ctx.read ? (
-    <p className="desc" data-testid="ms-source">
-      Source : journal comptable de paie PayFit — lecture du {dateTimeFmt.format(ctx.read.startedAt)} · mois lus {ctx.read.months[0] ?? "n.d."} → {ctx.read.months.at(-1) ?? "n.d."} · grille de comptes : {gridOrigin} (
-      <a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>)
+    <p className="desc ms-source" data-testid="ms-source">
+      Source : <strong>journal comptable de paie PayFit</strong> — lecture du {dateTimeFmt.format(ctx.read.startedAt)} · mois lus {ctx.read.months[0] ?? "n.d."} → {ctx.read.months.at(-1) ?? "n.d."}
     </p>
   ) : null;
+  const gridLine = (
+    <p className="ms-read-line" data-testid="ms-grid-origin">
+      Grille de comptes : {gridOrigin} (<a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>)
+    </p>
+  );
   const fullInput = ctx.input;
   if (!fullInput) {
     return (
-      <Header>
-        {sourceLine}
+      <>
+        {head(<>{sourceLine}{ctx.read && <ReadDetails>{gridLine}</ReadDetails>}</>)}
         <section className="placeholder" data-testid="ms-nd">
           <h3>n.d. — {ctx.unavailable}</h3>
           <p className="muted">La masse salariale réelle suit la source RH retenue : journal comptable de paie PayFit (API) ou DSN déposées. <a href={`/e/${slug}/donnees`}>Données</a></p>
         </section>
-      </Header>
+      </>
     );
   }
 
@@ -78,12 +69,12 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const last = closed.at(-1) ?? valueMonths.at(-1) ?? null;
   if (!last) {
     return (
-      <Header>
-        {sourceLine}
+      <>
+        {head(<>{sourceLine}<ReadDetails>{gridLine}</ReadDetails></>)}
         <section className="placeholder" data-testid="ms-nd">
           <h3>n.d. — aucun mois de journal de paie dans la lecture appliquée</h3>
         </section>
-      </Header>
+      </>
     );
   }
 
@@ -97,6 +88,12 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const rawVue = one(sp.vue);
   const vue: keyof typeof VUES = Object.hasOwn(VUES, rawVue) ? (rawVue as keyof typeof VUES) : "synthese";
   if (rawVue && !Object.hasOwn(VUES, rawVue)) ignore("vue", rawVue, "vues : synthese, fixe-variable, paie-compta");
+  // Affichage : tout, graphiques seuls ou tableaux seuls (comme Écart budgétaire).
+  const rawAff = one(sp.affichage);
+  const aff: Affichage = isAffichage(rawAff) ? rawAff : "tout";
+  if (rawAff && !isAffichage(rawAff)) ignore("affichage", rawAff, `valeurs : ${AFFICHAGES.join(", ")}`);
+  const showGraph = aff !== "tableau";
+  const showTable = aff !== "graphique";
   const rawService = one(sp.service);
   const knownServices = ctx.service.axis ? servicesOf(fullInput, fullInput.months) : [];
   const serviceValue: string | null | undefined = !rawService ? undefined : rawService === NV && knownServices.includes(null) ? null : knownServices.includes(rawService) ? rawService : undefined;
@@ -141,7 +138,14 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   for (const r of cur.months) if (r.kind === "value") for (const a of r.unclassified) unclassified.set(a.accountId, { name: a.accountName, cents: (unclassified.get(a.accountId)?.cents ?? 0) + a.balanceCents });
   const svcParam = serviceValue === undefined ? "" : `&service=${encodeURIComponent(serviceValue ?? NV)}`;
   const vueParam = vue === "synthese" ? "" : `&vue=${vue}`;
-  const q = (y: number, de: string, a: string, extra = "", svc = svcParam, v = vueParam) => `${base}?annee=${y}&de=${de}&a=${a}${svc}${v}${extra}`;
+  const affQ = (a: Affichage) => (a === "tout" ? "" : `&affichage=${a}`);
+  // Adresse de l'écran : année, mois, service, onglet et affichage courants, sauf ce que l'appel remplace.
+  const href = (o: { y?: number; de?: string; a?: string; svc?: string; v?: string; aff?: Affichage; extra?: string } = {}) =>
+    `${base}?annee=${o.y ?? year}&de=${o.de ?? from}&a=${o.a ?? to}${o.svc ?? svcParam}${o.v ?? vueParam}${affQ(o.aff ?? aff)}${o.extra ?? ""}`;
+  const resetQuery = new URLSearchParams();
+  if (vue !== "synthese") resetQuery.set("vue", vue);
+  if (aff !== "tout") resetQuery.set("affichage", aff);
+  const resetHref = `${base}${resetQuery.toString() ? `?${resetQuery.toString()}` : ""}`;
   // Table par service (toujours sur tout le journal) : la somme des services, non ventilé compris, égale le total.
   const serviceRows = ctx.service.axis
     ? servicesOf(fullInput, [...months, ...prevMonths]).map((v) => {
@@ -154,287 +158,530 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const totalCur = windowPayroll(fullInput, months);
   const masseOf = (w: PayrollWindow) => (w.kind === "value" ? w.masse : -1);
   serviceRows.sort((a, b) => (a.value === null ? 1 : b.value === null ? -1 : masseOf(b.cur) - masseOf(a.cur)));
+  const serviceNd = ctx.service.origin === "setting" ? "ventilation par service désactivée par un administrateur" : ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`;
   const presets = [
     { label: "Janv.–mars", de: "01", a: "03" },
     { label: "Janv.–juin", de: "01", a: "06" },
     { label: `Janv.–${monthShort(`${year}-${lastOfYear}`)}`, de: "01", a: lastOfYear },
     { label: `${monthShort(`${year}-${lastOfYear}`)} seul`, de: lastOfYear, a: lastOfYear },
-  ].filter((p, i, all) => p.a <= lastOfYear && all.findIndex((x) => x.de === p.de && x.a === p.a) === i);
+  ]
+    .filter((p, i, all) => p.a <= lastOfYear && all.findIndex((x) => x.de === p.de && x.a === p.a) === i)
+    .map((p) => ({ label: p.label, href: href({ de: p.de, a: p.a }), current: p.de === from && p.a === to }));
   // Contrôle DSN : affiché sur le total entreprise seulement (la DSN ne porte pas le code analytique du journal).
   const showDsn = serviceValue === undefined && [...months, ...prevMonths].some((m) => ctx.dsn.has(m));
   const etpSum = (c: CostPerEtp) => (c.kind === "value" ? `${fmtEtp4(c.etpMonths4)} ETP-mois` : "");
+  // Coût par ETP n.d. à cause des ETP : mois regroupés par raison identique (au lieu d'une phrase par mois).
+  const costReason = (c: CostPerEtp, etp: EtpMonth[]) =>
+    c.kind !== "nd" ? null : c.nd.code === "etp-nd" ? `ETP fin de mois — ${ndLines(ndGroups(etp.map((e) => ({ month: e.month, reason: e.etp4 === null ? (e.reason ?? "n.d.") : null })))).join(" ; ")}` : c.nd.reason;
+  // Raisons des n.d. des tuiles : écrites une fois sous les tuiles (une raison commune à plusieurs indicateurs n'est pas répétée).
+  const tileNd = reasonLines([
+    { label: `Période (${label(months)})`, reason: cur.kind === "nd" ? cur.nd.reason : null },
+    { label: `N-1 (${label(prevMonths)})`, reason: prev.kind === "nd" ? prev.nd.reason : null },
+    { label: "Coût par ETP-mois", reason: costReason(cost, etpCur) },
+    { label: "Coût par ETP-mois N-1", reason: costReason(costPrev, etpPrev) },
+  ]);
+  const openMonths = [...cur.months, ...prev.months].filter((r) => r.open).map((r) => r.month);
+  const scope = serviceValue === undefined ? "tous les services" : `service ${serviceLabel(serviceValue)}`;
+  const tableHref = href({ aff: "tableau" });
+  const detailList = detailMonth ? (months.includes(detailMonth) ? months : prevMonths) : [];
+  const detailAt = detailMonth ? detailList.indexOf(detailMonth) : -1;
+  const detailPrev = detailAt > 0 ? detailList[detailAt - 1] : null;
+  const detailNext = detailAt >= 0 && detailAt < detailList.length - 1 ? detailList[detailAt + 1] : null;
+  const detailHref = (m: string | null) => href({ extra: m ? `&mois=${m}#ms-detail` : "" });
+  // Raisons des « n.d. » du tableau mensuel (journal de paie et ETP, N et N-1), listées sous le tableau.
+  const ndList = ndLines(
+    ndGroups([
+      ...[...cur.months, ...prev.months].map((r) => ({ month: r.month, reason: r.kind === "nd" ? r.nd.reason : null })),
+      ...[...etpCur, ...etpPrev].map((e) => ({ month: e.month, reason: e.etp4 === null ? `ETP fin de mois : ${e.reason ?? "n.d."}` : null })),
+    ]),
+  );
+  // Raisons des « n.d. » du tableau service × mois : celles qui ne sont pas déjà sous le tableau mensuel (le mois d'un seul service).
+  const svcNdList = ndLines(ndGroups(serviceRows.flatMap((r) => r.cur.months.map((m) => ({ month: m.month, reason: m.kind === "nd" ? m.nd.reason : null }))))).filter((l) => !ndList.includes(l));
+  const axis = monthsAxis(months, prevMonths, openMonths);
+  const curOpen = cur.months.filter((r) => r.open).map((r) => r.month);
+  const axisN = monthsAxis(months, [], curOpen);
+  // Au-delà de neuf mois, un graphique empilé en demi-largeur n'a plus la place d'écrire les montants dans ses colonnes : pleine largeur.
+  const wide = months.length > 9 ? "ms-chart wide" : "ms-chart";
+  const svcParts = servicesParts(serviceRows.map((r) => ({ value: r.value, cur: r.cur })));
+  // Un mois n.d. d'un seul service (ligne sans montant) : la somme empilée de ce mois ne couvre pas tous les services.
+  const svcMonthNd = serviceRows.some((r) => r.cur.months.some((m) => m.kind === "nd"));
+  const svcMonthSeries = serviceMonthSeries(serviceRows.map((r) => ({ value: r.value, months: r.cur.months })));
+  const brutCotisSeries = brutCotisationsSeries(cur.months);
+  const costEtpSeries = costSeries(cur.months, etpCur, prev.months, etpPrev, { cur: `Coût par ETP ${year}`, prev: `Coût par ETP ${year - 1} (N-1)` });
 
   return (
-    <Header>
-      {sourceLine}
-      <p className="notice" data-testid="ms-raw-notice">
-        Montants tels que renvoyés par l'API PayFit (journal de paie), soldés débit − crédit. Aucun montant n'est recalculé ni reconstitué.
-      </p>
-      {notices.map((n) => (
-        <p key={n} className="notice" data-testid="ms-param-notice">{n}</p>
-      ))}
+    <>
+      {head(
+        <>
+          {sourceLine}
+          <ReadDetails>
+            <p className="notice" data-testid="ms-raw-notice">
+              Montants tels que renvoyés par l'API PayFit (journal de paie), soldés débit − crédit. Aucun montant n'est recalculé ni reconstitué.
+            </p>
+            {gridLine}
+            {cur.kind === "value" && (
+              <p className="ms-read-line" data-testid="ms-hors-masse">
+                Dans les cotisations : taxes et contributions sur les salaires {formatEuros(cur.byRubric.taxes)} · dans le brut : gratifications de stage {formatEuros(cur.byRubric.stages)} · hors masse chargée : provisions de congés payés {formatEuros(cur.byRubric["provisions-cp"])}, autres charges de personnel {formatEuros(cur.byRubric["autres-charges"])}
+              </p>
+            )}
+          </ReadDetails>
+        </>,
+      )}
 
-      <nav className="tabs" aria-label="Vues" data-testid="ms-tabs">
-        {(Object.keys(VUES) as (keyof typeof VUES)[]).map((v) => (
-          <a key={v} href={q(year, from, to, "", svcParam, v === "synthese" ? "" : `&vue=${v}`)} aria-current={v === vue ? "page" : undefined}>{VUES[v]}</a>
+      <div className="ms-controls">
+        <FamilyTabs
+          label="Vues"
+          testid="ms-tabs"
+          current={vue}
+          tabs={[
+            ...(Object.keys(VUES) as (keyof typeof VUES)[]).map((v) => ({ key: v, label: VUES[v], href: href({ v: v === "synthese" ? "" : `&vue=${v}` }) })),
+            ...MS_PREVU.map((t) => ({ key: t.key, label: t.label, href: `${base}${t.path}`, soon: true })),
+            { key: "ecart", label: "Écart budgétaire", href: `${base}/ecart` },
+            { key: "analyse", label: "Analyse des écarts", href: `${base}/analyse` },
+          ]}
+        />
+        <PeriodBar
+          years={years}
+          year={year}
+          from={from}
+          to={to}
+          hidden={{ ...(vue !== "synthese" ? { vue } : {}), ...(aff !== "tout" ? { affichage: aff } : {}) }}
+          presets={presets}
+          resetHref={resetHref}
+          service={ctx.service.axis ? { value: serviceValue === undefined ? "" : (serviceValue ?? NV), options: knownServices.map((v) => ({ value: v ?? NV, label: serviceLabel(v) })) } : undefined}
+        />
+        {notices.map((n) => (
+          <p key={n} className="notice" data-testid="ms-param-notice">{n}</p>
         ))}
-        {MS_PREVU.map((t) => <a key={t.key} href={`${base}${t.path}`}>{t.label}<span className="soon">Prévu</span></a>)}
-        <a href={`${base}/ecart`}>Écart budgétaire</a>
-        <a href={`${base}/analyse`}>Analyse des écarts</a>
-      </nav>
-      <form method="get" className="filters" data-testid="ms-filters">
-        {vue !== "synthese" && <input type="hidden" name="vue" value={vue} />}
-        <div className="field-row">
-          <label htmlFor="annee">Année</label>
-          <select className="select" id="annee" name="annee" defaultValue={String(year)}>
-            {years.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
+        <div className="ms-toolbar">
+          <p className="desc ms-period" data-testid="ms-period">
+            <strong>{label(months)}</strong> · comparé à {label(prevMonths)} (mêmes mois) · {scope}
+            {cur.kind === "value" && cur.openMonths.length > 0 && <> · paie non clôturée à la lecture : {cur.openMonths.join(", ")} (montants provisoires)</>}
+          </p>
+          <ViewSwitch
+            testid="ms-affichage"
+            label="Affichage des résultats"
+            current={aff}
+            options={[
+              { key: "tout", label: "Afficher tout", href: href({ aff: "tout" }) },
+              { key: "graphique", label: "Graphique", href: href({ aff: "graphique" }) },
+              { key: "tableau", label: "Tableau", href: tableHref },
+            ]}
+          />
         </div>
-        <div className="field-row">
-          <label htmlFor="de">Premier mois</label>
-          <select className="select" id="de" name="de" defaultValue={from}>
-            {MM.map((m, i) => <option key={m} value={m}>{MONTH_NAMES[i]}</option>)}
-          </select>
-        </div>
-        <div className="field-row">
-          <label htmlFor="a">Dernier mois</label>
-          <select className="select" id="a" name="a" defaultValue={to}>
-            {MM.map((m, i) => <option key={m} value={m}>{MONTH_NAMES[i]}</option>)}
-          </select>
-        </div>
-        {ctx.service.axis && (
-          <div className="field-row">
-            <label htmlFor="service">Service</label>
-            <select className="select" id="service" name="service" defaultValue={serviceValue === undefined ? "" : (serviceValue ?? NV)}>
-              <option value="">Tous les services</option>
-              {knownServices.map((v) => <option key={v ?? NV} value={v ?? NV}>{serviceLabel(v)}</option>)}
-            </select>
-          </div>
-        )}
-        <button className="btn" type="submit">Afficher</button>
-        <span className="actions" data-testid="ms-presets">
-          {presets.map((p) => (
-            <a key={p.label} className="btn" href={q(year, p.de, p.a)} aria-current={p.de === from && p.a === to ? "page" : undefined}>{p.label}</a>
-          ))}
-        </span>
-      </form>
-      <p className="desc" data-testid="ms-period">
-        <strong>{label(months)}</strong> · comparé à {label(prevMonths)} (mêmes mois) · {serviceValue === undefined ? "tous les services" : `service ${serviceLabel(serviceValue)}`}
-        {cur.kind === "value" && cur.openMonths.length > 0 && <> · paie non clôturée à la lecture : {cur.openMonths.join(", ")} (montants provisoires)</>}
-      </p>
+      </div>
 
-      {vue === "fixe-variable" && <FixeVariableView input={input} months={months} prevMonths={prevMonths} />}
-      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} compta={await ctx.compta()} />}
+      {vue === "fixe-variable" && <FixeVariableView input={input} months={months} prevMonths={prevMonths} aff={aff} tableHref={tableHref} />}
+      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} compta={await ctx.compta()} aff={aff} tableHref={tableHref} />}
       {vue === "synthese" && (
         <>
-      <section className="panel">
-        <h2>Vue d'ensemble — {label(months)}</h2>
-        <dl className="facts">
-          <div data-testid="ms-tile-masse">
-            <dt>Masse salariale chargée</dt>
-            <dd className={cur.kind === "nd" ? "nd" : undefined}>{money(cur, (w) => w.masse)}</dd>
-            <span className="tile-foot" data-testid="ms-tile-masse-n1">brut + cotisations patronales · N-1 : {money(prev, (w) => w.masse)}</span>
-            <span className="tile-foot"><a href="#def-masse">Définition</a></span>
-          </div>
-          <div data-testid="ms-tile-evolution">
-            <dt>Évolution vs N-1</dt>
-            <dd className={evo.kind === "nd" ? "nd" : undefined}>{evoText(evo)}</dd>
-            <span className="tile-foot">{evoEuros(evo)}{evo.kind === "value" ? ` · (N − N-1) ÷ N-1 = ${formatEuros(evo.deltaCents)} ÷ ${prev.kind === "value" ? formatEuros(prev.masse) : ""}` : ""}</span>
-            <span className="tile-foot"><a href="#def-evolution">Définition</a></span>
-          </div>
-          <div data-testid="ms-tile-cost-etp">
-            <dt>Coût par ETP-mois</dt>
-            <dd className={cost.kind === "nd" ? "nd" : undefined}>{costText(cost)}</dd>
-            <span className="tile-foot">{etpSum(cost)}{cost.kind === "value" ? " · " : ""}N-1 : {costText(costPrev)}</span>
-            {ctx.etpQualifiers.length > 0 && <span className="tile-foot" data-testid="ms-etp-qualifiers">ETP : {ctx.etpQualifiers.join(" ; ")}</span>}
-            <span className="tile-foot"><a href="#def-cout-etp">Définition</a></span>
-          </div>
-          <div data-testid="ms-tile-brut">
-            <dt>Brut</dt>
-            <dd className={cur.kind === "nd" ? "nd" : undefined}>{money(cur, (w) => w.brut)}</dd>
-            <span className="tile-foot">dont primes : {money(cur, (w) => w.byRubric.primes)} · N-1 : {money(prev, (w) => w.brut)}</span>
-            <span className="tile-foot"><a href="#def-brut">Définition</a></span>
-          </div>
-          <div data-testid="ms-tile-cotisations">
-            <dt>Cotisations patronales</dt>
-            <dd className={cur.kind === "nd" ? "nd" : undefined}>{money(cur, (w) => w.cotisations)}</dd>
-            <span className="tile-foot">taux : {rate(cur)} du brut · N-1 : {money(prev, (w) => w.cotisations)} ({rate(prev)})</span>
-            <span className="tile-foot"><a href="#def-cotisations">Définition</a></span>
-          </div>
-        </dl>
-        {cur.kind === "value" && <Composition brut={cur.brut} cotisations={cur.cotisations} />}
-      </section>
+          <section className="panel">
+            <PanelTitle title={`Vue d'ensemble — ${label(months)}`} desc={`${scope} · comparée à ${label(prevMonths)} (N-1) ; chaque chiffre renvoie à sa définition.`} />
+            <dl className="facts ms-tiles">
+              <Tile
+                testid="ms-tile-masse"
+                main
+                label="Masse salariale chargée"
+                value={money(cur, (w) => w.masse)}
+                nd={cur.kind === "nd"}
+                lead="brut + cotisations patronales"
+                compare={<span className="tile-foot" data-testid="ms-tile-masse-n1">N-1 : {money(prev, (w) => w.masse)}</span>}
+                def="masse"
+              />
+              <Tile
+                testid="ms-tile-evolution"
+                label="Évolution vs N-1"
+                value={evoText(evo)}
+                nd={evo.kind === "nd" || evo.ratio === null}
+                ndLong={evo.kind === "value" && evo.ratio === null}
+                lead={evoEuros(evo) || undefined}
+                compare={evo.kind === "value" ? <span className="tile-foot">(N − N-1) ÷ N-1 = {formatEuros(evo.deltaCents)} ÷ {prev.kind === "value" ? formatEuros(prev.masse) : ""}</span> : undefined}
+                def="evolution"
+              />
+              <Tile
+                testid="ms-tile-cost-etp"
+                label="Coût par ETP-mois"
+                value={costText(cost)}
+                nd={cost.kind === "nd"}
+                lead={etpSum(cost) || undefined}
+                compare={<span className="tile-foot">N-1 : {costText(costPrev)}</span>}
+                foot={ctx.etpQualifiers.length > 0 ? <span className="tile-foot ms-tile-note" data-testid="ms-etp-qualifiers">ETP : {ctx.etpQualifiers.join(" ; ")}</span> : undefined}
+                def="cout-etp"
+              />
+              <Tile
+                testid="ms-tile-brut"
+                label="Brut"
+                value={money(cur, (w) => w.brut)}
+                nd={cur.kind === "nd"}
+                lead={`dont primes : ${money(cur, (w) => w.byRubric.primes)}`}
+                compare={<span className="tile-foot">N-1 : {money(prev, (w) => w.brut)}</span>}
+                def="brut"
+              />
+              <Tile
+                testid="ms-tile-cotisations"
+                label="Cotisations patronales"
+                value={money(cur, (w) => w.cotisations)}
+                nd={cur.kind === "nd"}
+                lead={`taux : ${rate(cur)} du brut`}
+                compare={<span className="tile-foot">N-1 : {money(prev, (w) => w.cotisations)}{prev.kind === "value" ? ` (${rate(prev)})` : ""}</span>}
+                def="cotisations"
+              />
+            </dl>
+            <NdLines lines={tileNd} testid="ms-tiles-nd" />
+            {cur.kind === "value" && <Composition brut={cur.brut} cotisations={cur.cotisations} />}
+          </section>
 
-      <section className="panel">
-        <h2>Tendance mensuelle <span className="desc">— masse chargée en k€, {year} (noir, valeur au-dessus ; bleu clair = paie provisoire ; hachuré = n.d., raison au survol) et {year - 1} (gris)</span></h2>
-        <TrendChart rows={cur.months} previous={prev.months} />
-      </section>
-
-      {unclassified.size > 0 && (
-        <p className="notice" data-testid="ms-unclassified">
-          Comptes de charges de personnel sans rubrique (hors masse chargée) :{" "}
-          {[...unclassified.entries()].map(([id, a]) => `${id} ${a.name ?? ""} (${formatEuros(a.cents)})`).join(" · ")} — <a href={`/e/${slug}/parametres#masse-salariale`}>classer dans Paramètres</a>
-        </p>
-      )}
-
-      <section className="panel" data-testid="ms-services">
-        <h2>Services <span className="desc">— coût employeur par service ({ctx.service.axis ? `code analytique « ${ctx.service.axis} » du journal PayFit${ctx.service.origin === "single-axis" ? ", seul axe présent" : ""}` : "aucun axe"}) ; cliquer un service pour filtrer l'écran</span></h2>
-        {!ctx.service.axis ? (
-          <p className="nd" data-testid="ms-services-nd">
-            n.d. — {ctx.service.origin === "setting" ? "ventilation par service désactivée par un administrateur" : ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`} · <a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>
-          </p>
-        ) : (
-          <div className="table-wrap">
-            {ctx.axisMissing && <p className="notice" data-testid="ms-axis-missing">L'axe « {ctx.service.axis} » choisi dans Paramètres n'existe plus dans le journal appliqué : toutes les lignes sont « Non ventilé ».</p>}
-            <table className="data-table" data-testid="ms-services-table">
-              <thead>
-                <tr><th>Service</th><th className="num">Coût {year - 1}</th><th className="num">Coût {year}</th><th className="num">Écart €</th><th className="num">Écart %</th><th className="num">Hors primes {year}</th><th className="num">Primes {year}</th><th className="num">Cotisations {year}</th><th className="num">Coût / personne-mois {year}</th><th className="num">Part du coût</th></tr>
-              </thead>
-              <tbody>
-                {serviceRows.map((r) => {
-                  const c = r.cur;
-                  return (
-                    <tr key={r.value ?? NV} data-service={r.value ?? NV}>
-                      <td><a href={q(year, from, to, "", `&service=${encodeURIComponent(r.value ?? NV)}`)}>{serviceLabel(r.value)}</a></td>
-                      <td className="num" data-col="n1">{money(r.prev, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
-                      <td className="num" data-col="n">{money(c, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
-                      <td className="num" data-col="ecart">{r.evo.kind === "value" ? evoEuros(r.evo) : "n.d."}</td>
-                      <td className="num" data-col="ecart-pct">{r.evo.kind === "value" ? evoText(r.evo) : "n.d."}</td>
-                      <td className="num" data-col="hors-primes">{c.kind === "value" ? formatEuros(c.brut - c.byRubric.primes) : "n.d."}</td>
-                      <td className="num" data-col="primes">{c.kind === "value" ? formatEuros(c.byRubric.primes) : "n.d."}</td>
-                      <td className="num" data-col="cotisations">{c.kind === "value" ? formatEuros(c.cotisations) : "n.d."}</td>
-                      <td className="num" data-col="cout-pm">{c.kind === "value" && c.paidContractMonths > 0 ? eurosOf({ num: c.masse, den: c.paidContractMonths }) : "n.d."}</td>
-                      <td className="num" data-col="part">{c.kind === "value" && totalCur.kind === "value" && totalCur.masse > 0 ? fmtPercent({ num: c.masse, den: totalCur.masse }) : "n.d."}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr data-testid="ms-services-total">
-                  <td>Total</td>
-                  <td className="num">{money(windowPayroll(fullInput, prevMonths), (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
-                  <td className="num" data-col="n">{money(totalCur, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
-                  <td colSpan={7} className="tile-foot">Coût = masse chargée (brut + cotisations patronales). Coût / personne-mois = coût ÷ nombre de contrats rémunérés (ligne de brut) chaque mois ; ce n'est pas un coût par ETP.</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2>Mois par mois <span className="desc">— N-1 = même mois un an plus tôt ; cliquer un mois pour le détail par compte</span></h2>
-        <div className="table-wrap">
-          <table className="data-table" data-testid="ms-monthly-table">
-            <thead>
-              <tr>
-                <th>Mois</th><th className="num">Brut</th><th className="num">dont primes</th><th className="num">Cotisations</th><th className="num">Masse chargée</th><th className="num">Masse N-1</th><th className="num">Écart</th><th className="num">ETP fin de mois</th><th className="num">Coût / ETP</th>{showDsn && <><th className="num">Brut DSN (001)</th><th className="num">Écart journal − DSN</th></>}
-              </tr>
-            </thead>
-            <tbody>
-              {cur.months.map((r, i) => {
-                const p = prev.months[i];
-                const e = etpCur[i];
-                const diff = r.kind === "value" && p.kind === "value" ? r.masse - p.masse : null;
-                return (
-                  <tr key={r.month} data-month={r.month}>
-                    <td><a href={q(year, from, to, `&mois=${r.month}#ms-detail`)}>{formatMonth(r.month)}</a>{r.open && <span className="tile-foot"> · provisoire</span>}</td>
-                    <td className="num" data-col="brut">{r.kind === "nd" ? <span className="nd" title={r.nd.reason}>n.d.</span> : formatEuros(r.brut)}</td>
-                    <td className="num" data-col="primes">{cell(r, (x) => x.byRubric.primes)}</td>
-                    <td className="num" data-col="cotisations">{cell(r, (x) => x.cotisations)}</td>
-                    <td className="num" data-col="masse">{cell(r, (x) => x.masse)}</td>
-                    <td className="num" data-col="masse-n1"><a href={q(year, from, to, `&mois=${p.month}#ms-detail`)}>{cell(p, (x) => x.masse)}</a></td>
-                    <td className="num" data-col="ecart">{diff === null ? "n.d." : `${diff > 0 ? "+" : ""}${formatEuros(diff)}`}</td>
-                    <td className="num" data-col="etp">{e.etp4 === null ? <span className="nd" title={e.reason ?? ""}>n.d.</span> : fmtEtp4(e.etp4)}</td>
-                    <td className="num" data-col="cout-etp">{r.kind === "value" && e.etp4 ? eurosOf({ num: r.masse * 10000, den: e.etp4 }) : "n.d."}</td>
-                    {showDsn && (() => {
-                      const d = ctx.dsn.get(r.month);
-                      const b = d && d.status !== "blocked" ? d.byType["001"] : undefined;
-                      if (!d || b === undefined) return <><td className="num nd" data-col="dsn" title={d?.messages.join(" ; ")}>{!d ? "non déposée" : d.status === "blocked" ? "bloquée" : "type 001 absent"}</td><td className="num">—</td></>;
-                      return (
-                        <>
-                          <td className="num" data-col="dsn" title={d.status !== "complete" ? d.messages.join(" ; ") : undefined}>{formatEuros(b)}{d.status !== "complete" ? " ⚠" : ""}</td>
-                          <td className="num" data-col="dsn-ecart">{r.kind === "value" ? `${r.brut - b > 0 ? "+" : ""}${formatEuros(r.brut - b)}` : "n.d."}</td>
-                        </>
-                      );
-                    })()}
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr data-testid="ms-monthly-foot">
-                <td>Période</td>
-                <td className="num">{money(cur, (w) => w.brut).replace(/^n\.d\..*/, "n.d.")}</td>
-                <td className="num">{money(cur, (w) => w.byRubric.primes).replace(/^n\.d\..*/, "n.d.")}</td>
-                <td className="num">{money(cur, (w) => w.cotisations).replace(/^n\.d\..*/, "n.d.")}</td>
-                <td className="num" data-col="masse">{money(cur, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
-                <td className="num" data-col="masse-n1">{money(prev, (w) => w.masse).replace(/^n\.d\..*/, "n.d.")}</td>
-                <td className="num">{evo.kind === "value" ? evoEuros(evo) : "n.d."}</td>
-                <td className="num">{etpCur.every((e) => e.etp4 !== null) ? `${fmtEtp4(etpCur.reduce((s, e) => s + (e.etp4 ?? 0), 0))} ETP-mois` : "n.d."}</td>
-                <td className="num" data-col="cout-etp">{cost.kind === "value" ? eurosOf(cost.costCents) : "n.d."}</td>
-                {showDsn && (() => {
-                  const w = dsnBrutWindow(ctx.dsn, months);
-                  if (w.kind === "nd") return <><td className="num nd" data-col="dsn" title={w.reason}>n.d.</td><td className="num">—</td></>;
-                  const warn = w.incompleteMonths.length ? " ⚠" : "";
-                  return <><td className="num" data-col="dsn" title={w.incompleteMonths.length ? `mois incomplets : ${w.incompleteMonths.join(", ")}` : undefined}>{formatEuros(w.brutCents)}{warn}</td><td className="num" data-col="dsn-ecart">{cur.kind === "value" ? `${cur.brut - w.brutCents > 0 ? "+" : ""}${formatEuros(cur.brut - w.brutCents)}` : "n.d."}</td></>;
-                })()}
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <p className="tile-foot" data-testid="ms-dsn-control">
-          {showDsn
-            ? "Contrôle DSN : brut déclaré (rémunération S21.G00.51 de type 001, brut non plafonné) des déclarations qui font foi, tous établissements ; ⚠ = mois DSN incomplet ou bloqué. Un écart s'explique ligne par ligne dans le détail du mois."
-            : serviceValue !== undefined
-              ? "Contrôle DSN : disponible sur le total entreprise (sans filtre Service)."
-              : "Contrôle DSN : aucune DSN déposée pour ces mois — déposez-les dans Données › DSN pour comparer le brut du journal au brut déclaré."}{" "}
-          <a href={`/e/${slug}/donnees/dsn`}>Données › DSN</a>
-        </p>
-        {cur.kind === "value" && (
-          <p className="tile-foot" data-testid="ms-hors-masse">
-            Dans les cotisations : taxes et contributions sur les salaires {formatEuros(cur.byRubric.taxes)} · dans le brut : gratifications de stage {formatEuros(cur.byRubric.stages)} · hors masse chargée : provisions de congés payés {formatEuros(cur.byRubric["provisions-cp"])}, autres charges de personnel {formatEuros(cur.byRubric["autres-charges"])}
-          </p>
-        )}
-      </section>
-
-      {detail && (
-        <section className="panel" id="ms-detail" data-testid="ms-detail">
-          <h2>Détail par compte — {formatMonth(detail.month)}{detail.open ? " (provisoire)" : ""}{serviceValue !== undefined ? ` · service ${serviceLabel(serviceValue)}` : ""}</h2>
-          {detail.kind === "nd" ? (
-            <p className="nd">n.d. — {detail.nd.reason}</p>
-          ) : (
-            <div className="table-wrap">
-              <table className="data-table" data-testid="ms-detail-accounts">
-                <thead><tr><th>Compte</th><th>Libellé (PayFit)</th><th>Rubrique</th><th className="num">Débit</th><th className="num">Crédit</th><th className="num">Solde</th><th className="num">Lignes</th></tr></thead>
-                <tbody>
-                  {detail.accounts.map((a) => (
-                    <tr key={a.accountId} data-account={a.accountId}>
-                      <td>{a.accountId}</td>
-                      <td className="wrap">{a.accountName ?? <span className="nd">n.d.</span>}</td>
-                      <td>{a.rubric ? `${a.rubric.label}${a.rubric.role === "hors-masse" ? " (hors masse)" : ""}` : <span className="nd">non classé (hors masse)</span>}</td>
-                      <td className="num">{formatEuros(a.debitCents)}</td>
-                      <td className="num">{formatEuros(a.creditCents)}</td>
-                      <td className="num">{formatEuros(a.balanceCents)}</td>
-                      <td className="num">{a.lines}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr><td colSpan={5}>Brut</td><td className="num" data-testid="ms-detail-brut">{formatEuros(detail.brut)}</td><td /></tr>
-                  <tr><td colSpan={5}>Cotisations patronales</td><td className="num" data-testid="ms-detail-cotisations">{formatEuros(detail.cotisations)}</td><td /></tr>
-                  <tr><td colSpan={5}><strong>Masse salariale chargée</strong></td><td className="num" data-testid="ms-detail-masse"><strong>{formatEuros(detail.masse)}</strong></td><td /></tr>
-                </tfoot>
-              </table>
-            </div>
+          {showGraph && (
+            <section className="panel" data-testid="ms-graphs">
+              <PanelTitle title="Graphiques" desc={`${label(months)} · ${scope} · montants en euros ; l'année N est comparée au même mois un an plus tôt (N-1).`} />
+              <div className="ms-charts">
+                <div className="ms-chart wide">
+                  <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
+                </div>
+                <div className="ms-chart wide">
+                  {ctx.service.axis && serviceRows.length > 0 ? (
+                    <div className="ms-charts-split" data-testid="ms-by-service">
+                      <div className="ms-chart">
+                        <DonutChart
+                          testid="ms-chart-services"
+                          label={`Répartition de la masse chargée par service, ${label(months)}, en euros`}
+                          title={`Par service — ${label(months)}`}
+                          parts={svcParts.parts}
+                          unit="eur"
+                          centerLabel="masse chargée"
+                          note={[
+                            serviceValue !== undefined ? "Le filtre Service ne s'applique pas à ces graphiques : tous les services sont montrés, comme dans le tableau Services." : null,
+                            svcParts.omitted.length ? `Services sans coût positif, absents de l'anneau : ${svcParts.omitted.join(" ; ")}.` : null,
+                            svcParts.omitted.length || svcParts.parts.some((p) => p.value === null) ? "Les parts sont calculées sur les services tracés." : null,
+                          ].filter(Boolean).join(" ") || undefined}
+                        />
+                      </div>
+                      <div className="ms-chart">
+                        {serviceRows.length <= 8 ? (
+                          <ChartGuard testid="ms-chart-services-months" title={`Masse chargée par mois et par service — ${year}`} series={svcMonthSeries} lines={ndList}>
+                          <BarChart
+                            testid="ms-chart-services-months"
+                            label={`Masse chargée par mois et par service, ${year}, en euros`}
+                            title={`Masse chargée par mois et par service — ${year}`}
+                            categories={axisN.categories}
+                            categoryTitles={axisN.titles}
+                            series={svcMonthSeries}
+                            unit="eur"
+                            mode="stacked"
+                            toggle
+                            note={`La somme des services, non ventilé compris, est la masse chargée du mois${svcMonthNd ? " ; le « Total affiché » de l'infobulle ne compte pas un service n.d. " : ". "}${monthlyNote(curOpen)}`}
+                          />
+                          </ChartGuard>
+                        ) : (
+                          <div className="ms-nd-block" data-testid="ms-chart-services-months-nd">
+                            <h3 className="ms-sub">Masse chargée par mois et par service</h3>
+                            <p className="nd">Plus de huit services : l'empilement par mois ne tient plus lisiblement dans les huit teintes de la charte. Les montants de chaque service, mois par mois, sont dans l'affichage <a href={tableHref}>Tableau</a> ; le filtre Service isole un service.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ms-nd-block" data-testid="ms-chart-services-nd">
+                      <h3 className="ms-sub">Masse chargée par service</h3>
+                      <p className="nd">n.d. — {ctx.service.axis ? "aucune ligne de charges de personnel dans le journal sur la période" : serviceNd}</p>
+                    </div>
+                  )}
+                </div>
+                <div className={wide}>
+                  <ChartGuard testid="ms-chart-brut-cotisations" title={`Brut et cotisations patronales — ${year}`} series={brutCotisSeries} lines={ndList}>
+                    <BarChart
+                      testid="ms-chart-brut-cotisations"
+                      label={`Brut et cotisations patronales par mois, ${year}, en euros`}
+                      title={`Brut et cotisations patronales — ${year}`}
+                      categories={axisN.categories}
+                      categoryTitles={axisN.titles}
+                      series={brutCotisSeries}
+                      unit="eur"
+                      mode="stacked"
+                      toggle
+                      note={`Brut + cotisations patronales = masse chargée du mois. ${monthlyNote(curOpen)}`}
+                    />
+                  </ChartGuard>
+                </div>
+                <div className={wide}>
+                  <ChartGuard testid="ms-chart-cout-etp" title={`Coût par ETP, par mois — ${year} face à ${year - 1} (N-1)`} series={costEtpSeries} lines={ndList}>
+                    <LineChart
+                      testid="ms-chart-cout-etp"
+                      label={`Coût par ETP et par mois, ${year} et ${year - 1}, en euros`}
+                      title={`Coût par ETP, par mois — ${year} face à ${year - 1} (N-1)`}
+                      categories={axis.categories}
+                      categoryTitles={axis.titles}
+                      series={costEtpSeries}
+                      unit="eur"
+                      note={`Masse chargée du mois ÷ ETP contractuels de fin de mois (module KPI RH) ; un mois sans masse ou sans ETP exact n'est pas tracé.${ctx.etpQualifiers.length ? ` ETP : ${ctx.etpQualifiers.join(" ; ")}.` : ""}`}
+                    />
+                  </ChartGuard>
+                </div>
+              </div>
+              {!showTable && <NdLines lines={[...ndList, ...svcNdList]} testid="ms-graph-nd-reasons" />}
+              <GraphFoot aff={aff} tableHref={tableHref} />
+            </section>
           )}
-        </section>
-      )}
 
+          {unclassified.size > 0 && (
+            <p className="notice" data-testid="ms-unclassified">
+              Comptes de charges de personnel sans rubrique (hors masse chargée) :{" "}
+              {[...unclassified.entries()].map(([id, a]) => `${id} ${a.name ?? ""} (${formatEuros(a.cents)})`).join(" · ")} — <a href={`/e/${slug}/parametres#masse-salariale`}>classer dans Paramètres</a>
+            </p>
+          )}
+
+          {showTable && (
+            <>
+              <section className="panel" data-testid="ms-services">
+                <div className="panel-head">
+                  <PanelTitle
+                    title="Services"
+                    desc={`Coût employeur par service (${ctx.service.axis ? `code analytique « ${ctx.service.axis} » du journal PayFit${ctx.service.origin === "single-axis" ? ", seul axe présent" : ""}` : "aucun axe"}) ; cliquer un service pour filtrer l'écran.`}
+                  />
+                  {serviceValue !== undefined && (
+                    <div className="panel-tools">
+                      <a className="btn small" href={href({ svc: "" })}>Retirer le filtre Service</a>
+                    </div>
+                  )}
+                </div>
+                {!ctx.service.axis ? (
+                  <p className="nd" data-testid="ms-services-nd">
+                    n.d. — {serviceNd} · <a href={`/e/${slug}/parametres#masse-salariale`}>Paramètres</a>
+                  </p>
+                ) : (
+                  <>
+                    {ctx.axisMissing && <p className="notice" data-testid="ms-axis-missing">L'axe « {ctx.service.axis} » choisi dans Paramètres n'existe plus dans le journal appliqué : toutes les lignes sont « Non ventilé ».</p>}
+                    <ScrollTable label="Tableau des services">
+                      <table className="data-table sticky sticky-first ms-table" data-testid="ms-services-table">
+                        <caption className="ms-sr">Masse salariale chargée par service, {label(months)}, comparée à {label(prevMonths)}</caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Service</th>
+                            <th scope="col" className="num n1">Coût {year - 1}</th>
+                            <th scope="col" className="num">Coût {year}</th>
+                            <th scope="col" className="num">Écart €</th>
+                            <th scope="col" className="num">Écart %</th>
+                            <th scope="col" className="num">Hors primes {year}</th>
+                            <th scope="col" className="num">Primes {year}</th>
+                            <th scope="col" className="num">Cotisations {year}</th>
+                            <th scope="col" className="num">Coût / personne-mois {year}</th>
+                            <th scope="col" className="num">Part du coût</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {serviceRows.map((r) => {
+                            const c = r.cur;
+                            const isCurrent = serviceValue !== undefined && serviceValue === r.value;
+                            return (
+                              <tr key={r.value ?? NV} data-service={r.value ?? NV} className={isCurrent ? "selected" : undefined} aria-current={isCurrent ? "true" : undefined}>
+                                <td><a className="ms-detail-link" href={href({ svc: `&service=${encodeURIComponent(r.value ?? NV)}` })}>{serviceLabel(r.value)}</a></td>
+                                <td className="num n1" data-col="n1">{money(r.prev, (w) => w.masse)}</td>
+                                <td className="num" data-col="n">{money(c, (w) => w.masse)}</td>
+                                <td className="num" data-col="ecart">{r.evo.kind === "value" ? evoEuros(r.evo) : "n.d."}</td>
+                                <td className="num" data-col="ecart-pct">{r.evo.kind === "value" ? evoText(r.evo) : "n.d."}</td>
+                                <td className="num" data-col="hors-primes">{c.kind === "value" ? formatEuros(c.brut - c.byRubric.primes) : "n.d."}</td>
+                                <td className="num" data-col="primes">{c.kind === "value" ? formatEuros(c.byRubric.primes) : "n.d."}</td>
+                                <td className="num" data-col="cotisations">{c.kind === "value" ? formatEuros(c.cotisations) : "n.d."}</td>
+                                <td className="num" data-col="cout-pm">{c.kind === "value" && c.paidContractMonths > 0 ? eurosOf({ num: c.masse, den: c.paidContractMonths }) : "n.d."}</td>
+                                <td className="num" data-col="part">{c.kind === "value" && totalCur.kind === "value" && totalCur.masse > 0 ? fmtPercent({ num: c.masse, den: totalCur.masse }) : "n.d."}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr data-testid="ms-services-total">
+                            <td>Total</td>
+                            <td className="num n1">{money(windowPayroll(fullInput, prevMonths), (w) => w.masse)}</td>
+                            <td className="num" data-col="n">{money(totalCur, (w) => w.masse)}</td>
+                            <td colSpan={7} className="tile-foot ms-wrap">Coût = masse chargée (brut + cotisations patronales). Coût / personne-mois = coût ÷ nombre de contrats rémunérés (ligne de brut) chaque mois ; ce n'est pas un coût par ETP.</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </ScrollTable>
+                    <div className="ms-table-gap">
+                      <h3 className="ms-sub">Masse chargée par service et par mois</h3>
+                      <ScrollTable label="Tableau de la masse chargée par service et par mois">
+                        <table className="data-table sticky sticky-first ms-table" data-testid="ms-services-months">
+                          <caption className="ms-sr">Masse salariale chargée par service et par mois, {label(months)}</caption>
+                          <thead>
+                            <tr>
+                              <th scope="col">Service</th>
+                              {months.map((m) => <th key={m} scope="col" className="num">{monthShort(m)}</th>)}
+                              <th scope="col" className="num">Période</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {serviceRows.map((r) => (
+                              <tr key={r.value ?? NV} data-service={r.value ?? NV}>
+                                <th scope="row">{serviceLabel(r.value)}</th>
+                                {r.cur.months.map((m) => (
+                                  <td key={m.month} className="num" data-col={m.month}>{m.kind === "nd" ? <span className="nd" title={m.nd.reason}>n.d.</span> : formatEuros(m.masse)}</td>
+                                ))}
+                                <td className="num" data-col="periode">{r.cur.kind === "value" ? formatEuros(r.cur.masse) : "n.d."}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr data-testid="ms-services-months-total">
+                              <th scope="row">Total</th>
+                              {totalCur.months.map((m) => (
+                                <td key={m.month} className="num" data-col={m.month}>{m.kind === "nd" ? <span className="nd" title={m.nd.reason}>n.d.</span> : formatEuros(m.masse)}</td>
+                              ))}
+                              <td className="num" data-col="periode">{totalCur.kind === "value" ? formatEuros(totalCur.masse) : "n.d."}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </ScrollTable>
+                      <NdLines lines={svcNdList} testid="ms-services-months-nd" />
+                    </div>
+                  </>
+                )}
+              </section>
+
+              <section className="panel">
+                <PanelTitle title="Mois par mois" desc="N-1 = même mois un an plus tôt ; cliquer un mois pour le détail par compte." />
+                <ScrollTable label="Tableau mois par mois">
+                  <table className="data-table sticky sticky-first ms-table" data-testid="ms-monthly-table">
+                    <caption className="ms-sr">Masse salariale chargée mois par mois, {label(months)}, comparée à {label(prevMonths)}</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Mois</th>
+                        <th scope="col" className="num">Brut</th>
+                        <th scope="col" className="num">dont primes</th>
+                        <th scope="col" className="num">Cotisations</th>
+                        <th scope="col" className="num">Masse chargée</th>
+                        <th scope="col" className="num n1">Masse N-1</th>
+                        <th scope="col" className="num">Écart</th>
+                        <th scope="col" className="num">ETP fin de mois</th>
+                        <th scope="col" className="num n1">ETP N-1</th>
+                        <th scope="col" className="num">Coût / ETP</th>
+                        <th scope="col" className="num n1">Coût / ETP N-1</th>
+                        {showDsn && (
+                          <>
+                            <th scope="col" className="num">Brut DSN (001)</th>
+                            <th scope="col" className="num">Écart journal − DSN</th>
+                          </>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cur.months.map((r, i) => {
+                        const p = prev.months[i];
+                        const e = etpCur[i];
+                        const ep = etpPrev[i];
+                        const diff = r.kind === "value" && p.kind === "value" ? r.masse - p.masse : null;
+                        const selected = detailMonth === r.month || detailMonth === p.month;
+                        return (
+                          <tr key={r.month} data-month={r.month} className={selected ? "selected" : undefined} aria-current={selected ? "true" : undefined}>
+                            <th scope="row">
+                              <a className="ms-detail-link" href={detailHref(r.month)} aria-label={`${formatMonth(r.month)} : détail par compte`}>{formatMonth(r.month)}</a>
+                              {r.open && <span className="ms-prov">provisoire</span>}
+                            </th>
+                            <td className="num" data-col="brut">{r.kind === "nd" ? <span className="nd" title={r.nd.reason}>n.d.</span> : formatEuros(r.brut)}</td>
+                            <td className="num" data-col="primes">{cell(r, (x) => x.byRubric.primes)}</td>
+                            <td className="num" data-col="cotisations">{cell(r, (x) => x.cotisations)}</td>
+                            <td className="num" data-col="masse">{cell(r, (x) => x.masse)}</td>
+                            <td className="num n1" data-col="masse-n1"><a className="ms-detail-link" href={detailHref(p.month)} aria-label={`${cell(p, (x) => x.masse)} : détail par compte de ${formatMonth(p.month).toLowerCase()}`}>{cell(p, (x) => x.masse)}</a></td>
+                            <td className="num" data-col="ecart">{diff === null ? "n.d." : `${diff > 0 ? "+" : ""}${formatEuros(diff)}`}</td>
+                            <td className="num" data-col="etp">{e.etp4 === null ? <span className="nd" title={e.reason ?? ""}>n.d.</span> : fmtEtp4(e.etp4)}</td>
+                            <td className="num n1" data-col="etp-n1">{ep.etp4 === null ? <span className="nd" title={ep.reason ?? ""}>n.d.</span> : fmtEtp4(ep.etp4)}</td>
+                            <td className="num" data-col="cout-etp">{r.kind === "value" && e.etp4 ? eurosOf({ num: r.masse * 10000, den: e.etp4 }) : "n.d."}</td>
+                            <td className="num n1" data-col="cout-etp-n1">{p.kind === "value" && ep.etp4 ? eurosOf({ num: p.masse * 10000, den: ep.etp4 }) : "n.d."}</td>
+                            {showDsn && (() => {
+                              const d = ctx.dsn.get(r.month);
+                              const b = d && d.status !== "blocked" ? d.byType["001"] : undefined;
+                              if (!d || b === undefined) return <><td className="num nd" data-col="dsn" title={d?.messages.join(" ; ")}>{!d ? "non déposée" : d.status === "blocked" ? "bloquée" : "type 001 absent"}</td><td className="num">—</td></>;
+                              return (
+                                <>
+                                  <td className="num" data-col="dsn" title={d.status !== "complete" ? d.messages.join(" ; ") : undefined}>{formatEuros(b)}{d.status !== "complete" ? " ⚠" : ""}</td>
+                                  <td className="num" data-col="dsn-ecart">{r.kind === "value" ? `${r.brut - b > 0 ? "+" : ""}${formatEuros(r.brut - b)}` : "n.d."}</td>
+                                </>
+                              );
+                            })()}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr data-testid="ms-monthly-foot">
+                        <th scope="row">Période</th>
+                        <td className="num">{money(cur, (w) => w.brut)}</td>
+                        <td className="num">{money(cur, (w) => w.byRubric.primes)}</td>
+                        <td className="num">{money(cur, (w) => w.cotisations)}</td>
+                        <td className="num" data-col="masse">{money(cur, (w) => w.masse)}</td>
+                        <td className="num n1" data-col="masse-n1">{money(prev, (w) => w.masse)}</td>
+                        <td className="num">{evo.kind === "value" ? evoEuros(evo) : "n.d."}</td>
+                        <td className="num">{etpCur.every((e) => e.etp4 !== null) ? `${fmtEtp4(etpCur.reduce((s, e) => s + (e.etp4 ?? 0), 0))} ETP-mois` : "n.d."}</td>
+                        <td className="num n1" data-col="etp-n1">{etpPrev.every((e) => e.etp4 !== null) ? `${fmtEtp4(etpPrev.reduce((s, e) => s + (e.etp4 ?? 0), 0))} ETP-mois` : "n.d."}</td>
+                        <td className="num" data-col="cout-etp">{cost.kind === "value" ? eurosOf(cost.costCents) : "n.d."}</td>
+                        <td className="num n1" data-col="cout-etp-n1">{costPrev.kind === "value" ? eurosOf(costPrev.costCents) : "n.d."}</td>
+                        {showDsn && (() => {
+                          const w = dsnBrutWindow(ctx.dsn, months);
+                          if (w.kind === "nd") return <><td className="num nd" data-col="dsn" title={w.reason}>n.d.</td><td className="num">—</td></>;
+                          const warn = w.incompleteMonths.length ? " ⚠" : "";
+                          return <><td className="num" data-col="dsn" title={w.incompleteMonths.length ? `mois incomplets : ${w.incompleteMonths.join(", ")}` : undefined}>{formatEuros(w.brutCents)}{warn}</td><td className="num" data-col="dsn-ecart">{cur.kind === "value" ? `${cur.brut - w.brutCents > 0 ? "+" : ""}${formatEuros(cur.brut - w.brutCents)}` : "n.d."}</td></>;
+                        })()}
+                      </tr>
+                    </tfoot>
+                  </table>
+                </ScrollTable>
+                <NdLines lines={ndList} />
+                <p className="tile-foot ms-note" data-testid="ms-dsn-control">
+                  {showDsn
+                    ? "Contrôle DSN : brut déclaré (rémunération S21.G00.51 de type 001, brut non plafonné) des déclarations qui font foi, tous établissements ; ⚠ = mois DSN incomplet ou bloqué. Un écart s'explique ligne par ligne dans le détail du mois."
+                    : serviceValue !== undefined
+                      ? "Contrôle DSN : disponible sur le total entreprise (sans filtre Service)."
+                      : "Contrôle DSN : aucune DSN déposée pour ces mois — déposez-les dans Données › DSN pour comparer le brut du journal au brut déclaré."}{" "}
+                  <a href={`/e/${slug}/donnees/dsn`}>Données › DSN</a>
+                </p>
+              </section>
+
+              {detail && (
+                <section className="panel" id="ms-detail" data-testid="ms-detail">
+                  <div className="panel-head">
+                    <PanelTitle title={`Détail par compte — ${formatMonth(detail.month)}${detail.open ? " (provisoire)" : ""}${serviceValue !== undefined ? ` · service ${serviceLabel(serviceValue)}` : ""}`} desc="Comptes de charges de personnel du journal, soldés débit − crédit ; les contreparties (tiers, produits) sont ignorées." />
+                    <div className="panel-tools ms-detail-nav" role="group" aria-label="Navigation entre les mois">
+                      {detailPrev ? <a className="btn small" href={detailHref(detailPrev)} rel="prev">‹ {formatMonth(detailPrev)}</a> : <span className="btn small" aria-disabled="true">‹ Mois précédent</span>}
+                      {detailNext ? <a className="btn small" href={detailHref(detailNext)} rel="next">{formatMonth(detailNext)} ›</a> : <span className="btn small" aria-disabled="true">Mois suivant ›</span>}
+                      <a className="btn small" href={detailHref(null)}>Fermer le détail</a>
+                    </div>
+                  </div>
+                  {detail.kind === "nd" ? (
+                    <p className="nd">n.d. — {detail.nd.reason}</p>
+                  ) : (
+                    <ScrollTable label="Tableau du détail par compte">
+                      <table className="data-table sticky ms-table" data-testid="ms-detail-accounts">
+                        <caption className="ms-sr">Détail par compte de {formatMonth(detail.month)}</caption>
+                        <thead><tr><th scope="col">Compte</th><th scope="col">Libellé (PayFit)</th><th scope="col">Rubrique</th><th scope="col" className="num">Débit</th><th scope="col" className="num">Crédit</th><th scope="col" className="num">Solde</th><th scope="col" className="num">Lignes</th></tr></thead>
+                        <tbody>
+                          {detail.accounts.map((a) => (
+                            <tr key={a.accountId} data-account={a.accountId}>
+                              <td>{a.accountId}</td>
+                              <td className="wrap">{a.accountName ?? <span className="nd">n.d.</span>}</td>
+                              <td>{a.rubric ? `${a.rubric.label}${a.rubric.role === "hors-masse" ? " (hors masse)" : ""}` : <span className="nd">non classé (hors masse)</span>}</td>
+                              <td className="num">{formatEuros(a.debitCents)}</td>
+                              <td className="num">{formatEuros(a.creditCents)}</td>
+                              <td className="num">{formatEuros(a.balanceCents)}</td>
+                              <td className="num">{a.lines}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="subtotal"><td colSpan={5}>Brut</td><td className="num" data-testid="ms-detail-brut">{formatEuros(detail.brut)}</td><td /></tr>
+                          <tr className="subtotal"><td colSpan={5}>Cotisations patronales</td><td className="num" data-testid="ms-detail-cotisations">{formatEuros(detail.cotisations)}</td><td /></tr>
+                          <tr className="total"><td colSpan={5}><strong>Masse salariale chargée</strong></td><td className="num" data-testid="ms-detail-masse"><strong>{formatEuros(detail.masse)}</strong></td><td /></tr>
+                        </tfoot>
+                      </table>
+                    </ScrollTable>
+                  )}
+                </section>
+              )}
+            </>
+          )}
         </>
       )}
 
-      <details className="panel" data-testid="ms-definitions" id="definitions">
+      <details className="panel ms-defs" data-testid="ms-definitions" id="definitions">
         <summary>Définitions, grille de comptes et raisons des « n.d. »</summary>
         <dl className="defs">
           {PAYROLL_DEFINITIONS.map((d) => (
@@ -451,6 +698,6 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
           </div>
         </dl>
       </details>
-    </Header>
+    </>
   );
 }

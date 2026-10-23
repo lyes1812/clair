@@ -6,6 +6,7 @@ import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
 import { ActionForm } from "./ActionForm";
 import { saveBasesAction } from "./actions";
+import { DirtyIndicator, GridTools } from "./GridTools";
 import { detailOf, decText } from "./shared";
 
 // Bases individuelles : base figée du scénario (réel jusqu'au mois de référence) et correction de la base de chaque
@@ -15,6 +16,51 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
   const toFix = base.contracts.filter((c) => !c.base && !fixes.has(c.contractKey));
   const cost = (c: BaseSnapshot["contracts"][number]) => (c.base ? c.base.salaryCents + roundDiv(BigInt(c.base.salaryCents) * BigInt(c.base.refCotisationsCents), BigInt(c.base.refBrutCents)) : null);
   const rows = base.contracts;
+  const table = (
+    <div className="table-wrap scroll" {...(canEdit ? {} : { role: "region", "aria-label": "Contrats de la base", tabIndex: 0 })}>
+      <table className="data-table month-grid sticky sticky-first hs-bases" data-testid="hyp-base-contracts">
+        <thead>
+          <tr>
+            <th>Contrat</th><th>Service</th><th>Statut</th><th>Entrée</th><th>Fin connue</th><th className="num">ETP</th><th className="num">Salaire</th><th className="num">Taux de charges</th><th className="num">Coût mensuel</th>
+            {canEdit && <><th>Salaire corrigé (€)</th><th>Charges corrigées (%)</th></>}
+            <th>État</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((c, i) => {
+            const fix = fixes.get(c.contractKey);
+            return (
+              <tr key={c.contractKey} data-contract={c.externalId}>
+                <td>{c.label}{canEdit && <input type="hidden" name={`key_${i}`} value={c.contractKey} />}</td>
+                <td>{c.service ?? <span title={c.serviceNd ?? undefined}>Non ventilé{c.serviceNd ? " ⚠" : ""}</span>}</td>
+                <td>{c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "n.d."}</td>
+                <td>{c.startDate ?? "n.d."}</td>
+                <td>{c.endDate ?? "—"}</td>
+                <td className="num">{c.etp4 === null ? <span title={c.etpNd ?? undefined}>n.d.</span> : fmtEtp4(c.etp4)}</td>
+                <td className="num">{c.base ? formatEuros(c.base.salaryCents) : "n.d."}</td>
+                <td className="num">{c.base ? `${fmtFixed({ num: c.base.refCotisationsCents * 100, den: c.base.refBrutCents }, 2)} %` : "n.d."}</td>
+                <td className="num">{cost(c) === null ? "n.d." : formatEuros(cost(c)!)}</td>
+                {canEdit && (
+                  <>
+                    <td><input className="input" name={`salary_${i}`} data-cell data-row={`b${i}`} data-col="salary" inputMode="decimal" defaultValue={fix ? decText(fix.salaryCents) : ""} aria-label={`Salaire corrigé de ${c.label}`} /></td>
+                    <td><input className="input" name={`charges_${i}`} data-cell data-row={`b${i}`} data-col="charges" inputMode="decimal" defaultValue={fix ? decText(fix.chargesBps) : ""} aria-label={`Taux de charges corrigé de ${c.label}`} /></td>
+                  </>
+                )}
+                <td className="wrap">{fix ? `corrigée : ${detailOf(fix, base, hypotheses)}` : c.baseNd ? <span className="nd">n.d. — {c.baseNd}</span> : c.baseNote ? `figée — ${c.baseNote}` : "figée"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+  // « Copier vers le bas » seulement : un salaire n'a pas de sens dans la colonne des charges, ni l'inverse.
+  const frame = (
+    <div className="hs-grid" data-grid-root>
+      <GridTools filename={`bases-${scenario.firstMonth}.csv`} tools={["down"]} readOnly={!canEdit} />
+      {table}
+    </div>
+  );
   return (
     <section className="panel" data-testid="hyp-base">
       <h2>Base figée — {formatMonth(base.refMonth).toLowerCase()} <span className="desc">— <a href="#def-base-contrat">coût de référence d'un contrat</a></span></h2>
@@ -57,53 +103,17 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
       {toFix.length > 0 && (
         <p className="notice" data-testid="hyp-base-nd">{toFix.length} contrat(s) sans base : la projection est n.d. tant qu'une correction de base n'est pas saisie (salaire mensuel et taux de charges).</p>
       )}
-      {(() => {
-        const table = (
-          <div className="table-wrap">
-            <table className="data-table month-grid" data-testid="hyp-base-contracts">
-              <thead>
-                <tr>
-                  <th>Contrat</th><th>Service</th><th>Statut</th><th>Entrée</th><th>Fin connue</th><th className="num">ETP</th><th className="num">Salaire</th><th className="num">Taux de charges</th><th className="num">Coût mensuel</th>
-                  {canEdit && <><th>Salaire corrigé (€)</th><th>Charges corrigées (%)</th></>}
-                  <th>État</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((c, i) => {
-                  const fix = fixes.get(c.contractKey);
-                  return (
-                    <tr key={c.contractKey} data-contract={c.externalId}>
-                      <td>{c.label}{canEdit && <input type="hidden" name={`key_${i}`} value={c.contractKey} />}</td>
-                      <td>{c.service ?? <span title={c.serviceNd ?? undefined}>Non ventilé{c.serviceNd ? " ⚠" : ""}</span>}</td>
-                      <td>{c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "n.d."}</td>
-                      <td>{c.startDate ?? "n.d."}</td>
-                      <td>{c.endDate ?? "—"}</td>
-                      <td className="num">{c.etp4 === null ? <span title={c.etpNd ?? undefined}>n.d.</span> : fmtEtp4(c.etp4)}</td>
-                      <td className="num">{c.base ? formatEuros(c.base.salaryCents) : "n.d."}</td>
-                      <td className="num">{c.base ? `${fmtFixed({ num: c.base.refCotisationsCents * 100, den: c.base.refBrutCents }, 2)} %` : "n.d."}</td>
-                      <td className="num">{cost(c) === null ? "n.d." : formatEuros(cost(c)!)}</td>
-                      {canEdit && (
-                        <>
-                          <td><input className="input" name={`salary_${i}`} inputMode="decimal" defaultValue={fix ? decText(fix.salaryCents) : ""} aria-label={`Salaire corrigé de ${c.label}`} /></td>
-                          <td><input className="input" name={`charges_${i}`} inputMode="decimal" defaultValue={fix ? decText(fix.chargesBps) : ""} aria-label={`Taux de charges corrigé de ${c.label}`} /></td>
-                        </>
-                      )}
-                      <td className="wrap">{fix ? `corrigée : ${detailOf(fix, base, hypotheses)}` : c.baseNd ? <span className="nd">n.d. — {c.baseNd}</span> : c.baseNote ? `figée — ${c.baseNote}` : "figée"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
-        return canEdit ? (
-          <ActionForm action={saveBasesAction.bind(null, slug, scenario.id)} submit="Enregistrer les bases corrigées" testid="bases-grid">
-            <input type="hidden" name="n" value={rows.length} />
-            {table}
-            <p className="tile-foot">Corrige la base d'un contrat : salaire mensuel de base et taux de charges vont ensemble (0 € possible pour un contrat non payé). Les deux champs vides : pas de correction (une correction existante est retirée).</p>
-          </ActionForm>
-        ) : table;
-      })()}
+      <div className="hs-title">
+        <h3>Contrats de la base</h3>
+        <p className="desc">{canEdit ? "Une ligne par contrat : la base figée est lue à gauche ; saisissez à droite la correction du salaire et du taux de charges, ou laissez vide pour garder la base." : "Une ligne par contrat : base figée et correction éventuelle."}</p>
+      </div>
+      {canEdit ? (
+        <ActionForm action={saveBasesAction.bind(null, slug, scenario.id)} submit="Enregistrer les bases corrigées" testid="bases-grid" className="form hs-grid-form" footer={<DirtyIndicator />}>
+          <input type="hidden" name="n" value={rows.length} />
+          {frame}
+          <p className="tile-foot">Corrige la base d'un contrat : salaire mensuel de base et taux de charges vont ensemble (0 € possible pour un contrat non payé). Les deux champs vides : pas de correction (une correction existante est retirée).</p>
+        </ActionForm>
+      ) : frame}
       {(base.etpNote || base.contracts.some((c) => c.serviceNd)) && (
         <p className="tile-foot" data-testid="hyp-base-notes">
           {base.etpNote ? `ETP : ${base.etpNote}. ` : ""}

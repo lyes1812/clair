@@ -2,10 +2,10 @@ import { monthRange } from "@/lib/connectors/months";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { scopeKeyOf } from "@/lib/budget/grids";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
-import { monthShort } from "../masse-salariale/components";
+import { countByYear, gridYears } from "@/lib/viz/hyp-saisie";
 import { ActionForm } from "./ActionForm";
 import { saveConstantsAction, saveRatesAction } from "./actions";
-import { GridTools, RowFill } from "./GridTools";
+import { DirtyIndicator, GridTools, RowFill } from "./GridTools";
 import { decText, detailOf, UNIT_LABEL } from "./shared";
 
 type Cst = Extract<Hypothesis, { kind: "constante" }>;
@@ -43,10 +43,15 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
   }
   const targeted = hypotheses.filter((h) => h.kind === "augmentation" && scopeKeyOf(h.scope) === null);
   const consts: (Cst | null)[] = [...hypotheses.filter((h): h is Cst => h.kind === "constante"), ...(canEdit ? Array.from({ length: BLANK_ROWS }, () => null) : [])];
-  const ratesGrid = (
-    <div className="table-wrap">
-      <table className="data-table month-grid" data-testid="glob-rates-table">
-        <thead><tr><th>Périmètre</th>{months.map((m) => <th key={m} className="num">{monthShort(m)}</th>)}{canEdit && <th />}</tr></thead>
+  // Année affichée : le scénario peut couvrir deux années ; les cellules de l'autre année restent dans le formulaire.
+  const ratesYears = gridYears(months, countByYear([...rate.keys()].map((k) => k.slice(k.lastIndexOf("|") + 1))));
+  const constYears = gridYears(months, countByYear(consts.flatMap((c) => (c ? Object.keys(c.values) : []))));
+  const head = (gy: ReturnType<typeof gridYears>) => months.map((m) => <th key={m} className="num" data-yi={gy.index(m)} data-csv={m}>{gy.label(m)}</th>);
+
+  const ratesTable = (
+    <div className="table-wrap scroll" {...(canEdit ? {} : { role: "region", "aria-label": "Taux d'augmentation par mois", tabIndex: 0 })}>
+      <table className="data-table month-grid sticky sticky-first hs-rates" data-testid="glob-rates-table">
+        <thead><tr><th>Périmètre</th>{head(ratesYears)}{canEdit && <th data-no-csv><span className="sr-only">Report de la ligne</span></th>}</tr></thead>
         <tbody>
           {scopes.map((s, i) => (
             <tr key={s.key} data-scope={s.key}>
@@ -54,40 +59,40 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
               {months.map((m) => {
                 const v = rate.get(`${s.key}|${m}`);
                 return canEdit ? (
-                  <td key={m}><input className="input" name={`rate|${s.key}|${m}`} data-row={`s${i}`} data-cell inputMode="decimal" defaultValue={v === undefined ? "" : decText(v)} aria-label={`${s.label}, ${monthShort(m)} (%)`} /></td>
-                ) : <td key={m} className="num">{v === undefined ? "—" : `${decText(v)} %`}</td>;
+                  <td key={m} data-yi={ratesYears.index(m)}><input className="input" name={`rate|${s.key}|${m}`} data-row={`s${i}`} data-col={m} data-yi={ratesYears.index(m)} data-cell inputMode="decimal" defaultValue={v === undefined ? "" : decText(v)} aria-label={`${s.label}, ${ratesYears.label(m)} (%)`} /></td>
+                ) : <td key={m} className="num" data-yi={ratesYears.index(m)}>{v === undefined ? "—" : `${decText(v)} %`}</td>;
               })}
-              {canEdit && <td><RowFill row={`s${i}`} /></td>}
+              {canEdit && <td data-no-csv><RowFill row={`s${i}`} label={s.label} /></td>}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
-  const constGrid = (
-    <div className="table-wrap">
-      <table className="data-table month-grid" data-testid="glob-consts-table">
-        <thead><tr><th>Constante</th><th>Unité</th><th>Source</th>{months.map((m) => <th key={m} className="num">{monthShort(m)}</th>)}{canEdit && <><th /><th>Supprimer</th></>}</tr></thead>
+  const constTable = (
+    <div className="table-wrap scroll" {...(canEdit ? {} : { role: "region", "aria-label": "Constantes de référence", tabIndex: 0 })}>
+      <table className="data-table month-grid sticky sticky-first hs-consts" data-testid="glob-consts-table">
+        <thead><tr><th>Constante</th><th>Unité</th><th>Source</th>{head(constYears)}{canEdit && <><th data-no-csv><span className="sr-only">Report de la ligne</span></th><th>Supprimer</th></>}</tr></thead>
         <tbody>
           {consts.map((c, i) => (
             <tr key={c?.id ?? `new-${i}`} data-const={c?.label ?? ""}>
               {canEdit ? (
                 <>
-                  <td><input type="hidden" name={`id_${i}`} value={c?.id ?? ""} /><input className="input wide" name={`label_${i}`} defaultValue={c?.label ?? ""} maxLength={200} aria-label={`Constante, ligne ${i + 1}`} /></td>
+                  <td><input type="hidden" name={`id_${i}`} value={c?.id ?? ""} /><input className="input wide" name={`label_${i}`} defaultValue={c?.label ?? ""} maxLength={200} placeholder={c ? undefined : "Nouvelle constante"} aria-label={`Constante, ligne ${i + 1}`} /></td>
                   <td>
                     <select className="select" name={`unit_${i}`} defaultValue={c?.unit ?? "eur"} aria-label={`Unité, ligne ${i + 1}`}>
                       <option value="eur">Euros</option><option value="pct">Pourcentage</option><option value="nombre">Nombre</option>
                     </select>
                   </td>
-                  <td><input className="input wide" name={`source_${i}`} defaultValue={c?.source ?? ""} maxLength={300} aria-label={`Source, ligne ${i + 1}`} /></td>
-                  {months.map((m) => <td key={m}><input className="input" name={`m_${i}_${m}`} data-row={`c${i}`} data-cell inputMode="decimal" defaultValue={decText(c?.values[m])} aria-label={`${c?.label || "Constante"} ${i + 1}, ${monthShort(m)}`} /></td>)}
-                  <td><RowFill row={`c${i}`} /></td>
+                  <td><input className="input wide" name={`source_${i}`} defaultValue={c?.source ?? ""} maxLength={300} placeholder={c ? undefined : "Source obligatoire"} aria-label={`Source, ligne ${i + 1}`} /></td>
+                  {months.map((m) => <td key={m} data-yi={constYears.index(m)}><input className="input" name={`m_${i}_${m}`} data-row={`c${i}`} data-col={m} data-yi={constYears.index(m)} data-cell inputMode="decimal" defaultValue={decText(c?.values[m])} aria-label={`${c?.label || "Constante"} ${i + 1}, ${constYears.label(m)}`} /></td>)}
+                  <td data-no-csv><RowFill row={`c${i}`} label={c?.label || `ligne ${i + 1}`} /></td>
                   <td>{c ? <input type="checkbox" name={`del_${i}`} value="oui" aria-label={`Supprimer ${c.label}`} /> : null}</td>
                 </>
               ) : (
                 <>
                   <td>{c!.label}</td><td>{UNIT_LABEL[c!.unit]}</td><td>{c!.source}</td>
-                  {months.map((m) => <td key={m} className="num">{c!.values[m] === undefined ? "—" : decText(c!.values[m])}</td>)}
+                  {months.map((m) => <td key={m} className="num" data-yi={constYears.index(m)}>{c!.values[m] === undefined ? "—" : decText(c!.values[m])}</td>)}
                 </>
               )}
             </tr>
@@ -97,19 +102,27 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
       </table>
     </div>
   );
+  const frame = (gy: ReturnType<typeof gridYears>, filename: string, table: React.ReactNode) => (
+    <div className="hs-grid" data-grid-root data-ys={gy.multi ? "0" : undefined}>
+      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} />
+      {table}
+    </div>
+  );
   return (
     <>
       <section className="panel" data-testid="glob-rates">
-        <h2>Taux d'augmentation par mois <span className="desc">— une ligne par périmètre · <a href="#def-globales">règle</a></span></h2>
+        <div className="hs-title">
+          <h2>Taux d'augmentation par mois</h2>
+          <p className="desc">Une ligne par périmètre, une colonne par mois du scénario · <a href="#def-globales">règle</a></p>
+        </div>
         <p className="desc">
           Chaque cellule renseignée est une augmentation distincte, appliquée au 1er du mois en pourcentage du salaire déjà augmenté (les taux successifs se composent). Cellule vide ou 0 : aucune augmentation ce mois-là. Sur un même mois, la plus ciblée s'applique seule : l'augmentation d'un contrat prime sur celle d'un service ou d'un statut, qui prime sur celle de toute l'entreprise (celle d'un contrat se saisit dans Modifications de postes). Un service et un statut sont au même niveau : deux augmentations de ces niveaux le même mois pour un même salarié sont refusées avec leur raison.
         </p>
         {canEdit ? (
-          <ActionForm action={saveRatesAction.bind(null, slug, scenario.id)} submit="Enregistrer les taux" testid="glob-rates-form">
-            <GridTools filename={`taux-augmentation-${scenario.firstMonth}.csv`} />
-            {ratesGrid}
+          <ActionForm action={saveRatesAction.bind(null, slug, scenario.id)} submit="Enregistrer les taux" testid="glob-rates-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
+            {frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesTable)}
           </ActionForm>
-        ) : ratesGrid}
+        ) : frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesTable)}
         {statutNote && <p className="tile-foot" data-testid="glob-statut-note">{statutNote}</p>}
         {targeted.length > 0 && (
           <details>
@@ -119,17 +132,19 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
         )}
       </section>
       <section className="panel" data-testid="glob-consts">
-        <h2>Constantes de référence <span className="desc">— documentaires, sans effet sur le calcul</span></h2>
+        <div className="hs-title">
+          <h2>Constantes de référence</h2>
+          <p className="desc">Documentaires, sans effet sur le calcul.</p>
+        </div>
         <p className="desc">
           Valeurs saisies par mois avec leur source (taux légaux, plafonds, horaire théorique, taux de change…). Aucune valeur n'est fournie par Clair : chaque constante doit porter sa source. Elles sont conservées avec le scénario et rappelées dans les contrôles, mais aucune règle de calcul ne les lit : la masse salariale ne change pas.
         </p>
         {canEdit ? (
-          <ActionForm action={saveConstantsAction.bind(null, slug, scenario.id)} submit="Enregistrer les constantes" testid="glob-consts-form">
+          <ActionForm action={saveConstantsAction.bind(null, slug, scenario.id)} submit="Enregistrer les constantes" testid="glob-consts-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
             <input type="hidden" name="n" value={consts.length} />
-            <GridTools filename={`constantes-${scenario.firstMonth}.csv`} />
-            {constGrid}
+            {frame(constYears, `constantes-${scenario.firstMonth}.csv`, constTable)}
           </ActionForm>
-        ) : constGrid}
+        ) : frame(constYears, `constantes-${scenario.firstMonth}.csv`, constTable)}
         <p className="tile-foot">Multidevise : différé (euros seulement). Taux par statut cadre / non-cadre de la classification : PayFit ne fournit à Clair que l'indicateur « cadre dirigeant » (disponible ci-dessus) ; le statut cadre / non-cadre demande une autre source. Taux par société : une seule société par espace.</p>
       </section>
     </>

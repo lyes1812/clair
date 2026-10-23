@@ -1,11 +1,11 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { ROLES, ROLE_LABELS } from "@/lib/roles";
 import { inviteMember, renameWorkspace, type ActionState } from "./actions";
 
 function Feedback({ state }: { state: ActionState }) {
   if (state?.error) return <p className="error" role="alert">{state.error}</p>;
-  if (state?.ok) return <p className="notice" role="status">{state.ok}</p>;
+  if (state?.ok) return <p className="notice ok" role="status">{state.ok}</p>;
   return null;
 }
 
@@ -35,7 +35,7 @@ export function InviteForm({ slug }: { slug: string }) {
           <label htmlFor="invite-email">E-mail</label>
           <input className="input" id="invite-email" name="email" type="email" required />
         </div>
-        <div className="field-row" style={{ flex: "0 1 180px" }}>
+        <div className="field-row mb-role-field">
           <label htmlFor="invite-role">Rôle</label>
           <select className="select" id="invite-role" name="role" defaultValue="reader">
             {ROLES.map((r) => (
@@ -49,11 +49,26 @@ export function InviteForm({ slug }: { slug: string }) {
   );
 }
 
+// Lien d'invitation : affiché en clair (aucun e-mail n'est envoyé en V1), copiable d'un clic, sélectionnable d'un clic aussi.
 export function CopyLink({ url }: { url: string }) {
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setState("done");
+    } catch {
+      setState("failed");
+    }
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState("idle"), 3000);
+  }
   return (
-    <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+    <span className="mb-link">
       <code className="code" data-testid="invitation-link">{url}</code>
-      <button type="button" className="btn" onClick={() => navigator.clipboard?.writeText(url)}>Copier</button>
+      <button type="button" className="btn" onClick={copy} aria-label="Copier le lien d'invitation">{state === "done" ? "Copié" : "Copier"}</button>
+      <span className="desc" aria-live="polite">{state === "done" ? "Lien copié dans le presse-papiers." : state === "failed" ? "Copie impossible : sélectionnez le lien à la main." : ""}</span>
     </span>
   );
 }

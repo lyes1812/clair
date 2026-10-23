@@ -7,9 +7,10 @@ import { contractNatureLabel, endReasonLabel } from "@/lib/dsn/labels";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { RH_DEFINITIONS } from "@/lib/rh/definitions";
 import { findingLabel } from "@/lib/rh/findings";
-import type { EventRow } from "@/lib/rh/headcount";
+import type { EventRow, RowState } from "@/lib/rh/headcount";
 import { fieldView, type ContractDraft, type FieldView, type FindingDraft, type PersonDraft, type Provenance, type Traced as TracedRow } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, personLabel, type CollabContext, type Shown } from "@/lib/rh/view";
+import { PAGE_SIZES } from "@/lib/viz/collaborateurs";
 
 // Composants partagés des écrans Collaborateurs : en-tête (source, base de calcul, définitions), valeurs tracées, constats.
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/collaborateurs")!;
@@ -79,12 +80,17 @@ export function CollabHeader({ ctx, tab, children }: { ctx: CollabContext; tab: 
   const { slug, source, state } = ctx;
   return (
     <>
-      <div style={{ display: "grid", gap: 8 }}>
+      <div className="collab-head">
         <span className="label">Studio RH</span>
         <h1>{ITEM.label}</h1>
         <p className="desc">{ITEM.summary}</p>
         <SourceBadge resolution={source} slug={slug} />
-        <BuildInfo ctx={ctx} />
+        {ctx.data && (
+          <details className="collab-read-details" data-testid="collab-read-details">
+            <summary>Détail de la lecture{ctx.data.build.referenceDate ? ` · date de référence ${formatDate(ctx.data.build.referenceDate)}` : ""}</summary>
+            <BuildInfo ctx={ctx} />
+          </details>
+        )}
         <PayfitHistoryNotice ctx={ctx} />
         {ctx.switchedAt && (
           <p className="notice" data-testid="source-switch-notice">
@@ -171,16 +177,82 @@ export function Field<T>({ row, field, value, slug, format, prov }: { row: Trace
   return <Traced view={fieldView(row, field, value)} slug={slug} format={format} prov={prov} />;
 }
 
+// Tuile d'indicateur : la valeur courte est écrite en grand, une raison (n.d.) ou un texte long en texte courant.
 export function Tile({ id, label, shown, def }: { id: string; label: string; shown: Shown; def: string }) {
+  const big = shown.kind !== "nd" && shown.text.length <= 12;
+  const cls = [shown.kind === "nd" ? "nd" : shown.kind === "lower" ? "lower" : "", big ? "big" : ""].filter(Boolean).join(" ");
   return (
-    <div data-testid={id}>
+    <div data-testid={id} className="collab-tile">
       <dt>{label}</dt>
-      <dd className={shown.kind === "nd" ? "nd" : shown.kind === "lower" ? "lower" : undefined}>{shown.text}</dd>
+      <dd className={cls || undefined}>{shown.text}</dd>
       <span className="tile-foot">
         {shown.foot ? <>{shown.foot} · </> : null}
         <a href={`#def-${def}`}>Définition</a>
       </span>
     </div>
+  );
+}
+
+// Section repliable (ouverte par défaut) : le titre reste visible, le contenu se replie. `data-fold` permet « Tout replier ».
+export function Fold({ title, count, open = true, sub = false, testid, children }: { title: ReactNode; count?: number; open?: boolean; sub?: boolean; testid?: string; children: ReactNode }) {
+  return (
+    <details className={sub ? "collab-fold sub" : "collab-fold"} open={open} data-fold="" data-testid={testid}>
+      <summary>
+        <h3>{title}{count !== undefined && <span className="desc"> ({count})</span>}</h3>
+      </summary>
+      <div className="collab-fold-body">{children}</div>
+    </details>
+  );
+}
+
+// Pastilles d'état : le libellé est celui du moteur (« entré le 01/04/2025 »), la couleur le renforce sans le remplacer.
+const STATE_CLASS: Record<RowState["code"], string> = {
+  present: "s-present",
+  entered: "s-entered",
+  entered_exited: "s-entered",
+  exited: "s-exited",
+  declared_after_end: "s-alert",
+  before_start: "s-alert",
+  not_declared: "",
+  absent: "",
+  out_of_scope: "",
+};
+export function StatePill({ code, label }: { code: RowState["code"]; label: string }) {
+  return <span className={`collab-pill ${STATE_CLASS[code]}`.trim()}>{label}</span>;
+}
+export function YesNoPill({ yes, title }: { yes: boolean; title?: string }) {
+  return <span className={yes ? "collab-pill s-present" : "collab-pill"} title={title}>{yes ? "oui" : "non"}</span>;
+}
+
+// Paramètres d'adresse conservés par un formulaire GET qui ne les montre pas (filtres de l'autre barre, taille de page).
+export function HiddenParams({ values }: { values: Record<string, string | undefined> }) {
+  return (
+    <>
+      {Object.entries(values).map(([k, v]) => (v ? <input key={k} type="hidden" name={k} value={v} /> : null))}
+    </>
+  );
+}
+
+// Barre d'outils au-dessus d'un tableau : recherche sur toutes les colonnes, filtres du tableau (children), lignes par page.
+// Un formulaire GET : l'état est dans l'adresse (lien partageable) ; valider revient à la première page.
+export function ListToolbar({ testid, label, hidden, q, size, resetHref, submitLabel = "Appliquer", children }: { testid: string; label: string; hidden: Record<string, string | undefined>; q: string; size: number; resetHref: string | null; submitLabel?: string; children?: ReactNode }) {
+  return (
+    <form method="get" className="filters collab-toolbar" data-testid={testid} aria-label={label}>
+      <HiddenParams values={hidden} />
+      <div className="field-row collab-search">
+        <label htmlFor="q">Rechercher dans toutes les colonnes</label>
+        <input className="input" id="q" name="q" type="search" defaultValue={q} maxLength={80} placeholder="nom, matricule, contrat, nature, date…" />
+      </div>
+      {children}
+      <div className="field-row collab-size">
+        <label htmlFor="taille">Lignes par page</label>
+        <select className="select" id="taille" name="taille" defaultValue={String(size)}>
+          {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </div>
+      <button className="btn" type="submit">{submitLabel}</button>
+      {resetHref && <a className="collab-reset" href={resetHref}>Réinitialiser</a>}
+    </form>
   );
 }
 
@@ -208,6 +280,13 @@ export function ShortId({ id }: { id: string }) {
 
 export function Nature({ code }: { code: string | null }) {
   return code === null ? <span className="nd">nature : n.d.</span> : <span>{contractNatureLabel(code)}</span>;
+}
+
+// Texte de la colonne « Fin » (mêmes mots que EndCell, sans balisage ni provenance) : sert à la recherche sur toutes les colonnes.
+export function endText(c: ContractDraft): string {
+  if (c.endDate) return `${formatDate(c.endDate)} ${c.endReason ? endReasonLabel(c.endReason) : `motif : n.d. — ${c.fieldsNd.endReason?.reason ?? "non renseigné"}`}`;
+  if (c.endStatus === "none_cdi") return "sans terme (CDI)";
+  return `n.d. — ${c.fieldsNd.endDate?.reason ?? (c.endStatus === "unpositioned" ? "contrat non positionnable" : "fin non renseignée")}`;
 }
 
 export function EndCell({ c, slug, prov = true }: { c: ContractDraft; slug: string; prov?: boolean }) {
@@ -271,25 +350,30 @@ export function FindingList({ findings, slug, persons, contracts, testId }: { fi
 export function EventsTable({ rows, slug, kind, testId, source }: { rows: EventRow[]; slug: string; kind: "entry" | "exit"; testId: string; source: "payfit" | "dsn" }) {
   if (!rows.length) return <p className="muted" data-testid={`${testId}-empty`}>Aucune {kind === "entry" ? "entrée" : "sortie"} sur la période.</p>;
   return (
-    <div className="table-wrap">
-      <table className="data-table" data-testid={testId}>
+    <div className="table-wrap scroll collab-scroll">
+      <table className="data-table sticky collab-table" data-testid={testId}>
+        <caption className="collab-sr">{kind === "entry" ? "Entrées" : "Sorties"} datées, une ligne par contrat</caption>
         <thead>
-          <tr><th>Date</th><th>Personne</th><th>Contrat</th><th>Établissement</th><th>Nature</th>{kind === "exit" && <th className="wrap">Motif</th>}<th>Effectif</th><th>Drapeaux</th><th>Provenance de la date</th></tr>
+          <tr>
+            <th scope="col">Date</th><th scope="col">Personne</th><th scope="col">Contrat</th><th scope="col">Établissement</th><th scope="col">Nature</th>
+            {kind === "exit" && <th scope="col" className="wrap">Motif</th>}
+            <th scope="col">Effectif</th><th scope="col">Drapeaux</th><th scope="col">Provenance de la date</th>
+          </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={`${r.event.contractKey}-${r.event.kind}`}>
-              <td>{formatDate(r.event.date)}</td>
+              <td className="col-date">{formatDate(r.event.date)}</td>
               <td><PersonCell person={r.person} contract={r.contract} slug={slug} /></td>
               <td><a href={contractHref(slug, r.contract.contractKey)}><code>{r.contract.externalId}</code></a></td>
               <td><code>{r.event.establishmentId ?? "n.d."}</code></td>
               <td><Nature code={r.event.nature} /></td>
               {kind === "exit" && (
-                <td className="wrap">
+                <td className="col-wide">
                   {r.event.endReason ? endReasonLabel(r.event.endReason) : <span className="nd">n.d. — {r.event.fieldsNd.endReason?.reason ?? (source === "payfit" ? "PayFit n'expose pas le motif" : "motif absent")}</span>}
                 </td>
               )}
-              <td>{r.inScope ? "compté" : <span className="muted">hors effectif</span>}</td>
+              <td>{r.inScope ? <span className="collab-pill s-counted">compté</span> : <span className="collab-pill">hors effectif</span>}</td>
               <td><FlagTags flags={r.event.flags} labels={EVENT_FLAG_LABELS} /></td>
               <td><Prov p={r.event.provenance.date} slug={slug} /></td>
             </tr>

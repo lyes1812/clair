@@ -1,0 +1,129 @@
+/* Hypothèses budgétaires › écrans de saisie (modifications de postes, grilles mensuelles, formulaires, en-tête de scénario),
+   charte « 101 ». Classes de ergonomie.css réutilisées : .table-wrap.scroll, .data-table.sticky, .sticky-first, .changed,
+   .pager, .panel-head. Préfixe hs-. */
+
+/* Lecture d'écran seulement. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Titre d'un panneau avec sa phrase de contexte dessous. */
+.hs-title { display: grid; gap: 4px; min-width: 0; }
+.hs-title .desc { line-height: 1.5; max-width: 90ch; }
+.hs-title h3 { font-size: var(--clair-type-section); }
+
+/* Aide courte sous un champ ou sous l'intitulé d'un groupe. */
+.hint { margin: 0; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.45; font-weight: 400; }
+.field-row .hint { max-width: 42ch; }
+
+/* --- En-tête de scénario ------------------------------------------------------------------------------------------ */
+.hs-crumb { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; font-size: var(--clair-type-form); }
+.hs-scenario { gap: 14px; }
+.hs-scn-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0; }
+.hs-scn-head h2 { margin-right: 4px; overflow-wrap: anywhere; }
+.hs-status::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+.hs-status.is-draft { background: var(--blue-soft); border-color: #d6e3ff; color: var(--blue); }
+.hs-status.is-frozen { background: var(--ink); border-color: var(--ink); color: #fff; }
+.hs-facts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 24px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+/* Actions sur le scénario : figer, dupliquer, supprimer, regroupées dans un même bandeau. */
+.hs-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.hs-act { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.hs-act h3 { font-size: var(--clair-type-form); font-weight: 650; }
+.hs-act .inline-form { margin-top: 4px; }
+.hs-act-danger { border-color: #f1d6dc; background: var(--danger-bg); }
+
+/* Changer de scénario sans quitter l'entrée du menu en cours. */
+.hs-switch { position: relative; }
+.hs-switch > summary { list-style: none; cursor: pointer; }
+.hs-switch > summary::-webkit-details-marker { display: none; }
+html[data-clair-theme="airy"] .hs-switch > summary.btn { min-height: 32px; padding: 5px 12px; }
+.hs-switch-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: min(480px, calc(100vw - 32px)); max-height: 50vh; overflow: auto; margin: 0; padding: 6px; list-style: none; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 40px #1418241a; }
+.hs-switch-list a { display: grid; gap: 2px; padding: 8px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+.hs-switch-list a:hover { background: var(--surface); }
+.hs-switch-list a[aria-current="page"] { background: var(--blue-soft); }
+.hs-switch-name { font-weight: 550; overflow-wrap: anywhere; }
+.hs-switch-meta { font-size: var(--clair-type-label); color: var(--muted); }
+
+/* --- Formulaires : groupes de champs, messages ------------------------------------------------------------------- */
+.hs-group { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.hs-group legend { padding: 0 6px; font-size: var(--clair-type-form-label); font-weight: 650; color: var(--ink); }
+.hs-group .filters { align-items: flex-start; }
+.hs-group .filters .field-row { flex: 1 1 200px; max-width: 320px; }
+.hs-hire { display: grid; gap: 14px; }
+.form-msg { display: grid; gap: 8px; }
+.form-msg .error, .form-msg .notice { margin: 0; }
+.form-msg .list { margin: 0; }
+/* Bordure rouge d'un champ numérique ou obligatoire que le navigateur juge invalide, après qu'on l'a quitté. */
+.input:user-invalid, .select:user-invalid { border-color: var(--danger); background: var(--danger-bg); }
+/* Entrées de création d'un événement : une fiche repliable par type. */
+.hs-events { display: grid; gap: 10px; }
+.hs-events details { border: 1px solid var(--line); border-radius: 8px; padding: 0 14px; background: #fff; }
+.hs-events details[open] { padding-bottom: 14px; }
+.hs-events summary { cursor: pointer; padding: 11px 0; font-size: var(--clair-type-form); font-weight: 550; }
+.hs-events details[open] > summary { margin-bottom: 8px; }
+.hs-events .form { margin-top: 4px; }
+
+/* --- Recherche et tableaux --------------------------------------------------------------------------------------- */
+.hs-search { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
+.hs-search .field-row { flex: 1 1 260px; max-width: 520px; }
+.hs-search .field-row.hs-narrow { flex: 0 1 220px; }
+.hs-search .btn { min-height: 40px; }
+.hs-table th { white-space: nowrap; }
+.hs-table td.wrap { min-width: 150px; max-width: 280px; }
+.hs-table td.changed, .hs-table th.changed { background: var(--danger-bg); }
+.data-table.hs-table tr[aria-current="true"] > :is(td, th) { background: var(--blue-soft); }
+.hs-row-actions { white-space: nowrap; }
+.hs-row-actions a { margin-right: 12px; font-size: var(--clair-type-table-cell); }
+.hs-row-actions a:last-child { margin-right: 0; }
+.hs-table :is(input, select) { min-height: 32px; }
+.hs-table td .input { min-width: 130px; padding: 5px 8px; }
+
+/* --- Grilles de saisie mensuelles -------------------------------------------------------------------------------- */
+.hs-grid { display: grid; gap: 10px; min-width: 0; }
+.hs-grid .table-wrap.scroll { max-height: 66vh; }
+.hs-grid .month-grid th, .hs-grid .month-grid td { padding: 6px 8px; }
+/* Première colonne fixe : libellé qui passe à la ligne plutôt que d'occuper l'écran. */
+.hs-grid .data-table :is(th, td):first-child { min-width: 150px; max-width: 280px; white-space: normal; }
+.hs-grid .hs-consts :is(th, td):first-child, .hs-grid .hs-env :is(th, td):first-child { max-width: none; }
+.hs-grid .month-grid tbody tr:focus-within > td { background: #f3f7ff; }
+.hs-grid .data-table.sticky-first tbody tr:focus-within > td:first-child { background: var(--blue-soft); }
+/* Une seule année à la fois quand la grille en couvre plusieurs ; l'autre reste dans la page et dans le formulaire. */
+.hs-grid[data-ys="0"] [data-yi]:not([data-yi="0"]),
+.hs-grid[data-ys="1"] [data-yi]:not([data-yi="1"]),
+.hs-grid[data-ys="2"] [data-yi]:not([data-yi="2"]) { display: none; }
+/* Cellule modifiée, non enregistrée : fond bleu et barre à gauche (jamais la couleur seule). Valeur illisible : rouge. */
+.hs-grid .input[data-dirty="true"] { background: var(--blue-soft); border-color: #8aafff; box-shadow: inset 3px 0 0 var(--blue); }
+.hs-grid .input[data-invalid="true"] { background: var(--danger-bg); border-color: var(--danger); box-shadow: inset 3px 0 0 var(--danger); }
+.hs-grid input[type="checkbox"][data-dirty="true"], .hs-grid select[data-dirty="true"] { outline: 2px solid var(--blue); outline-offset: 2px; }
+/* Bouton d'enregistrement toujours visible sous une grille longue. */
+.hs-grid-form > .actions { position: sticky; bottom: 0; z-index: 6; align-items: center; gap: 14px; padding: 10px 0; background: #fff; border-top: 1px solid var(--line); }
+
+/* Barre d'outils de la grille. */
+.hs-tools { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.hs-tools-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; }
+html[data-clair-theme="airy"] .hs-tools .btn, html[data-clair-theme="airy"] .btn.hs-report { min-height: 30px; padding: 4px 10px; font-size: var(--clair-type-form); }
+.hs-years { display: inline-flex; }
+html[data-clair-theme="airy"] .hs-years .btn { border-radius: 0; margin-left: -1px; min-width: 64px; }
+html[data-clair-theme="airy"] .hs-years .btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+html[data-clair-theme="airy"] .hs-years .btn:last-child { border-radius: 0 6px 6px 0; }
+html[data-clair-theme="airy"] .hs-years .btn[aria-pressed="true"] { position: relative; }
+.hs-count { margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 600; }
+.hs-fill { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hs-fill label { font-size: var(--clair-type-form-label); font-weight: 600; }
+.hs-fill .input { width: 108px; min-height: 30px; padding: 4px 8px; text-align: right; }
+.hs-active { margin: 0; font-size: var(--clair-type-label); color: var(--muted); }
+.hs-active strong { color: var(--ink); font-weight: 600; }
+.hs-note { font-size: var(--clair-type-form); color: var(--ink); line-height: 1.4; }
+.hs-note:empty { display: none; }
+
+/* Compteur de modifications non enregistrées, à côté du bouton d'enregistrement. */
+.hs-dirty { font-size: var(--clair-type-form); color: var(--muted); }
+.hs-dirty[data-n]:not([data-n="0"]) { color: var(--blue); font-weight: 600; }
+.hs-dirty[data-n]:not([data-n="0"])::before { content: "●"; margin-right: 6px; font-size: 9px; vertical-align: 1px; }
+.hs-dirty[data-bad]:not([data-bad="0"]) { color: var(--danger); }
+
+@media (max-width: 720px) {
+  .hs-tools-row { align-items: stretch; }
+  .hs-fill { width: 100%; }
+  .hs-fill .input { flex: 1 1 100px; }
+  .hs-grid-form > .actions { gap: 8px; }
+}

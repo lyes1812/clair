@@ -1,7 +1,7 @@
 "use client";
 import { useId, useMemo, useState } from "react";
 import { barDomain, barLayout, niceTicks } from "./scale";
-import { colorOf, Frame, labelWidth, Legend, NdPattern, TipBox, useWidth, type ChartSeries, type Tip } from "./shared";
+import { colorOf, Frame, labelWidth, Legend, NdPattern, onColor, TipBox, useRoving, useWidth, type ChartSeries, type Tip } from "./shared";
 import { unitFormat, type UnitName } from "./units";
 
 export type BarChartProps = {
@@ -29,6 +29,7 @@ export function BarChart(p: BarChartProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [tip, setTip] = useState<Tip | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
+  const rov = useRoving(p.categories.length);
   const u = unitFormat(p.unit);
   const axisFmt = u.axis;
   const labelFmt = u.label;
@@ -59,7 +60,7 @@ export function BarChart(p: BarChartProps) {
   };
   const labelBars = lay.barW >= 26 && (mode === "grouped" ? visible.length <= 4 : true);
   const toggleHidden = (key: string) => setHidden((h) => { const n = new Set(h); if (n.has(key)) n.delete(key); else n.add(key); return n; });
-  const aria = (c: number) => `${catTitle(c)} : ${p.series.map((s) => `${s.name} ${s.values[c] === null || s.values[c] === undefined ? "n.d." : u.fmt(s.values[c] as number)}`).join(", ")}`;
+  const aria = (c: number) => `${catTitle(c)} : ${p.series.map((s) => `${s.name} ${s.values[c] === null || s.values[c] === undefined ? `n.d.${s.reasons?.[c] ? ` (${s.reasons[c]})` : ""}` : u.fmt(s.values[c] as number)}`).join(", ")}`;
   return (
     <Frame
       testid={p.testid}
@@ -100,10 +101,10 @@ export function BarChart(p: BarChartProps) {
               return <rect key={`${b.cat}-${b.ser}`} x={b.x} y={b.y} width={b.w} height={b.h} fill={colorOf(i, s.color)} rx={mode === "grouped" ? 2 : 0} opacity={focus !== null && focus !== b.cat ? 0.55 : 1} />;
             })}
             {labelBars && lay.bars.map((b) => (mode === "grouped" || b.h >= 14) && b.v !== 0 ? (
-              <text key={`l${b.cat}-${b.ser}`} x={b.x + b.w / 2} y={mode === "grouped" ? (b.v >= 0 ? b.y - 4 : b.y + b.h + 11) : b.y + b.h / 2} textAnchor="middle" dominantBaseline={mode === "grouped" ? undefined : "middle"} className={mode === "grouped" ? "val" : "val inside"}>{labelFmt(b.v)}</text>
+              <text key={`l${b.cat}-${b.ser}`} x={b.x + b.w / 2} y={mode === "grouped" ? (b.v >= 0 ? b.y - 4 : b.y + b.h + 11) : b.y + b.h / 2} textAnchor="middle" dominantBaseline={mode === "grouped" ? undefined : "middle"} className="val" style={mode === "grouped" ? undefined : { fill: onColor(colorOf(visible[b.ser].i, visible[b.ser].s.color)) }}>{labelFmt(b.v)}</text>
             ) : null)}
             {Array.from({ length: nCat }, (_, c) => (
-              <rect key={`hit${c}`} x={c * lay.band} y={-top} width={lay.band} height={plotH + top + bottom - 4} fill="transparent" tabIndex={0} aria-label={aria(c)} className="hit"
+              <rect key={`hit${c}`} x={c * lay.band} y={-top} width={lay.band} height={plotH + top + bottom - 4} fill="transparent" tabIndex={rov.tab(c)} onKeyDown={rov.onKeyDown} aria-label={aria(c)} className="hit"
                 onMouseEnter={() => { setTip(tipFor(c)); setFocus(c); }} onMouseMove={() => setTip(tipFor(c))} onMouseLeave={() => setFocus(null)}
                 onFocus={() => { setTip(tipFor(c)); setFocus(c); }} onBlur={() => { setTip(null); setFocus(null); }} />
             ))}

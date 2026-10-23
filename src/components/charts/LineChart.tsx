@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { niceTicks } from "./scale";
 import { unitFormat, type UnitName } from "./units";
-import { colorOf, Frame, labelWidth, Legend, TipBox, useWidth, type ChartSeries, type Tip } from "./shared";
+import { colorOf, Frame, labelWidth, Legend, TipBox, useRoving, useWidth, type ChartSeries, type Tip } from "./shared";
 
 export type LineChartProps = {
   testid: string;
@@ -24,6 +24,7 @@ export function LineChart(p: LineChartProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [tip, setTip] = useState<Tip | null>(null);
   const [at, setAt] = useState<number | null>(null);
+  const rov = useRoving(p.categories.length);
   const u = unitFormat(p.unit);
   const axisFmt = u.axis;
   const vis = p.series.map((s, i) => ({ s, i })).filter(({ s }) => !hidden.has(s.key));
@@ -69,7 +70,7 @@ export function LineChart(p: LineChartProps) {
     return out;
   };
   const toggleHidden = (key: string) => setHidden((h) => { const n = new Set(h); if (n.has(key)) n.delete(key); else n.add(key); return n; });
-  const aria = (c: number) => `${catTitle(c)} : ${p.series.map((s) => `${s.name} ${s.values[c] === null || s.values[c] === undefined ? "n.d." : u.fmt(s.values[c] as number)}`).join(", ")}`;
+  const aria = (c: number) => `${catTitle(c)} : ${p.series.map((s) => `${s.name} ${s.values[c] === null || s.values[c] === undefined ? `n.d.${s.reasons?.[c] ? ` (${s.reasons[c]})` : ""}` : u.fmt(s.values[c] as number)}`).join(", ")}`;
   const note = [p.note, truncated ? `Axe vertical ajusté aux valeurs (il ne part pas de zéro) : ${axisFmt(t.min)} à ${axisFmt(t.max)}.` : null].filter(Boolean).join(" ");
   return (
     <Frame testid={p.testid} title={p.title} legend={<Legend items={p.series.map((s, i) => ({ key: s.key, name: s.name, color: colorOf(i, s.color), dashed: s.dashed }))} hidden={hidden} onToggle={p.series.length > 1 ? toggleHidden : undefined} />} note={note || undefined}>
@@ -97,12 +98,12 @@ export function LineChart(p: LineChartProps) {
                   {segs.map((seg, k) => seg.length > 1 && (
                     <path key={`p${k}`} d={seg.map((pt, j) => `${j ? "L" : "M"} ${X(pt.c)} ${Y(pt.v)}`).join(" ")} fill="none" stroke={color} strokeWidth={2} strokeDasharray={s.dashed ? "6 4" : undefined} strokeLinejoin="round" strokeLinecap="round" />
                   ))}
-                  {segs.flat().map((pt) => <circle key={`${s.key}-${pt.c}`} cx={X(pt.c)} cy={Y(pt.v)} r={at === pt.c ? 4.5 : nCat > 18 ? 0 : 3} fill="#fff" stroke={color} strokeWidth={2} />)}
+                  {segs.map((seg) => seg.map((pt) => <circle key={`${s.key}-${pt.c}`} cx={X(pt.c)} cy={Y(pt.v)} r={at === pt.c ? 4.5 : nCat > 18 && seg.length > 1 ? 0 : 3} fill="#fff" stroke={color} strokeWidth={2} />))}
                 </g>
               );
             })}
             {Array.from({ length: nCat }, (_, c) => (
-              <rect key={`hit${c}`} x={c * band} y={-top} width={band} height={plotH + top + bottom - 4} fill="transparent" tabIndex={0} aria-label={aria(c)} className="hit"
+              <rect key={`hit${c}`} x={c * band} y={-top} width={band} height={plotH + top + bottom - 4} fill="transparent" tabIndex={rov.tab(c)} onKeyDown={rov.onKeyDown} aria-label={aria(c)} className="hit"
                 onMouseEnter={() => { setTip(tipFor(c)); setAt(c); }} onMouseMove={() => setTip(tipFor(c))}
                 onFocus={() => { setTip(tipFor(c)); setAt(c); }} onBlur={() => { setTip(null); setAt(null); }} />
             ))}

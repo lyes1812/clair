@@ -1,0 +1,62 @@
+/* Hypothèses budgétaires › écrans de résultat (projection, comparaison, atterrissage, embauches prévisionnelles), charte « 101 ».
+   Classes de ergonomie.css et charts.css réutilisées : .view-switch, .panel-head, .panel-tools, .swatch, .ver-badge. Préfixe hr-. */
+
+/* Barre d'affichage : « Afficher tout / Graphique / Tableau » à gauche, rappel de lecture à droite. */
+.hr-switch { display: flex; align-items: center; justify-content: space-between; gap: 6px 20px; flex-wrap: wrap; }
+.hr-switch .view-switch { flex: none; }
+.hr-switch .hr-hint { margin: 0; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.45; max-width: 62ch; }
+
+/* Titre d'un panneau avec sa phrase de contexte dessous. */
+.hr-title { display: grid; gap: 4px; min-width: 0; }
+.hr-title .desc { line-height: 1.5; max-width: 80ch; }
+.panel-head .hr-title { flex: 1 1 320px; }
+
+/* Tuiles : en-tête (titre et période), valeur en grand, pieds de tuile. */
+.facts.hr-tiles { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.hr-tiles .hr-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; min-width: 0; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.hr-tiles .hr-tile dt { display: grid; gap: 1px; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
+.hr-tiles .hr-tile dt .hr-sub { font-size: var(--clair-type-label); font-weight: 400; color: var(--muted); }
+.hr-tiles .hr-tile dd { margin: 0; font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* Valeur n.d. : la raison s'écrit en texte courant, pas en gros chiffre. */
+.hr-tiles .hr-tile dd.nd { font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; line-height: 1.5; }
+.hr-tiles-sm .hr-tile dd { font-size: calc(var(--clair-type-secondary) * .78); }
+.hr-tiles-sm .hr-tile dd.nd { font-size: var(--clair-type-form); }
+.hr-tiles .hr-tile .tile-foot { line-height: 1.5; overflow-wrap: anywhere; }
+.hr-tiles .hr-tile .tile-foot:last-child { margin-top: auto; padding-top: 2px; }
+
+/* Lecture graphique : une colonne, ou deux colonnes pour deux petits graphiques côte à côte. */
+.hr-charts { display: grid; gap: 30px; min-width: 0; }
+.hr-charts-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 32px; min-width: 0; }
+.hr-block { display: grid; gap: 8px; min-width: 0; align-content: start; }
+@media (max-width: 960px) { .hr-charts-2 { grid-template-columns: minmax(0, 1fr); } }
+
+/* Rien à tracer : on l'écrit, avec la raison. */
+.hr-nd { display: grid; gap: 6px; padding: 14px 16px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); line-height: 1.5; }
+.hr-nd p { margin: 0; }
+.hr-nd-title { font-size: var(--clair-type-subheading); font-weight: 550; font-style: normal; color: var(--ink); }
+
+/* Bascule de regroupement (liens d'adresse) : un groupe de boutons, l'option choisie en bleu. */
+.hr-seg { display: inline-flex; flex-wrap: wrap; font-size: var(--clair-type-form); }
+.hr-seg a, .hr-seg span { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 13px; margin-left: -1px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-weight: 500; text-decoration: none; }
+.hr-seg > :first-child { margin-left: 0; border-radius: 6px 0 0 6px; }
+.hr-seg > :last-child { border-radius: 0 6px 6px 0; }
+.hr-seg a:hover { background: #f7f8fb; border-color: #d8dce5; position: relative; }
+.hr-seg a[aria-current="true"] { background: var(--blue-soft); border-color: #d6e3ff; color: var(--blue); font-weight: 600; position: relative; }
+.hr-seg a:focus-visible { outline: 3px solid #8aafff; outline-offset: 2px; position: relative; z-index: 1; }
+.hr-seg span[aria-disabled="true"] { color: var(--muted); background: var(--surface); cursor: not-allowed; }
+.hr-seg span em { font-size: var(--clair-type-label); }
+
+/* Tableau d'une répartition : pastille de la teinte du graphique devant le libellé. */
+.data-table .hr-group { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Liste des postes : première colonne fixe, libellé qui passe à la ligne. */
+.data-table.hr-hires :is(th, td):first-child { min-width: 190px; max-width: 300px; white-space: normal; }
+
+/* Notes sous un graphique ou un tableau. */
+.hr-notes { display: grid; gap: 4px; margin: 0; }
+.hr-notes .tile-foot { line-height: 1.5; }
+
+@media (max-width: 720px) {
+  .hr-switch .hr-hint { max-width: none; }
+  .facts.hr-tiles { grid-template-columns: minmax(0, 1fr); }
+}

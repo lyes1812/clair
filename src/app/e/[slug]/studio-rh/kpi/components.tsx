@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BarChart, LineChart, type ChartSeries } from "@/components/charts";
 import { SourceBadge } from "@/components/SourceBadge";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, formatMonth } from "@/lib/dates";
@@ -12,12 +13,14 @@ import type {
   Absenteeism,
   AbsenteeismMonth,
   Average,
+  Compared,
   EtpBasis,
   EtpMonthEnd,
   EtpSource,
   EventContribution,
   Kind,
   KpiNd,
+  KpiRow,
   MonthMovements,
   TheoreticalMonth,
   TheoreticalWindow,
@@ -27,6 +30,7 @@ import type { KpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
+import { absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, movementSeries, ndSummary, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
 // Composants de l'écran KPI RH : en-tête, tuiles (valeur, N-1, écart, paramètres), tableau mensuel, détail d'un chiffre.
@@ -56,24 +60,31 @@ export function KpiHeader({ ctx, closedMonth, children }: { ctx: KpiContext; clo
   const { slug, source, state, switchedAt } = ctx.collab;
   return (
     <>
-      <div style={{ display: "grid", gap: 8 }}>
+      <div className="kpi-head">
         <span className="label">Studio RH</span>
         <h1>{ITEM.label}</h1>
         <p className="desc">{ITEM.summary}</p>
-        <SourceBadge resolution={source} slug={slug} />
-        <BuildInfo ctx={ctx.collab} />
+        <div className="kpi-read-strip">
+          <SourceBadge resolution={source} slug={slug} />
+          {ctx.collab.data && (
+            <p className="desc" data-testid="kpi-closed-month">
+              Dernier mois clos : {closedMonth ? <strong>{closedMonth}</strong> : <span className="nd">n.d. — aucun mois clos à la date de référence</span>}
+              {(ctx.input?.openMonths ?? []).length > 0 && (
+                <span data-testid="kpi-payroll-open"> · paie non clôturée à la lecture : {ctx.input!.openMonths!.join(", ")} (mois non clos)</span>
+              )}
+            </p>
+          )}
+        </div>
         {switchedAt && (
           <p className="notice" data-testid="source-switch-notice">
             Source RH changée le {dateTimeFmt.format(switchedAt)} par un administrateur ({source.reason}). Les identifiants PayFit et DSN sont distincts : aucune comparaison n'est faite entre les deux sources.
           </p>
         )}
         {ctx.collab.data && (
-          <p className="desc" data-testid="kpi-closed-month">
-            Dernier mois clos : {closedMonth ? <strong>{closedMonth}</strong> : <span className="nd">n.d. — aucun mois clos à la date de référence</span>}
-            {(ctx.input?.openMonths ?? []).length > 0 && (
-              <span data-testid="kpi-payroll-open"> · paie non clôturée à la lecture : {ctx.input!.openMonths!.join(", ")} (mois non clos)</span>
-            )}
-          </p>
+          <details className="kpi-read-details" data-testid="kpi-read-details">
+            <summary>Détails de la lecture</summary>
+            <BuildInfo ctx={ctx.collab} />
+          </details>
         )}
       </div>
       {!source.chosen && (
@@ -133,30 +144,151 @@ export function KpiTile(props: {
   deltaCalc?: string;
   params: string;
   qualifiers?: string[];
+  // Avertissement qui conditionne la lecture de la valeur : reste visible sous la valeur (le reste est replié).
+  warning?: ReactNode;
   def: string;
   detail: string;
   detailN1: string;
   children?: ReactNode;
   visible?: boolean;
 }) {
-  const { id, label, shown, title, n1, delta, deltaCalc, params, qualifiers = [], def, detail, detailN1, children, visible = true } = props;
+  const { id, label, shown, title, n1, delta, deltaCalc, params, qualifiers = [], warning, def, detail, detailN1, children, visible = true } = props;
   if (!visible) return null;
+  const notes = [...new Set(qualifiers)];
   return (
-    <div data-testid={`kpi-tile-${id}`}>
+    <div className="kpi-tile" data-testid={`kpi-tile-${id}`}>
       <dt>{label}</dt>
       <dd className={cls(shown)} title={title}>{shown.text}</dd>
-      {[...new Set(qualifiers)].map((q) => <span key={q} className="tile-foot">{q}</span>)}
-      <span className="tile-foot" data-testid={`kpi-tile-${id}-n1`}>{n1}</span>
-      <span className="tile-foot" data-testid={`kpi-tile-${id}-delta`}>
-        écart : {delta}
-        {deltaCalc ? <span data-testid={`kpi-tile-${id}-delta-calc`}> ({deltaCalc})</span> : null}
+      {(notes.length > 0 || warning) && (
+        <span className="tile-notes">
+          {notes.map((q) => <span key={q} className="tile-foot">{q}</span>)}
+          {warning}
+        </span>
+      )}
+      <span className="tile-compare">
+        <span className="tile-foot" data-testid={`kpi-tile-${id}-n1`}>{n1}</span>
+        <span className="tile-foot" data-testid={`kpi-tile-${id}-delta`}>
+          écart : {delta}
+          {deltaCalc ? <span className="tile-calc" data-testid={`kpi-tile-${id}-delta-calc`}> ({deltaCalc})</span> : null}
+        </span>
       </span>
-      <span className="tile-foot" data-testid={`kpi-tile-${id}-params`}>{params}</span>
-      {children}
-      <span className="tile-foot">
+      <details className="tile-more">
+        <summary>Paramètres et périmètre</summary>
+        <span className="tile-foot" data-testid={`kpi-tile-${id}-params`}>{params}</span>
+        {children}
+      </details>
+      <span className="tile-foot tile-links">
         <a href={`#def-${def}`}>Définition</a> · <a href={detail}>Détail</a> · <a href={detailN1} data-testid={`kpi-tile-${id}-detail-n1`}>Détail N-1</a>
       </span>
     </div>
+  );
+}
+
+// --- Lecture graphique (séries mensuelles déjà calculées : le tableau « Mois par mois » reste la référence)
+
+// Un emplacement de graphique : si tout est n.d. la raison remplace le graphique (une courbe vide ne dirait rien).
+function Slot({ id, title, list, wide, children }: { id: string; title: string; list: ChartSeries[]; wide?: boolean; children: ReactNode }) {
+  const nd = ndSummary(list);
+  return (
+    <div className={wide ? "kpi-chart wide" : "kpi-chart"}>
+      {nd ? (
+        <figure className="chart" data-testid={`kpi-chart-${id}`} data-state="nd">
+          <figcaption className="chart-head"><span className="chart-title">{title}</span></figcaption>
+          <p className="nd">n.d. — {nd}</p>
+        </figure>
+      ) : children}
+    </div>
+  );
+}
+
+export function KpiCharts({ vue, rows, turnover, absenteeism, isPayfit }: { vue: "suivi" | "turnover" | "absenteisme"; rows: KpiRow[]; turnover: Compared<Turnover>; absenteeism: Compared<Absenteeism>; isPayfit: boolean }) {
+  const months = rows.map((r) => r.month);
+  const axis = monthAxis(months); // séries du mois seul
+  const axisN1 = monthAxis(months, rows.map((r) => r.previous.month)); // séries avec leur N-1 : l'infobulle nomme les deux mois
+  const etp = etpSeries(rows);
+  const headcount = headcountSeries(rows);
+  const moves = movementSeries(rows);
+  const abs = absenteeismSeries(rows);
+  const turn = comparedRate("Turnover", { label: turnover.previousWindow.label, value: turnover.previous }, { label: turnover.window.label, value: turnover.current });
+  const absPeriod = comparedRate("Absentéisme", { label: absenteeism.previousWindow.label, value: absenteeism.previous }, { label: absenteeism.window.label, value: absenteeism.current });
+  const H = 250;
+  // Un emplacement par graphique, dans l'ordre de lecture de chaque écran ; le seul graphique « large » est celui des mouvements du turnover.
+  const slots: Record<string, ReactNode> = {
+    etp: (
+      <Slot key="etp" id="etp" title="ETP contractuel de fin de mois" list={etp}>
+        <LineChart
+          testid="kpi-chart-etp"
+          label="ETP contractuel de fin de mois, par mois, période affichée et N-1"
+          title="ETP contractuel de fin de mois"
+          categories={axisN1.categories}
+          categoryTitles={axisN1.titles}
+          series={etp}
+          unit="etp"
+          height={H}
+          note={isPayfit ? "Quotités à la date de lecture, non historisées : la même quotité sert à tous les mois, N-1 compris." : undefined}
+        />
+      </Slot>
+    ),
+    effectif: (
+      <Slot key="effectif" id="effectif" title="Effectif de fin de mois (personnes)" list={headcount}>
+        <LineChart testid="kpi-chart-effectif" label="Effectif de fin de mois en personnes, par mois" title="Effectif de fin de mois (personnes)" categories={axis.categories} categoryTitles={axis.titles} series={headcount} unit="nombre" height={H} />
+      </Slot>
+    ),
+    mouvements: (
+      <Slot key="mouvements" id="mouvements" title="Entrées et sorties comptées par mois" list={moves} wide={vue === "turnover"}>
+        <BarChart testid="kpi-chart-mouvements" label="Entrées et sorties comptées, par mois" title="Entrées et sorties comptées par mois" categories={axis.categories} categoryTitles={axis.titles} series={moves} unit="nombre" mode="grouped" height={H} note="Mouvements comptés selon les règles du turnover (natures, contrats continus, sorties exclues) : les mêmes chiffres que les colonnes Entrées et Sorties du tableau." />
+      </Slot>
+    ),
+    absenteisme: (
+      <Slot key="absenteisme" id="absenteisme" title="Absentéisme par mois" list={abs}>
+        <LineChart testid="kpi-chart-absenteisme" label="Absentéisme de chaque mois, période affichée et N-1" title="Absentéisme par mois, période affichée et N-1" categories={axisN1.categories} categoryTitles={axisN1.titles} series={abs} unit="bps" zero height={H} note="Taux du mois seul (jours d'absence ÷ jours théoriques du mois) ; le taux de la période est la somme des jours sur la somme des jours théoriques, jamais une moyenne de ces taux." />
+      </Slot>
+    ),
+    turnover: (
+      <Slot key="turnover" id="turnover-periode" title="Turnover par période" list={turn.series}>
+        <BarChart testid="kpi-chart-turnover-periode" label="Taux de turnover, période précédente et période affichée" title="Turnover par période" categories={turn.categories} categoryTitles={turn.titles} series={turn.series} unit="bps" mode="grouped" height={H} note="Taux de chaque période (formule des Paramètres) ; il n'existe pas de taux mensuel." />
+      </Slot>
+    ),
+    absenteismePeriode: (
+      <Slot key="absenteisme-periode" id="absenteisme-periode" title="Absentéisme par période" list={absPeriod.series}>
+        <BarChart testid="kpi-chart-absenteisme-periode" label="Taux d'absentéisme, période précédente et période affichée" title="Absentéisme par période" categories={absPeriod.categories} categoryTitles={absPeriod.titles} series={absPeriod.series} unit="bps" mode="grouped" height={H} note="Taux de chaque période : somme des jours d'absence ÷ somme des jours théoriques." />
+      </Slot>
+    ),
+  };
+  const order = vue === "turnover" ? ["mouvements", "effectif", "turnover"] : vue === "absenteisme" ? ["absenteisme", "absenteismePeriode"] : ["etp", "effectif", "mouvements", "absenteisme", "turnover", "absenteismePeriode"];
+  return (
+    <section className="panel" data-testid="kpi-graphs">
+      <div className="panel-head">
+        <div className="kpi-panel-title">
+          <h2>Lecture graphique</h2>
+          <p className="desc">Lecture visuelle du tableau « Mois par mois » ci-dessous, qui reste la référence. Un mois n.d. ou en borne basse n'est pas tracé (colonne hachurée ou ligne interrompue) : sa raison est dans l'infobulle ; le tableau donne la valeur « ≥ » d'une borne basse et, dessous, la raison de chaque n.d. <a href="#def-lecture-graphique">Règles de lecture</a></p>
+        </div>
+      </div>
+      <div className="kpi-charts">{order.map((id) => slots[id])}</div>
+    </section>
+  );
+}
+
+// ETP de fin de mois par catégorie (CDI, CDD, apprenti, stagiaire) : barres empilées dont la hauteur est l'ETP contractuel du mois.
+export function KpiCategoryChart({ months, keys, labels }: { months: CategoryMonthIn[]; keys: string[]; labels: Record<string, string> }) {
+  const axis = monthAxis(months.map((m) => m.month));
+  const list = categorySeries(months, keys, labels, "etp");
+  return (
+    <Slot id="categories" title="ETP de fin de mois par catégorie" list={list}>
+      <BarChart
+        testid="kpi-chart-categories"
+        label="ETP de fin de mois par catégorie de contrat, par mois"
+        title="ETP de fin de mois par catégorie"
+        categories={axis.categories}
+        categoryTitles={axis.titles}
+        series={list}
+        unit="etp"
+        mode="stacked"
+        toggle
+        height={260}
+        note="Une catégorie sans contrat un mois connu vaut 0 ; un ETP n.d. (contrat sans quotité) et un mois en borne basse ne sont pas tracés."
+      />
+    </Slot>
   );
 }
 
@@ -649,6 +781,15 @@ export function KpiDefinitions({ slug, params }: { slug: string; params: { label
             <dd>{d.text}</dd>
           </div>
         ))}
+        <div id="def-lecture-graphique" data-testid="kpi-def-graphiques">
+          <dt>Lecture graphique</dt>
+          <dd>
+            Les graphiques ne montrent que des valeurs déjà calculées : celles du tableau « Mois par mois » (effectif, ETP, entrées, sorties, absentéisme de chaque mois) et les taux de période des tuiles (turnover, absentéisme). Le
+            turnover est un taux de période : il n'existe pas de taux mensuel de turnover. Les courbes en pointillés sont celles de N-1 (même mois un an plus tôt). Un mois n.d. ou en borne basse n'est pas tracé : colonne hachurée pour
+            les barres, ligne interrompue pour les courbes, jamais un point à zéro ; sa raison est dans l'infobulle. Les barres partent de zéro. L'axe vertical des courbes d'effectif et d'ETP est ajusté aux valeurs (il ne part pas de
+            zéro) et la graduation le dit sous le graphique ; celui des taux part de zéro. Les taux sont arrondis au centième de point, comme dans le tableau. Le tableau reste la référence.
+          </dd>
+        </div>
       </dl>
       <h3>Paramètres en vigueur</h3>
       <dl className="defs" data-testid="kpi-params">

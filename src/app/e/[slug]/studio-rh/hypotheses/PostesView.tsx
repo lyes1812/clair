@@ -1,17 +1,22 @@
+import { Pager } from "@/components/Pager";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { hireKey, roundDiv } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { CATEGORY_IDS, CATEGORY_LABELS, type BaseContract, type BaseSnapshot, type CategoryId, type Hypothesis, type Projection } from "@/lib/budget/types";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
+import { dateFr, matchesQuery, pageNumber, paginate } from "@/lib/viz/hyp-saisie";
 import { ActionForm } from "./ActionForm";
 import { addHypothesisAction, bulkDeparturesAction, bulkRaisesAction, deleteHypothesisAction } from "./actions";
+import { AmountFields, Field, FieldGroup, pct } from "./shared";
 
 type Row = { key: string; label: string; kind: "base" | "embauche"; service: string | null; category: CategoryId | null; etp4: number | null; monthly: number | null; entry: string | null; contract: BaseContract | null };
+type Depart = Extract<Hypothesis, { kind: "depart" }>;
 
-const fold = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const PAGE_SIZE = 20;
+const NO_SERVICE = "__nd"; // valeur du filtre « Non ventilé »
 const catText = (c: CategoryId | null) => (c ? CATEGORY_LABELS[c] : "Non classé");
-const Field = ({ id, label, children }: { id: string; label: string; children: React.ReactNode }) => <div className="field-row"><label htmlFor={id}>{label}</label>{children}</div>;
+const lower = (m: string) => formatMonth(m).toLowerCase();
 
 // Hypothèses qui concernent un salarié (contrat de la base ou embauche).
 export function eventsOf(key: string, hyps: Hypothesis[]): Hypothesis[] {
@@ -25,44 +30,62 @@ export function eventsOf(key: string, hyps: Hypothesis[]): Hypothesis[] {
 }
 
 const KIND_TEXT: Record<string, string> = { augmentation: "Augmentation", depart: "Départ", absence: "Congé non payé", categorie: "Catégorie", base: "Correction de base", ponctuel: "Prime / élément ponctuel", embauche: "Embauche", changement: "Changement de service / quotité" };
+// Détail d'un événement : taux en français (virgule), dates en JJ/MM/AAAA comme dans le tableau.
+const dmy = (iso: string) => dateFr(iso) ?? iso;
 const detail = (h: Hypothesis): string => {
   switch (h.kind) {
-    case "augmentation": return `${h.rateBps > 0 ? "+" : ""}${h.rateBps / 100} % à compter de ${formatMonth(h.from).toLowerCase()}`;
-    case "depart": return `${h.motif ? `${h.motif} · ` : ""}dernier jour payé ${h.lastPaidDate}${h.exitCost ? ` · sortie ${h.exitCost.mode === "brut" ? `${formatEuros(h.exitCost.brutCents)} brut + ${h.exitCost.chargesBps / 100} %` : `${formatEuros(h.exitCost.costCents)} chargés`}` : ""}`;
-    case "absence": return `du ${h.from} au ${h.to} · payé à ${h.paidBps / 100} %`;
+    case "augmentation": return `${h.rateBps > 0 ? "+" : ""}${pct(h.rateBps)} à compter de ${lower(h.from)}`;
+    case "depart": return `${h.motif ? `${h.motif} · ` : ""}dernier jour payé ${dmy(h.lastPaidDate)}${h.exitCost ? ` · sortie ${h.exitCost.mode === "brut" ? `${formatEuros(h.exitCost.brutCents)} brut + ${pct(h.exitCost.chargesBps)}` : `${formatEuros(h.exitCost.costCents)} chargés`}` : ""}`;
+    case "absence": return `du ${dmy(h.from)} au ${dmy(h.to)} · payé à ${pct(h.paidBps)}`;
     case "categorie": return CATEGORY_LABELS[h.category];
-    case "base": return `salaire ${formatEuros(h.salaryCents)} · charges ${h.chargesBps / 100} %`;
-    case "ponctuel": return `${formatMonth(h.month)} · ${h.amount.mode === "brut" ? `${formatEuros(h.amount.brutCents)} brut + ${h.amount.chargesBps / 100} %` : `${formatEuros(h.amount.costCents)} chargés`}${h.nonRecurring ? " · non récurrent" : ""}`;
-    case "embauche": return `${h.start}${h.end ? ` → ${h.end}` : ""} · ${formatEuros(h.grossFullTimeCents)} × ${h.quotaBps / 100} %`;
-    case "changement": return `à compter de ${formatMonth(h.from).toLowerCase()}${h.service ? ` · service ${h.service}` : ""}${h.quotaBps !== undefined ? ` · quotité ${h.quotaBps / 100} %` : ""}${h.poste ? ` · poste ${h.poste}` : ""}`;
+    case "base": return `salaire ${formatEuros(h.salaryCents)} · charges ${pct(h.chargesBps)}`;
+    case "ponctuel": return `${formatMonth(h.month)} · ${h.amount.mode === "brut" ? `${formatEuros(h.amount.brutCents)} brut + ${pct(h.amount.chargesBps)}` : `${formatEuros(h.amount.costCents)} chargés`}${h.nonRecurring ? " · non récurrent" : ""}`;
+    case "embauche": return `${dmy(h.start)}${h.end ? ` → ${dmy(h.end)}` : ""} · ${formatEuros(h.grossFullTimeCents)} × ${pct(h.quotaBps)}`;
+    case "changement": return `à compter de ${lower(h.from)}${h.service ? ` · service ${h.service}` : ""}${h.quotaBps !== undefined ? ` · quotité ${pct(h.quotaBps)}` : ""}${h.poste ? ` · poste ${h.poste}` : ""}`;
     default: return "";
   }
 };
 
-// Sortie d'un salarié : départ saisi dans le scénario (date et motif), sinon fin de contrat connue de PayFit.
-function exitOf(r: Row, hyps: Hypothesis[]): { date: string | null; motif: string | null } {
-  const dep = hyps.find((h): h is Extract<Hypothesis, { kind: "depart" }> => h.kind === "depart" && h.contractKey === r.key);
-  if (dep) return { date: dep.lastPaidDate, motif: dep.motif ?? null };
-  if (r.kind === "embauche") {
-    const h = hyps.find((x): x is Extract<Hypothesis, { kind: "embauche" }> => x.kind === "embauche" && hireKey(x.id) === r.key);
-    return h?.end ? { date: h.end, motif: "fin prévue (CDD)" } : { date: null, motif: null };
-  }
-  return r.contract?.endDate ? { date: r.contract.endDate, motif: "fin de contrat connue" } : { date: null, motif: null };
+// Ce que les hypothèses du scénario changent pour un salarié (colonnes colorées du tableau) : rien n'est écrit tant qu'aucune
+// hypothèse n'existe (« — »), jamais une valeur par défaut.
+type Effect = { exitDate: string | null; exitMotif: string | null; raises: string[]; changes: string[]; recategorised: boolean; events: Hypothesis[] };
+function effectOf(key: string, hyps: Hypothesis[]): Effect {
+  const events = eventsOf(key, hyps);
+  const dep = events.find((h): h is Depart => h.kind === "depart");
+  return {
+    exitDate: dep?.lastPaidDate ?? null,
+    exitMotif: dep?.motif ?? null,
+    raises: events.flatMap((h) => (h.kind === "augmentation" ? [`${h.rateBps > 0 ? "+" : ""}${pct(h.rateBps)} dès ${lower(h.from)}`] : [])),
+    changes: events.flatMap((h) => (h.kind === "changement" ? [`${[h.service ? `service ${h.service}` : null, h.quotaBps !== undefined ? `quotité ${pct(h.quotaBps)}` : null, h.poste ? `poste ${h.poste}` : null].filter(Boolean).join(" · ") || "sans effet saisi"} dès ${lower(h.from)}`] : [])),
+    recategorised: events.some((h) => h.kind === "categorie"),
+    events,
+  };
 }
+
+// Fin connue : fin de contrat lue dans PayFit, ou dernier jour payé d'une embauche à durée déterminée.
+function knownEnd(r: Row, hyps: Hypothesis[]): string | null {
+  if (r.kind === "embauche") return hyps.find((x): x is Extract<Hypothesis, { kind: "embauche" }> => x.kind === "embauche" && hireKey(x.id) === r.key)?.end ?? null;
+  return r.contract?.endDate ?? null;
+}
+
+const MOTIFS = ["Licenciement", "Licenciement pour faute grave", "Rupture conventionnelle", "Démission", "Fin de CDD", "Fin de stage"];
 
 // Saisie en masse : une ligne par salarié de la base, lignes vides ignorées, lot enregistré en entier ou pas du tout.
 function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[] }) {
   const departing = new Set(hyps.flatMap((h) => (h.kind === "depart" ? [h.contractKey] : [])));
   const leavers = base.contracts.filter((c) => !departing.has(c.contractKey));
   return (
-    <section className="panel" data-testid="sal-bulk">
-      <h2>Saisie en masse <span className="desc">— une ligne par salarié, les lignes vides sont ignorées · <a href="#def-saisie-masse">règle</a></span></h2>
+    <section className="panel hs-events" id="sal-bulk" data-testid="sal-bulk">
+      <div className="hs-title">
+        <h2>Saisie en masse</h2>
+        <p className="desc">Une ligne par salarié ; les lignes vides sont ignorées et le lot est enregistré en entier ou pas du tout. <a href="#def-saisie-masse">Règle</a></p>
+      </div>
       <details>
-        <summary>Départs ({leavers.length} salariés sans départ saisi)</summary>
+        <summary>Départs ({leavers.length} salarié{leavers.length > 1 ? "s" : ""} sans départ saisi)</summary>
         <ActionForm action={bulkDeparturesAction.bind(null, slug, scenario.id)} submit="Enregistrer les départs renseignés" testid="sal-bulk-departs">
           <input type="hidden" name="n" value={leavers.length} />
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className="table-wrap scroll">
+            <table className="data-table sticky sticky-first hs-table">
               <thead><tr><th>Salarié</th><th>Service</th><th>Dernier jour payé</th><th>Motif</th><th>Coûts de sortie chargés (€)</th></tr></thead>
               <tbody>
                 {leavers.map((c, i) => (
@@ -77,19 +100,19 @@ function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: S
               </tbody>
             </table>
           </div>
-          <datalist id="bulk-motifs"><option value="Licenciement" /><option value="Licenciement pour faute grave" /><option value="Rupture conventionnelle" /><option value="Démission" /><option value="Fin de CDD" /><option value="Fin de stage" /></datalist>
+          <datalist id="bulk-motifs">{MOTIFS.map((m) => <option key={m} value={m} />)}</datalist>
           <p className="tile-foot">Coûts de sortie en coût chargé, imputés au mois du départ (facultatif). Pour les saisir en brut + taux de charges, utilisez la fiche du salarié.</p>
         </ActionForm>
       </details>
       <details>
-        <summary>Augmentations ({base.contracts.length} salariés)</summary>
+        <summary>Augmentations ({base.contracts.length} salarié{base.contracts.length > 1 ? "s" : ""})</summary>
         <ActionForm action={bulkRaisesAction.bind(null, slug, scenario.id)} submit="Enregistrer les augmentations renseignées" testid="sal-bulk-raises">
           <input type="hidden" name="n" value={base.contracts.length} />
           <div className="filters">
-            <Field id="bulk-from" label="À compter de (mois), commun à toutes les lignes"><input className="input" id="bulk-from" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} /></Field>
+            <Field id="bulk-from" label="À compter de (mois), commun à toutes les lignes" hint={`Entre ${lower(scenario.firstMonth)} et ${lower(scenario.lastMonth)}.`}><input className="input" id="bulk-from" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} /></Field>
           </div>
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className="table-wrap scroll">
+            <table className="data-table sticky sticky-first hs-table">
               <thead><tr><th>Salarié</th><th>Service</th><th>Catégorie</th><th>Taux d'augmentation (%)</th></tr></thead>
               <tbody>
                 {base.contracts.map((c, i) => (
@@ -109,7 +132,7 @@ function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: S
   );
 }
 
-export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[]; proj: Projection; q: string; selected: string; canEdit: boolean }) {
+export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canEdit, page, forme, service }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hyps: Hypothesis[]; proj: Projection; q: string; selected: string; canEdit: boolean; page?: string; forme?: string; service?: string }) {
   const catOver = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
   const rows: Row[] = [
     ...base.contracts.map((c): Row => ({
@@ -118,65 +141,133 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
     })),
     ...hyps.flatMap((h): Row[] => (h.kind === "embauche" ? [{ key: hireKey(h.id), label: `${h.label} (embauche)`, kind: "embauche", service: h.service, category: catOver.get(hireKey(h.id)) ?? h.category ?? null, etp4: h.counted ? h.quotaBps : null, entry: h.start, contract: null, monthly: null }] : [])),
   ];
-  const shown = q ? rows.filter((r) => fold(r.label).includes(fold(q)) || fold(r.service ?? "").includes(fold(q))) : rows;
-  const sel = rows.find((r) => r.key === selected) ?? null;
+  const line = rows.map((r) => {
+    const fx = effectOf(r.key, hyps);
+    const end = knownEnd(r, hyps);
+    const etp = r.etp4 === null ? "n.d." : fmtEtp4(r.etp4);
+    const cost = r.monthly === null ? (r.kind === "embauche" ? "—" : "n.d.") : formatEuros(r.monthly);
+    return { r, fx, end, etp, cost };
+  });
   const services = [...new Set([...base.contracts.map((c) => c.service), ...hyps.map((h) => (h.kind === "embauche" ? h.service : null))].filter((x): x is string => x !== null))].sort();
+  const hasNoService = rows.some((r) => r.service === null);
+  // Filtre par service : une valeur inconnue (lien ancien) est ignorée plutôt que de vider la liste.
+  const svc = service === NO_SERVICE && hasNoService ? NO_SERVICE : service && services.includes(service) ? service : "";
+  // Recherche « toutes les colonnes » : chaque mot saisi doit se retrouver dans au moins une colonne du tableau.
+  const shown = line.filter(({ r }) => svc === "" || (svc === NO_SERVICE ? r.service === null : r.service === svc)).filter(({ r, fx, end, etp, cost }) => matchesQuery([
+    r.label, catText(r.category), r.contract?.nature, r.service ?? "Non ventilé", r.entry, dateFr(r.entry), end, dateFr(end), etp, cost,
+    fx.exitDate, dateFr(fx.exitDate), fx.exitMotif, ...fx.raises, ...fx.changes, String(fx.events.length),
+  ], q));
+  const paged = paginate(shown, pageNumber(page), PAGE_SIZE);
+  const sel = rows.find((r) => r.key === selected) ?? null;
   const base_ = `/e/${slug}/studio-rh/hypotheses?scenario=${scenario.id}&vue=postes`;
+  const qPart = `${q ? `&q=${encodeURIComponent(q)}` : ""}${svc ? `&service=${encodeURIComponent(svc)}` : ""}`;
+  const pagePart = (p: number) => (p > 1 ? `&page=${p}` : "");
+  const ficheHref = (key: string, anchor: string) => `${base_}&salarie=${encodeURIComponent(key)}${qPart}${pagePart(paged.page)}#${anchor}`;
+  const pageHref = (p: number) => `${base_}${selected ? `&salarie=${encodeURIComponent(selected)}` : ""}${qPart}${pagePart(p)}`;
   const add = (kind: Hypothesis["kind"]) => addHypothesisAction.bind(null, slug, scenario.id, kind);
+  const horizon = `Entre ${lower(scenario.firstMonth)} et ${lower(scenario.lastMonth)}.`;
+  const open = (k: string) => forme === k;
+  const COLS = 13;
   return (
     <>
       <section className="panel" data-testid="sal-list">
-        <h2>Modifications de postes <span className="desc">— cherchez un salarié, puis créez-lui un événement daté (augmentation, départ, congé non payé, changement de service ou de quotité, prime…)</span></h2>
-        <form method="get" action={`/e/${slug}/studio-rh/hypotheses`} className="filters" data-testid="sal-search">
+        <div className="panel-head">
+          <div className="hs-title">
+            <h2>Modifications de postes</h2>
+            <p className="desc">Cherchez un salarié, ouvrez sa fiche, puis créez-lui un événement daté (augmentation, départ, congé non payé, changement de service ou de quotité, prime…). Les colonnes « hypothèse » montrent ce que ce scénario change.</p>
+          </div>
+          {canEdit && <div className="panel-tools"><a className="btn" href="#sal-bulk" data-testid="sal-bulk-link">Saisie en masse</a></div>}
+        </div>
+        <form method="get" action={`/e/${slug}/studio-rh/hypotheses`} className="hs-search" data-testid="sal-search" role="search" aria-label="Recherche des salariés">
           <input type="hidden" name="scenario" value={scenario.id} />
-          <input type="hidden" name="vue" value="salaries" />
+          <input type="hidden" name="vue" value="postes" />
           <div className="field-row">
-            <label htmlFor="sal-q">Rechercher (nom, service)</label>
-            <input className="input" id="sal-q" name="q" defaultValue={q} />
+            <label htmlFor="sal-q">Rechercher</label>
+            <input className="input" id="sal-q" name="q" type="search" defaultValue={q} placeholder="Toutes les colonnes : nom, service, motif, date…" aria-label="Rechercher (nom, service) dans toutes les colonnes" autoComplete="off" />
+          </div>
+          <div className="field-row hs-narrow">
+            <label htmlFor="sal-service">Service</label>
+            <select className="select" id="sal-service" name="service" defaultValue={svc}>
+              <option value="">Tous les services</option>
+              {services.map((x) => <option key={x} value={x}>{x}</option>)}
+              {hasNoService && <option value={NO_SERVICE}>Non ventilé</option>}
+            </select>
           </div>
           <button className="btn" type="submit">Rechercher</button>
+          {(q || svc) && <a className="btn" href={base_} data-testid="sal-search-clear">Effacer la recherche</a>}
         </form>
-        <div className="table-wrap">
-          <table className="data-table" data-testid="sal-table">
-            <thead><tr><th>Salarié</th><th>Catégorie</th><th>Service</th><th>Entrée</th><th>Date de sortie</th><th>Motif de sortie</th><th className="num">ETP</th><th className="num">Coût mensuel de base</th><th className="num">Événements</th></tr></thead>
+        {paged.pages > 1 && <Pager page={paged.page} pageSize={PAGE_SIZE} total={shown.length} href={pageHref} testid="sal-pager-top" />}
+        <div className="table-wrap scroll">
+          <table className="data-table sticky sticky-first hs-table" data-testid="sal-table">
+            <thead>
+              <tr>
+                <th>Salarié</th><th>Catégorie</th><th>Service</th><th>Entrée</th>
+                <th title="Fin de contrat lue dans PayFit, ou dernier jour payé d'une embauche à durée déterminée">Fin connue</th>
+                <th className="num">ETP</th><th className="num">Coût mensuel de base</th>
+                <th className="changed" title="Départ saisi dans ce scénario : dernier jour payé">Sortie (hypothèse)</th>
+                <th className="changed">Motif de sortie (hypothèse)</th>
+                <th className="changed" title="Augmentations saisies sur ce contrat seul (celles d'un service ou de toute l'entreprise sont dans Hypothèses globales)">Augmentation (hypothèse)</th>
+                <th className="changed">Changement (hypothèse)</th>
+                <th className="num">Événements</th><th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {shown.map((r) => (
+              {paged.items.map(({ r, fx, end, etp, cost }) => (
                 <tr key={r.key} data-salarie={r.label} aria-current={r.key === selected ? "true" : undefined}>
-                  <td><a href={`${base_}&salarie=${encodeURIComponent(r.key)}${q ? `&q=${encodeURIComponent(q)}` : ""}#sal-fiche`}>{r.label}</a></td>
-                  <td>{catText(r.category)}{r.category === null && r.contract?.nature ? <span className="tile-foot"> nature {r.contract.nature}</span> : null}</td>
+                  <td><a href={ficheHref(r.key, "sal-fiche")}>{r.label}</a></td>
+                  <td className={fx.recategorised ? "changed" : undefined}>
+                    {catText(r.category)}
+                    {fx.recategorised ? <span className="tile-foot"> (hypothèse)</span> : null}
+                    {r.category === null && r.contract?.nature ? <span className="tile-foot"> nature {r.contract.nature}</span> : null}
+                  </td>
                   <td>{r.service ?? "Non ventilé"}</td>
-                  <td>{r.entry ?? "n.d."}</td>
-                  <td>{exitOf(r, hyps).date ?? "—"}</td>
-                  <td>{exitOf(r, hyps).motif ?? "—"}</td>
-                  <td className="num">{r.etp4 === null ? "n.d." : fmtEtp4(r.etp4)}</td>
-                  <td className="num">{r.monthly === null ? (r.kind === "embauche" ? "—" : "n.d.") : formatEuros(r.monthly)}</td>
-                  <td className="num">{eventsOf(r.key, hyps).length}</td>
+                  <td>{dateFr(r.entry) ?? "n.d."}</td>
+                  <td>{dateFr(end) ?? "—"}</td>
+                  <td className="num" title={etp === "n.d." ? (r.contract?.etpNd ?? (r.kind === "embauche" ? "Poste non compté dans l'effectif : pas d'ETP" : undefined)) : undefined}>{etp}</td>
+                  <td className="num" title={cost === "n.d." ? (r.contract?.baseNd ?? undefined) : undefined}>{cost}</td>
+                  <td className={fx.exitDate ? "changed" : undefined} data-col="sortie">{dateFr(fx.exitDate) ?? "—"}</td>
+                  <td className={fx.exitDate ? "changed wrap" : "wrap"}>{fx.exitDate ? fx.exitMotif ?? "non précisé" : "—"}</td>
+                  <td className={fx.raises.length ? "changed wrap" : "wrap"}>{fx.raises.length ? fx.raises.join(" ; ") : "—"}</td>
+                  <td className={fx.changes.length ? "changed wrap" : "wrap"}>{fx.changes.length ? fx.changes.join(" ; ") : "—"}</td>
+                  <td className="num" title={fx.events.map((h) => KIND_TEXT[h.kind]).join(" ; ") || undefined}>{fx.events.length}</td>
+                  <td className="hs-row-actions">
+                    <a href={ficheHref(r.key, "sal-fiche")} aria-label={`Ouvrir la fiche de ${r.label}`}>Fiche</a>
+                    {canEdit && <a href={ficheHref(r.key, "sal-add")} aria-label={`Créer un événement pour ${r.label}`}>Événement</a>}
+                  </td>
                 </tr>
               ))}
-              {shown.length === 0 && <tr><td colSpan={9} className="desc">Aucun salarié ne correspond.</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={COLS} className="desc">{q || svc ? `Aucun salarié ne correspond à ${q ? `« ${q} »` : "ce service"}${q && svc ? " dans ce service" : ""}.` : "Aucun salarié dans la base figée de ce scénario."}</td></tr>}
             </tbody>
           </table>
         </div>
-        <p className="tile-foot">Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée ici si besoin (ex. une apprentie codée CDD par PayFit).</p>
+        <Pager page={paged.page} pageSize={PAGE_SIZE} total={shown.length} href={pageHref} testid="sal-pager" />
+        <p className="tile-foot">
+          Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée ici si besoin (ex. une apprentie codée CDD par PayFit).
+          Colonnes « hypothèse » : ce que ce scénario saisit pour le salarié ; « — » : aucune hypothèse, la projection reconduit sa base.
+          Règles : <a href="#def-augmentation">augmentation</a>, <a href="#def-absence">congé non payé</a>, <a href="#def-changement">changement de service ou de quotité</a>, <a href="#def-prorata">prorata</a>, <a href="#def-categories">catégories</a>.
+        </p>
       </section>
-
-      {canEdit && <BulkSection slug={slug} scenario={scenario} base={base} hyps={hyps} />}
 
       {sel && (
         <section className="panel" id="sal-fiche" data-testid="sal-fiche">
-          <h2>{sel.label} <span className="tag">{catText(sel.category)}</span></h2>
-          <p className="desc">
-            {sel.service ?? "Non ventilé"} · entrée {sel.entry ?? "n.d."} · ETP {sel.etp4 === null ? "n.d." : fmtEtp4(sel.etp4)}
-            {sel.contract?.baseNote ? ` · base : ${sel.contract.baseNote}` : ""}
-            {sel.contract?.baseNd ? ` · base n.d. : ${sel.contract.baseNd}` : ""}
-          </p>
+          <div className="panel-head">
+            <div className="hs-title">
+              <h2>{sel.label} <span className="tag">{catText(sel.category)}</span></h2>
+              <p className="desc">
+                {sel.service ?? "Non ventilé"} · entrée {dateFr(sel.entry) ?? "n.d."} · ETP {sel.etp4 === null ? "n.d." : fmtEtp4(sel.etp4)}
+                {sel.contract?.baseNote ? ` · base : ${sel.contract.baseNote}` : ""}
+                {sel.contract?.baseNd ? ` · base n.d. : ${sel.contract.baseNd}` : ""}
+              </p>
+            </div>
+            <div className="panel-tools"><a className="btn" href={`${base_}${qPart}${pagePart(paged.page)}`} data-testid="sal-fiche-close">Fermer la fiche</a></div>
+          </div>
           <h3>Événements</h3>
           {eventsOf(sel.key, hyps).filter((h) => h.kind !== "embauche").length === 0 ? (
             <p className="desc">Aucun événement pour ce salarié : la projection reconduit sa base.</p>
           ) : (
             <div className="table-wrap">
               <table className="data-table" data-testid="sal-events">
-                <thead><tr><th>Type</th><th>Libellé</th><th>Détail</th>{canEdit && <th />}</tr></thead>
+                <thead><tr><th>Type</th><th>Libellé</th><th>Détail</th>{canEdit && <th><span className="sr-only">Supprimer</span></th>}</tr></thead>
                 <tbody>
                   {eventsOf(sel.key, hyps).filter((h) => h.kind !== "embauche").map((h) => (
                     <tr key={h.id} data-hyp={h.label}>
@@ -192,8 +283,8 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
           {proj.kind === "error" ? (
             <p className="nd">n.d. — projection refusée : {proj.errors.join(" ; ")}</p>
           ) : (
-            <div className="table-wrap">
-              <table className="data-table" data-testid="sal-months">
+            <div className="table-wrap scroll" role="region" aria-label="Coût mensuel projeté du salarié" tabIndex={0}>
+              <table className="data-table sticky" data-testid="sal-months">
                 <thead><tr><th>Mois</th><th>Détail</th><th className="num">Coût chargé</th></tr></thead>
                 <tbody>
                   {proj.months.map((m) => {
@@ -211,52 +302,47 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
             </div>
           )}
           {canEdit && (
-            <div data-testid="sal-add">
+            <div id="sal-add" className="hs-events" data-testid="sal-add">
               <h3>Créer un événement pour {sel.label}</h3>
-              <details>
+              <p className="desc">Chaque événement est daté et enregistré directement dans le brouillon ; il apparaît ensuite dans la projection et dans les contrôles des changements.</p>
+              <details open={open("augmentation")}>
                 <summary>Augmentation de salaire</summary>
                 <ActionForm action={add("augmentation")} submit="Ajouter l'augmentation" testid="sal-form-augmentation">
                   <input type="hidden" name="scope" value={`contrat:${sel.key}`} />
-                  <div className="filters">
+                  <FieldGroup title="Augmentation" hint="Effet au 1er du mois choisi, en pourcentage du salaire déjà augmenté.">
                     <Field id="s-aug-l" label="Libellé"><input className="input" id="s-aug-l" name="label" defaultValue={`Augmentation ${sel.label}`} maxLength={200} required /></Field>
-                    <Field id="s-aug-r" label="Taux (%)"><input className="input" id="s-aug-r" name="rate" inputMode="decimal" required /></Field>
-                    <Field id="s-aug-f" label="À compter de (mois)"><input className="input" id="s-aug-f" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
-                  </div>
+                    <Field id="s-aug-r" label="Taux (%)" hint="Ex. 2,5 pour +2,5 %."><input className="input" id="s-aug-r" name="rate" inputMode="decimal" required /></Field>
+                    <Field id="s-aug-f" label="À compter de (mois)" hint={horizon}><input className="input" id="s-aug-f" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
+                  </FieldGroup>
                 </ActionForm>
               </details>
               {sel.kind === "base" && (
                 <>
-                  <details>
+                  <details open={open("depart")}>
                     <summary>Départ (licenciement, rupture conventionnelle, démission, fin de CDD…)</summary>
                     <ActionForm action={add("depart")} submit="Ajouter le départ" testid="sal-form-depart">
                       <input type="hidden" name="contractKey" value={sel.key} />
-                      <div className="filters">
+                      <FieldGroup title="Départ">
                         <Field id="s-dep-l" label="Libellé"><input className="input" id="s-dep-l" name="label" defaultValue={`Départ ${sel.label}`} maxLength={200} required /></Field>
-                        <Field id="s-dep-m" label="Motif"><input className="input" id="s-dep-m" name="motif" list="sal-motifs" maxLength={100} /></Field>
-                        <Field id="s-dep-d" label="Dernier jour payé"><input className="input" id="s-dep-d" name="lastPaidDate" type="date" required /></Field>
-                      </div>
-                      <p className="label">Coûts de sortie (mois du départ, facultatif)</p>
-                      <div className="filters">
-                        <Field id="s-dep-em" label="Saisie">
-                          <select className="select" id="s-dep-em" name="exitMode" defaultValue="aucun"><option value="aucun">Aucun</option><option value="brut">Brut + taux de charges</option><option value="charge">Coût chargé</option></select>
-                        </Field>
-                        <Field id="s-dep-eb" label="Brut (€)"><input className="input" id="s-dep-eb" name="exitBrut" inputMode="decimal" /></Field>
-                        <Field id="s-dep-et" label="Taux de charges (%)"><input className="input" id="s-dep-et" name="exitTaux" inputMode="decimal" /></Field>
-                        <Field id="s-dep-ec" label="Coût chargé (€)"><input className="input" id="s-dep-ec" name="exitCout" inputMode="decimal" /></Field>
-                      </div>
-                      <datalist id="sal-motifs"><option value="Licenciement" /><option value="Licenciement pour faute grave" /><option value="Rupture conventionnelle" /><option value="Démission" /><option value="Fin de CDD" /><option value="Fin de stage" /></datalist>
+                        <Field id="s-dep-m" label="Motif" hint="Facultatif : suggestions ou saisie libre."><input className="input" id="s-dep-m" name="motif" list="sal-motifs" maxLength={100} /></Field>
+                        <Field id="s-dep-d" label="Dernier jour payé" hint="Dernier jour rémunéré, inclus."><input className="input" id="s-dep-d" name="lastPaidDate" type="date" required /></Field>
+                      </FieldGroup>
+                      <FieldGroup title="Coûts de sortie (mois du départ, facultatif)" hint="Imputés au mois du départ ; « Aucun » : pas de coût de sortie.">
+                        <AmountFields prefix="exit" idp="s-dep-e" optional />
+                      </FieldGroup>
+                      <datalist id="sal-motifs">{MOTIFS.map((m) => <option key={m} value={m} />)}</datalist>
                     </ActionForm>
                   </details>
-                  <details>
+                  <details open={open("absence")}>
                     <summary>Congé non payé ou partiellement payé (congé sans solde, congé supplémentaire de naissance…)</summary>
                     <ActionForm action={add("absence")} submit="Ajouter le congé" testid="sal-form-absence">
                       <input type="hidden" name="contractKey" value={sel.key} />
-                      <div className="filters">
+                      <FieldGroup title="Congé">
                         <Field id="s-abs-l" label="Libellé"><input className="input" id="s-abs-l" name="label" defaultValue={`Congé ${sel.label}`} maxLength={200} required /></Field>
                         <Field id="s-abs-f" label="Du"><input className="input" id="s-abs-f" name="from" type="date" required /></Field>
                         <Field id="s-abs-t" label="Au (inclus)"><input className="input" id="s-abs-t" name="to" type="date" required /></Field>
-                        <Field id="s-abs-p" label="Part du salaire payée (%) — 0 : aucun salaire"><input className="input" id="s-abs-p" name="paid" inputMode="decimal" required /></Field>
-                      </div>
+                        <Field id="s-abs-p" label="Part du salaire payée (%) — 0 : aucun salaire" hint="100 : salaire maintenu en entier ; entre les deux : maintien partiel."><input className="input" id="s-abs-p" name="paid" inputMode="decimal" required /></Field>
+                      </FieldGroup>
                     </ActionForm>
                   </details>
                   {sel.contract && !sel.contract.base && (
@@ -264,65 +350,64 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                       <summary>Base du salarié (n.d. : à saisir)</summary>
                       <ActionForm action={add("base")} submit="Enregistrer la base" testid="sal-form-base">
                         <input type="hidden" name="contractKey" value={sel.key} />
-                        <div className="filters">
+                        <FieldGroup title="Base du contrat" hint="La projection est n.d. pour ce contrat tant que sa base n'est pas saisie.">
                           <Field id="s-b-l" label="Libellé"><input className="input" id="s-b-l" name="label" defaultValue="Base saisie" maxLength={200} required /></Field>
                           <Field id="s-b-s" label="Salaire mensuel de base (€, 0 si non payé)"><input className="input" id="s-b-s" name="salary" inputMode="decimal" required /></Field>
-                          <Field id="s-b-c" label="Taux de charges (%)"><input className="input" id="s-b-c" name="charges" inputMode="decimal" required /></Field>
-                        </div>
+                          <Field id="s-b-c" label="Taux de charges (%)" hint="Ex. 42,5."><input className="input" id="s-b-c" name="charges" inputMode="decimal" required /></Field>
+                        </FieldGroup>
                       </ActionForm>
                     </details>
                   )}
                 </>
               )}
-              <details>
+              <details open={open("ponctuel")}>
                 <summary>Prime ou élément ponctuel</summary>
                 <ActionForm action={add("ponctuel")} submit="Ajouter l'élément" testid="sal-form-ponctuel">
                   <input type="hidden" name="contractKey" value={sel.key} />
                   <input type="hidden" name="service" value={sel.service ?? ""} />
-                  <div className="filters">
+                  <FieldGroup title="Élément ponctuel">
                     <Field id="s-p-l" label="Libellé"><input className="input" id="s-p-l" name="label" defaultValue={`Prime ${sel.label}`} maxLength={200} required /></Field>
-                    <Field id="s-p-m" label="Mois"><input className="input" id="s-p-m" name="month" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
-                    <Field id="s-p-mode" label="Saisie">
-                      <select className="select" id="s-p-mode" name="amountMode" defaultValue=""><option value="" disabled>Choisir…</option><option value="brut">Brut + taux de charges</option><option value="charge">Coût chargé (non ventilé)</option></select>
-                    </Field>
-                    <Field id="s-p-b" label="Brut (€)"><input className="input" id="s-p-b" name="amountBrut" inputMode="decimal" /></Field>
-                    <Field id="s-p-t" label="Taux de charges (%)"><input className="input" id="s-p-t" name="amountTaux" inputMode="decimal" /></Field>
-                    <Field id="s-p-c" label="Coût chargé (€)"><input className="input" id="s-p-c" name="amountCout" inputMode="decimal" /></Field>
-                  </div>
+                    <Field id="s-p-m" label="Mois" hint={horizon}><input className="input" id="s-p-m" name="month" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
+                  </FieldGroup>
+                  <FieldGroup title="Montant">
+                    <AmountFields prefix="amount" idp="s-p-amount" />
+                  </FieldGroup>
                   <label className="check"><input type="checkbox" name="nonRecurring" value="oui" /><span>Non récurrent (retiré de l'atterrissage retraité)</span></label>
                 </ActionForm>
               </details>
-              <details>
+              <details open={open("changement")}>
                 <summary>Changement de service ou de quotité (à compter d'un mois)</summary>
                 <ActionForm action={add("changement")} submit="Ajouter le changement" testid="sal-form-changement">
                   <input type="hidden" name="contractKey" value={sel.key} />
-                  <div className="filters">
+                  <FieldGroup title="Changement" hint="Effet au 1er jour du mois ; renseignez le service, la quotité ou les deux.">
                     <Field id="s-ch-l" label="Libellé"><input className="input" id="s-ch-l" name="label" defaultValue={`Changement ${sel.label}`} maxLength={200} required /></Field>
-                    <Field id="s-ch-f" label="À compter de (mois)"><input className="input" id="s-ch-f" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
-                    <Field id="s-ch-s" label="Nouveau service (facultatif)"><input className="input" id="s-ch-s" name="service" list="sal-services" maxLength={200} /></Field>
-                    <Field id="s-ch-q" label="Nouvelle quotité (%, facultatif)"><input className="input" id="s-ch-q" name="quota" inputMode="decimal" /></Field>
+                    <Field id="s-ch-f" label="À compter de (mois)" hint={horizon}><input className="input" id="s-ch-f" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
+                    <Field id="s-ch-s" label="Nouveau service (facultatif)" hint="Existant ou nouveau."><input className="input" id="s-ch-s" name="service" list="sal-services" maxLength={200} /></Field>
+                    <Field id="s-ch-q" label="Nouvelle quotité (%, facultatif)" hint="Entre 0 et 100 %."><input className="input" id="s-ch-q" name="quota" inputMode="decimal" /></Field>
                     <Field id="s-ch-p" label="Poste (facultatif, descriptif)"><input className="input" id="s-ch-p" name="poste" maxLength={200} /></Field>
-                  </div>
+                  </FieldGroup>
                   <datalist id="sal-services">{services.map((x) => <option key={x} value={x} />)}</datalist>
                   <p className="tile-foot">Service : les coûts de ce salarié sont attribués au nouveau service à compter du mois choisi (les augmentations ciblées par service continuent de suivre le service de la base). Quotité : salaire proportionnel (nouvelle quotité ÷ quotité actuelle), même taux de charges, ETP au nouveau niveau. Effet au 1er jour du mois.</p>
                 </ActionForm>
               </details>
-              <details>
+              <details open={open("categorie")}>
                 <summary>Catégorie (CDI, CDD, apprenti, stagiaire)</summary>
                 <ActionForm action={add("categorie")} submit="Enregistrer la catégorie" testid="sal-form-categorie">
                   <input type="hidden" name="contractKey" value={sel.key} />
-                  <div className="filters">
+                  <FieldGroup title="Catégorie" hint="Corrige la catégorie proposée depuis la nature du contrat.">
                     <Field id="s-c-l" label="Libellé"><input className="input" id="s-c-l" name="label" defaultValue={`Catégorie ${sel.label}`} maxLength={200} required /></Field>
                     <Field id="s-c-c" label="Catégorie">
                       <select className="select" id="s-c-c" name="category" defaultValue={sel.category ?? ""}><option value="" disabled>Choisir…</option>{CATEGORY_IDS.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select>
                     </Field>
-                  </div>
+                  </FieldGroup>
                 </ActionForm>
               </details>
             </div>
           )}
         </section>
       )}
+
+      {canEdit && <BulkSection slug={slug} scenario={scenario} base={base} hyps={hyps} />}
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { formatEuros } from "@/lib/money";
-import { fmtFixed } from "@/lib/rh/kpi/format";
+import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 
 // Unités des graphiques de Clair : euros en centimes, ETP en dix-millièmes, nombres entiers, pourcentages en points de base.
 // Les graphiques reçoivent le NOM de l'unité (sérialisable des composants serveur vers les composants client), jamais une fonction. `fmt` donne la valeur exacte
@@ -24,6 +24,6 @@ export function compactEuros(cents: number): string {
 export function unitFormat(unit: UnitName): UnitFormat {
   if (unit === "eur") return { fmt: formatEuros, axis: compactEuros, label: compactEuros, integer: false };
   if (unit === "etp") return { fmt: (v) => fmtFixed({ num: v, den: 10000 }, 2), axis: (v) => n2.format(v / 10000), label: (v) => fmtFixed({ num: v, den: 10000 }, 2), integer: false };
-  if (unit === "bps") return { fmt: (v) => `${nf(2).format(v / 100)} %`, axis: (v) => `${nf(2).format(v / 100)} %`, label: (v) => `${nf(1).format(v / 100)} %`, integer: false };
+  if (unit === "bps") return { fmt: (v) => fmtPercent({ num: v, den: 10000 }), axis: (v) => `${nf(2).format(v / 100)} %`, label: (v) => `${nf(1).format(v / 100)} %`, integer: false };
   return { fmt: (v) => n0.format(v), axis: (v) => n0.format(v), label: (v) => n0.format(v), integer: true };
 }

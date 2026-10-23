@@ -109,3 +109,12 @@ describe("rendu serveur", () => {
     expect(html).not.toMatch(/NaN/);
   });
 });
+
+describe("étiquettes dans les barres empilées", () => {
+  it("texte posé sur la teinte : encre sur les teintes claires (4 à 7), blanc ailleurs ; posé par style (le CSS de .val l'emporterait sur un attribut)", () => {
+    const series = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ key: `s${n}`, name: `S${n}`, values: [100000], color: `var(--chart-${n})` }));
+    const html = renderToStaticMarkup(h(BarChart, { testid: "t", label: "Test", unit: "eur", categories: ["a"], series, mode: "stacked", height: 520 }));
+    const labels = [...html.matchAll(/<text[^>]*class="val"[^>]*style="fill:([^"]*)"/g)].map((m) => m[1]);
+    expect(labels).toEqual(["#fff", "#fff", "#fff", "var(--chart-ink)", "var(--chart-ink)", "var(--chart-ink)", "var(--chart-ink)", "#fff"]);
+  });
+});

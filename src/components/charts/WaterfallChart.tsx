@@ -2,7 +2,7 @@
 import { useId, useState } from "react";
 import { niceTicks } from "./scale";
 import { unitFormat, type UnitName } from "./units";
-import { Frame, labelWidth, TipBox, useWidth, type Tip } from "./shared";
+import { Frame, labelWidth, TipBox, useRoving, useWidth, type Tip } from "./shared";
 
 export type WaterfallProps = {
   testid: string;
@@ -17,14 +17,16 @@ export type WaterfallProps = {
   note?: string;
 };
 
-// Cascade (pont) : départ, contributions signées, arrivée. Hausse pleine bleue, baisse hachurée rouge, totaux en noir ; chaque
-// barre porte sa valeur signée en clair, le sens ne dépend donc pas de la couleur. L'axe est tronqué quand les contributions
+// Cascade (pont) : départ, contributions signées, arrivée. Hausse pleine bleue, baisse hachurée, totaux en noir ; chaque
+// barre porte sa valeur signée en clair, le sens ne dépend donc pas de la couleur. La baisse n'est pas peinte en rouge : aucune
+// règle métier ne dit qu'une baisse est « défavorable » (elle est hachurée, en teinte neutre). L'axe est tronqué quand les contributions
 // sont petites devant les totaux ; la troncature est écrite sous le graphique.
 export function WaterfallChart(p: WaterfallProps) {
   const uid = useId().replace(/:/g, "");
   const [ref, width] = useWidth();
   const [tip, setTip] = useState<Tip | null>(null);
   const [on, setOn] = useState<number | null>(null);
+  const rov = useRoving(p.steps.length + 2);
   const u = unitFormat(p.unit);
   const axisFmt = u.axis;
   const levels: number[] = [p.start];
@@ -61,7 +63,7 @@ export function WaterfallChart(p: WaterfallProps) {
       <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setOn(null); }}>
         <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={p.label}>
           <defs>
-            <pattern id={`hd-${uid}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff" /><rect width="3" height="6" fill="var(--danger)" /></pattern>
+            <pattern id={`hd-${uid}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#fff" /><rect width="3" height="6" fill="var(--chart-2)" /></pattern>
           </defs>
           <g transform={`translate(${left},${topM})`}>
             {t.ticks.map((v) => (
@@ -79,10 +81,10 @@ export function WaterfallChart(p: WaterfallProps) {
               const x = i * band + (band - barW) / 2;
               return (
                 <g key={`${b.label}-${i}`} opacity={on !== null && on !== i ? 0.55 : 1}>
-                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? "var(--chart-1)" : `url(#hd-${uid})`} stroke={b.kind === "down" ? "var(--danger)" : "none"} rx={2} />
+                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? "var(--chart-1)" : `url(#hd-${uid})`} stroke={b.kind === "down" ? "var(--chart-2)" : "none"} rx={2} />
                   <text x={x + barW / 2} y={a - 5} textAnchor="middle" className="val">{b.text}</text>
                   <text x={x + barW / 2} y={plotH + 16} textAnchor="middle" className="tick cat">{short(b.label)}</text>
-                  <rect x={i * band} y={-topM} width={band} height={plotH + topM + bottomM - 4} fill="transparent" tabIndex={0} className="hit" aria-label={`${b.label} : ${b.text}`}
+                  <rect x={i * band} y={-topM} width={band} height={plotH + topM + bottomM - 4} fill="transparent" tabIndex={rov.tab(i)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${b.label} : ${b.text}`}
                     onMouseEnter={() => { setOn(i); setTip(tipOf(i)); }} onFocus={() => { setOn(i); setTip(tipOf(i)); }} onBlur={() => { setOn(null); setTip(null); }} />
                 </g>
               );

@@ -1,3 +1,4 @@
+import "@/styles/collaborateurs.css";
 import { notFound } from "next/navigation";
 import { Prevu } from "@/components/Prevu";
 import { loadCollabContext } from "@/lib/rh/view";

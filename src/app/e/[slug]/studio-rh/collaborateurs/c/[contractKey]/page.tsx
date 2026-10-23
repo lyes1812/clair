@@ -1,8 +1,9 @@
+import "@/styles/collaborateurs.css";
 import { notFound } from "next/navigation";
 import { PROVIDER_LABELS } from "@/lib/connectors/labels";
 import { loadAbsences } from "@/lib/rh/referential/store";
 import { KEY_RE, loadCollabContext } from "@/lib/rh/view";
-import { base, CollabHeader, FindingList } from "../../components";
+import { base, CollabHeader, FindingList, Fold, personHref } from "../../components";
 import { ContractPanel } from "../../ContractPanel";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +34,12 @@ export default async function ContractPage({ params }: { params: Promise<{ slug:
   const contractMap = new Map(d.contracts.map((x) => [x.contractKey, x]));
   return (
     <CollabHeader ctx={ctx} tab={null}>
-      <span className="label"><a href={base(slug)}>Collaborateurs</a> / Contrat</span>
+      <span className="label"><a href={base(slug)}>Collaborateurs</a> / Contrat{person && <> · <a href={personHref(slug, person.personKey)}>fiche de la personne</a></>}</span>
       <ContractPanel c={c} data={d} slug={slug} person={person} months={d.months.filter((m) => m.contractKey === contractKey)} events={d.events.filter((e) => e.contractKey === contractKey)} absences={absences} />
-      <section className="panel">
-        <h3>Constats</h3>
-        <FindingList findings={d.findings.filter((f) => f.contractKeys.includes(contractKey))} slug={slug} persons={persons} contracts={contractMap} />
+      <section className="panel collab-panel">
+        <Fold title="Constats" count={d.findings.filter((f) => f.contractKeys.includes(contractKey)).length}>
+          <FindingList findings={d.findings.filter((f) => f.contractKeys.includes(contractKey))} slug={slug} persons={persons} contracts={contractMap} />
+        </Fold>
       </section>
     </CollabHeader>
   );

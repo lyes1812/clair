@@ -1,31 +1,32 @@
 import type { CoverageRow } from "@/lib/dsn/selection";
+import { Empty, Pill, type Tone } from "../ui";
 
-const STATUS: Record<CoverageRow["status"], { label: string; cls: string }> = {
-  complete: { label: "Complète", cls: "applied" },
-  incomplete: { label: "Incomplète", cls: "preview" },
-  blocked: { label: "Bloquée", cls: "failed" },
+const STATUS: Record<CoverageRow["status"], { label: string; tone: Tone }> = {
+  complete: { label: "Complète", tone: "applied" },
+  incomplete: { label: "Incomplète", tone: "preview" },
+  blocked: { label: "Bloquée", tone: "failed" },
 };
 const TYPE: Record<string, string> = { "01": "normale", "03": "annule et remplace" };
 
 export function CoverageTable({ rows }: { rows: CoverageRow[] }) {
-  if (rows.length === 0) return <p className="muted" data-testid="dsn-coverage-empty">n.d. — aucune déclaration appliquée.</p>;
+  if (rows.length === 0) return <Empty testid="dsn-coverage-empty">n.d. — aucune déclaration appliquée.</Empty>;
   return (
-    <div className="table-wrap">
-      <table className="data-table" data-testid="dsn-coverage">
-        <thead><tr><th>Mois</th><th>SIRET</th><th>État</th><th>Déclarations retenues</th><th>Écartées</th><th>Constats</th></tr></thead>
+    <div className="table-wrap scroll">
+      <table className="data-table sticky" data-testid="dsn-coverage">
+        <thead><tr><th scope="col">Mois</th><th scope="col">SIRET</th><th scope="col">État</th><th scope="col">Déclarations retenues</th><th scope="col">Écartées</th><th scope="col">Constats</th></tr></thead>
         <tbody>
           {rows.map((r) => (
             <tr key={`${r.siret}-${r.month}`}>
               <td>{r.month}</td>
               <td><code>{r.siret}</code></td>
-              <td><span className={`status-pill ${STATUS[r.status].cls}`}>{STATUS[r.status].label}</span></td>
-              <td style={{ whiteSpace: "normal" }}>
+              <td><Pill tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Pill></td>
+              <td className="wrap">
                 {r.selected.length === 0 ? "—" : r.selected.map((d) => `${TYPE[d.type ?? ""] ?? d.type} · fraction ${d.fraction?.[0]}/${d.fraction?.[1]} · ordre ${d.order}`).join(" ; ")}
               </td>
-              <td style={{ whiteSpace: "normal" }}>
+              <td className="wrap">
                 {r.excluded.length === 0 ? "—" : r.excluded.map((e) => `${TYPE[e.declaration.type ?? ""] ?? e.declaration.type} ordre ${e.declaration.order ?? "n.d."} (${e.reason})`).join(" ; ")}
               </td>
-              <td style={{ whiteSpace: "normal" }}>{r.messages.length ? r.messages.join(" ") : "—"}</td>
+              <td className="wrap">{r.messages.length ? r.messages.join(" ") : "—"}</td>
             </tr>
           ))}
         </tbody>

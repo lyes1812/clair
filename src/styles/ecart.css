@@ -1,0 +1,92 @@
+/* Masse salariale › Écart budgétaire, Analyse des écarts et entrées « Prévu » (charte « 101 », inspirée des captures du webinaire).
+   Classes de ergonomie.css réutilisées : .view-switch, .panel-head, .table-wrap.scroll, .data-table.sticky, tr.subtotal / tr.total /
+   tr.child, .ver-badge, .pager. Aucune couleur « favorable / défavorable » : le sens d'un écart est une flèche grise, le signe est écrit. */
+
+.ecart-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.ecart-panel-title { display: grid; gap: 4px; min-width: 0; }
+
+/* Paramètres : versions, période, service. */
+.filters.ecart-filters .field-row { flex: 1 1 170px; min-width: 150px; }
+.ecart-filters .field-row label { display: flex; align-items: center; }
+.ecart-filters .ver-badge { margin-right: 6px; }
+.ecart-filter-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+.ecart-panel-title .desc { line-height: 1.5; }
+.panel-head .view-switch { flex: none; }
+
+/* Graphiques : sélecteur de rubrique au-dessus de la courbe ou de la cascade. */
+.ecart-chart { display: grid; gap: 14px; min-width: 0; }
+.ecart-chart-controls { display: flex; gap: 12px 20px; align-items: flex-end; flex-wrap: wrap; }
+.ecart-chart-controls .field-row { flex: 0 1 380px; min-width: 220px; }
+.ecart-chart-controls .check { padding-bottom: 9px; }
+.ecart-nd-block { display: grid; gap: 8px; padding: 16px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); }
+
+/* Tableau d'écart : en-tête fixe, première colonne fixe, sous-totaux grisés. */
+.data-table.ecart-table :is(th, td) { padding: 9px 12px; }
+.ecart-table thead th { vertical-align: bottom; line-height: 1.35; }
+.ecart-table thead th.ver-col { min-width: 124px; white-space: normal; }
+.ecart-table .ver-name { font-weight: 600; color: var(--ink); }
+.ecart-table .ver-kind { display: block; font-weight: 400; font-size: var(--clair-type-note); color: var(--muted); }
+.ecart-ver-pair { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; }
+.ecart-ver-pair .ver-badge { margin-right: 0; }
+.ecart-table tbody th[scope="row"] { font-weight: 400; color: var(--ink); font-size: var(--clair-type-table-cell); white-space: normal; min-width: 210px; max-width: 300px; }
+.ecart-table tbody tr.subtotal > th[scope="row"] { font-weight: 600; }
+.ecart-table tbody tr.total > th[scope="row"] { font-weight: 650; }
+.ecart-table tbody tr:not(.subtotal, .total) > th[scope="row"] { background: #fff; }
+.ecart-table tbody tr:not(.subtotal, .total):hover > th[scope="row"] { background: #f7f8fb; }
+.ecart-table.sticky-first tr.subtotal > :first-child { background: var(--surface); }
+.ecart-table.sticky-first tr.total > :first-child { background: #eef1f6; }
+.ecart-table tbody tr.subtotal:hover > :is(td, th) { background: var(--surface); }
+.ecart-table tbody tr.total:hover > :is(td, th) { background: #eef1f6; }
+.analyse-table td.wrap { min-width: 280px; }
+.ecart-table td.gap a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+.ecart-table td.gap a:hover { color: var(--blue); text-decoration-style: solid; }
+.ecart-table td abbr.nd { cursor: help; }
+
+/* Contraste : le gris des « n.d. » (4,26:1) passe sous 4,5:1 sur le fond des lignes de total ; teinte un peu plus foncée à cet endroit. */
+.ecart-table tr.total .nd { color: #626877; }
+
+/* Cascades : la hachure d'une baisse reprend le rouge d'alerte dans le composant partagé ; ici aucune règle ne dit qu'une baisse
+   est défavorable, la hachure et la légende (« Baisse ») restent donc d'un gris neutre. */
+.ecart-chart .chart, .pont-chart .chart { --danger: var(--muted); }
+
+/* Sens d'un écart : flèche neutre (grise), jamais rouge ni verte. */
+.ecart-table [data-sign]::before, .pont-tiles dd[data-sign]::before { content: ""; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border: 0 solid transparent; opacity: .8; }
+.ecart-table [data-sign="up"]::before, .pont-tiles dd[data-sign="up"]::before { border-width: 0 3.5px 6px; border-bottom-color: var(--muted); }
+.ecart-table [data-sign="down"]::before, .pont-tiles dd[data-sign="down"]::before { border-width: 6px 3.5px 0; border-top-color: var(--muted); }
+.ecart-table [data-sign="zero"]::before, .pont-tiles dd[data-sign="zero"]::before { width: 7px; border-width: 0 0 2px; border-bottom-color: var(--muted); vertical-align: 3px; }
+.pont-tiles dd[data-sign]::before { margin-right: 9px; vertical-align: 4px; }
+.pont-tiles dd[data-sign="up"]::before { border-width: 0 5px 9px; }
+.pont-tiles dd[data-sign="down"]::before { border-width: 9px 5px 0; }
+.pont-tiles dd[data-sign="zero"]::before { width: 10px; border-width: 0 0 3px; vertical-align: 7px; }
+
+/* Pont volume / coût moyen : trois tuiles et une petite cascade. */
+.pont { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 20px 28px; align-items: start; }
+.pont:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+.pont-tiles { display: grid; gap: 10px; margin: 0; }
+.pont-tiles > div { display: grid; gap: 4px; align-content: start; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.pont-tiles dt { font-size: var(--clair-type-label); font-weight: 600; color: var(--muted); }
+.pont-tiles dd { margin: 0; font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -.5px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.pont-chart { min-width: 0; max-width: 620px; }
+
+/* Entrées « Prévu » : état, ce qui existe déjà, ce qui reste à préciser. */
+.prevu-body { display: grid; gap: 22px; color: var(--ink); font-size: var(--clair-type-body); }
+.prevu-lead { max-width: 72ch; line-height: 1.6; }
+.prevu-block { display: grid; gap: 10px; }
+.prevu-block h3 { font-size: var(--clair-type-form); font-weight: 650; color: var(--muted); letter-spacing: .6px; text-transform: uppercase; }
+.prevu-links { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.prevu-links a { display: grid; gap: 4px; align-content: start; height: 100%; padding: 13px 15px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-decoration: none; transition: background .15s, border-color .15s; }
+.prevu-links a:hover { background: var(--surface); border-color: #d8dce5; }
+.prevu-links strong { font-size: var(--clair-type-form); font-weight: 600; color: var(--blue); }
+.prevu-links span { font-size: var(--clair-type-label); line-height: 1.5; color: var(--muted); }
+.prevu-open { margin: 0; padding-left: 18px; display: grid; gap: 6px; max-width: 72ch; font-size: var(--clair-type-form); line-height: 1.55; }
+
+@media (max-width: 960px) {
+  .pont { grid-template-columns: minmax(0, 1fr); }
+  .pont-chart { max-width: none; }
+}
+@media (max-width: 720px) {
+  .ecart-filter-actions { margin-left: 0; width: 100%; }
+  .ecart-table tbody th[scope="row"] { min-width: 150px; max-width: 200px; }
+  .data-table.sticky-first.ecart-table :is(th, td):first-child { position: static; box-shadow: none; }
+  .analyse-table td.wrap { min-width: 220px; }
+}

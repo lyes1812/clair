@@ -5,6 +5,32 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 // jamais le seul porteur d'information : légende nommée, étiquettes et infobulle donnent le nom et la valeur.
 export const PALETTE = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)", "var(--chart-7)", "var(--chart-8)"];
 export const colorOf = (i: number, override?: string) => override ?? PALETTE[i % PALETTE.length];
+// Texte posé sur une teinte de série : blanc sur 1, 2, 3 et 8, encre sur 4 à 7 (≥ 4,5:1 dans les deux cas). Couleur libre : blanc.
+const INK_ON = new Set([4, 5, 6, 7]);
+export const onColor = (color: string) => {
+  const m = /--chart-(\d)/.exec(color);
+  return m && INK_ON.has(Number(m[1])) ? "var(--chart-ink)" : "#fff";
+};
+
+// Un seul arrêt de tabulation par graphique, flèches gauche / droite (et début / fin) entre les colonnes : douze colonnes
+// par graphique ne doivent pas coûter douze tabulations au clavier.
+export function useRoving(n: number) {
+  const [active, setActive] = useState(0);
+  return {
+    tab: (i: number) => (i === Math.min(active, Math.max(0, n - 1)) ? 0 : -1),
+    onKeyDown: (e: React.KeyboardEvent<SVGElement>) => {
+      const keys: Record<string, (i: number) => number> = { ArrowRight: (i) => i + 1, ArrowLeft: (i) => i - 1, Home: () => 0, End: () => n - 1 };
+      const f = keys[e.key];
+      if (!f) return;
+      const hits = Array.from(e.currentTarget.ownerSVGElement?.querySelectorAll<SVGElement>(".hit") ?? []);
+      const i = hits.indexOf(e.currentTarget);
+      const next = Math.min(Math.max(0, f(i)), hits.length - 1);
+      e.preventDefault();
+      setActive(next);
+      hits[next]?.focus();
+    },
+  };
+}
 
 export type ChartSeries = {
   key: string;

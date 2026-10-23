@@ -1,9 +1,11 @@
+import { Pager } from "@/components/Pager";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { enteredAfter, hireKey } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis, PresentPerson, Projection } from "@/lib/budget/types";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
+import { matchesQuery, pageNumber, paginate } from "@/lib/viz/hyp-saisie";
 import { ActionForm } from "./ActionForm";
 import { deleteHypothesisAction, importHypothesesAction } from "./actions";
 import { detailOf, Field, KIND } from "./shared";
@@ -40,7 +42,7 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
   return (
     <>
       <section className="panel" data-testid="ctrl-base">
-        <h2>Contrôle de la base</h2>
+        <h2>Contrôle de la base <span className="desc">— <a href="#def-controles">règle</a></span></h2>
         <p data-testid="ctrl-base-line">
           Effectif compté fin {formatMonth(base.refMonth).toLowerCase()} : {refHeadcount === null ? <span className="nd">n.d. — réel du mois de référence non disponible</span> : <strong>{refHeadcount} (réel)</strong>} · contrats comptés de la base : <strong>{baseCount}</strong>
           {refHeadcount !== null && <> · {refHeadcount === baseCount ? <span data-testid="ctrl-base-ok">concordant</span> : <span className="nd" data-testid="ctrl-base-gap">écart de {baseCount - refHeadcount}</span>}</>}
@@ -48,9 +50,9 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
         {refHeadcount !== null && refHeadcount !== baseCount && <p className="tile-foot">Un écart vient d'un contrat présent à la date de lecture mais pas fin {formatMonth(base.refMonth).toLowerCase()} (ou l'inverse), ou d'une nature non comptée dans l'effectif (Paramètres › KPI).</p>}
       </section>
       <section className="panel" data-testid="ctrl-effectifs">
-        <h2>Contrôles effectifs <span className="desc">— effectif de début + entrées − sorties = effectif de fin</span></h2>
-        <div className="table-wrap">
-          <table className="data-table" data-testid="ctrl-eff-table">
+        <h2>Contrôles effectifs <span className="desc">— effectif de début + entrées − sorties = effectif de fin · <a href="#def-controles">règle</a></span></h2>
+        <div className="table-wrap scroll" role="region" aria-label="Contrôle de l'effectif par mois" tabIndex={0}>
+          <table className="data-table sticky sticky-first" data-testid="ctrl-eff-table">
             <thead><tr><th>Mois</th><th className="num">Effectif début</th><th className="num">Entrées</th><th className="num">Sorties</th><th className="num">Effectif fin</th><th className="num">ETP fin</th><th>Contrôle</th></tr></thead>
             <tbody>
               {rows.map((r) => ("nd" in r ? (
@@ -85,41 +87,80 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
 }
 
 // Contrôles des changements : toutes les hypothèses du scénario avec leur effet sur le coût projeté, suppression, reprise
-// d'hypothèses d'un autre scénario.
-export function ControlesChangements({ slug, scenario, base, hypotheses, proj, canEdit, others }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; proj: Projection; canEdit: boolean; others: OtherScenario[] }) {
+// d'hypothèses d'un autre scénario. Recherche, filtre par type et pagination : une grille mensuelle peut créer des dizaines
+// d'hypothèses (une par cellule renseignée).
+const CHANGES_PAGE = 25;
+export function ControlesChangements({ slug, scenario, base, hypotheses, proj, canEdit, others, q = "", type = "", page }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; proj: Projection; canEdit: boolean; others: OtherScenario[]; q?: string; type?: string; page?: string }) {
   const effect = (id: string): number | null => {
     if (proj.kind === "error") return null;
     return proj.months.reduce((s, m) => s + (m.kind === "value" ? m.contributions.filter((c) => c.hypothesisId === id).reduce((t, c) => t + c.cost, 0) : 0), 0);
   };
   const ndMonths = proj.kind === "value" ? proj.months.filter((m) => m.kind === "nd").length : 0;
+  const kinds = (Object.keys(KIND) as Hypothesis["kind"][]).map((k) => ({ kind: k, count: hypotheses.filter((h) => h.kind === k).length })).filter((k) => k.count > 0);
+  const kind = kinds.some((k) => k.kind === type) ? (type as Hypothesis["kind"]) : null;
+  const rows = hypotheses
+    .map((h) => ({ h, detail: detailOf(h, base, hypotheses) }))
+    .filter(({ h, detail }) => (kind === null || h.kind === kind) && matchesQuery([KIND[h.kind], h.label, detail], q));
+  const paged = paginate(rows, pageNumber(page), CHANGES_PAGE);
+  const filtered = kind !== null || q !== "";
+  const here = `/e/${slug}/studio-rh/hypotheses?scenario=${scenario.id}&vue=ctrl-changements`;
+  const pageHref = (p: number) => `${here}${kind ? `&type=${kind}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}${p > 1 ? `&page=${p}` : ""}`;
   return (
     <>
       <section className="panel" data-testid="hyp-list-hyps">
-        <h2>Contrôles des changements <span className="desc">— {hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} du scénario</span></h2>
+        <div className="hs-title">
+          <h2>Contrôles des changements <span className="desc">— {hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} du scénario</span></h2>
+          <p className="desc">Chaque hypothèse avec son effet sur le coût projeté : de quoi vérifier d'un coup d'œil ce que le scénario change. <a href="#def-controles">Règle</a></p>
+        </div>
         {proj.kind === "error" && <ul className="list" data-testid="hyp-errors">{proj.errors.map((e) => <li key={e} className="nd">{e}</li>)}</ul>}
-        {ndMonths > 0 && <p className="notice">{ndMonths} mois projeté(s) n.d. : leurs contributions ne sont pas comptées dans la colonne « Effet ».</p>}
+        {ndMonths > 0 && <p className="notice">{ndMonths} mois projeté(s) n.d. : leurs contributions ne sont pas comptées dans la colonne « Coût attribué sur l'horizon ».</p>}
+        {hypotheses.length > CHANGES_PAGE / 2 && (
+          <form method="get" action={`/e/${slug}/studio-rh/hypotheses`} className="hs-search" data-testid="hyp-filter" role="search" aria-label="Filtre des hypothèses">
+            <input type="hidden" name="scenario" value={scenario.id} />
+            <input type="hidden" name="vue" value="ctrl-changements" />
+            <div className="field-row">
+              <label htmlFor="hyp-q">Rechercher</label>
+              <input className="input" id="hyp-q" name="q" type="search" defaultValue={q} placeholder="Libellé, détail, type…" autoComplete="off" />
+            </div>
+            <div className="field-row">
+              <label htmlFor="hyp-type">Type</label>
+              <select className="select" id="hyp-type" name="type" defaultValue={kind ?? ""}>
+                <option value="">Tous les types</option>
+                {kinds.map((k) => <option key={k.kind} value={k.kind}>{KIND[k.kind]} ({k.count})</option>)}
+              </select>
+            </div>
+            <button className="btn" type="submit">Filtrer</button>
+            {filtered && <a className="btn" href={here}>Effacer le filtre</a>}
+          </form>
+        )}
         {hypotheses.length === 0 ? (
           <p className="desc">Aucune hypothèse : la projection reconduit la base figée (avec les fins de contrat connues).</p>
+        ) : rows.length === 0 ? (
+          <p className="desc">Aucune hypothèse ne correspond à ce filtre.</p>
         ) : (
-          <div className="table-wrap">
-            <table className="data-table" data-testid="hyp-hypotheses">
-              <thead><tr><th>Type</th><th>Libellé</th><th>Détail</th><th className="num">Coût attribué sur l'horizon</th>{canEdit && <th />}</tr></thead>
-              <tbody>
-                {hypotheses.map((h) => {
-                  const e = effect(h.id);
-                  return (
-                    <tr key={h.id} data-hyp={h.label}>
-                      <td>{KIND[h.kind]}</td>
-                      <td>{h.label}</td>
-                      <td className="wrap">{detailOf(h, base, hypotheses)}</td>
-                      <td className="num" data-col="effet">{h.kind === "realise" || h.kind === "constante" ? "—" : e === null ? "n.d." : formatEuros(e)}</td>
-                      {canEdit && <td><ActionForm action={deleteHypothesisAction.bind(null, slug, scenario.id, h.id)} submit="Supprimer" testid={`hyp-delete-${h.id}`} className="inline-form" danger /></td>}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {paged.pages > 1 && <Pager page={paged.page} pageSize={CHANGES_PAGE} total={rows.length} href={pageHref} testid="hyp-pager-top" />}
+            <div className="table-wrap scroll" role="region" aria-label="Hypothèses du scénario" tabIndex={0}>
+              <table className="data-table sticky" data-testid="hyp-hypotheses">
+                <thead><tr><th>Type</th><th>Libellé</th><th>Détail</th><th className="num">Coût attribué sur l'horizon</th>{canEdit && <th><span className="sr-only">Supprimer</span></th>}</tr></thead>
+                <tbody>
+                  {paged.items.map(({ h, detail }) => {
+                    const e = effect(h.id);
+                    return (
+                      <tr key={h.id} data-hyp={h.label}>
+                        <td>{KIND[h.kind]}</td>
+                        <td>{h.label}</td>
+                        <td className="wrap">{detail}</td>
+                        <td className="num" data-col="effet">{h.kind === "realise" || h.kind === "constante" ? "—" : e === null ? "n.d." : formatEuros(e)}</td>
+                        {canEdit && <td><ActionForm action={deleteHypothesisAction.bind(null, slug, scenario.id, h.id)} submit="Supprimer" testid={`hyp-delete-${h.id}`} className="inline-form" danger /></td>}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pager page={paged.page} pageSize={CHANGES_PAGE} total={rows.length} href={pageHref} testid="hyp-pager" />
+          </>
         )}
         <p className="tile-foot">Coût attribué : somme, sur les mois projetés, des lignes de la projection rattachées à l'hypothèse (pour une correction de base : le coût du contrat qu'elle porte ; pour un départ : la réduction de paie et les coûts de sortie). Les éléments « réalisés » et les constantes n'entrent pas dans la projection.</p>
       </section>

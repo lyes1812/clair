@@ -1,5 +1,6 @@
 "use client";
 import { useActionState } from "react";
+import { Feedback } from "./Feedback";
 import { savePayfitHistory } from "./actions";
 
 const CHOICES = [
@@ -11,9 +12,8 @@ export function PayfitHistoryForm({ slug, mode, disabled }: { slug: string; mode
   const [state, action, pending] = useActionState(savePayfitHistory.bind(null, slug), undefined);
   return (
     <form className="form" action={action}>
-      {state?.error && <p className="error" role="alert">{state.error}</p>}
-      {state?.ok && <p className="notice" role="status">{state.ok}</p>}
-      <fieldset className="checks" disabled={disabled}>
+      <Feedback state={state} />
+      <fieldset className="checks pm-checks pm-choices" disabled={disabled}>
         <legend className="label">Mois antérieurs à la limite de conservation PayFit</legend>
         {CHOICES.map((c) => (
           <label key={c.value} className="check">

@@ -1,3 +1,4 @@
+import "@/styles/kpi.css";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, monthEnd } from "@/lib/dates";
@@ -27,6 +28,8 @@ import {
   etpShown,
   etpTitle,
   HeadcountDetail,
+  KpiCategoryChart,
+  KpiCharts,
   KpiDefinitions,
   KpiHeader,
   KpiTile,
@@ -303,7 +306,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <p key={n} className="notice" data-testid="kpi-param-notice">{n}</p>
       ))}
 
-      <form method="get" className="filters" data-testid="kpi-filters">
+      <form method="get" className="filters bar kpi-bar" data-testid="kpi-filters" aria-label="Période et périmètre des indicateurs">
         {vue !== "suivi" && <input type="hidden" name="vue" value={vue} />}
         <div className="field-row">
           <label htmlFor="mode">Période</label>
@@ -344,10 +347,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             {ctx.collab.natures.codes.map((n) => <option key={n} value={n}>{contractNatureLabel(n)}</option>)}
           </select>
         </div>
-        <button className="btn" type="submit">Afficher</button>
+        <button className="btn primary" type="submit">Afficher</button>
       </form>
 
-      <p className="desc" data-testid="kpi-period">
+      <p className="desc kpi-period" data-testid="kpi-period">
         <strong>{w.label}</strong> · N-1 : {pw.label} · date de référence {formatDate(data.build.referenceDate)}
         {etab ? ` · établissement ${etab}` : ""}
         {nature ? ` · nature ${contractNatureLabel(nature)}` : ""}
@@ -357,8 +360,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       ))}
 
       <section className="panel">
-        <h2>Indicateurs — {w.label}</h2>
-        <dl className="facts" data-testid="kpi-tiles">
+        <div className="kpi-panel-title">
+          <h2>Indicateurs</h2>
+          <p className="desc">{w.label} · comparés à la période précédente (N-1) ; chaque chiffre se retrace dans « Détail ».</p>
+        </div>
+        <dl className="facts kpi-tiles" data-testid="kpi-tiles">
           <KpiTile
             id="etp-end"
             visible={tileOn("etp-end")}
@@ -429,6 +435,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             deltaCalc={deltaCalc(t.absenteeism, (x) => (x.kind === "nd" ? null : x.ratio), true)}
             params={absParams}
             qualifiers={absCur.kind === "nd" ? [] : absCur.qualifiers}
+            warning={
+              input.absences.status === "read" && missingTypes.length > 0 ? (
+                <span className="tile-foot" data-testid="kpi-absence-missing">types d'absence comptés absents de la lecture : {missingTypes.map((x) => x.type).join(", ")}</span>
+              ) : undefined
+            }
             def="absenteeism"
             detail={detailHref("absenteeism", null)}
             detailN1={detailHref("absenteeism", null, true)}
@@ -445,10 +456,15 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         </dl>
       </section>
 
+      <KpiCharts vue={vue === "turnover" ? "turnover" : vue === "absenteisme" ? "absenteisme" : "suivi"} rows={dash.rows} turnover={t.turnover} absenteeism={t.absenteeism} isPayfit={isPayfit} />
+
       <section className="panel">
-        <h2>Mois par mois <span className="desc">— {w.months.length} mois, valeurs de fin de mois ; N-1 = même mois un an plus tôt</span></h2>
-        <div className="table-wrap">
-          <table className="data-table" data-testid="kpi-monthly-table">
+        <div className="kpi-panel-title">
+          <h2>Mois par mois</h2>
+          <p className="desc">{w.months.length} mois, valeurs de fin de mois ; N-1 = même mois un an plus tôt.</p>
+        </div>
+        <div className="table-wrap scroll">
+          <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-monthly-table">
             <thead>
               <tr>
                 <th>Mois</th>
@@ -506,9 +522,13 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
 
       {vue === "suivi" && (
       <section className="panel" data-testid="kpi-categories">
-        <h2>Effectif et ETP par catégorie <span className="desc">— fin de mois ; CDI, CDD, apprenti, stagiaire</span></h2>
-        <div className="table-wrap">
-          <table className="data-table" data-testid="kpi-categories-table">
+        <div className="kpi-panel-title">
+          <h2>Effectif et ETP par catégorie</h2>
+          <p className="desc">Fin de mois ; CDI, CDD, apprenti, stagiaire.</p>
+        </div>
+        <KpiCategoryChart months={catMonths} keys={catKeys} labels={{ ...CATEGORY_LABELS, nc: "Non classé" }} />
+        <div className="table-wrap scroll">
+          <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-categories-table">
             <thead>
               <tr><th>Mois</th>{catKeys.map((k) => <th key={k} className="num">{k === "nc" ? "Non classé" : CATEGORY_LABELS[k as CategoryId]}</th>)}<th className="num">Total</th></tr>
             </thead>

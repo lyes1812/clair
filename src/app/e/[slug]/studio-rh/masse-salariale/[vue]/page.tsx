@@ -1,3 +1,4 @@
+import "@/styles/ecart.css";
 import { notFound } from "next/navigation";
 import { Prevu } from "@/components/Prevu";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
@@ -6,6 +7,34 @@ import { MS_PREVU, MsHeader, MsTabs, type MsTab } from "../EcartParts";
 
 export const dynamic = "force-dynamic";
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/masse-salariale")!;
+
+type Link = { href: string; title: string; text: string };
+type Content = { lead: React.ReactNode; existing: Link[]; open: string[] };
+
+// Contenu d'une entrée « Prévu » : l'état, ce qui existe déjà dans l'application (avec un lien), ce qui reste à préciser.
+function PrevuBody({ lead, existing, open }: Content) {
+  return (
+    <div className="prevu-body">
+      <p className="prevu-lead">{lead}</p>
+      {existing.length > 0 && (
+        <section className="prevu-block" aria-labelledby="prevu-existing">
+          <h3 id="prevu-existing">Ce qui existe déjà</h3>
+          <ul className="prevu-links">
+            {existing.map((l) => (
+              <li key={l.href}><a href={l.href}><strong>{l.title}</strong><span>{l.text}</span></a></li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {open.length > 0 && (
+        <section className="prevu-block" aria-labelledby="prevu-open">
+          <h3 id="prevu-open">Reste à préciser</h3>
+          <ul className="prevu-open">{open.map((t) => <li key={t}>{t}</li>)}</ul>
+        </section>
+      )}
+    </div>
+  );
+}
 
 // Entrées du cahier de la famille Masse salariale dont le comportement n'est pas établi : on le dit, avec ce qui existe déjà
 // et ce qui reste à préciser, sans simuler.
@@ -16,17 +45,46 @@ export default async function MsPrevuPage({ params }: { params: Promise<{ slug: 
   await requireWorkspace(slug);
   const ms = `/e/${slug}/studio-rh/masse-salariale`;
   const hyp = `/e/${slug}/studio-rh/hypotheses`;
-  const text: Record<string, React.ReactNode> = {
-    croisee: <p>Rapport de synthèse croisé en plusieurs chapitres : non réalisé. La lecture de la masse salariale par mois, par service et par rubrique existe dans <a href={ms}>Synthèse</a>, <a href={`${ms}?vue=fixe-variable`}>Fixe & variable</a> et <a href={`${ms}?vue=paie-compta`}>Paie & comptabilité</a>. Les chapitres à croiser et leurs filtres restent à préciser avec toi avant toute réalisation ; rien n'est simulé ici.</p>,
-    organisation: <p>Masse salariale par organisation (direction, établissement, société) : non réalisée. La répartition par service (code analytique du journal de paie) existe dans <a href={ms}>Synthèse</a> ; la masse par catégorie, nature de contrat, établissement et statut se lit dans <a href={`/e/${slug}/studio-rh/kpi?vue=effectifs`}>KPI RH › Effectifs mensuels</a>. Direction et société ne sont pas dans les données lues (une seule société par espace).</p>,
-    reel: <p>Écart entre deux périodes de réel : l'écart du réel d'une année à une autre se lit dans <a href={`${ms}/ecart`}>Écart budgétaire</a> en choisissant deux versions « Réel PayFit », et sa décomposition dans <a href={`${ms}/analyse`}>Analyse des écarts</a>. Un écran dédié (par rubrique de paie du bulletin) n'est pas possible : l'API PayFit ne renvoie pas de rubrique de bulletin. À préciser avec toi.</p>,
-    suivi: <p>Suivi mensuel du réel face au budget : la comparaison mois par mois d'un scénario avec le budget saisi, le réel courant et N-1 existe dans <a href={`${hyp}`}>Hypothèses budgétaires</a> (un scénario › Résultat › Comparaison), et le tableau par rubrique dans <a href={`${ms}/ecart`}>Écart budgétaire</a>. Un suivi mensuel autonome, hors scénario, reste à préciser avec toi (budget de référence, mois de clôture).</p>,
+  const content: Record<string, Content> = {
+    croisee: {
+      lead: "Rapport de synthèse croisé en plusieurs chapitres : non réalisé. Rien n'est simulé ici.",
+      existing: [
+        { href: ms, title: "Synthèse", text: "Masse salariale par mois, par service et par rubrique." },
+        { href: `${ms}?vue=fixe-variable`, title: "Fixe & variable", text: "Part fixe et part variable, brut par libellé de paie, primes par famille et par mois." },
+        { href: `${ms}?vue=paie-compta`, title: "Paie & comptabilité", text: "Congés payés dus, rapprochement avec la comptabilité (comptes 63 et 64)." },
+      ],
+      open: ["Les chapitres à croiser et leurs filtres, avant toute réalisation."],
+    },
+    organisation: {
+      lead: "Masse salariale par organisation (direction, établissement, société) : non réalisée.",
+      existing: [
+        { href: ms, title: "Synthèse", text: "Répartition par service (code analytique du journal de paie)." },
+        { href: `/e/${slug}/studio-rh/kpi?vue=effectifs`, title: "KPI RH › Effectifs mensuels", text: "Masse par catégorie, nature de contrat, établissement et statut." },
+      ],
+      open: ["Direction et société ne figurent pas dans les données lues (une seule société par espace) : l'axe d'organisation à retenir reste à définir."],
+    },
+    reel: {
+      lead: "Écart entre deux périodes de réel : l'écran dédié, par rubrique de bulletin, n'est pas possible aujourd'hui, car l'API PayFit ne renvoie pas de rubrique de bulletin.",
+      existing: [
+        { href: `${ms}/ecart`, title: "Écart budgétaire", text: "Choisir deux versions « Réel PayFit » pour lire l'écart du réel d'une année à l'autre." },
+        { href: `${ms}/analyse`, title: "Analyse des écarts", text: "Décomposition de cet écart (cascade d'ETP, contributions par rubrique, pont volume / coût moyen)." },
+      ],
+      open: ["Le niveau de détail attendu pour l'écart réel, faute de rubrique de bulletin dans les données lues."],
+    },
+    suivi: {
+      lead: "Suivi mensuel du réel face au budget : la comparaison existe dans un scénario, un suivi autonome hors scénario n'est pas réalisé.",
+      existing: [
+        { href: hyp, title: "Hypothèses budgétaires", text: "Dans un scénario : Résultat › Comparaison, mois par mois, avec le budget saisi, le réel courant et N-1." },
+        { href: `${ms}/ecart`, title: "Écart budgétaire", text: "Tableau par rubrique entre versions (réel, scénario, budget saisi)." },
+      ],
+      open: ["Un suivi mensuel autonome, hors scénario, reste à préciser : budget de référence et mois de clôture."],
+    },
   };
   return (
     <>
       <MsHeader title={ITEM.label} summary={ITEM.summary} />
       <MsTabs slug={slug} current={tab.key as MsTab} />
-      <Prevu title={tab.label}>{text[vue]}</Prevu>
+      <Prevu title={tab.label}><PrevuBody {...content[tab.key]} /></Prevu>
     </>
   );
 }

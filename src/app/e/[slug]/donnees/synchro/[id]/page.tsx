@@ -1,3 +1,4 @@
+import "@/styles/donnees.css";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { COLLECTION_LABELS, dateTimeFmt, PROVIDER_LABELS } from "@/lib/connectors/labels";
@@ -11,6 +12,7 @@ import { formatEuros } from "@/lib/money";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { DecisionButtons } from "../../Forms";
+import { PageHead, Pill, syncTone } from "../../ui";
 
 export const dynamic = "force-dynamic";
 
@@ -43,25 +45,30 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
   const uploaded = dsn ?? fec;
   const coverage = dsn && (status === "preview" || status === "applied") ? await dsnCoverage(workspace.id, status === "preview" ? id : undefined) : null;
   const exercises = fec && (status === "preview" || status === "applied") ? await fecCoverage(workspace.id, status === "preview" ? id : undefined) : null;
+  const providerLabel = PROVIDER_LABELS[sync.provider as keyof typeof PROVIDER_LABELS];
 
   return (
     <>
       {status === "running" && <AutoRefresh />}
-      <div style={{ display: "grid", gap: 8 }}>
-        <span className="label">
-          <a href={`/e/${slug}/donnees`}>Données</a> / <a href={`/e/${slug}/donnees/${sync.provider}`}>{PROVIDER_LABELS[sync.provider as keyof typeof PROVIDER_LABELS]}</a> / {additive ? "Dépôt" : "Lecture"}
-        </span>
-        <h1>{additive ? "Dépôt" : "Lecture"} du {dateTimeFmt.format(sync.startedAt)}</h1>
-        <p className="desc">
-          Période {months.length ? `${months[0]} → ${months[months.length - 1]}` : "n.d."} · <span className={`status-pill ${status}`} data-testid="sync-status">{statusLabel}</span>
-          {sync.contentHash && <> · empreinte <code>{sync.contentHash.slice(0, 12)}</code></>}
-        </p>
-      </div>
+      <PageHead
+        crumbs={[
+          { label: "Données", href: `/e/${slug}/donnees` },
+          { label: providerLabel, href: `/e/${slug}/donnees/${sync.provider}` },
+          { label: additive ? "Dépôt" : "Lecture" },
+        ]}
+        title={`${additive ? "Dépôt" : "Lecture"} du ${dateTimeFmt.format(sync.startedAt)}`}
+      >
+        <dl className="dn-meta">
+          <div><dt>Période</dt><dd>{months.length ? `${months[0]} → ${months[months.length - 1]}` : "n.d."}</dd></div>
+          <div><dt>Statut</dt><dd><Pill tone={syncTone(status)} testid="sync-status">{statusLabel}</Pill></dd></div>
+          {sync.contentHash && <div><dt>Empreinte</dt><dd><code>{sync.contentHash.slice(0, 12)}</code></dd></div>}
+        </dl>
+      </PageHead>
 
       {status === "running" && <p className="notice">Lecture en cours auprès de la source… La page se met à jour automatiquement.</p>}
       {status === "failed" && <p className="error" data-testid="sync-error">{sync.errorMessage ?? "Échec de la lecture."}</p>}
       {status === "applied" && (
-        <p className="notice" data-testid="sync-active">
+        <p className="notice ok" data-testid="sync-active">
           {additive
             ? `Appliqué le ${sync.decidedAt ? dateTimeFmt.format(sync.decidedAt) : "n.d."} : ces déclarations comptent dans la couverture DSN de l'espace.`
             : `Source active depuis le ${sync.decidedAt ? dateTimeFmt.format(sync.decidedAt) : "n.d."} : c'est cette lecture que les modules Studio RH utiliseront.`}
@@ -77,19 +84,19 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
       {uploaded && (
         <section className="panel">
           <h2>Fichiers du dépôt</h2>
-          <div className="table-wrap">
-            <table className="data-table" data-testid="dsn-upload-files">
-              <thead><tr><th>Fichier</th><th>Résultat</th><th>Détail</th></tr></thead>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky" data-testid="dsn-upload-files">
+              <thead><tr><th scope="col">Fichier</th><th scope="col">Résultat</th><th scope="col">Détail</th></tr></thead>
               <tbody>
                 {uploaded.files.map((f) => (
                   <tr key={`${f.filename}-${f.status}`}>
                     <td>{f.filename}</td>
                     <td>
-                      <span className={`status-pill ${f.status === "read" ? "applied" : f.status === "duplicate" ? "" : "failed"}`}>
+                      <Pill tone={f.status === "read" ? "applied" : f.status === "duplicate" ? "neutral" : "failed"}>
                         {f.status === "read" ? "lu" : f.status === "duplicate" ? "déjà déposé" : "refusé"}
-                      </span>
+                      </Pill>
                     </td>
-                    <td style={{ whiteSpace: "normal" }}>
+                    <td className="wrap">
                       {f.status === "read" && `${f.detail} · ${f.encoding} · empreinte ${f.sha256.slice(0, 12)}`}
                       {f.status === "duplicate" && `Même empreinte qu'un fichier déposé ${f.importedAt === "ce dépôt" ? "dans ce dépôt" : `le ${dateTimeFmt.format(new Date(f.importedAt))}`} ; non importé.`}
                       {f.status === "rejected" && f.reason}
@@ -108,10 +115,10 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
           {dsn && dsn.declarations.length > 0 && (
             <>
               <h3>Déclarations lues</h3>
-              <div className="table-wrap">
-                <table className="data-table" data-testid="dsn-declarations">
+              <div className="table-wrap scroll">
+                <table className="data-table sticky" data-testid="dsn-declarations">
                   <thead>
-                    <tr><th>Fichier</th><th>Mois</th><th>SIRET</th><th>Type</th><th>Fraction</th><th>Ordre</th><th className="num">Individus</th><th className="num">Contrats</th><th className="num">Rémunérations</th><th>État</th></tr>
+                    <tr><th scope="col">Fichier</th><th scope="col">Mois</th><th scope="col">SIRET</th><th scope="col">Type</th><th scope="col">Fraction</th><th scope="col">Ordre</th><th scope="col" className="num">Individus</th><th scope="col" className="num">Contrats</th><th scope="col" className="num">Rémunérations</th><th scope="col">État</th></tr>
                   </thead>
                   <tbody>
                     {dsn.declarations.map((d) => (
@@ -120,8 +127,8 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
                         <td>{d.type === "01" ? "normale" : d.type === "03" ? "annule et remplace" : d.type ?? "n.d."}</td>
                         <td>{d.fraction ? `${d.fraction[0]}/${d.fraction[1]}` : "n.d."}</td><td>{d.order ?? "n.d."}</td>
                         <td className="num">{d.counts.people}</td><td className="num">{d.counts.contracts}</td><td className="num">{d.counts.remunerations}</td>
-                        <td style={{ whiteSpace: "normal" }}>
-                          {d.eligible ? <span className="status-pill applied">éligible</span> : <span className="status-pill failed">non éligible</span>}
+                        <td className="wrap">
+                          {d.eligible ? <Pill tone="applied">éligible</Pill> : <Pill tone="failed">non éligible</Pill>}
                           {d.blocking.length > 0 && <span className="desc"> {d.blocking.join(" ")}</span>}
                           {d.warnings.length > 0 && <span className="desc"> {d.warnings.join(" ")}</span>}
                         </td>
@@ -151,15 +158,17 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
 
       {summary.collections && (
         <section className="panel">
-          <h2>{status === "preview" ? "Aperçu avant application" : "Contenu lu"}</h2>
-          {additive && <p className="desc">Déclarations lues dans ce dépôt ; elles s'ajoutent aux dépôts déjà appliqués.</p>}
-          {summary.company && <p className="desc">Société : {summary.company.name}</p>}
+          <div className="dn-section-head">
+            <h2>{status === "preview" ? "Aperçu avant application" : "Contenu lu"}</h2>
+            {additive && <p className="desc">Déclarations lues dans ce dépôt ; elles s'ajoutent aux dépôts déjà appliqués.</p>}
+            {summary.company && <p className="desc">Société : {summary.company.name}</p>}
+          </div>
           <div className="table-wrap">
             <table className="data-table" data-testid="sync-summary">
               <thead>
                 <tr>
-                  <th>Collection</th><th>Lecture</th><th className="num">Éléments</th>
-                  {!additive && (<><th className="num">Nouveaux</th><th className="num">Modifiés</th><th className="num">Retirés</th></>)}
+                  <th scope="col">Collection</th><th scope="col">Lecture</th><th scope="col" className="num">Éléments</th>
+                  {!additive && (<><th scope="col" className="num">Nouveaux</th><th scope="col" className="num">Modifiés</th><th scope="col" className="num">Retirés</th></>)}
                 </tr>
               </thead>
               <tbody>
@@ -170,7 +179,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
                     return (
                       <tr key={c.collection}>
                         <td>{COLLECTION_LABELS[c.collection] ?? c.collection}</td>
-                        <td>{c.status === "read" ? "lue" : `n.d. — ${c.reason}`}</td>
+                        <td className={c.status === "read" ? undefined : "wrap"}>{c.status === "read" ? "lue" : <span className="nd">{`n.d. — ${c.reason}`}</span>}</td>
                         <td className="num">{c.status === "read" ? c.count : "n.d."}</td>
                         {!additive && (
                           <>
@@ -186,20 +195,26 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
             </table>
           </div>
           {sync.warnings.length > 0 && (
-            <ul className="desc" data-testid="sync-warnings">
-              {sync.warnings.map((w) => <li key={w}>{w}</li>)}
-            </ul>
+            <div className="dn-warnings">
+              <h3>Points d'attention</h3>
+              <ul data-testid="sync-warnings">
+                {sync.warnings.map((w) => <li key={w}>{w}</li>)}
+              </ul>
+            </div>
           )}
-          {canDecide && <DecisionButtons slug={slug} syncId={id} />}
+          {canDecide && <DecisionButtons slug={slug} syncId={id} additive={additive} />}
         </section>
       )}
 
       {collaborators.length > 0 && (
         <section className="panel">
-          <h2>Collaborateurs (extrait)</h2>
+          <div className="dn-section-head">
+            <h2>Collaborateurs (extrait)</h2>
+            <p className="desc">Les dix premiers enregistrements lus, à titre de contrôle.</p>
+          </div>
           <div className="table-wrap">
             <table className="data-table">
-              <thead><tr><th>Identifiant PayFit</th><th>Matricule</th><th>Prénom</th><th>Nom</th><th>Équipe</th></tr></thead>
+              <thead><tr><th scope="col">Identifiant PayFit</th><th scope="col">Matricule</th><th scope="col">Prénom</th><th scope="col">Nom</th><th scope="col">Équipe</th></tr></thead>
               <tbody>
                 {collaborators.map((r) => (
                   <tr key={r.key}><td><code>{r.key}</code></td><td>{nd(r.data.employeeNumber)}</td><td>{nd(r.data.firstName)}</td><td>{nd(r.data.lastName)}</td><td>{nd(r.data.teamName)}</td></tr>
@@ -213,9 +228,9 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
       {contracts.length > 0 && additive && (
         <section className="panel">
           <h2>Contrats déclarés (extrait)</h2>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead><tr><th>Mois</th><th>SIRET</th><th>N° de contrat</th><th>Matricule</th><th>Début</th><th>Fin</th><th>Nature</th><th className="num">Quotité contrat / référence</th></tr></thead>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky">
+              <thead><tr><th scope="col">Mois</th><th scope="col">SIRET</th><th scope="col">N° de contrat</th><th scope="col">Matricule</th><th scope="col">Début</th><th scope="col">Fin</th><th scope="col">Nature</th><th scope="col" className="num">Quotité contrat / référence</th></tr></thead>
               <tbody>
                 {contracts.map((r) => {
                   const d = r.data as { contractNumber?: string; startDate?: string; endDate?: string | null; nature?: string | null; contractQuota?: number | null; referenceQuota?: number | null; siret?: string | null; personId?: string };
@@ -237,9 +252,9 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
       {contracts.length > 0 && !additive && (
         <section className="panel">
           <h2>Contrats (extrait)</h2>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead><tr><th>Contrat</th><th>Collaborateur</th><th>Début</th><th>Fin</th><th>Statut</th><th>Nature DSN</th><th className="num">Quotité (ETP contractuel)</th></tr></thead>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky">
+              <thead><tr><th scope="col">Contrat</th><th scope="col">Collaborateur</th><th scope="col">Début</th><th scope="col">Fin</th><th scope="col">Statut</th><th scope="col">Nature DSN</th><th scope="col" className="num">Quotité (ETP contractuel)</th></tr></thead>
               <tbody>
                 {contracts.map((r) => (
                   <tr key={r.key}>
@@ -256,11 +271,13 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
 
       {ledger.length > 0 && (
         <section className="panel">
-          <h2>{fec ? "Écritures : totaux par mois et par compte (classes 6 et 7, comptes 421, 431, 437)" : "Journal comptable : totaux par mois et par compte"}</h2>
-          <p className="desc">Montants tels que lus à la source, sans retraitement. « — » : aucune ligne de ce côté du compte.{fec && " Les autres classes sont conservées mais ne sont pas affichées ici."}</p>
-          <div className="table-wrap">
-            <table className="data-table" data-testid="ledger-totals">
-              <thead><tr><th>Mois</th><th>Compte</th><th>Libellé</th><th className="num">Lignes</th><th className="num">Débit</th><th className="num">Crédit</th></tr></thead>
+          <div className="dn-section-head">
+            <h2>{fec ? "Écritures : totaux par mois et par compte (classes 6 et 7, comptes 421, 431, 437)" : "Journal comptable : totaux par mois et par compte"}</h2>
+            <p className="desc">Montants tels que lus à la source, sans retraitement. « — » : aucune ligne de ce côté du compte.{fec && " Les autres classes sont conservées mais ne sont pas affichées ici."}</p>
+          </div>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky" data-testid="ledger-totals">
+              <thead><tr><th scope="col">Mois</th><th scope="col">Compte</th><th scope="col">Libellé</th><th scope="col" className="num">Lignes</th><th scope="col" className="num">Débit</th><th scope="col" className="num">Crédit</th></tr></thead>
               <tbody>
                 {ledger.map((r) => (
                   <tr key={`${r.period}-${r.accountId}`}>

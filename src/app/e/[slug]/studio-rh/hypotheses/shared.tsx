@@ -1,3 +1,4 @@
+import { cloneElement, isValidElement } from "react";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { hireKey } from "@/lib/budget/engine";
@@ -54,26 +55,40 @@ export function detailOf(h: Hypothesis, base: BaseSnapshot, hyps: Hypothesis[]):
   }
 }
 
-export const Field = ({ id, label, children }: { id: string; label: string; children: React.ReactNode }) => (
-  <div className="field-row"><label htmlFor={id}>{label}</label>{children}</div>
+// Champ de formulaire : libellé, aide courte facultative (hors du libellé, reliée au champ par aria-describedby), champ.
+export const Field = ({ id, label, hint, children }: { id: string; label: string; hint?: React.ReactNode; children: React.ReactNode }) => (
+  <div className="field-row">
+    <label htmlFor={id}>{label}</label>
+    {hint && isValidElement<{ "aria-describedby"?: string }>(children) ? cloneElement(children, { "aria-describedby": `${id}-hint` }) : children}
+    {hint ? <small className="hint" id={`${id}-hint`}>{hint}</small> : null}
+  </div>
 );
-export const Text = ({ id, name, label, ...rest }: { id: string; name: string; label: string } & React.InputHTMLAttributes<HTMLInputElement>) => (
-  <Field id={id} label={label}><input className="input" id={id} name={name} {...rest} /></Field>
+export const Text = ({ id, name, label, hint, ...rest }: { id: string; name: string; label: string; hint?: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) => (
+  <Field id={id} label={label} hint={hint}><input className="input" id={id} name={name} {...rest} /></Field>
+);
+
+// Groupe de champs d'un formulaire : intitulé, phrase d'aide, champs en ligne.
+export const FieldGroup = ({ title, hint, children }: { title: string; hint?: React.ReactNode; children: React.ReactNode }) => (
+  <fieldset className="hs-group">
+    <legend>{title}</legend>
+    {hint ? <p className="hint">{hint}</p> : null}
+    <div className="filters">{children}</div>
+  </fieldset>
 );
 
 export function AmountFields({ prefix, idp, optional }: { prefix: string; idp: string; optional?: boolean }) {
   return (
     <>
-      <Field id={`${idp}-mode`} label="Saisie">
+      <Field id={`${idp}-mode`} label="Saisie" hint="Brut + taux : charges = brut × taux. Coût chargé : montant tel quel, non ventilé.">
         <select className="select" id={`${idp}-mode`} name={`${prefix}Mode`} defaultValue={optional ? "aucun" : ""}>
           {optional ? <option value="aucun">Aucun</option> : <option value="" disabled>Choisir…</option>}
           <option value="brut">Brut + taux de charges</option>
           <option value="charge">Coût chargé (non ventilé)</option>
         </select>
       </Field>
-      <Text id={`${idp}-brut`} name={`${prefix}Brut`} label="Brut (€)" inputMode="decimal" />
-      <Text id={`${idp}-taux`} name={`${prefix}Taux`} label="Taux de charges (%)" inputMode="decimal" />
-      <Text id={`${idp}-cout`} name={`${prefix}Cout`} label="Coût chargé (€)" inputMode="decimal" />
+      <Text id={`${idp}-brut`} name={`${prefix}Brut`} label="Brut (€)" inputMode="decimal" hint="Si la saisie est « Brut + taux »." />
+      <Text id={`${idp}-taux`} name={`${prefix}Taux`} label="Taux de charges (%)" inputMode="decimal" hint="Ex. 42,5." />
+      <Text id={`${idp}-cout`} name={`${prefix}Cout`} label="Coût chargé (€)" inputMode="decimal" hint="Si la saisie est « Coût chargé »." />
     </>
   );
 }

@@ -1,13 +1,27 @@
+import "@/styles/collaborateurs.css";
+import { BarChart } from "@/components/charts";
 import { isMonth } from "@/lib/connectors/months";
-import { addMonths, formatDate, monthsBetween } from "@/lib/dates";
-import { movements } from "@/lib/rh/headcount";
-import { loadCollabContext, personLabel } from "@/lib/rh/view";
+import { addMonths, formatDate, formatMonth, monthsBetween } from "@/lib/dates";
+import { monthlyList, movements, type Count } from "@/lib/rh/headcount";
+import { loadCollabContext, personLabel, showCount } from "@/lib/rh/view";
+import { monthAxis, monthLongLabel, movementSeries, ndSummary } from "@/lib/viz/collaborateurs";
 import { CollabHeader, contractHref, EventsTable, MonthSelect, PersonCell } from "../components";
 
 export const dynamic = "force-dynamic";
 
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
+
+// Une cellule du tableau des mois : le nombre, « ≥ n » (borne basse) ou « n.d. — raison » ; jamais zéro à la place d'un n.d.
+function CountCell({ c }: { c: Count }) {
+  const s = showCount(c);
+  return (
+    <td className={s.kind === "nd" ? "col-nd" : "num"}>
+      <span className={s.kind === "nd" ? "nd" : s.kind === "lower" ? "lower" : undefined}>{s.text}</span>
+      {s.foot && <span className="tile-foot"> {s.foot}</span>}
+    </td>
+  );
+}
 
 export default async function CollaborateursMouvementsPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
@@ -28,18 +42,30 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
   }
   const months = monthsBetween(first, last);
   const defaultFrom = addMonths(last, -11) < first ? first : addMonths(last, -11);
-  let from = isMonth(one(sp.de)) ? one(sp.de) : defaultFrom;
-  let to = isMonth(one(sp.a)) ? one(sp.a) : last;
+  // La période reste dans les mois couverts (ceux que proposent les listes) : une adresse forgée ne peut pas demander des siècles de mois.
+  const within = (m: string) => (m < first ? first : m > last ? last : m);
+  let from = within(isMonth(one(sp.de)) ? one(sp.de) : defaultFrom);
+  let to = within(isMonth(one(sp.a)) ? one(sp.a) : last);
   if (from > to) [from, to] = [to, from];
   const etab = ctx.establishments.some((e) => e.id === one(sp.etab)) ? one(sp.etab) : "";
   const mv = movements(d, from, to, { natures: ctx.natures.codes, establishments: etab ? [etab] : undefined });
   const ndMonths = new Set(months.filter((m) => !d.coverage.some((c) => c.month === m && c.presenceStatus === "complete")));
   const persons = new Map(d.persons.map((p) => [p.personKey, p]));
   const provisional = mv.exits.filter((r) => r.event.flags.includes("provisional"));
+  // Entrées et sorties de chaque mois de la période : les comptes de la liste mensuelle (mêmes règles de couverture, n.d. conservé).
+  const span = monthsBetween(from, to);
+  const perMonth = span.map((m) => {
+    const ml = monthlyList(d, m, { natures: ctx.natures.codes, establishments: etab ? [etab] : undefined });
+    // Les qualificatifs du moteur (mois en cours, source incomplète) suivent jusque dans l'infobulle du graphique.
+    return { month: m, entries: ml.entriesCount, exits: ml.exitsCount };
+  });
+  const series = movementSeries(perMonth);
+  const chartNd = ndSummary(series);
+  const axis = monthAxis(span);
 
   return (
     <CollabHeader ctx={ctx} tab="mouvements">
-      <form method="get" className="filters" data-testid="movements-filters">
+      <form method="get" className="filters bar collab-bar" data-testid="movements-filters" aria-label="Période et périmètre">
         <MonthSelect name="de" id="de" label="Du mois" months={months} value={from} nd={ndMonths} />
         <MonthSelect name="a" id="a" label="Au mois" months={months} value={to} nd={ndMonths} />
         {ctx.establishments.length > 1 && (
@@ -63,11 +89,54 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
         </section>
       )}
 
-      <section className="panel">
+      <section className="panel collab-panel" data-testid="movements-chart-panel">
+        <div className="panel-head">
+          <div className="collab-title">
+            <h2>Entrées et sorties par mois</h2>
+            <p className="desc">{formatMonth(from)} → {formatMonth(to)} · nombre de contrats, natures comptées · <a href="#def-movements">Définition</a></p>
+          </div>
+        </div>
+        <div className="collab-chart-grid">
+          <div className="collab-chart">
+            {chartNd ? (
+              <p className="nd" data-testid="movements-chart-nd">n.d. — {chartNd}</p>
+            ) : (
+              <BarChart
+                testid="movements-chart"
+                label={`Entrées et sorties comptées par mois, en nombre de contrats, période ${monthLongLabel(from)} → ${monthLongLabel(to)}`}
+                title="Entrées et sorties par mois"
+                categories={axis.categories}
+                categoryTitles={axis.titles}
+                series={series}
+                unit="nombre"
+                height={280}
+                note="Entrées : contrats dont la date de début tombe dans le mois ; sorties : date de fin. Les contrats continus d'une même personne ne sont pas neutralisés ici (le turnover du KPI RH applique la règle choisie dans Paramètres). Un mois n.d. ou en borne basse n'est pas tracé : voir le tableau."
+              />
+            )}
+          </div>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky collab-table" data-testid="movements-months">
+              <caption className="collab-sr">Entrées et sorties comptées par mois, valeurs exactes du graphique</caption>
+              <thead><tr><th scope="col">Mois</th><th scope="col" className="num">Entrées</th><th scope="col" className="num">Sorties</th></tr></thead>
+              <tbody>
+                {perMonth.map((m) => (
+                  <tr key={m.month} data-month={m.month}>
+                    <th scope="row">{formatMonth(m.month)}</th>
+                    <CountCell c={m.entries} />
+                    <CountCell c={m.exits} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel collab-panel">
         <h2>Entrées <span className="desc">— {from} → {to} · {mv.entries.filter((r) => r.inScope).length} comptée(s), {mv.entries.length} au total</span></h2>
         <EventsTable rows={mv.entries} slug={slug} kind="entry" testId="movements-entries" source={b.source} />
       </section>
-      <section className="panel">
+      <section className="panel collab-panel">
         <h2>Sorties <span className="desc">— {from} → {to} · {mv.exits.filter((r) => r.inScope).length} comptée(s), {mv.exits.length} au total</span></h2>
         <EventsTable rows={mv.exits} slug={slug} kind="exit" testId="movements-exits" source={b.source} />
       </section>

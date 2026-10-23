@@ -1,15 +1,16 @@
-/* Graphiques de Clair (charte « 101 ») : un bleu mesuré, du gris et du noir, étendus à huit teintes de série.
+/* Graphiques de Clair (charte « 101 ») : un bleu mesuré, du gris et du noir, étendus à huit teintes de série, toutes à 3:1 au moins
+   sur fond blanc (objets graphiques) ; le texte posé dessus est blanc (1, 2, 3, 8) ou encre (4 à 7), à 4,5:1 au moins (voir onColor).
    Typographie : échelle de typography.css (--clair-type-chart, --clair-type-legend). */
 :root {
   --chart-ink: #141824;
   --chart-1: #155cff;
   --chart-2: #2d3a55;
   --chart-3: #1b7861;
-  --chart-4: #8aafff;
-  --chart-5: #9aa3b5;
-  --chart-6: #d9a34a;
-  --chart-7: #4cb5a0;
-  --chart-8: #c7cedd;
+  --chart-4: #5a8cf5;
+  --chart-5: #7b8497;
+  --chart-6: #c2780a;
+  --chart-7: #2a9d8f;
+  --chart-8: #7a52c9;
 }
 
 .chart { margin: 0; display: grid; gap: 10px; min-width: 0; }
@@ -25,7 +26,6 @@
 .chart text { font-family: var(--font); fill: var(--muted); font-size: var(--clair-type-chart); font-variant-numeric: tabular-nums; }
 .chart .tick.nd { font-style: italic; }
 .chart .val { fill: var(--ink); font-size: var(--clair-type-chart); font-weight: 550; }
-.chart .val.inside { fill: #fff; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .axis { stroke: #c7cedd; stroke-width: 1; }
 .chart .cross { stroke: #c7cedd; stroke-width: 1; stroke-dasharray: 3 3; }
@@ -42,7 +42,7 @@ button.legend-btn:focus-visible { outline: 3px solid #8aafff; outline-offset: 1p
 .legend-btn .off { text-decoration: line-through; opacity: .6; }
 .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; flex: none; }
 .swatch.dashed { height: 0; width: 18px; border: 0; border-top: 2px dashed currentColor; border-radius: 0; background: none !important; }
-.swatch.hatch { background: repeating-linear-gradient(45deg, #fff, #fff 2px, var(--danger) 2px, var(--danger) 4px); border: 1px solid var(--danger); }
+.swatch.hatch { background: repeating-linear-gradient(45deg, #fff, #fff 2px, var(--chart-2) 2px, var(--chart-2) 4px); border: 1px solid var(--chart-2); }
 .chart-note { font-size: var(--clair-type-label); color: var(--muted); }
 
 .chart-tip { position: absolute; z-index: 20; min-width: 160px; max-width: 320px; padding: 9px 11px; display: grid; gap: 4px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px #1418241f; font-size: 12px; pointer-events: none; }

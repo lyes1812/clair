@@ -1,0 +1,66 @@
+/* KPI RH (charte « 101 ») : en-tête de lecture, tuiles d'indicateurs, lecture graphique, effectifs mensuels.
+   Variables et échelle typographique de globals.css / typography.css ; teintes de série de charts.css. */
+
+/* Titre d'un panneau avec sa phrase de contexte dessous (le titre reste court pour les lecteurs d'écran). */
+.kpi-panel-title { display: grid; gap: 4px; min-width: 0; }
+.kpi-panel-title .desc { max-width: 78ch; }
+.panel-head .kpi-panel-title { flex: 1 1 320px; }
+
+/* En-tête : titre, source et dernier mois clos visibles ; le détail technique de la lecture est replié. */
+.kpi-head { display: grid; gap: 10px; }
+.kpi-read-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 22px; }
+.kpi-read-strip .source-badge { flex-wrap: wrap; }
+.kpi-read-details { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.kpi-read-details[open] { justify-self: stretch; }
+.kpi-read-details > summary { cursor: pointer; padding: 7px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
+.kpi-read-details[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
+.kpi-read-details > p { padding: 10px 12px 12px; overflow-wrap: anywhere; line-height: 1.55; }
+
+/* Ligne de période sous les filtres. */
+.kpi-period strong { color: var(--ink); font-weight: 600; }
+
+/* Tuiles d'indicateurs : valeur en grand, comparaison N-1 sous un filet, paramètres repliés, liens en pied. */
+.facts.kpi-tiles { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.kpi-tiles .kpi-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 0; }
+.kpi-tiles .kpi-tile dt { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
+.kpi-tiles .kpi-tile dd { margin: 0; font-size: var(--clair-type-kpi); font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kpi-tiles .kpi-tile dd.lower { color: var(--muted); }
+/* Valeur n.d. : la raison s'écrit en texte courant, pas en gros chiffre. */
+.kpi-tiles .kpi-tile dd.nd { font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; line-height: 1.5; }
+.kpi-tile .tile-notes { display: grid; gap: 2px; }
+.kpi-tile .tile-notes .tile-foot { font-style: italic; line-height: 1.45; }
+.kpi-tile .tile-compare { display: grid; gap: 2px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.kpi-tile .tile-compare .tile-foot { font-size: var(--clair-type-description); line-height: 1.45; }
+.kpi-tile .tile-calc { display: block; font-size: var(--clair-type-label); }
+.kpi-tile .tile-more > summary { cursor: pointer; padding: 2px 0; font-size: var(--clair-type-label); color: var(--muted); }
+.kpi-tile .tile-more[open] > summary { margin-bottom: 4px; }
+.kpi-tile .tile-more .tile-foot { display: block; margin-bottom: 6px; line-height: 1.5; overflow-wrap: anywhere; }
+.kpi-tile .tile-links { margin-top: auto; padding-top: 4px; }
+
+/* Lecture graphique : deux colonnes, une seule sous 960 px ; un graphique « large » prend toute la ligne. */
+.kpi-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
+.kpi-chart { min-width: 0; }
+.kpi-chart.wide { grid-column: 1 / -1; }
+.kpi-chart .chart > .nd { padding: 10px 0; }
+@media (max-width: 960px) { .kpi-charts { grid-template-columns: minmax(0, 1fr); } }
+
+/* Tableaux de l'écran (classe kpi-table) : lignes de total et de pied alignées sur la charte, première colonne fixe sans trou de couleur. */
+.data-table.kpi-table tr.total > th { font-size: var(--clair-type-table-cell); color: var(--ink); }
+.data-table.kpi-table.sticky-first tr.total > :first-child { background: #eef1f6; }
+.data-table.kpi-table tfoot :is(td, th) { background: var(--surface); font-weight: 600; border-top: 1px solid var(--line); border-bottom: 0; }
+.data-table.kpi-table.sticky-first tfoot tr > :first-child { background: var(--surface); }
+.data-table.kpi-table tfoot tr.total > :is(td, th) { background: #eef1f6; border-top: 1px solid #d8dce5; }
+.data-table.kpi-table.sticky-first tfoot tr.total > :first-child { background: #eef1f6; }
+.data-table.kpi-table .swatch { vertical-align: -1px; }
+
+/* Effectifs mensuels : volet de paramètres, panneau « Graphiques » (anneau à gauche, barres à droite). */
+.em-param-fixed { font-size: var(--clair-type-form); color: var(--muted); line-height: 1.5; }
+.em-param-note { font-size: var(--clair-type-label); color: var(--muted); }
+.em-param-note summary { cursor: pointer; padding: 2px 0; }
+.em-param-note ul { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 6px; line-height: 1.45; }
+.filters.bar .field-row.em-version { flex: 2 1 280px; }
+.filters.bar.kpi-bar .btn { flex: 0 0 auto; }
+.em-charts { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px 32px; align-items: start; }
+.em-donut, .em-bars { min-width: 0; }
+/* Le volet de paramètres (250 px) et le menu laissent peu de largeur : sous 1280 px les barres passent sous l'anneau pour rester lisibles. */
+@media (max-width: 1280px) { .em-charts { grid-template-columns: minmax(0, 1fr); } }

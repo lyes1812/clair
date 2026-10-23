@@ -1,21 +1,67 @@
+import "@/styles/collaborateurs.css";
+import { Pager } from "@/components/Pager";
 import { formatDate } from "@/lib/dates";
-import { annualList, type StripCell } from "@/lib/rh/headcount";
+import { contractNatureLabel } from "@/lib/dsn/labels";
+import { annualList, type AnnualRow, type StripCell } from "@/lib/rh/headcount";
 import { loadCollabContext, personLabel, showCount, showHeadcount } from "@/lib/rh/view";
-import { CollabHeader, contractHref, FindingList, Nature, personHref, ShortId, Tile } from "../components";
+import { DEFAULT_PAGE_SIZE, matchesQuery, pageHref, pageOf, pageSizeOf, paginate, quarters, stripCellTitle, stripLabel } from "@/lib/viz/collaborateurs";
+import { CollabHeader, contractHref, FindingList, HiddenParams, ListToolbar, Nature, personHref, ShortId, Tile, YesNoPill } from "../components";
 
 export const dynamic = "force-dynamic";
 
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
+// Frise de présence en fin de mois : douze cases lues par trimestre ; le détail de chaque mois est au survol et à la lecture d'écran.
 function Strip({ cells }: { cells: StripCell[] }) {
   return (
-    <span className="strip" aria-label="présence en fin de mois">
-      {cells.map((c) => (
-        <span key={c.month} className={c.state} title={`${c.month} : ${c.state === "present" ? "présent en fin de mois" : c.state === "absent" ? `absent (${c.reason})` : `n.d. — ${c.reason}`}`} />
+    <span className="collab-strip" role="img" aria-label={stripLabel(cells)}>
+      {quarters(cells).map((q, i) => (
+        <span key={i} className="q">
+          {q.map((c) => <i key={c.month} className={c.state} title={stripCellTitle(c)} />)}
+        </span>
       ))}
     </span>
   );
+}
+
+// Échelle des mois au-dessus de la frise (initiales, même découpage en trimestres).
+const INITIALS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+function StripScale() {
+  return (
+    <span className="collab-strip collab-strip-scale" aria-hidden="true">
+      {quarters(INITIALS).map((q, i) => (
+        <span key={i} className="q">{q.map((l, j) => <span key={j}>{l}</span>)}</span>
+      ))}
+    </span>
+  );
+}
+
+type Presence = AnnualRow["presentJan1"];
+const presenceText = (p: Presence) => (p.state === "present" ? "oui" : p.state === "absent" ? "non" : `n.d. — ${p.nd.reason}`);
+const dates = (list: { date: string }[]) => list.map((e) => `${formatDate(e.date)} ${e.date}`).join(" ");
+
+// Texte de chaque colonne d'une ligne (sans balisage, mêmes mots que l'écran) : la recherche porte sur toutes les colonnes affichées, n.d. compris.
+const ndName = (p: AnnualRow["person"]) => `n.d. — ${p.fieldsNd.familyName?.reason ?? "nom absent"}`;
+const ndMatricule = (p: AnnualRow["person"]) => `n.d. — ${p.fieldsNd.employeeNumber?.reason ?? "valeur absente"}`;
+function rowCells(r: AnnualRow): (string | number | null | undefined)[] {
+  return [
+    personLabel(r.person) ?? ndName(r.person),
+    r.person.externalId,
+    r.person.employeeNumber ?? ndMatricule(r.person),
+    r.contracts.map((c) => `${c.externalId} ${c.nature === null ? "nature : n.d." : `${contractNatureLabel(c.nature)} ${c.nature}`}`).join(" "),
+    presenceText(r.presentJan1),
+    presenceText(r.presentDec31),
+    r.entries.length ? dates(r.entries) : "—",
+    r.exits.length ? dates(r.exits) : "—",
+    `${r.monthsPresent} sur ${r.monthsCovered} couverts`,
+    r.establishments.join(" "),
+  ];
+}
+
+function PresenceCell({ p }: { p: Presence }) {
+  if (p.state === "nd") return <td className="col-wide"><span className="nd">n.d. — {p.nd.reason}</span></td>;
+  return <td><YesNoPill yes={p.state === "present"} title={p.state === "absent" ? p.reason : undefined} /></td>;
 }
 
 export default async function CollaborateursAnneePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
@@ -30,6 +76,8 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
   const year = years.includes(requested) ? requested : (b.presenceTo ? Number(b.presenceTo.slice(0, 4)) : years[years.length - 1]);
   const etab = ctx.establishments.some((e) => e.id === one(sp.etab)) ? one(sp.etab) : "";
   const nature = /^\d{2}$/.test(one(sp.nature)) ? one(sp.nature) : "";
+  const q = one(sp.q).trim().slice(0, 80);
+  const size = pageSizeOf(one(sp.taille));
   if (!year) {
     return (
       <CollabHeader ctx={ctx} tab="annee">
@@ -38,16 +86,22 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
     );
   }
   const al = annualList(d, year, { natures: ctx.natures.codes, establishments: etab ? [etab] : undefined });
-  const rows = nature ? al.rows.filter((r) => r.contracts.some((c) => c.nature === nature)) : al.rows;
+  const rows = al.rows.filter((r) => (!nature || r.contracts.some((c) => c.nature === nature)) && matchesQuery(rowCells(r), q));
+  const pg = paginate(rows, pageOf(one(sp.page)), size);
   const persons = new Map(d.persons.map((p) => [p.personKey, p]));
   const contracts = new Map(d.contracts.map((c) => [c.contractKey, c]));
   const natures = [...new Set(d.contracts.map((c) => c.nature).filter((n): n is string => n !== null))].sort();
   const covered = al.coveredMonths.length;
-  const presence = (p: { state: string; reason?: string; nd?: { reason: string } }) => (p.state === "present" ? "oui" : p.state === "absent" ? "non" : `n.d. — ${p.nd?.reason ?? ""}`);
+
+  // Adresses : la barre de période (année, établissement) et la barre du tableau (recherche, nature, taille) se conservent l'une l'autre.
+  const sizeParam = size === DEFAULT_PAGE_SIZE ? undefined : String(size);
+  const listParams = { annee: String(year), etab: etab || undefined, nature: nature || undefined, q: q || undefined, taille: sizeParam };
+  const resetHref = q || nature ? pageHref({ annee: String(year), etab: etab || undefined, taille: sizeParam }) : null;
 
   return (
     <CollabHeader ctx={ctx} tab="annee">
-      <form method="get" className="filters" data-testid="year-filters">
+      <form method="get" className="filters bar collab-bar" data-testid="year-filters" aria-label="Période et périmètre">
+        <HiddenParams values={{ nature: nature || undefined, q: q || undefined, taille: sizeParam }} />
         <div className="field-row">
           <label htmlFor="annee">Année</label>
           <select className="select" id="annee" name="annee" defaultValue={String(year)}>
@@ -63,19 +117,12 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
             </select>
           </div>
         )}
-        <div className="field-row">
-          <label htmlFor="nature">Nature</label>
-          <select className="select" id="nature" name="nature" defaultValue={nature}>
-            <option value="">Toutes</option>
-            {natures.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </div>
         <button className="btn" type="submit">Afficher</button>
       </form>
 
-      <section className="panel">
+      <section className="panel collab-panel">
         <h2>Année {year}</h2>
-        <dl className="facts">
+        <dl className="facts collab-tiles">
           <Tile id="year-jan1" label={`Effectif au 01/01/${year} (personnes)`} shown={showHeadcount(al.headcountJan1, "persons")} def="headcount-persons" />
           <Tile id="year-dec31" label={`Effectif au 31/12/${year} (personnes)`} shown={showHeadcount(al.headcountDec31, "persons")} def="headcount-persons" />
           <Tile id="year-entries" label="Entrées de l'année" shown={showCount(al.entriesCount)} def="movements" />
@@ -89,28 +136,44 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
         </dl>
       </section>
 
-      <section className="panel">
-        <h2>Personnes <span className="desc">— {rows.length} ligne(s)</span></h2>
-        <div className="table-wrap">
-          <table className="data-table" data-testid="collab-annual-table">
+      <section className="panel collab-panel" data-testid="collab-annual-panel">
+        <h2>Personnes <span className="desc">— {rows.length} ligne(s){rows.length !== al.rows.length ? ` sur ${al.rows.length}` : ""}</span></h2>
+        <ListToolbar testid="year-toolbar" label="Recherche et filtres du tableau des personnes de l'année" hidden={{ annee: String(year), etab: etab || undefined }} q={q} size={size} resetHref={resetHref}>
+          <div className="field-row">
+            <label htmlFor="nature">Nature</label>
+            <select className="select" id="nature" name="nature" defaultValue={nature}>
+              <option value="">Toutes</option>
+              {natures.map((n) => <option key={n} value={n}>{contractNatureLabel(n)}</option>)}
+            </select>
+          </div>
+        </ListToolbar>
+        <div className="table-wrap scroll collab-scroll">
+          <table className="data-table sticky sticky-first collab-table collab-who" data-testid="collab-annual-table">
+            <caption className="collab-sr">Personnes de l'année {year}, une ligne par personne</caption>
             <thead>
               <tr>
-                <th>Personne</th><th>Matricule</th><th className="wrap">Contrats dans l'année</th><th>Présent au 01/01</th><th>Présent au 31/12</th><th className="wrap">Entrées</th><th className="wrap">Sorties</th><th>Fin de mois</th><th className="wrap">Mois présents</th><th className="wrap">Établissements</th><th className="num">Constats</th>
+                <th scope="col">Personne</th><th scope="col">Matricule</th><th scope="col">Contrats dans l'année</th><th scope="col">Présent au 01/01</th><th scope="col">Présent au 31/12</th><th scope="col">Entrées</th><th scope="col">Sorties</th>
+                <th scope="col">Fin de mois<StripScale /></th>
+                <th scope="col" className="num">Mois présents</th><th scope="col">Établissements</th><th scope="col" className="num">Constats</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {pg.items.map((r) => (
                 <tr key={r.person.personKey}>
-                  <td><a href={personHref(slug, r.person.personKey)}>{personLabel(r.person) ?? <span className="nd">n.d.</span>}</a> <ShortId id={r.person.externalId} /></td>
-                  <td>{r.person.employeeNumber ?? <span className="nd">n.d.</span>}</td>
-                  <td className="wrap">{r.contracts.map((c) => <span key={c.contractKey} style={{ marginRight: 8 }}><a href={contractHref(slug, c.contractKey)}><code>{c.externalId}</code></a> <Nature code={c.nature} /></span>)}</td>
-                  <td>{presence(r.presentJan1)}</td>
-                  <td>{presence(r.presentDec31)}</td>
-                  <td className="wrap">{r.entries.length ? r.entries.map((e) => formatDate(e.date)).join(", ") : "—"}</td>
-                  <td className="wrap">{r.exits.length ? r.exits.map((e) => formatDate(e.date)).join(", ") : "—"}</td>
+                  <td><a href={personHref(slug, r.person.personKey)}>{personLabel(r.person) ?? <span className="nd">{ndName(r.person)}</span>}</a> <ShortId id={r.person.externalId} /></td>
+                  <td className="col-nd">{r.person.employeeNumber ?? <span className="nd">{ndMatricule(r.person)}</span>}</td>
+                  <td>
+                    <ul className="collab-contracts">
+                      {r.contracts.map((c) => <li key={c.contractKey}><a href={contractHref(slug, c.contractKey)}><code>{c.externalId}</code></a> <Nature code={c.nature} /></li>)}
+                    </ul>
+                  </td>
+                  <PresenceCell p={r.presentJan1} />
+                  <PresenceCell p={r.presentDec31} />
+                  <td className="collab-dates">{r.entries.length ? r.entries.map((e, i) => <span key={`${e.contractKey}-${e.date}`}><span className="col-date">{formatDate(e.date)}</span>{i < r.entries.length - 1 ? ", " : ""}</span>) : "—"}</td>
+                  <td className="collab-dates">{r.exits.length ? r.exits.map((e, i) => <span key={`${e.contractKey}-${e.date}`}><span className="col-date">{formatDate(e.date)}</span>{i < r.exits.length - 1 ? ", " : ""}</span>) : "—"}</td>
                   <td><Strip cells={r.strip} /></td>
-                  <td className="wrap">{r.monthsPresent} sur {r.monthsCovered} couverts</td>
-                  <td className="wrap">{r.establishments.map((e) => <code key={e} style={{ marginRight: 6 }}>{e}</code>)}</td>
+                  <td className="num">{r.monthsPresent} sur {r.monthsCovered} couverts</td>
+                  <td>{r.establishments.map((e) => <code key={e} style={{ marginRight: 6 }}>{e}</code>)}</td>
                   <td className="num">{r.findings.length}</td>
                 </tr>
               ))}
@@ -118,6 +181,13 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
           </table>
         </div>
         {rows.length === 0 && <p className="muted">Aucune personne pour ces filtres.</p>}
+        <Pager page={pg.page} pageSize={size} total={pg.total} href={(p) => pageHref(listParams, p)} testid="collab-annual-pager" />
+        <p className="collab-legend" data-testid="strip-legend">
+          <span>Frise de fin de mois, par trimestre :</span>
+          <span><i className="sw present" aria-hidden="true" />présent</span>
+          <span><i className="sw" aria-hidden="true" />absent</span>
+          <span><i className="sw nd" aria-hidden="true" />n.d. (mois non couvert, raison au survol)</span>
+        </p>
       </section>
 
       {(al.withoutPerson.length > 0 || al.personsWithoutContract.length > 0) && (

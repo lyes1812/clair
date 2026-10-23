@@ -1,8 +1,11 @@
+import { FamilyTabs } from "@/components/FamilyTabs";
 import { formatEuros } from "@/lib/money";
 import type { Agg, Diff } from "@/lib/budget/versions";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
+import { periodText } from "@/lib/viz/ecart";
 import { monthShort } from "./components";
 import { NV, type Loaded } from "./ecart-data";
+import { RubInput } from "./ecart/LiveRub";
 
 import { MS_PREVU, type MsTab } from "./tabs";
 export { MS_PREVU, type MsTab };
@@ -27,28 +30,30 @@ export function MsTabs({ slug, current, extra = "" }: { slug: string; current: M
     { key: "ecart", label: "Écart budgétaire", href: `${base}/ecart` },
     { key: "analyse", label: "Analyse des écarts", href: `${base}/analyse` },
   ];
-  return (
-    <nav className="tabs" aria-label="Vues" data-testid="ms-tabs">
-      {tabs.map((t) => <a key={t.key} href={t.href} aria-current={t.key === current ? "page" : undefined}>{t.label}{t.soon && <span className="soon">Prévu</span>}</a>)}
-    </nav>
-  );
+  return <FamilyTabs tabs={tabs} current={current} label="Vues" testid="ms-tabs" />;
 }
 
 export type Unit = "etp" | "nombre" | "eur";
 const sign = (n: number) => (n > 0 ? "+" : "");
+const plain = (num: number, den: number, unit: Unit) => (unit === "eur" ? formatEuros(num) : unit === "etp" ? fmtFixed({ num, den }, 2) : String(num));
+
 export function aggText(a: Agg, unit: Unit): string {
   if (a.kind !== "value") return a.kind === "na" ? "—" : "n.d.";
-  return unit === "eur" ? formatEuros(a.num) : unit === "etp" ? fmtFixed({ num: a.num, den: a.den }, 2) : String(a.num);
+  return plain(a.num, a.den, unit);
 }
 export function Val({ agg, unit }: { agg: Agg; unit: Unit }) {
   if (agg.kind === "nd") return <abbr className="nd" title={agg.reason}>n.d.</abbr>;
   return <>{aggText(agg, unit)}</>;
 }
+
+// Texte d'un écart signé (« +3 550,00 € ») ; null quand l'écart est n.d. ou sans objet.
+export function gapText(d: Diff, unit: Unit): string | null {
+  return d.kind === "value" ? `${sign(d.num)}${plain(d.num, d.den, unit)}` : null;
+}
 export function Gap({ d, unit }: { d: Diff; unit: Unit }) {
   if (d.kind === "nd") return <abbr className="nd" title={d.reason}>n.d.</abbr>;
   if (d.kind === "na") return <>—</>;
-  const t = unit === "eur" ? formatEuros(d.num) : unit === "etp" ? fmtFixed({ num: d.num, den: d.den }, 2) : String(d.num);
-  return <>{sign(d.num)}{t}</>;
+  return <>{gapText(d, unit)}</>;
 }
 export function GapPct({ d }: { d: Diff }) {
   if (d.kind === "nd") return <abbr className="nd" title={d.reason}>n.d.</abbr>;
@@ -57,18 +62,46 @@ export function GapPct({ d }: { d: Diff }) {
   return <>{sign(d.pct.num)}{fmtPercent({ num: d.pct.num, den: d.pct.den })}</>;
 }
 
+// Sens d'un écart, porté par une flèche neutre (gris) ajoutée en CSS : aucune règle métier ne dit quel sens est favorable,
+// donc aucun code couleur « favorable / défavorable ». Le signe reste écrit dans le texte.
+export type Sign = "up" | "down" | "zero";
+export const signOf = (n: number): Sign => (n > 0 ? "up" : n < 0 ? "down" : "zero");
+export const gapSign = (d: Diff): Sign | undefined => (d.kind === "value" ? signOf(d.num) : undefined);
+export const pctSign = (d: Diff): Sign | undefined => (d.kind === "value" && d.pct ? signOf(d.pct.num) : undefined);
+
+// Pastille numérotée d'une version (①②③) : le chiffre est décoratif, le texte caché dit « Version n ».
+export function VerBadge({ n }: { n: number }) {
+  return (
+    <>
+      <span className="ver-badge" aria-hidden="true">{n}</span>
+      <span className="ecart-sr">Version {n} : </span>
+    </>
+  );
+}
+// En-tête d'un écart entre deux versions : « ② − ① » (version suivante moins version précédente).
+export function VerPair({ to, from }: { to: number; from: number }) {
+  return (
+    <>
+      <span className="ecart-ver-pair" aria-hidden="true"><span className="ver-badge">{to}</span>−<span className="ver-badge">{from}</span></span>
+      <span className="ecart-sr">Version {to} moins version {from} : </span>
+    </>
+  );
+}
+
 const MONTH_NAMES = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 export const rankLabel = (mm: string) => monthShort(`2000-${mm}`);
+export { periodText };
+export const scopeText = (loaded: Loaded) => (loaded.filter ? `service ${loaded.filter.value ?? "non ventilé"}` : "tous les services");
 
 // Formulaire de choix des versions, de la période (rangs de mois) et du service : tout passe par l'adresse de la page.
 export function PickerForm({ path, loaded, columns, hidden = {} }: { path: string; loaded: Loaded; columns: 2 | 3; hidden?: Record<string, string> }) {
   const cols = Array.from({ length: columns }, (_, i) => i);
   return (
-    <form method="get" action={path} className="filters" data-testid="ecart-form">
-      {Object.entries(hidden).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
+    <form method="get" action={path} className="filters ecart-filters" data-testid="ecart-form">
+      {Object.entries(hidden).map(([k, v]) => (k === "rub" ? <RubInput key={k} initial={v} /> : <input key={k} type="hidden" name={k} value={v} />))}
       {cols.map((i) => (
         <div className="field-row" key={i}>
-          <label htmlFor={`v${i + 1}`}>Version {i + 1}</label>
+          <label htmlFor={`v${i + 1}`}><span className="ver-badge" aria-hidden="true">{i + 1}</span>Version {i + 1}</label>
           <select className="select" id={`v${i + 1}`} name={`v${i + 1}`} defaultValue={loaded.selected[i] ?? ""}>
             <option value="">— aucune</option>
             {loaded.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -91,47 +124,10 @@ export function PickerForm({ path, loaded, columns, hidden = {} }: { path: strin
           {loaded.hasNv && <option value={NV}>Non ventilé</option>}
         </select>
       </div>
-      <button className="btn" type="submit">Afficher</button>
+      <div className="ecart-filter-actions">
+        <button className="btn primary" type="submit">Afficher</button>
+        <a className="btn" href={path}>Réinitialiser</a>
+      </div>
     </form>
-  );
-}
-
-// Cascade (pont) : valeur de départ, contributions signées, valeur d'arrivée. Une contribution positive est pleine, une
-// négative hachurée, et chaque barre porte sa valeur signée en clair : le sens ne dépend pas de la couleur.
-export function Waterfall({ startLabel, endLabel, start, end, steps, fmt, testid }: { startLabel: string; endLabel: string; start: number; end: number; steps: { label: string; value: number }[]; fmt: (n: number) => string; testid: string }) {
-  const levels: number[] = [start];
-  for (const s of steps) levels.push(levels.at(-1)! + s.value);
-  const top = Math.max(1, start, end, ...levels);
-  const bottom = Math.min(start, end, ...levels);
-  // Quand les contributions sont petites devant les totaux, l'axe est tronqué pour qu'elles se lisent ; il est dit à l'écran.
-  const truncated = bottom > 0 && (top - bottom) / top < 0.3;
-  const low = truncated ? Math.max(0, bottom - (top - bottom) * 0.5) : Math.min(0, bottom);
-  const span = top - low || 1;
-  const H = 170;
-  const W = (steps.length + 2) * 78 + 20;
-  const y = (v: number) => 14 + ((top - Math.max(v, low)) / span) * (H - 24);
-  const bars = [
-    { label: startLabel, from: low, to: start, kind: "total" as const, text: fmt(start) },
-    ...steps.map((s, i) => ({ label: s.label, from: levels[i], to: levels[i + 1], kind: s.value >= 0 ? ("up" as const) : ("down" as const), text: `${s.value > 0 ? "+" : ""}${fmt(s.value)}` })),
-    { label: endLabel, from: low, to: end, kind: "total" as const, text: fmt(end) },
-  ];
-  return (
-    <svg viewBox={`0 0 ${W} ${H + 64}`} role="img" aria-label="Cascade de l'écart" style={{ width: "100%", maxWidth: W, height: "auto" }} data-testid={testid}>
-      <defs><pattern id={`${testid}-h`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="var(--ink)" /></pattern></defs>
-      <line x1="6" x2={W - 6} y1={y(low)} y2={y(low)} stroke="var(--line)" />
-      {truncated && <text x={W - 8} y={H + 40} textAnchor="end" fontSize="10" fill="var(--muted)">{`axe tronqué à ${fmt(Math.round(low))}`}</text>}
-      {bars.map((b, i) => {
-        const x = 16 + i * 78;
-        const a = y(Math.max(b.from, b.to));
-        const h = Math.max(2, Math.abs(y(b.from) - y(b.to)));
-        return (
-          <g key={`${b.label}-${i}`}>
-            <rect x={x} y={a} width="44" height={h} fill={b.kind === "total" ? "var(--ink)" : b.kind === "up" ? "var(--blue)" : `url(#${testid}-h)`} stroke={b.kind === "down" ? "var(--ink)" : "none"}><title>{`${b.label} : ${b.text}`}</title></rect>
-            <text x={x + 22} y={a - 4} textAnchor="middle" fontSize="10" fill="var(--ink)">{b.text}</text>
-            <text x={x + 22} y={H + 16} textAnchor="middle" fontSize="10" fill="var(--muted)">{b.label.length > 14 ? `${b.label.slice(0, 13)}…` : b.label}</text>
-          </g>
-        );
-      })}
-    </svg>
   );
 }

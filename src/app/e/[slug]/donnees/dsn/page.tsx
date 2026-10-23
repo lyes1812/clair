@@ -1,14 +1,16 @@
+import "@/styles/donnees.css";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { listSyncs, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
 import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { FileUploadForm } from "../Forms";
+import { Empty, PageHead, Pill, sizeFmt, syncTone } from "../ui";
 import { CoverageTable } from "./CoverageTable";
 
 export const dynamic = "force-dynamic";
 
-const sizeFmt = (n: number) => (n < 1024 ? `${n} o` : n < 1024 * 1024 ? `${Math.round(n / 1024)} Ko` : `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} Mo`);
+const statusLabel = (s: string) => (s === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[s as SyncStatus]);
 
 export default async function DsnPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -17,36 +19,38 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
 
   return (
     <>
-      <div style={{ display: "grid", gap: 8 }}>
-        <span className="label"><a href={`/e/${slug}/donnees`}>Données</a> / Fichiers DSN</span>
-        <h1>Fichiers DSN</h1>
+      <PageHead crumbs={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Fichiers DSN" }]} title="Fichiers DSN">
         <p className="desc">
           Déclarations sociales nominatives mensuelles, déposées fichier par fichier. Les lectures appliquées s'additionnent ; pour chaque
           établissement et chaque mois, la déclaration qui fait foi est déterminée par les règles de la norme (numéro d'ordre, annule et remplace, fractions).
         </p>
-      </div>
+      </PageHead>
 
-      {hasAtLeast(workspace.role, "editor") && (
-        <section className="panel">
+      {hasAtLeast(workspace.role, "editor") ? (
+        <section className="panel" id="deposer">
           <h2>Déposer</h2>
           <FileUploadForm slug={slug} kind="dsn" />
         </section>
+      ) : (
+        <p className="notice">Le dépôt de fichiers est réservé aux éditeurs et aux administrateurs de l'espace.</p>
       )}
 
-      <section className="panel">
-        <h2>Couverture</h2>
-        <p className="desc">Lecture partielle : individus, contrats, rémunérations et activités. Cotisations et arrêts de travail ne sont pas extraits.</p>
+      <section className="panel" id="couverture">
+        <div className="dn-section-head">
+          <h2>Couverture</h2>
+          <p className="desc">Lecture partielle : individus, contrats, rémunérations et activités. Cotisations et arrêts de travail ne sont pas extraits.</p>
+        </div>
         <CoverageTable rows={coverage} />
       </section>
 
-      <section className="panel">
+      <section className="panel" id="fichiers">
         <h2>Fichiers conservés</h2>
         {files.length === 0 ? (
-          <p className="muted">Aucun fichier.</p>
+          <Empty>Aucun fichier.</Empty>
         ) : (
-          <div className="table-wrap">
-            <table className="data-table" data-testid="dsn-files">
-              <thead><tr><th>Fichier</th><th>Déposé le</th><th className="num">Taille</th><th>Empreinte</th><th>Lecture</th></tr></thead>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky" data-testid="dsn-files">
+              <thead><tr><th scope="col">Fichier</th><th scope="col">Déposé le</th><th scope="col" className="num">Taille</th><th scope="col">Empreinte</th><th scope="col">Lecture</th></tr></thead>
               <tbody>
                 {files.map((f) => (
                   <tr key={f.id}>
@@ -54,7 +58,7 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
                     <td>{dateTimeFmt.format(f.createdAt)}</td>
                     <td className="num">{sizeFmt(f.sizeBytes)}</td>
                     <td><code>{f.sha256.slice(0, 12)}</code></td>
-                    <td><a href={`/e/${slug}/donnees/synchro/${f.syncId}`}><span className={`status-pill ${f.syncStatus}`}>{f.syncStatus === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[f.syncStatus as SyncStatus]}</span></a></td>
+                    <td><a className="dn-pill-link" href={`/e/${slug}/donnees/synchro/${f.syncId}`}><Pill tone={syncTone(f.syncStatus)}>{statusLabel(f.syncStatus)}</Pill></a></td>
                   </tr>
                 ))}
               </tbody>
@@ -63,24 +67,24 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" id="historique">
         <h2>Historique des dépôts</h2>
         {syncs.length === 0 ? (
-          <p className="muted">Aucun dépôt.</p>
+          <Empty>Aucun dépôt.</Empty>
         ) : (
-          <div className="table-wrap">
-            <table className="data-table" data-testid="dsn-history">
-              <thead><tr><th>Déposé le</th><th>Fichiers</th><th>Mois</th><th>Statut</th><th></th></tr></thead>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky" data-testid="dsn-history">
+              <thead><tr><th scope="col">Déposé le</th><th scope="col">Fichiers</th><th scope="col">Mois</th><th scope="col">Statut</th><th scope="col"></th></tr></thead>
               <tbody>
                 {syncs.map((s) => {
                   const scope = s.scope as { files?: string[]; months?: string[] };
                   return (
                     <tr key={s.id}>
                       <td>{dateTimeFmt.format(s.startedAt)}</td>
-                      <td>{scope.files?.join(", ") ?? "n.d."}</td>
-                      <td>{scope.months?.length ? scope.months.join(", ") : "—"}</td>
-                      <td><span className={`status-pill ${s.status}`}>{s.status === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[s.status as SyncStatus]}</span></td>
-                      <td><a href={`/e/${slug}/donnees/synchro/${s.id}`}>Détail</a></td>
+                      <td className="wrap">{scope.files?.join(", ") ?? "n.d."}</td>
+                      <td className="wrap">{scope.months?.length ? scope.months.join(", ") : "—"}</td>
+                      <td><Pill tone={syncTone(s.status)}>{statusLabel(s.status)}</Pill></td>
+                      <td><a href={`/e/${slug}/donnees/synchro/${s.id}`} aria-label={`Détail du dépôt du ${dateTimeFmt.format(s.startedAt)}`}>Détail</a></td>
                     </tr>
                   );
                 })}

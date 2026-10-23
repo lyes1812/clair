@@ -1,15 +1,19 @@
+import "@/styles/ecart.css";
+import { Pager } from "@/components/Pager";
 import { formatEuros } from "@/lib/money";
-import { aggregate, diff, ROW_LABELS, ROW_UNIT, type Cell, type RowKey, type Version } from "@/lib/budget/versions";
+import { aggregate, diff, type RowKey, type Version } from "@/lib/budget/versions";
 import { ECART_DEFINITIONS } from "@/lib/budget/ecart-definitions";
 import { zoomOf, ZOOM_RUBRICS, HORS_SALARIE, type ZoomRubric } from "@/lib/budget/zoom";
-import { fmtFixed } from "@/lib/rh/kpi/format";
+import { ecartChartData, RUBRIC_KEYS, rubricGroups } from "@/lib/viz/ecart";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { loadVersions } from "../ecart-data";
 import { ecartRows } from "../ecart-rows";
-import { Gap, GapPct, MsTabs, PickerForm, rankLabel, Val } from "../EcartParts";
+import { Gap, gapSign, gapText, GapPct, MsHeader, MsTabs, periodText, pctSign, PickerForm, scopeText, Val, VerBadge, VerPair } from "../EcartParts";
 import { peopleIndex } from "../people-index";
+import { EcartChart } from "./EcartChart";
+import { LiveLink, LiveViewSwitch, RubInput } from "./LiveRub";
 
 export const dynamic = "force-dynamic";
 type Search = Record<string, string | string[] | undefined>;
@@ -17,45 +21,12 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) 
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/masse-salariale")!;
 const PAGE_SIZE = 100;
 const ZOOM_KEYS = Object.keys(ZOOM_RUBRICS) as ZoomRubric[];
-const CHART_KEYS: RowKey[] = ["masse", "brut", "charges", "remun", "primes", "indemnites", "etp", "headcount", "entrees", "sorties"];
-
-const cellValue = (c: Cell) => (c.kind === "value" ? c.v : null);
-
-function Chart({ versions, labels, monthsOf, rub }: { versions: Version[]; labels: string[]; monthsOf: (v: Version) => string[]; rub: RowKey }) {
-  const ranks = monthsOf(versions[0]).map((m) => m.slice(5, 7));
-  const series = versions.map((v) => monthsOf(v).map((m) => {
-    const f = v.months.get(m);
-    return f ? cellValue(rub === "etp" ? f.etp4 : f[rub as Exclude<RowKey, "etp">]) : null;
-  }));
-  const max = Math.max(1, ...series.flat().map((x) => x ?? 0));
-  const bw = 14;
-  const gw = versions.length * bw + 12;
-  const H = 150;
-  const W = ranks.length * gw + 20;
-  const fills = ["var(--ink)", "var(--blue)", "url(#ecart-hatch)"];
-  return (
-    <svg viewBox={`0 0 ${W} ${H + 32}`} role="img" aria-label={`${ROW_LABELS[rub]} par mois et par version`} style={{ width: "100%", maxWidth: W, height: "auto" }} data-testid="ecart-chart">
-      <defs><pattern id="ecart-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="var(--blue)" /></pattern></defs>
-      <line x1="6" x2={W - 6} y1={H} y2={H} stroke="var(--line)" />
-      {ranks.map((mm, i) => (
-        <g key={mm}>
-          {series.map((s, j) => {
-            const v = s[i];
-            const x = 12 + i * gw + j * bw;
-            return v === null ? (
-              <rect key={j} x={x} y={H - 14} width={bw - 2} height="14" fill="#e7eaf0"><title>{`${labels[j]}, ${rankLabel(mm)} : n.d.`}</title></rect>
-            ) : (
-              <rect key={j} x={x} y={H - Math.max(0, (Math.max(0, v) / max) * (H - 14))} width={bw - 2} height={Math.max(0, (Math.max(0, v) / max) * (H - 14))} fill={fills[j]} stroke={j === 2 ? "var(--blue)" : "none"}>
-                <title>{`${labels[j]}, ${rankLabel(mm)} : ${ROW_UNIT[rub] === "eur" ? formatEuros(v) : ROW_UNIT[rub] === "etp" ? fmtFixed({ num: v, den: 10000 }, 2) : v}`}</title>
-              </rect>
-            );
-          })}
-          <text x={12 + i * gw + (versions.length * bw) / 2} y={H + 16} textAnchor="middle" fontSize="11" fill="var(--muted)">{rankLabel(mm)}</text>
-        </g>
-      ))}
-    </svg>
-  );
-}
+type Affichage = "tout" | "graphique" | "tableau";
+const AFFICHAGES: Affichage[] = ["tout", "graphique", "tableau"];
+const KIND_LABEL: Record<Version["kind"], string> = { reel: "Réel PayFit", scenario: "Scénario", budget: "Budget saisi" };
+// Mise en forme des lignes : la masse chargée est le total, le brut et les charges ses sous-totaux, les rubriques de rémunération
+// des lignes de détail du brut (voir ecart.css).
+const ROW_CLASS: Partial<Record<RowKey, string>> = { masse: "total", brut: "subtotal child", charges: "subtotal child", nonventile: "child", remun: "child2", primes: "child2", indemnites: "child2", autres: "child2" };
 
 export default async function EcartPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
@@ -65,7 +36,8 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
   const loaded = await loadVersions(slug, workspace.id, sp, 3);
   const { versions } = loaded;
   const vue = one(sp.vue) === "detail" ? "detail" : "synthese";
-  const rub = CHART_KEYS.includes(one(sp.rub) as RowKey) ? (one(sp.rub) as RowKey) : "masse";
+  const rub = RUBRIC_KEYS.includes(one(sp.rub) as RowKey) ? (one(sp.rub) as RowKey) : "masse";
+  const aff: Affichage = AFFICHAGES.includes(one(sp.affichage) as Affichage) ? (one(sp.affichage) as Affichage) : "tout";
   const rows = ecartRows(loaded, vue);
   const base = `/e/${slug}/studio-rh/masse-salariale/ecart`;
   const keep = new URLSearchParams();
@@ -76,8 +48,20 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
     return `${base}?${p.toString()}`;
   };
+  // Paramètres d'affichage reportés dans chaque lien de la page (niveau de détail, rubrique du graphique, affichage).
+  const view: Record<string, string> = { vue, rub, ...(aff !== "tout" ? { affichage: aff } : {}) };
   const monthsOf = (v: Version) => loaded.months(v.year);
   const header = (i: number) => loaded.shorts[i];
+  const period = periodText(loaded.from, loaded.to);
+  const scope = scopeText(loaded);
+  const exportQuery = new URLSearchParams(keep);
+  exportQuery.set("vue", vue);
+  // Même comparaison dans l'analyse des écarts (deux versions consécutives, même période et même service).
+  const analyseHref = (i: number) => {
+    const p = new URLSearchParams({ v1: loaded.selected[i], v2: loaded.selected[i + 1], de: loaded.from, a: loaded.to });
+    if (keep.get("service")) p.set("service", keep.get("service")!);
+    return `/e/${slug}/studio-rh/masse-salariale/analyse?${p.toString()}`;
+  };
 
   // Détail par salarié d'un écart (rubrique : paire de versions).
   const [zr, zp] = one(sp.zoom).split(":");
@@ -114,26 +98,37 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
       const shownTotal = shown.reduce((s, r) => s + r.d, 0);
       const fmt = (n: number | null) => (n === null ? "—" : formatEuros(n));
       const sg = (n: number) => `${n > 0 ? "+" : ""}${formatEuros(n)}`;
-      const zoomQ = (extra: Record<string, string>) => q({ vue, rub, zoom: `${zoomRubric}:${pair + 1}`, ...(search ? { zq: one(sp.zq) } : {}), ...(nz ? {} : { nz: "0" }), ...extra });
+      const zoomQ = (extra: Record<string, string>) => q({ ...view, zoom: `${zoomRubric}:${pair + 1}`, ...(search ? { zq: one(sp.zq) } : {}), ...(nz ? {} : { nz: "0" }), ...extra });
+      const exportZoom = new URLSearchParams(keep);
+      exportZoom.set("zoom", `${zoomRubric}:${pair + 1}`);
       zoomBlock = (
         <section className="panel" id="zoom" data-testid="zoom">
-          <h2>Détail par salarié — {ZOOM_RUBRICS[zoomRubric]} <span className="desc">— <a href="#def-zoom">règle</a></span></h2>
-          <p className="desc">{a.label} → {b.label} · {loaded.from}–{loaded.to} (rangs de mois){loaded.filter ? ` · service ${loaded.filter.value ?? "non ventilé"}` : " · tous les services"}</p>
+          <div className="panel-head">
+            <div className="ecart-panel-title">
+              <h2>Détail par salarié — {ZOOM_RUBRICS[zoomRubric]} <span className="desc">— <a href="#def-zoom">règle</a></span></h2>
+              <p className="desc"><span className="ver-badge" aria-hidden="true">{pair + 1}</span>{a.label} → <span className="ver-badge" aria-hidden="true">{pair + 2}</span>{b.label} · {period} · {scope}</p>
+            </div>
+            <div className="panel-tools">
+              <a className="btn primary" href={`${base}/export?${exportZoom.toString()}`} data-testid="zoom-export">Exporter le détail (CSV)</a>
+            </div>
+          </div>
           <form method="get" action={base} className="filters" data-testid="zoom-filters">
             {[...keep].map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
-            <input type="hidden" name="vue" value={vue} /><input type="hidden" name="rub" value={rub} /><input type="hidden" name="zoom" value={`${zoomRubric}:${pair + 1}`} />
+            {Object.entries(view).map(([k, v]) => (k === "rub" ? <RubInput key={k} initial={v} /> : <input key={k} type="hidden" name={k} value={v} />))}
+            <input type="hidden" name="zoom" value={`${zoomRubric}:${pair + 1}`} />
             <div className="field-row"><label htmlFor="zq">Rechercher (nom, matricule, service)</label><input className="input" id="zq" name="zq" defaultValue={one(sp.zq)} /></div>
             <label className="check"><input type="checkbox" name="nz" value="1" defaultChecked={nz} /><span>Écart non nul seulement</span></label>
             {!nz && <input type="hidden" name="nz" value="0" />}
             <button className="btn" type="submit">Filtrer</button>
           </form>
-          <div className="table-wrap">
-            <table className="data-table" data-testid="zoom-table">
-              <thead><tr><th className="num">Écart</th><th className="num">{loaded.shorts[pair]}</th><th className="num">{loaded.shorts[pair + 1]}</th><th>Matricule</th><th>Nom</th><th>Service</th><th>Contrat</th><th>Date d'embauche</th><th>Date de sortie</th></tr></thead>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky ecart-table" data-testid="zoom-table">
+              <caption className="ecart-sr">Détail par salarié de l'écart de {ZOOM_RUBRICS[zoomRubric]}, de {a.label} à {b.label}</caption>
+              <thead><tr><th scope="col" className="num">Écart</th><th scope="col" className="num">{loaded.shorts[pair]}</th><th scope="col" className="num">{loaded.shorts[pair + 1]}</th><th scope="col">Matricule</th><th scope="col">Nom</th><th scope="col">Service</th><th scope="col">Contrat</th><th scope="col">Date d'embauche</th><th scope="col">Date de sortie</th></tr></thead>
               <tbody>
                 {slice.map((r) => (
                   <tr key={r.k} data-person={r.info.label}>
-                    <td className="num" data-col="ecart">{sg(r.d)}</td><td className="num">{fmt(r.av)}</td><td className="num">{fmt(r.bv)}</td>
+                    <td className="num gap" data-col="ecart" data-sign={r.d === 0 ? "zero" : r.d > 0 ? "up" : "down"}>{sg(r.d)}</td><td className="num">{fmt(r.av)}</td><td className="num">{fmt(r.bv)}</td>
                     <td>{r.info.externalId ?? "—"}</td><td className="wrap">{r.info.label}</td><td>{r.info.service ?? "—"}</td><td>{r.info.contract ?? "—"}</td><td>{r.info.start ?? "—"}</td><td>{r.info.end ?? "—"}</td>
                   </tr>
                 ))}
@@ -141,102 +136,127 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
               </tbody>
             </table>
           </div>
+          <Pager page={page} pageSize={PAGE_SIZE} total={shown.length} href={(pg) => `${zoomQ({ zp: String(pg) })}#zoom`} testid="zoom-pager" />
           <p className="tile-foot" data-testid="zoom-totals">
             Total non filtré : <strong data-col="total-all">{sg(total)}</strong> · total affiché (après filtre) : <strong data-col="total-shown">{sg(shownTotal)}</strong> ·{" "}
             {aggregated.kind === "value" ? (aggregated.num === total ? <span data-testid="zoom-ok">rapproché de l'écart de la rubrique ({sg(aggregated.num)})</span> : <span className="nd" data-testid="zoom-gap">écart de rubrique {sg(aggregated.num)} ≠ somme des salariés {sg(total)}</span>) : <span className="nd">écart de rubrique n.d.</span>}
-            {" · "}{shown.length} ligne{shown.length > 1 ? "s" : ""}, page {page}/{pages}
-          </p>
-          <p className="actions">
-            {page > 1 && <a className="btn" href={`${zoomQ({ zp: String(page - 1) })}#zoom`}>Page précédente</a>}
-            {page < pages && <a className="btn" href={`${zoomQ({ zp: String(page + 1) })}#zoom`}>Page suivante</a>}
-            <a className="btn" href={`${base}/export?${new URLSearchParams({ ...Object.fromEntries(keep), zoom: `${zoomRubric}:${pair + 1}` }).toString()}`}>Télécharger le détail (CSV)</a>
+            {" · "}{shown.length} ligne{shown.length > 1 ? "s" : ""}
           </p>
         </section>
       );
     }
   }
-  const zoomHref = (key: RowKey, i: number) => (ZOOM_KEYS.includes(key as ZoomRubric) && canZoom ? `${q({ vue, rub, zoom: `${key}:${i + 1}` })}#zoom` : null);
+  const zoomHref = (key: RowKey, i: number) => (ZOOM_KEYS.includes(key as ZoomRubric) && canZoom ? `${q({ ...view, zoom: `${key}:${i + 1}` })}#zoom` : null);
   const reasons = [...new Set(rows.flatMap((r) => [...r.aggs, ...r.gaps].flatMap((x) => (x.kind === "nd" ? [`${r.label} : ${x.reason}`] : []))))];
+  const showGraph = versions.length > 0 && aff !== "tableau";
+  const showTable = versions.length > 0 && aff !== "graphique";
+  const affHref = (key: Affichage) => q({ vue, rub, ...(key !== "tout" ? { affichage: key } : {}) });
+  const chart = showGraph ? ecartChartData(versions, loaded.shorts, monthsOf) : null;
 
   return (
     <>
-      <div style={{ display: "grid", gap: 8 }}>
-        <span className="label">Studio RH</span>
-        <h1>{ITEM.label}</h1>
-        <p className="desc">{ITEM.summary}</p>
-      </div>
+      <MsHeader title={ITEM.label} summary={ITEM.summary} />
       <MsTabs slug={slug} current="ecart" />
       <section className="panel" data-testid="ecart">
-        <h2>Écart budgétaire <span className="desc">— comparaison de versions de même période · <a href="#def-versions">règles</a></span></h2>
+        <div className="panel-head">
+          <h2>Écart budgétaire <span className="desc">— comparaison de versions de même période · <a href="#def-versions">règles</a></span></h2>
+          {versions.length > 0 && (
+            <LiveViewSwitch
+              initialRub={rub}
+              testid="ecart-affichage"
+              label="Affichage des résultats"
+              current={aff}
+              options={[{ key: "tout", label: "Afficher tout", href: affHref("tout") }, { key: "graphique", label: "Graphique", href: affHref("graphique") }, { key: "tableau", label: "Tableau", href: affHref("tableau") }]}
+            />
+          )}
+        </div>
         {loaded.ctx.unavailable && <p className="notice">Journal de paie PayFit indisponible : {loaded.ctx.unavailable}. Les versions réelles sont n.d.</p>}
         {loaded.notices.map((n) => <p key={n} className="notice">{n}</p>)}
-        <PickerForm path={base} loaded={loaded} columns={3} hidden={{ vue, rub }} />
+        <PickerForm path={base} loaded={loaded} columns={3} hidden={view} />
         {versions.length === 0 ? (
           <p className="desc" data-testid="ecart-empty">Aucune version à comparer : lisez le journal de paie PayFit dans Données ou créez un scénario dans Hypothèses budgétaires.</p>
         ) : (
-          <>
-            <nav className="tabs" aria-label="Niveau de détail" data-testid="ecart-vues">
-              <a href={q({ vue: "synthese", rub })} aria-current={vue === "synthese" ? "page" : undefined}>Synthèse</a>
-              <a href={q({ vue: "detail", rub })} aria-current={vue === "detail" ? "page" : undefined}>Détail</a>
-            </nav>
-            <div className="table-wrap">
-              <table className="data-table" data-testid="ecart-table">
-                <thead>
-                  <tr>
-                    <th>Rubrique</th>
-                    <th className="num">{header(0)}</th>
-                    {versions.slice(1).flatMap((_, i) => [
-                      <th key={`v${i}`} className="num">{header(i + 1)}</th>,
-                      <th key={`g${i}`} className="num">Écart {i + 2}−{i + 1}</th>,
-                      <th key={`p${i}`} className="num">Écart {i + 2}−{i + 1} %</th>,
-                    ])}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.key} data-row={r.key} style={r.indent === 0 && (r.key === "masse") ? { fontWeight: 600 } : undefined}>
-                      <td style={{ paddingLeft: 12 + r.indent * 16 }}>{r.label}</td>
-                      <td className="num" data-col="v1"><Val agg={r.aggs[0]} unit={r.unit} /></td>
-                      {r.aggs.slice(1).flatMap((agg, i) => {
-                        const href = zoomHref(r.key, i);
-                        return [
-                          <td key={`v${i}`} className="num" data-col={`v${i + 2}`}><Val agg={agg} unit={r.unit} /></td>,
-                          <td key={`g${i}`} className="num" data-col={`g${i + 1}`}>{href && r.gaps[i].kind === "value" ? <a href={href} title="Détail par salarié"><Gap d={r.gaps[i]} unit={r.unit} /></a> : <Gap d={r.gaps[i]} unit={r.unit} />}</td>,
-                          <td key={`p${i}`} className="num" data-col={`p${i + 1}`}><GapPct d={r.gaps[i]} /></td>,
-                        ];
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="tile-foot">
-              Période : rangs de mois {loaded.from}–{loaded.to} appliqués à l'année de chaque version · {loaded.filter ? `service ${loaded.filter.value ?? "non ventilé"}` : "tous les services"}. Écart = version suivante − version précédente. Une valeur n.d. affiche sa raison au survol et ci-dessous.
-              {" "}<a href={`${base}/export?${keep.toString()}&vue=${vue}`}>Télécharger le tableau (CSV)</a>
-            </p>
-            {reasons.length > 0 && (
-              <details data-testid="ecart-nd">
-                <summary>Données absentes ({reasons.length})</summary>
-                <ul className="list">{reasons.map((x) => <li key={x} className="desc">{x}</li>)}</ul>
-              </details>
-            )}
-          </>
+          <p className="tile-foot">
+            {versions.length} version{versions.length > 1 ? "s" : ""} comparée{versions.length > 1 ? "s" : ""}, {period} (rangs de mois appliqués à l'année de chaque version), {scope}. Écart = version suivante − version précédente.
+          </p>
         )}
       </section>
-      {versions.length > 0 && (
-        <section className="panel" data-testid="ecart-graph">
-          <h2>{ROW_LABELS[rub]} par mois <span className="desc">— une barre par version</span></h2>
-          <form method="get" action={base} className="filters">
-            {[...keep].map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
-            <input type="hidden" name="vue" value={vue} />
-            <div className="field-row">
-              <label htmlFor="rub">Rubrique</label>
-              <select className="select" id="rub" name="rub" defaultValue={rub}>{CHART_KEYS.map((k) => <option key={k} value={k}>{ROW_LABELS[k]}</option>)}</select>
+
+      {chart && (
+        <section className="panel" data-testid="ecart-graph" id="graphique">
+          <div className="panel-head">
+            <h2>Évolution mensuelle par version <span className="desc">— une courbe par version · définitions : <a href="#def-rubriques">rubriques</a>, <a href="#def-effectifs">effectifs et ETP</a></span></h2>
+          </div>
+          <EcartChart testid="ecart-chart" initial={rub} groups={rubricGroups()} categories={chart.categories} categoryTitles={chart.categoryTitles} data={chart.byRubric} period={period} scope={scope} />
+          {!showTable && <p className="tile-foot">Le graphique est une lecture : les valeurs exactes de chaque rubrique sont dans <a href={affHref("tableau")}>l'affichage Tableau</a>.</p>}
+        </section>
+      )}
+
+      {showTable && (
+        <section className="panel" data-testid="ecart-tableau" id="tableau">
+          <div className="panel-head">
+            <h2>Écart par rubrique <span className="desc">— valeurs exactes</span></h2>
+            <div className="panel-tools">
+              <LiveViewSwitch
+                initialRub={rub}
+                testid="ecart-vues"
+                label="Niveau de détail"
+                current={vue}
+                options={[{ key: "synthese", label: "Synthèse", href: q({ ...view, vue: "synthese" }) }, { key: "detail", label: "Détail", href: q({ ...view, vue: "detail" }) }]}
+              />
+              <a className="btn primary" href={`${base}/export?${exportQuery.toString()}`} data-testid="ecart-export">Exporter en CSV</a>
             </div>
-            <button className="btn" type="submit">Afficher</button>
-          </form>
-          <Chart versions={versions} labels={loaded.shorts} monthsOf={monthsOf} rub={rub} />
-          <p className="tile-foot">{versions.map((v, i) => `${["Plein noir", "Plein bleu", "Hachuré bleu"][i]} : ${loaded.shorts[i]}`).join(" · ")} · barre grise : mois n.d.</p>
+          </div>
+          <div className="table-wrap scroll">
+            <table className="data-table sticky sticky-first ecart-table" data-testid="ecart-table">
+              <caption className="ecart-sr">Écart par rubrique entre les versions comparées, {period}, {scope}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Rubrique</th>
+                  <th scope="col" className="num ver-col" title={versions[0].label}><VerBadge n={1} /><span className="ver-name">{header(0)}</span><span className="ver-kind">{KIND_LABEL[versions[0].kind]}</span></th>
+                  {versions.slice(1).flatMap((v, i) => [
+                    <th key={`v${i}`} scope="col" className="num ver-col" title={v.label}><VerBadge n={i + 2} /><span className="ver-name">{header(i + 1)}</span><span className="ver-kind">{KIND_LABEL[v.kind]}</span></th>,
+                    <th key={`g${i}`} scope="col" className="num"><VerPair to={i + 2} from={i + 1} />Écart</th>,
+                    <th key={`p${i}`} scope="col" className="num"><VerPair to={i + 2} from={i + 1} />Écart (%)</th>,
+                  ])}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.key} data-row={r.key} className={ROW_CLASS[r.key]}>
+                    <th scope="row">{r.label}</th>
+                    <td className="num" data-col="v1"><Val agg={r.aggs[0]} unit={r.unit} /></td>
+                    {r.aggs.slice(1).flatMap((agg, i) => {
+                      const href = zoomHref(r.key, i);
+                      const g = r.gaps[i];
+                      const text = gapText(g, r.unit);
+                      return [
+                        <td key={`v${i}`} className="num" data-col={`v${i + 2}`}><Val agg={agg} unit={r.unit} /></td>,
+                        <td key={`g${i}`} className="num gap" data-col={`g${i + 1}`} data-sign={gapSign(g)}>{href && text !== null ? <LiveLink initialRub={rub} href={href} title="Détail par salarié de cet écart" label={`${text}, détail par salarié`}><Gap d={g} unit={r.unit} /></LiveLink> : <Gap d={g} unit={r.unit} />}</td>,
+                        <td key={`p${i}`} className="num gap" data-col={`p${i + 1}`} data-sign={pctSign(g)}><GapPct d={g} /></td>,
+                      ];
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="tile-foot">
+            Écart = version suivante − version précédente ; Écart (%) = écart ÷ valeur de la version précédente (n.d. si elle est nulle ; <a href="#def-ecart">définition</a>). La flèche indique seulement le sens de l'écart. Une valeur n.d. affiche sa raison au survol et dans « Données absentes ».
+            {canZoom ? " Un écart souligné ouvre le détail par salarié." : ""}
+          </p>
+          {versions.length > 1 && (
+            <p className="tile-foot" data-testid="ecart-vers-analyse">
+              Pour comprendre d'où vient un écart (entrées, sorties, rubriques, volume et coût moyen), ouvrir l'analyse :{" "}
+              {versions.slice(1).map((_, i) => <span key={i}>{i > 0 && " · "}<a href={analyseHref(i)}>version {i + 1} → version {i + 2}</a></span>)}.
+            </p>
+          )}
+          {reasons.length > 0 && (
+            <details data-testid="ecart-nd">
+              <summary>Données absentes ({reasons.length})</summary>
+              <ul className="list">{reasons.map((x) => <li key={x} className="desc">{x}</li>)}</ul>
+            </details>
+          )}
         </section>
       )}
       {zoomBlock}
