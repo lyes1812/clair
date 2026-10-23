@@ -1,6 +1,6 @@
 import "@/styles/ecart.css";
 import { notFound } from "next/navigation";
-import { Prevu } from "@/components/Prevu";
+import { Prevu, type PrevuLink } from "@/components/Prevu";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { requireWorkspace } from "@/lib/workspace";
 import { MS_PREVU, MsHeader, MsTabs, type MsTab } from "../EcartParts";
@@ -8,36 +8,9 @@ import { MS_PREVU, MsHeader, MsTabs, type MsTab } from "../EcartParts";
 export const dynamic = "force-dynamic";
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/masse-salariale")!;
 
-type Link = { href: string; title: string; text: string };
-type Content = { lead: React.ReactNode; existing: Link[]; open: string[] };
+type Content = { lead: React.ReactNode; existing: PrevuLink[]; open: string[] };
 
-// Contenu d'une entrée « Prévu » : l'état, ce qui existe déjà dans l'application (avec un lien), ce qui reste à préciser.
-function PrevuBody({ lead, existing, open }: Content) {
-  return (
-    <div className="prevu-body">
-      <p className="prevu-lead">{lead}</p>
-      {existing.length > 0 && (
-        <section className="prevu-block" aria-labelledby="prevu-existing">
-          <h3 id="prevu-existing">Ce qui existe déjà</h3>
-          <ul className="prevu-links">
-            {existing.map((l) => (
-              <li key={l.href}><a href={l.href}><strong>{l.title}</strong><span>{l.text}</span></a></li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {open.length > 0 && (
-        <section className="prevu-block" aria-labelledby="prevu-open">
-          <h3 id="prevu-open">Reste à préciser</h3>
-          <ul className="prevu-open">{open.map((t) => <li key={t}>{t}</li>)}</ul>
-        </section>
-      )}
-    </div>
-  );
-}
-
-// Entrées du cahier de la famille Masse salariale dont le comportement n'est pas établi : on le dit, avec ce qui existe déjà
-// et ce qui reste à préciser, sans simuler.
+// Entrées de la famille Masse salariale pas encore construites : on le dit, avec ce qui existe déjà et ce qui reste à préciser.
 export default async function MsPrevuPage({ params }: { params: Promise<{ slug: string; vue: string }> }) {
   const { slug, vue } = await params;
   const tab = MS_PREVU.find((t) => t.key === vue);
@@ -84,7 +57,7 @@ export default async function MsPrevuPage({ params }: { params: Promise<{ slug: 
     <>
       <MsHeader title={ITEM.label} summary={ITEM.summary} />
       <MsTabs slug={slug} current={tab.key as MsTab} />
-      <Prevu title={tab.label}><PrevuBody {...content[tab.key]} /></Prevu>
+      <Prevu title={tab.label} {...content[tab.key]} />
     </>
   );
 }
