@@ -16,7 +16,7 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
     id: "augmentation",
     title: "Augmentation",
     text:
-      "Taux appliqué au 1er du mois d'effet, en pourcentage du salaire déjà augmenté : les taux successifs se composent. Si plusieurs augmentations prennent effet le même mois pour un même contrat, la plus ciblée s'applique seule (contrat, puis service, puis toute l'entreprise) ; deux augmentations de même niveau le même mois sont refusées. Les embauches ne reçoivent que les augmentations qui les visent directement. L'effet d'une augmentation est calculé sur le mois complet ; un départ ou une fin de contrat dans le mois porte la réduction correspondante.",
+      "Taux appliqué au 1er du mois d'effet, en pourcentage du salaire déjà augmenté : les taux successifs se composent. Si plusieurs augmentations prennent effet le même mois pour un même contrat, la plus ciblée s'applique seule (contrat, puis service, puis toute l'entreprise) ; deux augmentations de même niveau le même mois sont refusées. Les embauches et les contrats entrés après le mois de référence (base saisie à leur entrée) ne reçoivent que les augmentations qui les visent directement. L'effet d'une augmentation est calculé sur le mois complet ; un départ ou une fin de contrat dans le mois porte la réduction correspondante.",
   },
   {
     id: "prorata",

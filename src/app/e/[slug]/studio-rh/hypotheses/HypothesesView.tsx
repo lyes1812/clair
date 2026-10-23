@@ -12,8 +12,8 @@ const amountText = (a: Amount) => (a.mode === "brut" ? `${formatEuros(a.brutCent
 const KIND = { augmentation: "Augmentation", embauche: "Embauche", depart: "Départ", ponctuel: "Élément ponctuel", base: "Correction de base" } as const;
 
 function scopeText(s: Scope, base: BaseSnapshot, hyps: Hypothesis[]) {
-  if (s.kind === "global") return "toute l'entreprise (hors embauches)";
-  if (s.kind === "service") return `service ${s.service} (hors embauches)`;
+  if (s.kind === "global") return "toute l'entreprise (hors embauches et entrées après la base)";
+  if (s.kind === "service") return `service ${s.service} (hors embauches et entrées après la base)`;
   const c = base.contracts.find((x) => x.contractKey === s.key);
   const h = hyps.find((x) => hireKey(x.id) === s.key);
   return `contrat : ${c?.label ?? h?.label ?? s.key}`;
@@ -175,7 +175,7 @@ export function HypothesesView({ slug, scenario, base, hypotheses, proj, canEdit
                 <Field id="aug-scope" label="Périmètre">
                   <select className="select" id="aug-scope" name="scope" defaultValue="">
                     <option value="" disabled>Choisir…</option>
-                    <option value="global">Toute l'entreprise (hors embauches)</option>
+                    <option value="global">Toute l'entreprise (hors embauches et entrées après la base)</option>
                     {services.map((s) => <option key={s} value={`service:${s}`}>Service {s}</option>)}
                     {base.contracts.map((c) => <option key={c.contractKey} value={`contrat:${c.contractKey}`}>Contrat : {c.label}</option>)}
                     {hires.map((h) => <option key={h.id} value={`contrat:${hireKey(h.id)}`}>Embauche : {h.label}</option>)}

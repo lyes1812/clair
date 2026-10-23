@@ -74,6 +74,14 @@ describe("scénarios : gel, duplication, base figée", () => {
     await freezeScenario(W, U, id);
     expect(await withWorkspace(W, (tx) => tx.delete(budgetHypothesis).where(sql`scenario_id = ${id}`).returning({ id: budgetHypothesis.id }))).toHaveLength(0);
     expect(await withWorkspace(W, (tx) => tx.delete(budgetScenario).where(sql`id = ${id}`).returning({ id: budgetScenario.id }))).toHaveLength(0);
+    // Réattribution de l'auteur d'un scénario figé, de sa base ou de ses hypothèses : refusée par la base.
+    const U2 = `${U}-2`;
+    await db.insert(user).values({ id: U2, name: "Autre", email: `${U2}@test.invalid` });
+    const baseId = (await getScenario(W, id))!.scenario.baseId;
+    await expect(withWorkspace(W, (tx) => tx.update(budgetScenario).set({ frozenBy: U2 }).where(sql`id = ${id}`))).rejects.toThrow();
+    await expect(withWorkspace(W, (tx) => tx.update(budgetHypothesis).set({ createdBy: U2 }).where(sql`scenario_id = ${id}`))).rejects.toThrow();
+    await expect(withWorkspace(W, (tx) => tx.update(budgetBase).set({ createdBy: U2 }).where(sql`id = ${baseId}`))).rejects.toThrow();
+    await db.delete(user).where(sql`id = ${U2}`);
     await db.delete(user).where(sql`id = ${U}`);
     const after = (await getScenario(W, id))!;
     expect(after.scenario).toMatchObject({ status: "fige", createdBy: null, frozenBy: null });
