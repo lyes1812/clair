@@ -10,12 +10,15 @@ import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { monthRanges, payfitExactFrom, type Count, type HeadcountResult } from "@/lib/rh/headcount";
 import { fmtEtp4, fmtFixed, fmtFraction, fmtHalfDays, fmtPercent, showKpi } from "@/lib/rh/kpi/format";
 import type {
+  AbsenceMotifs,
   Absenteeism,
   AbsenteeismMonth,
   Average,
   Compared,
   EtpBasis,
+  EtpMissing,
   EtpMonthEnd,
+  EtpProrated,
   EtpSource,
   EventContribution,
   Kind,
@@ -30,7 +33,7 @@ import type { KpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
-import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, movementSeries, ndSummary, readingQualifiers, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
+import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, motifRows, movementSeries, ndSummary, readingQualifiers, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
 // Composants de l'écran KPI RH : en-tête, tuiles (valeur, N-1, écart, « ? » vers le glossaire), tableau mensuel, détail d'un chiffre.
@@ -46,6 +49,11 @@ export function show<T extends { kind: Kind | "nd"; nd?: KpiNd | null }>(v: T, t
 }
 export const etpShown = (e: EtpMonthEnd): Shown => show(e, (x) => fmtEtp4(x.etp4));
 export const etpTitle = (e: EtpMonthEnd): string | undefined => (e.kind === "nd" ? undefined : `${fmtFraction({ num: e.etp4, den: 10000 })} ETP (${fmtInt(e.etp4)} dix-millièmes)`);
+// ETP proratisé : valeur à deux décimales, fraction exacte au survol (jamais un ETP payé : la tuile et le détail le disent).
+export const etpProratedShown = (e: EtpProrated): Shown => {
+  const shown = show(e, (x) => fmtFixed(x.ratio));
+  return e.kind === "nd" ? shown : { ...shown, foot: `fraction exacte : ${fmtFraction(e.ratio)}` };
+};
 export const averageShown = (a: Average): Shown => show(a, (x) => fmtFixed(x.ratio));
 export const ratioTitle = (v: { kind: Kind | "nd"; ratio?: { num: number; den: number } }): string | undefined => (v.kind === "nd" || !v.ratio ? undefined : `fraction exacte : ${fmtFraction(v.ratio)}`);
 export const turnoverShown = (t: Turnover): Shown => show(t, (x) => fmtPercent(x.ratio));
@@ -171,18 +179,18 @@ export function AbsenceTypes({ codes }: { codes: string[] }) {
   return <>{codes.map((c, i) => <span key={c}>{i > 0 ? ", " : ""}<AbsenceType code={c} /></span>)}</>;
 }
 
-// Tuile Absentéisme : types d'absence comptés, présents non comptés, comptés mais sans aucune absence dans la lecture.
+// Tuile Absentéisme : motifs retenus, motifs présents non retenus, retenus mais sans aucune absence dans la lecture.
 // Le nombre entre parenthèses (absences de toute la lecture) est expliqué au glossaire.
 export function AbsenceTypeNotes({ chosen, other, missing, slug }: { chosen: { type: string; count: number }[]; other: { type: string; count: number }[]; missing: { type: string }[]; slug: string }) {
   const list = (xs: { type: string; count: number }[]) =>
     xs.length ? xs.map((x, i) => <span key={x.type}>{i > 0 ? ", " : ""}<AbsenceType code={x.type} /> ({x.count})</span>) : "aucun";
   return (
     <details className="tile-more">
-      <summary>Types d'absence</summary>
+      <summary>Motifs de la lecture</summary>
       <span className="tile-foot tile-types" data-testid="kpi-absence-types">
-        <span><strong>Types comptés</strong> : {list(chosen)}</span>
-        <span><strong>Autres types présents dans la lecture, non comptés</strong> : {list(other)}</span>
-        {missing.length > 0 && <span><strong>Types comptés absents de la lecture</strong> : <AbsenceTypes codes={missing.map((x) => x.type)} /></span>}
+        <span><strong>Retenus</strong> : {list(chosen)}</span>
+        <span><strong>Présents dans la lecture, non retenus</strong> : {list(other)}</span>
+        {missing.length > 0 && <span><strong>Retenus absents de la lecture</strong> : <AbsenceTypes codes={missing.map((x) => x.type)} /></span>}
         <span>
           <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
           <GlossaryLink slug={slug} term={KPI_TERMS.absenceTypes} />
@@ -269,8 +277,8 @@ export function KpiCharts({ slug, vue, rows, turnover, absenteeism }: { slug: st
   // Aucune note sous les graphiques : les règles de lecture sont au glossaire (« ? » du panneau).
   const slots: Record<string, ReactNode> = {
     etp: (
-      <Slot key="etp" id="etp" title="ETP contractuel de fin de mois" list={etp}>
-        <LineChart testid="kpi-chart-etp" label="ETP contractuel de fin de mois, par mois, période affichée et N-1" title="ETP contractuel de fin de mois" categories={axisN1.categories} categoryTitles={axisN1.titles} series={etp} unit="etp" height={H} />
+      <Slot key="etp" id="etp" title="ETP contractuel : fin de mois et proratisé" list={etp}>
+        <LineChart testid="kpi-chart-etp" label="ETP contractuel de fin de mois et ETP proratisé, par mois, période affichée et N-1" title="ETP contractuel : fin de mois et proratisé" categories={axisN1.categories} categoryTitles={axisN1.titles} series={etp} unit="etp" height={H} />
       </Slot>
     ),
     effectif: (
@@ -406,6 +414,32 @@ function Total({ children, nd = false }: { children: ReactNode; nd?: boolean }) 
   return <p className={nd ? "nd" : "desc"} data-testid="kpi-detail-total"><strong>{children}</strong></p>;
 }
 
+// Contrats présents sans quotité lisible (ou sans date de début pour l'ETP proratisé) : listés avec leur raison, jamais comptés.
+function MissingEtp({ missing, maps, slug, refDate, title }: { missing: EtpMissing[]; maps: Maps; slug: string; refDate: string | null; title: string }) {
+  if (!missing.length) return null;
+  return (
+    <>
+      <h3>{title}</h3>
+      <div className="table-wrap">
+        <table className="data-table" data-testid="kpi-detail-missing">
+          <thead><tr><th>Personne</th><th>Contrat</th><th>Nature</th><th className="wrap">Quotité source</th><th className="wrap">Raison</th></tr></thead>
+          <tbody>
+            {missing.map((m) => (
+              <tr key={m.contractKey}>
+                <td><Person personKey={m.personKey} contractKey={m.contractKey} maps={maps} slug={slug} /></td>
+                <td><ContractLink contractKey={m.contractKey} externalId={m.externalId} slug={slug} /></td>
+                <td><Nature code={m.nature} /></td>
+                <td className="wrap">{sourceText(m.source, refDate)}</td>
+                <td className="wrap nd">n.d. — {m.nd.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 export function EtpEndDetail({ v, maps, slug, decimals, refDate }: { v: EtpMonthEnd; maps: Maps; slug: string; decimals: number; refDate: string | null }) {
   return (
     <>
@@ -433,32 +467,60 @@ export function EtpEndDetail({ v, maps, slug, decimals, refDate }: { v: EtpMonth
           </table>
         </div>
       )}
-      {v.missing.length > 0 && (
-        <>
-          <h3>Contrats présents sans quotité lisible</h3>
-          <div className="table-wrap">
-            <table className="data-table" data-testid="kpi-detail-missing">
-              <thead><tr><th>Personne</th><th>Contrat</th><th>Nature</th><th className="wrap">Quotité source</th><th className="wrap">Raison</th></tr></thead>
-              <tbody>
-                {v.missing.map((m) => (
-                  <tr key={m.contractKey}>
-                    <td><Person personKey={m.personKey} contractKey={m.contractKey} maps={maps} slug={slug} /></td>
-                    <td><ContractLink contractKey={m.contractKey} externalId={m.externalId} slug={slug} /></td>
-                    <td><Nature code={m.nature} /></td>
-                    <td className="wrap">{sourceText(m.source, refDate)}</td>
-                    <td className="wrap nd">n.d. — {m.nd.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      <MissingEtp missing={v.missing} maps={maps} slug={slug} refDate={refDate} title="Contrats présents sans quotité lisible" />
       {v.kind === "nd" ? (
         <Total nd>n.d. — {v.nd.reason}</Total>
       ) : (
         <Total>
           Σ {v.kind === "lower_bound" ? "≥" : "="} {fmtEtp4(v.etp4)} ETP ({v.contributions.length} contrat{v.contributions.length > 1 ? "s" : ""}, {fmtInt(v.etp4)} dix-millièmes)
+          {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
+        </Total>
+      )}
+    </>
+  );
+}
+
+// Détail de l'ETP contractuel proratisé : un contrat par ligne (quotité, jours sous contrat du mois, part proratisée), puis le total en fraction exacte.
+export function EtpProratedDetail({ v, maps, slug, decimals, refDate }: { v: EtpProrated; maps: Maps; slug: string; decimals: number; refDate: string | null }) {
+  return (
+    <>
+      {v.kind !== "nd" && (
+        <div className="table-wrap">
+          <table className="data-table" data-testid="kpi-detail-contracts">
+            <thead>
+              <tr>
+                <th>Personne</th><th>Contrat</th><th>Établissement</th><th>Nature</th><th>Quotité source</th><th className="num">Quotité retenue (ETP)</th>
+                <th className="wrap">Du</th><th className="wrap">Au</th><th className="num wrap">Jours sous contrat</th><th className="num wrap">Part proratisée (ETP)</th><th className="wrap">Contrôles</th><th>Provenance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {v.contributions.map((c) => (
+                <tr key={c.contractKey} data-contract={c.externalId}>
+                  <td><Person personKey={c.personKey} contractKey={c.contractKey} maps={maps} slug={slug} /></td>
+                  <td><ContractLink contractKey={c.contractKey} externalId={c.externalId} slug={slug} /></td>
+                  <td><code>{c.establishmentId ?? "n.d."}</code></td>
+                  <td><Nature code={c.nature} /></td>
+                  <td>{sourceText(c.source, refDate)}</td>
+                  <td className="num">{fmtFixed({ num: c.etp4, den: 10000 }, decimals)}</td>
+                  <td className="wrap">{formatDate(c.from)}</td>
+                  <td className="wrap">{formatDate(c.to)}</td>
+                  <td className="num">{fmtInt(c.days)} j</td>
+                  <td className="num" title={`fraction exacte : ${fmtFraction({ num: c.weighted, den: 10000 * v.monthDays })}`}>{fmtFixed({ num: c.weighted, den: 10000 * v.monthDays }, 4)}</td>
+                  <td className="wrap">{c.checks.length ? c.checks.join(" · ") : <span className="muted">—</span>}</td>
+                  <td><Prov p={c.provenance} slug={slug} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <MissingEtp missing={v.missing} maps={maps} slug={slug} refDate={refDate} title="Contrats présents non comptés" />
+      {v.kind === "nd" ? (
+        <Total nd>n.d. — {v.nd.reason}</Total>
+      ) : (
+        <Total>
+          Σ (quotité × jours) = {fmtInt(v.contributions.reduce((n, c) => n + c.weighted, 0))} dix-millièmes d'ETP-jours ÷ (10 000 × {fmtInt(v.monthDays)} j, {v.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"}){" "}
+          {v.kind === "lower_bound" ? "≥" : "="} {fmtFraction(v.ratio)} = {fmtFixed(v.ratio)} ETP ({v.contributions.length} contrat{v.contributions.length > 1 ? "s" : ""})
           {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
         </Total>
       )}
@@ -752,7 +814,68 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
   );
 }
 
-export function AbsenteeismWindowDetail({ v, theoretical, detailHref }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string }) {
+// Absentéisme par motif (période) : TOUS les motifs présents dans la lecture, retenus ou non, puis, à part, le taux tous motifs.
+// Un motif n.d. garde sa raison (jamais 0) ; le taux tous motifs est nommé comme tel et n'est jamais présenté comme la tuile.
+export function AbsenceMotifsDetail({ motifs, slug }: { motifs: AbsenceMotifs; slug: string }) {
+  const rows = motifRows(motifs.lines);
+  const all = motifs.all;
+  return (
+    <>
+      <h3>
+        Par motif
+        <GlossaryLink slug={slug} term={KPI_TERMS.absenceByMotif} />
+      </h3>
+      {rows.length === 0 ? (
+        <p className="nd" data-testid="kpi-detail-motifs-empty">n.d. — {motifs.emptyReason ?? "aucun motif dans la lecture"}</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="data-table" data-testid="kpi-detail-motifs">
+            <thead>
+              <tr><th>Motif</th><th className="num wrap">Absences de la lecture</th><th className="num wrap">Absences de la période</th><th>Retenu</th><th className="num wrap">Demi-journées</th><th className="num">Taux</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.type} data-motif={r.type} data-retained={r.retained ? "oui" : "non"}>
+                  <td><AbsenceType code={r.type} withCode /></td>
+                  <td className="num">{fmtInt(r.count)}</td>
+                  <td className="num">{fmtInt(r.inWindow)}</td>
+                  <td>{r.retained ? "oui" : "non"}</td>
+                  {r.kind === "nd" ? (
+                    <td colSpan={2} className="nd wrap">n.d. — {r.reason}</td>
+                  ) : (
+                    <>
+                      <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.halfText}</td>
+                      <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.rateText}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="kpi-motif-all" data-testid="kpi-detail-motifs-all-block">
+        <h3>
+          {motifs.label}
+          <GlossaryLink slug={slug} term={KPI_TERMS.absenceAllMotifs} />
+        </h3>
+        {all.kind === "nd" ? (
+          <p className="nd" data-testid="kpi-detail-motifs-all">n.d. — {all.nd.reason}</p>
+        ) : (
+          <p className="desc" data-testid="kpi-detail-motifs-all">
+            <strong>
+              {all.kind === "lower_bound" ? "≥ " : ""}
+              {all.ratio.num} demi-journées = {fmtHalfDays(all.ratio.num)} ÷ {fmtHalfDays(all.ratio.den)} = {fmtPercent(all.ratio)}
+            </strong>
+            {all.qualifiers.length > 0 && <> — {all.qualifiers.join(" · ")}</>}
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
+export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, slug }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; slug?: string }) {
   // Une ligne par mois : jours théoriques (toujours calculés s'ils le peuvent) et absences (n.d. avec la raison de la période
   // quand l'absentéisme s'arrête avant le calcul mensuel : arrêts DSN non extraits, types non choisis, absences non lues).
   const abs = new Map(v.months.map((m) => [m.month, m]));
@@ -799,6 +922,7 @@ export function AbsenteeismWindowDetail({ v, theoretical, detailHref }: { v: Abs
           {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
         </Total>
       )}
+      {motifs && slug && <AbsenceMotifsDetail motifs={motifs} slug={slug} />}
     </>
   );
 }

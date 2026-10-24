@@ -119,6 +119,28 @@ describe("séries mensuelles du suivi des effectifs", () => {
     expect(prev.values).toEqual([null, 50000, 48000]);
     expect(prev.reasons?.[0]).toBe("mois antérieur à la lecture");
   });
+  it("ETP proratisé : troisième série en dix-millièmes d'ETP, arrondi demi vers le haut ; borne basse et n.d. non tracés ; sans lui, deux séries", () => {
+    // 91/60 = 1,51666… → 15167 ; 339/220 = 1,540909… → 15409 ; 1/32 = 0,03125 → 312,5 → 313 (le demi remonte).
+    const withProrated: RowIn[] = [
+      { ...rows[0], etpProrated: { kind: "exact", ratio: { num: 91, den: 60 } } },
+      { ...rows[1], etpProrated: { kind: "lower_bound", ratio: { num: 5, den: 3 } } },
+      { ...rows[2], etpProrated: { kind: "nd", ...nd("aucune quotité lisible") } },
+    ];
+    const list = etpSeries(withProrated);
+    expect(list.map((x) => x.key)).toEqual(["etp", "etp-n1", "etp-prorated"]);
+    expect(list[2].values).toEqual([15167, null, null]);
+    expect(list[2].reasons?.[1]).toContain("borne basse (≥ 1,67 ETP)"); // 5/3 = 1,6667
+    expect(list[2].reasons?.[2]).toBe("aucune quotité lisible");
+    expect(list[2].dashed).toBeUndefined();
+    expect(etpSeries([{ ...rows[0], etpProrated: { kind: "exact", ratio: { num: 339, den: 220 } } }])[2].values).toEqual([15409]);
+    expect(etpSeries([{ ...rows[0], etpProrated: { kind: "exact", ratio: { num: 1, den: 32 } } }])[2].values).toEqual([313]);
+    expect(etpSeries(rows)).toHaveLength(2);
+    // Une ligne sans valeur proratisée parmi d'autres : n.d. avec raison, jamais 0.
+    const partial = etpSeries([{ ...rows[0], etpProrated: { kind: "exact", ratio: { num: 91, den: 60 } } }, rows[1]]);
+    expect(partial[2].values).toEqual([15167, null]);
+    expect(partial[2].reasons?.[1]).toBe("ETP proratisé non calculé pour ce mois");
+    expect(() => structuredClone(list)).not.toThrow();
+  });
   it("mouvements : une sortie à 0 est un vrai zéro, une entrée en borne basse n'est pas tracée", () => {
     const [entries, exits] = movementSeries(rows);
     expect(entries.values).toEqual([1, null, null]);
@@ -359,7 +381,7 @@ describe("glossaire KPI RH (lot 10)", () => {
     has("turnover", "il n'existe pas de taux mensuel");
     has("turnover", "contrats continus");
     has("absenteeism", "jamais une moyenne de taux mensuels");
-    has("absenteeism", "fr_maladie_ordinaire");
+    has("absenteeism", "Motifs retenus : ceux que l'espace a choisis");
     has("absenteeism", "les arrêts de travail ne sont pas extraits");
     has("previous-period", "valeur − N-1");
     has("previous-period", "jamais coloré en rouge ou en vert");
@@ -370,6 +392,7 @@ describe("glossaire KPI RH (lot 10)", () => {
     has("kpi-mois-par-mois", "jamais une moyenne de colonne recalculée par l'écran");
     has("kpi-categories", "ETP contractuel de fin de mois");
     has("kpi-types-absence", "nombre d'absences dans toute la lecture");
+    has("kpi-types-absence", "le calcul ne reconnaît aucun motif par son nom");
     has("kpi-limites-lecture", "n'historise pas les quotités");
     has("effectifs-mesures", "Les stocks (ETP, inscrit) ne s'additionnent pas dans le temps");
     has("effectifs-ventilation", "code analytique");
@@ -480,10 +503,12 @@ describe("écrans KPI RH : tuile, titres, graphiques sans note (lot 10)", () => 
   });
   it("types d'absence : listes de la lecture conservées, phrase d'explication retirée", () => {
     const html = render(h(AbsenceTypeNotes, { chosen: [{ type: "fr_maladie_ordinaire", count: 3 }], other: [{ type: "test_maternity", count: 1 }], missing: [{ type: "fr_conges_x" }], slug: "demo" }));
-    expect(html).toContain("Types comptés</strong> : <span>");
+    expect(html).toContain("Retenus</strong> : <span>");
     expect(html).toContain("Maladie ordinaire");
     expect(html).toContain("test_maternity</code> (1)");
-    expect(html).toContain("Types comptés absents de la lecture</strong>");
+    expect(html).toContain("Retenus absents de la lecture</strong>");
+    expect(html).toContain("Présents dans la lecture, non retenus</strong>");
+    expect(html).not.toMatch(/Types comptés|Types d'absence/); // vocabulaire : « motifs »
     expect(html).not.toContain("Entre parenthèses");
     expect(html).toContain("glossaire#def-kpi-types-absence");
   });

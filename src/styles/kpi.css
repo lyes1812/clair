@@ -61,6 +61,10 @@
   .kpi-tile .tile-links { align-self: end; margin-top: 0; }
 }
 
+/* Détail de l'absentéisme : le taux tous motifs est un bloc à part, sous un filet, jamais une ligne du tableau par motif. */
+.kpi-motif-all { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.kpi-motif-all h3 { margin-top: 0; }
+
 /* Lecture graphique : deux colonnes, une seule sous 960 px ; un graphique « large » prend toute la ligne. */
 .kpi-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
 .kpi-chart { min-width: 0; }

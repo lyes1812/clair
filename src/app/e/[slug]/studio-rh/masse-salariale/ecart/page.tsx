@@ -1,4 +1,5 @@
 import "@/styles/ecart.css";
+import { ExportButtons } from "@/components/ExportButtons";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { formatEuros } from "@/lib/money";
@@ -117,7 +118,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
               <VersionChain labels={[a.label, b.label]} first={pair + 1} /> · {period} · {scope}
             </PanelTitle>
             <div className="panel-tools">
-              <a className="btn" href={`${base}/export?${exportZoom.toString()}`} data-testid="zoom-export">Exporter le détail (CSV)</a>
+              <ExportButtons href={`${base}/export`} params={exportZoom.toString()} label="Exporter le détail" xlsxTestId="zoom-export-xlsx" csvTestId="zoom-export" />
             </div>
           </div>
           <form method="get" action={base} className="filters" data-testid="zoom-filters">
@@ -216,7 +217,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
                 current={vue}
                 options={[{ key: "synthese", label: "Synthèse", href: q({ ...view, vue: "synthese" }) }, { key: "detail", label: "Détail", href: q({ ...view, vue: "detail" }) }]}
               />
-              <a className="btn" href={`${base}/export?${exportQuery.toString()}`} data-testid="ecart-export">Exporter en CSV</a>
+              <ExportButtons href={`${base}/export`} params={exportQuery.toString()} label="Exporter le tableau" xlsxTestId="ecart-export-xlsx" csvTestId="ecart-export" />
             </div>
           </div>
           <TrendLegend slug={slug} />

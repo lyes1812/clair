@@ -22,3 +22,5 @@ export function compareWindows<T extends Valued>(input: KpiInput, w: Window, fn:
 }
 
 export const etpValue = (e: { etp4: number }): Ratio => ratio(e.etp4, 10000);
+// ETP proratisé : la valeur est déjà une fraction exacte (quotité × jours ÷ jours du mois).
+export const etpProratedValue = (e: { ratio: Ratio }): Ratio => e.ratio;

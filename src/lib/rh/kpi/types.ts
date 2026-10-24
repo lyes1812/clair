@@ -36,6 +36,7 @@ export type KpiNdCode =
   | "quota-missing"
   | "quota-inconsistent"
   | "absence-types-unset"
+  | "no-absence-motif"
   | "absences-unavailable"
   | "absence-date-nd"
   | "absence-unknown-contract"
@@ -60,6 +61,12 @@ export type EtpContribution = ContractRef & { kind: "etp"; etp4: number; basis: 
 export type EtpMissing = ContractRef & { kind: "missing"; source: EtpSource | null; nd: KpiNd };
 export type EtpMonthEnd =
   | { month: string; kind: Kind; etp4: number; contributions: EtpContribution[]; missing: EtpMissing[]; headcount: Extract<HeadcountResult, { kind: Kind }>; qualifiers: string[] }
+  | { month: string; kind: "nd"; nd: KpiNd; missing: EtpMissing[] };
+
+// ETP contractuel proratisé : quotité × jours sous contrat du mois ÷ jours du mois (fraction exacte, aucun arrondi intermédiaire).
+export type EtpProratedContribution = EtpContribution & { from: string; to: string; days: number; weighted: number }; // weighted = etp4 × days
+export type EtpProrated =
+  | { month: string; kind: Kind; ratio: Ratio; dayBasis: DayBasis; monthDays: number; contributions: EtpProratedContribution[]; missing: EtpMissing[]; qualifiers: string[] }
   | { month: string; kind: "nd"; nd: KpiNd; missing: EtpMissing[] };
 
 // Moyennes
@@ -117,6 +124,14 @@ export type AbsenteeismMonth =
   | { month: string; kind: "nd"; nd: KpiNd };
 export type Absenteeism = { kind: Kind; ratio: Ratio; months: AbsenteeismMonth[]; qualifiers: string[] } | { kind: "nd"; nd: KpiNd; months: AbsenteeismMonth[] };
 
+// Absentéisme par motif : une ligne par type présent dans la lecture, sur une fenêtre ; le taux « tous motifs » est un autre
+// calcul (jamais la tuile principale) et compte une demi-journée couverte par plusieurs motifs une seule fois.
+export type AbsenceMotifLine = { type: string; count: number; inWindow: number; chosen: boolean } & (
+  | { kind: Kind; half: number; ratio: Ratio; qualifiers: string[] }
+  | { kind: "nd"; half: null; ratio: null; nd: KpiNd }
+);
+export type AbsenceMotifs = { window: Window; label: string; lines: AbsenceMotifLine[]; all: Absenteeism; emptyReason: string | null };
+
 // N-1
 export type DeltaUnit = "etp" | "persons" | "points";
 export type Delta = { kind: "exact"; unit: DeltaUnit; value: Ratio } | { kind: "nd"; nd: KpiNd };
@@ -131,6 +146,7 @@ export type KpiRow = {
   movements: MonthMovements;
   theoretical: TheoreticalMonth;
   absenteeism: AbsenteeismMonth;
+  etpProrated: EtpProrated;
   previous: { month: string; etp: EtpMonthEnd; absenteeism: AbsenteeismMonth };
 };
 export type AbsenceTypeChoice = { type: string; count: number; chosen: boolean; inRead: boolean };
@@ -140,15 +156,17 @@ export type KpiDashboard = {
   previousWindow: Window;
   params: KpiParams;
   scope: KpiScope;
-  tiles: { etpEnd: Compared<EtpMonthEnd>; etpAverage: Compared<Average>; headcountAverage: Compared<Average>; turnover: Compared<Turnover>; absenteeism: Compared<Absenteeism> };
+  tiles: { etpEnd: Compared<EtpMonthEnd>; etpProrated: Compared<EtpProrated>; etpAverage: Compared<Average>; headcountAverage: Compared<Average>; turnover: Compared<Turnover>; absenteeism: Compared<Absenteeism> };
   rows: KpiRow[];
   theoretical: TheoreticalWindow;
   movements: { entries: MovementTotal; exits: MovementTotal };
   absenceTypes: AbsenceTypeChoice[];
+  motifs?: AbsenceMotifs; // absentéisme par motif sur la fenêtre (détail ; jamais la tuile principale)
 };
-export type KpiDetailId = "etp-end" | "headcount" | "entries" | "exits" | "theoretical" | "absenteeism" | "etp-avg" | "headcount-avg" | "turnover";
+export type KpiDetailId = "etp-end" | "etp-prorated" | "headcount" | "entries" | "exits" | "theoretical" | "absenteeism" | "etp-avg" | "headcount-avg" | "turnover";
 export type KpiDetail =
   | { id: "etp-end"; month: string; value: EtpMonthEnd }
+  | { id: "etp-prorated"; month: string; value: EtpProrated }
   | { id: "headcount"; month: string; value: HeadcountResult }
   | { id: "entries" | "exits"; month: string; value: MonthMovements }
   | { id: "theoretical" | "absenteeism"; month: string; value: AbsenteeismMonth; theoretical: TheoreticalMonth }

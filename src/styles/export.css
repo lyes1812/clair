@@ -1,0 +1,9 @@
+/* Boutons d'export (Excel, CSV) : composant ExportButtons. Classes partagées réutilisées : .btn. Bleu / blanc / noir, aucune couleur propre. */
+
+.export-buttons { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.export-label { color: var(--muted); font-size: var(--clair-type-label); }
+.export-buttons .btn { white-space: nowrap; text-decoration: none; }
+@media (max-width: 720px) {
+  .export-buttons { width: 100%; }
+  .export-label { flex: 1 0 100%; }
+}

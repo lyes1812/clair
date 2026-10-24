@@ -1,5 +1,5 @@
 import type { ChartSeries } from "@/components/charts/shared";
-import { fmtEtp4, fmtFraction, fmtPercent } from "@/lib/rh/kpi/format";
+import { fmtEtp4, fmtFixed, fmtFraction, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 
 // Adaptateurs purs « résultat du moteur → séries de graphique » de l'écran KPI RH et des effectifs mensuels.
@@ -14,10 +14,13 @@ export type HeadcountIn = { kind: "exact" | "lower_bound"; persons: number } | (
 export type EtpIn = { kind: "exact" | "lower_bound"; etp4: number } | ({ kind: "nd" } & Nd);
 export type CountIn = { kind: "exact" | "lower_bound"; value: number } | ({ kind: "nd" } & Nd);
 export type RatioIn = { kind: "exact" | "lower_bound"; ratio: Ratio } | ({ kind: "nd" } & Nd);
+// ETP proratisé : fraction exacte (quotité × jours sous contrat ÷ jours du mois), pas un stock en dix-millièmes.
+export type EtpProratedIn = { kind: "exact" | "lower_bound"; ratio: Ratio } | ({ kind: "nd" } & Nd);
 export type RowIn = {
   month: string;
   headcount: HeadcountIn;
   etp: EtpIn;
+  etpProrated?: EtpProratedIn;
   movements: { entries: CountIn; exits: CountIn };
   absenteeism: RatioIn;
   previous: { month: string; etp: EtpIn; absenteeism: RatioIn };
@@ -61,6 +64,11 @@ const nf = new Intl.NumberFormat("fr-FR");
 // donc l'infobulle affiche le même « 6,91 % » que le tableau.
 export const ratioBps = (r: Ratio): number => Number(roundHalfUp({ num: r.num * 100, den: r.den }, 2));
 
+// ETP proratisé : le graphique le lit en dix-millièmes d'ETP (unité « etp »), arrondi au plus proche, demi vers le haut ; la fraction exacte
+// reste dans le tableau. Une borne basse n'est pas tracée ; un dénominateur nul n'est jamais tracé.
+const etpRatioPoint = (e: EtpProratedIn): Point =>
+  e.kind === "nd" ? absent(e.nd.reason) : e.ratio.den <= 0 ? absent("dénominateur nul : ETP proratisé non défini") : e.kind === "lower_bound" ? bound(`${fmtFixed(e.ratio)} ETP`) : known(Number(roundHalfUp(e.ratio, 4)));
+
 // Les trois issues d'un résultat du moteur : exact (tracé), borne basse (non tracée, valeur dans la raison), n.d. (non tracé).
 const headcountPoint = (h: HeadcountIn): Point => (h.kind === "nd" ? absent(h.nd.reason) : h.kind === "lower_bound" ? bound(nf.format(h.persons)) : known(h.persons));
 const etpPoint = (e: EtpIn): Point => (e.kind === "nd" ? absent(e.nd.reason) : e.kind === "lower_bound" ? bound(`${fmtEtp4(e.etp4)} ETP`) : known(e.etp4));
@@ -76,9 +84,11 @@ function series(key: string, name: string, points: Point[], extra: Partial<Pick<
 // --- Écran KPI RH (une valeur par mois de la fenêtre ; N-1 = même mois un an plus tôt)
 export const headcountSeries = (rows: RowIn[]): ChartSeries[] => [series("effectif", "Effectif fin de mois (personnes)", rows.map((r) => headcountPoint(r.headcount)))];
 
+// Troisième série (ETP proratisé) seulement si au moins une ligne le porte : sans lui, les deux séries historiques sont inchangées.
 export const etpSeries = (rows: RowIn[]): ChartSeries[] => [
   series("etp", "ETP fin de mois", rows.map((r) => etpPoint(r.etp))),
   series("etp-n1", "ETP N-1 (même mois un an plus tôt)", rows.map((r) => etpPoint(r.previous.etp)), { dashed: true }),
+  ...(rows.some((r) => r.etpProrated) ? [series("etp-prorated", "ETP proratisé (quotité actuelle)", rows.map((r) => (r.etpProrated ? etpRatioPoint(r.etpProrated) : absent("ETP proratisé non calculé pour ce mois"))))] : []),
 ];
 
 export const movementSeries = (rows: RowIn[]): ChartSeries[] => [
@@ -176,6 +186,34 @@ export const absenceTypeText = (code: string): string => {
   const label = absenceTypeLabel(code);
   return label ? `${label} (${code})` : code;
 };
+
+// Ligne courte sous la valeur de la tuile Absentéisme : les motifs que l'espace a retenus (Paramètres), avec leur libellé français quand
+// il est connu. Aucun motif retenu : « aucun » (le moteur refuse alors de calculer et l'écran dit pourquoi).
+export const motifsRetenusLine = (codes: string[]): string => `Motifs retenus : ${codes.length ? codes.map(absenceTypeText).join(", ") : "aucun"}`;
+
+// Remarque de la tuile « ETP contractuel proratisé » : le qualifieur obligatoire du moteur, ramené à une ligne courte (la date de lecture
+// est dite dans « Limites de la lecture » et au survol) ; les autres remarques du moteur (borne basse) sont conservées telles quelles.
+const PRORATED_SHORT: [RegExp, string][] = [
+  [/^ETP contractuel proratisé : quotité à la date de lecture/, "quotité à la date de lecture ; ni ETP payé ni historique exact"],
+  [/^ETP contractuel proratisé : quotité déclarée dans la DSN du mois/, "quotité déclarée dans la DSN du mois ; ni ETP payé ni historique exact"],
+];
+export const etpProratedNotes = (qualifiers: string[]): string[] => readingQualifiers(qualifiers.map((q) => PRORATED_SHORT.find(([re]) => re.test(q))?.[1] ?? q));
+
+// Tableau « par motif » du détail de l'absentéisme : une ligne par motif présent dans la lecture. Un n.d. reste n.d. (jamais 0), une borne
+// basse garde son « ≥ ». `count` : absences de toute la lecture ; `inWindow` : absences qui touchent la période affichée.
+export type MotifLineIn = { type: string; count: number; inWindow: number; chosen: boolean } & (
+  | { kind: "exact" | "lower_bound"; half: number; ratio: Ratio }
+  | { kind: "nd"; half: null; ratio: null; nd: { reason: string } }
+);
+export type MotifRow = { type: string; label: string | null; count: number; inWindow: number; retained: boolean; kind: "exact" | "lower_bound" | "nd"; halfText: string; rateText: string; reason: string | null };
+export function motifRows(lines: MotifLineIn[]): MotifRow[] {
+  return lines.map((l) => {
+    const base = { type: l.type, label: absenceTypeLabel(l.type), count: l.count, inWindow: l.inWindow, retained: l.chosen };
+    if (l.kind === "nd") return { ...base, kind: "nd", halfText: "n.d.", rateText: "n.d.", reason: l.nd.reason };
+    const lower = l.kind === "lower_bound" ? "≥ " : "";
+    return { ...base, kind: l.kind, halfText: `${lower}${l.half} (${fmtHalfDays(l.half)})`, rateText: `${lower}${fmtPercent(l.ratio)}`, reason: null };
+  });
+}
 
 // Vrai signe moins (U+2212) dans une formule affichée : « = -42500/1079 » → « = −42500/1079 ». Un tiret d'un nom (« N-1 »)
 // ou d'une date (« 2025-10 ») n'est pas touché : seul un tiret qui précède un chiffre en début de terme est remplacé.

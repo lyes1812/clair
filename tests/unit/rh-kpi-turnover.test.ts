@@ -335,3 +335,48 @@ describe("turnover — révisions DSN : aucune valeur « exacte » qui changerai
     expect(isRatio(turnover(kpiInput(sept, DSN_ABSENCES), w), 0, 48)).toBe(true);
   });
 });
+
+describe("turnover — décision du 24/10/2026 : aucune exclusion de sortie, contrats continus neutralisés, taux recalculé (lecture du 31/01/2026)", async () => {
+  // P-A : CDI C-A depuis 2024, jamais sorti. P-B : CDD C-B (02) du 01/06/2024 au 31/08/2025, sortie sans suite. P-C : CDD C-C1 (02) jusqu'au
+  // 30/06/2025, puis CDI C-C2 (01) dès le 01/07/2025 (contrat continu de la même personne). Fenêtre 2025-02 → 2026-01 (12 mois).
+  // Effectif fin de mois en personnes : A 12 mois, B 7 mois (02/2025 → 08/2025, le 31/08 inclus), C 12 mois ⇒ Σ = 31.
+  // Réglage par défaut (aucune exclusion, neutralisation) : E = 0 (l'entrée C-C2 est neutralisée), S = 1 (C-B ; la sortie C-C1 est neutralisée)
+  //   ⇒ (12 × (0 + 1)) ÷ (2 × 31) = 12/62 = 6/31.
+  // Ancien réglage « fins de CDD exclues » (02) : la sortie C-B est exclue ⇒ S = 0 ⇒ 0/62.
+  // Sans neutralisation, aucune exclusion : E = 1 (C-C2), S = 2 (C-B et C-C1) ⇒ (12 × 3) ÷ 62 = 36/62.
+  const edge = {
+    collaborators: [{ id: "P-A" }, { id: "P-B" }, { id: "P-C" }],
+    contracts: [
+      { contractId: "C-A", collaboratorId: "P-A", startDate: "2024-01-01", endDate: null, natureContratDsn: "01" },
+      { contractId: "C-B", collaboratorId: "P-B", startDate: "2024-06-01", endDate: "2025-08-31", natureContratDsn: "02" },
+      { contractId: "C-C1", collaboratorId: "P-C", startDate: "2024-06-01", endDate: "2025-06-30", natureContratDsn: "02" },
+      { contractId: "C-C2", collaboratorId: "P-C", startDate: "2025-07-01", endDate: null, natureContratDsn: "01" },
+    ],
+  };
+  const w = rollingWindow("2026-01");
+  const run = async (over = {}) => {
+    const data = await payfitBuild("cle-fictive-edge-1234", payfitEdgeFetch("cle-fictive-edge-1234", edge as never), monthRange("2024-10", "2026-01"), new Date("2026-01-31T08:00:00Z"));
+    const input = kpiInput(data, DSN_ABSENCES, over);
+    return { input, t: turnover(input, w) };
+  };
+  const why = (input: ReturnType<typeof kpiInput>, month: string) => monthMovements(input, month).events.map((e) => `${e.row.contract.externalId}:${e.why}`).sort();
+  it("aucune exclusion (excludedExitNatures = []) : la sortie du CDD est comptée, le contrat continu est neutralisé ⇒ 12/62", async () => {
+    const { input, t } = await run({ excludedExitNatures: [] });
+    expect(isRatio(t, 12, 62)).toBe(true);
+    expect(t).toMatchObject({ entries: 0, exits: 1 });
+    expect(why(input, "2025-08")).toEqual(["C-B:counted"]);
+    expect(why(input, "2025-06")).toEqual(["C-C1:neutralized"]);
+    expect(why(input, "2025-07")).toEqual(["C-C2:neutralized"]);
+  });
+  it("même sortie sous l'ancien réglage « fins de CDD exclues » : exclue, taux 0/62 ; la neutralisation reste prioritaire sur l'exclusion", async () => {
+    const { input, t } = await run({ excludedExitNatures: ["02"] });
+    expect(isRatio(t, 0, 62)).toBe(true);
+    expect(why(input, "2025-08")).toEqual(["C-B:excluded-nature"]);
+    expect(why(input, "2025-06")).toEqual(["C-C1:neutralized"]);
+  });
+  it("sans neutralisation ni exclusion : E = 1, S = 2 ⇒ 36/62 (la neutralisation retire une entrée et une sortie du taux)", async () => {
+    const { t } = await run({ excludedExitNatures: [], neutralizeContinuity: false });
+    expect(isRatio(t, 36, 62)).toBe(true);
+    expect(t).toMatchObject({ entries: 1, exits: 2 });
+  });
+});

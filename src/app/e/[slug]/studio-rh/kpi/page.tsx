@@ -8,7 +8,9 @@ import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
 import { coverageAt, gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
+import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import { KPI_DETAIL_IDS, kpiDashboard, kpiDetail } from "@/lib/rh/kpi/dashboard";
+import { ETP_PRORATED_LABEL, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
 import { fmtDelta, fmtEtp4, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { civilWindow, closedMonths, defaultYear, lastClosedMonth, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
 import type { Compared, KpiDetailId, KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
@@ -17,7 +19,7 @@ import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import type { Shown } from "@/lib/rh/view";
-import { absenceTypeText, deltaExact } from "@/lib/viz/kpi";
+import { absenceTypeText, deltaExact, etpProratedNotes, motifsRetenusLine } from "@/lib/viz/kpi";
 import {
   AbsenceMonthDetail,
   AbsenceTypeNotes,
@@ -29,6 +31,8 @@ import {
   averageShown,
   Cell,
   EtpEndDetail,
+  EtpProratedDetail,
+  etpProratedShown,
   etpShown,
   etpTitle,
   HeadcountDetail,
@@ -65,6 +69,7 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) 
 
 const DETAIL_TITLES: Record<KpiDetailId, string> = {
   "etp-end": "ETP contractuel fin de mois",
+  "etp-prorated": ETP_PRORATED_LABEL,
   headcount: "Effectif fin de mois (personnes)",
   entries: "Entrées du mois",
   exits: "Sorties du mois",
@@ -87,9 +92,9 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
     ["turnoverFormula", "Formule du turnover", v.turnoverFormula === "half_sum" ? "moyenne des entrées et des sorties ÷ effectif moyen" : "sorties ÷ effectif du premier jour"],
     ["neutralizeContinuity", "Contrats continus neutralisés", yes(v.neutralizeContinuity)],
     ["excludedExitNatures", "Sorties non comptées (natures)", v.excludedExitNatures.length ? natureList(v.excludedExitNatures) : "aucune"],
-    ["absenceTypes", "Types d'absence comptés", v.absenceTypes.length ? v.absenceTypes.map(absenceTypeText).join(", ") : "aucun (absentéisme n.d.)"],
+    ["absenceTypes", "Motifs retenus pour l'absentéisme", v.absenceTypes.length ? v.absenceTypes.map(absenceTypeText).join(", ") : "aucun (absentéisme n.d.)"],
     ["absenceStatuses", "Statuts d'absence retenus", v.absenceStatuses.map((s) => ABSENCE_STATUS_LABELS[s] ?? s).join(", ")],
-    ["dayBasis", "Base des jours", v.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"],
+    ["dayBasis", "Base des jours (absentéisme et ETP proratisé)", v.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"],
   ];
   return [
     { label: "Natures comptées dans l'effectif", value: natureList(natures.codes), origin: natures.origin === "default" ? "valeur par défaut validée" : "modifié par un administrateur", testId: "natures" },
@@ -301,6 +306,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       coverage: coverageShown(data, r.month, input.scope.establishments, rawLimit),
       headcount: showHeadcount(r.headcount, "persons"),
       etp: etpShown(r.etp),
+      etpProrated: etpProratedShown(r.etpProrated),
       entries: showCount(r.movements.entries),
       exits: showCount(r.movements.exits),
       theoretical: theoreticalShown(r.theoretical),
@@ -316,6 +322,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   );
   const toCur = t.turnover.current;
   const absCur = t.absenteeism.current;
+  const prCur = t.etpProrated.current;
 
   const [catNatures, catOverrides] = await Promise.all([getCategoryNatures(ctx.collab.workspace.id), getContractCategories(ctx.collab.workspace.id)]);
   const catMonths = w.months.map((m) => categoryMonth(ctx.input!, m, catNatures.natures, catOverrides));
@@ -412,6 +419,22 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             detailN1={detailHref("etp-end", dash.previousWindow.to)}
           />
           <KpiTile
+            id="etp-prorated"
+            slug={slug}
+            visible={tileOn("etp-prorated")}
+            label={ETP_PRORATED_LABEL}
+            shown={etpProratedShown(prCur)}
+            title={ratioTitle(prCur)}
+            n1={n1(etpProratedShown(t.etpProrated.previous))}
+            n1Title={t.etpProrated.previousWindow.label}
+            delta={fmtDelta(t.etpProrated.delta)}
+            deltaTitle={deltaTitle(t.etpProrated, (e) => (e.kind === "nd" ? null : e.ratio))}
+            qualifiers={[`Mois : ${monthLabel(w.to)}`, ...etpProratedNotes(prCur.kind === "nd" ? [etpProratedQualifier(input)] : prCur.qualifiers)]}
+            term={KPI_TERMS.etpProrated}
+            detail={detailHref("etp-prorated", w.to)}
+            detailN1={detailHref("etp-prorated", dash.previousWindow.to)}
+          />
+          <KpiTile
             id="etp-avg"
             slug={slug}
             visible={tileOn("etp-avg")}
@@ -469,11 +492,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             n1Title={t.absenteeism.previousWindow.label}
             delta={fmtDelta(t.absenteeism.delta)}
             deltaTitle={deltaTitle(t.absenteeism, (x) => (x.kind === "nd" ? null : x.ratio), true)}
-            qualifiers={absCur.kind === "nd" ? [] : absCur.qualifiers}
+            qualifiers={[motifsRetenusLine(dash.params.absenceTypes), ...(absCur.kind === "nd" ? [] : absCur.qualifiers)]}
             warning={
               input.absences.status === "read" && missingTypes.length > 0 ? (
                 <span className="tile-foot" data-testid="kpi-absence-missing">
-                  {missingTypes.length > 1 ? "Aucune absence des types " : "Aucune absence de type "}
+                  {missingTypes.length > 1 ? "Aucune absence des motifs " : "Aucune absence du motif "}
                   <AbsenceTypes codes={missingTypes.map((x) => x.type)} />
                   {" dans la lecture PayFit."}
                 </span>
@@ -501,6 +524,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                 {colOn("coverage") && <th>Couverture</th>}
                 {colOn("headcount") && <th className="num wrap">Effectif fin de mois</th>}
                 {colOn("etp") && <th className="num wrap">ETP fin de mois</th>}
+                {colOn("etp-prorated") && <th className="num wrap">ETP proratisé</th>}
                 {colOn("entries") && <th className="num">Entrées</th>}
                 {colOn("exits") && <th className="num">Sorties</th>}
                 {colOn("theoretical") && <th className="num wrap">Jours théoriques</th>}
@@ -517,6 +541,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                   {colOn("coverage") && <Cell col="coverage" shown={c.coverage} href={null} />}
                   {colOn("headcount") && <Cell col="headcount" shown={c.headcount} href={detailHref("headcount", r.month)} />}
                   {colOn("etp") && <Cell col="etp" shown={c.etp} href={detailHref("etp-end", r.month)} />}
+                  {colOn("etp-prorated") && <Cell col="etp-prorated" shown={c.etpProrated} href={detailHref("etp-prorated", r.month)} />}
                   {colOn("entries") && <Cell col="entries" shown={c.entries} href={detailHref("entries", r.month)} />}
                   {colOn("exits") && <Cell col="exits" shown={c.exits} href={detailHref("exits", r.month)} />}
                   {colOn("theoretical") && <Cell col="theoretical" shown={c.theoretical} href={detailHref("theoretical", r.month)} />}
@@ -533,6 +558,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                 {colOn("coverage") && <td />}
                 {colOn("headcount") && <Cell col="headcount" shown={averageShown(t.headcountAverage.current)} href={detailHref("headcount-avg", null)} />}
                 {colOn("etp") && <Cell col="etp" shown={averageShown(t.etpAverage.current)} href={detailHref("etp-avg", null)} />}
+                {colOn("etp-prorated") && <td data-col="etp-prorated" />}
                 {colOn("entries") && <Cell col="entries" shown={show(dash.movements.entries, (x) => String(x.value))} href={detailHref("turnover", null)} />}
                 {colOn("exits") && <Cell col="exits" shown={show(dash.movements.exits, (x) => String(x.value))} href={detailHref("turnover", null)} />}
                 {colOn("theoretical") && <Cell col="theoretical" shown={show(dash.theoretical, (x) => fmtHalfDays(x.half))} href={detailHref("absenteeism", null)} />}
@@ -593,10 +619,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           </PanelTitle>
           <p className="desc"><a href={query({})}>Fermer le détail</a></p>
           {detail.id === "etp-end" && <EtpEndDetail v={detail.value} maps={maps} slug={slug} decimals={s.etpDecimals} refDate={data.build.referenceDate} />}
+          {detail.id === "etp-prorated" && <EtpProratedDetail v={detail.value} maps={maps} slug={slug} decimals={s.etpDecimals} refDate={data.build.referenceDate} />}
           {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} natureAt={natureAt} />}
           {(detail.id === "entries" || detail.id === "exits") && <MovementsDetail v={detail.value} kind={detail.id === "entries" ? "entry" : "exit"} maps={maps} slug={slug} />}
           {(detail.id === "theoretical" || detail.id === "absenteeism") && <AbsenceMonthDetail id={detail.id} v={detail.value} theoretical={detail.theoretical} maps={maps} slug={slug} />}
-          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} />}
+          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} motifs={absenceByMotif(input, detail.window)} slug={slug} />}
           {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={inDetail} />}
           {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={inDetail} natureAt={natureAt} />}
         </section>

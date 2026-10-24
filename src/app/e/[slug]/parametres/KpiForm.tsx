@@ -142,24 +142,24 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
           <div className="pm-card-body">
             <CardNote id="absence" text={notes.absence} />
             <div className="pm-item" role="group" aria-labelledby="kpi-types-title">
-              <ItemHead id="kpi-types-title" title="Types d'absence comptés" help={helps.absenceTypes} />
+              <ItemHead id="kpi-types-title" title="Motifs retenus pour l'absentéisme" help={helps.absenceTypes} />
               {readLabel === null ? (
-                <p className="desc" data-testid="setting-kpi-types-empty">Aucune lecture PayFit appliquée : aucun type à choisir. DSN : arrêts non extraits.</p>
+                <p className="desc" data-testid="setting-kpi-types-empty">Aucune lecture PayFit appliquée : aucun motif à choisir. DSN : arrêts non extraits.</p>
               ) : (
-                <p className="desc">Types de la {readLabel}.</p>
+                <p className="desc" data-testid="setting-kpi-types-help">Motifs de la {readLabel}. Cocher explicitement les motifs à compter ; les autres restent visibles dans le détail.</p>
               )}
               <div className="pm-checks">
                 {types.map((t) => (
                   <label key={t.type} className="check">
                     <input type="checkbox" name="absenceTypes" value={t.type} defaultChecked={values.absenceTypes.includes(t.type)} data-testid="setting-kpi-absence-types" />
                     <span className="pm-type">
-                      <span>{t.label ?? "Type sans libellé connu"} <code>{t.type}</code></span>
+                      <span>{t.label ?? "Motif sans libellé connu"} <code>{t.type}</code></span>
                       {t.inRead ? <span className="desc">{t.count} absence{t.count > 1 ? "s" : ""}</span> : <span className="desc" data-testid="setting-kpi-types-missing">absent de la lecture appliquée (sans effet)</span>}
                     </span>
                   </label>
                 ))}
               </div>
-              {values.absenceTypes.length === 0 && <p className="desc">Aucun type choisi : absentéisme n.d.</p>}
+              {values.absenceTypes.length === 0 && <p className="desc">Aucun motif retenu : absentéisme n.d.</p>}
               <Origin id="absence-types" name="absenceTypes" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item" role="group" aria-labelledby="kpi-statuses-title">
@@ -175,7 +175,7 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
               <Origin id="absence-statuses" name="absenceStatuses" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item" role="group" aria-labelledby="kpi-basis-title">
-              <ItemHead id="kpi-basis-title" title="Base de comptage des jours" help={helps.absenceBase} />
+              <ItemHead id="kpi-basis-title" title="Base de comptage des jours : absentéisme et prorata de l'ETP proratisé" help={helps.absenceBase} />
               <label className="check">
                 <input type="radio" name="dayBasis" value="calendar" defaultChecked={values.dayBasis === "calendar"} data-testid="setting-kpi-absence-basis" />
                 <span>Jours calendaires</span>
