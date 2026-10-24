@@ -142,3 +142,16 @@ describe("cas limites de lecture", () => {
     expect(wide).toContain("19");
   });
 });
+
+describe("cascade en euros : tendance financière", () => {
+  const steps = [{ label: "Hausse", value: 8000 }, { label: "Baisse", value: -3000 }];
+  it("trend « cost » : hausse de coût rouge, baisse de coût verte ; sans trend : hausse bleue, baisse grise (aucun jugement)", () => {
+    const cost = renderToStaticMarkup(h(WaterfallChart, { testid: "t", label: "Test", unit: "eur", startLabel: "A", endLabel: "B", start: 100000, end: 105000, steps, trend: "cost" }));
+    expect(cost).toContain('fill="var(--bad)"');
+    expect(cost).toContain('fill="var(--good)"');
+    const neutral = renderToStaticMarkup(h(WaterfallChart, { testid: "t", label: "Test", unit: "etp", startLabel: "A", endLabel: "B", start: 100000, end: 105000, steps }));
+    expect(neutral).not.toContain("var(--bad)");
+    expect(neutral).not.toContain("var(--good)");
+    expect(neutral).toContain('fill="var(--chart-1)"');
+  });
+});

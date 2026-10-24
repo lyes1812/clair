@@ -15,6 +15,9 @@ export type WaterfallProps = {
   steps: { label: string; value: number }[];
   unit: UnitName;
   note?: string;
+  // « cost » : les contributions sont des montants de coût : une hausse est une tendance négative (rouge), une baisse une tendance
+  // positive (verte). « neutral » (défaut, effectifs et ETP) : hausse bleue, baisse grise, aucun jugement.
+  trend?: "cost" | "neutral";
 };
 
 // Cascade (pont) : départ, contributions signées, arrivée. Hausse pleine bleue, baisse en aplat gris, totaux en noir ; chaque
@@ -22,6 +25,7 @@ export type WaterfallProps = {
 // règle métier ne dit qu'une baisse est « défavorable » (aplat gris à contour noir ; la hachure est réservée aux valeurs n.d.). L'axe est tronqué quand les contributions
 // sont petites devant les totaux ; la troncature est écrite sous le graphique.
 export function WaterfallChart(p: WaterfallProps) {
+  const cost = p.trend === "cost";
   const [ref, width] = useWidth();
   const [tip, setTip] = useState<Tip | null>(null);
   const [on, setOn] = useState<number | null>(null);
@@ -62,7 +66,7 @@ export function WaterfallChart(p: WaterfallProps) {
   const tipOf = (i: number): Tip => ({ x: left + i * band + band / 2, y: topM, title: bars[i].label, rows: [{ name: bars[i].kind === "total" ? "Valeur" : "Contribution", value: bars[i].text, strong: true }] });
   const note = [p.note, truncated ? `Axe tronqué : il commence à ${axisFmt(Math.round(t.min))}.` : null].filter(Boolean).join(" ");
   return (
-    <Frame testid={p.testid} title={p.title} note={note || undefined} legend={<ul className="chart-legend" aria-label="Légende"><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-ink)" }} />Total</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-1)" }} />Hausse</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-5)", border: "1px solid var(--chart-ink)" }} />Baisse</span></li></ul>}>
+    <Frame testid={p.testid} title={p.title} note={note || undefined} legend={<ul className="chart-legend" aria-label="Légende"><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-ink)" }} />Total</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: cost ? "var(--bad)" : "var(--chart-1)" }} />{cost ? "Hausse de coût" : "Hausse"}</span></li><li><span className="legend-btn static"><i className="swatch" style={cost ? { background: "var(--good)" } : { background: "var(--chart-5)", border: "1px solid var(--chart-ink)" }} />{cost ? "Baisse de coût" : "Baisse"}</span></li></ul>}>
       <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setOn(null); }}>
         <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={p.label}>
           <g transform={`translate(${left},${topM})`}>
@@ -81,7 +85,7 @@ export function WaterfallChart(p: WaterfallProps) {
               const x = i * band + (band - barW) / 2;
               return (
                 <g key={`${b.label}-${i}`} opacity={on !== null && on !== i ? 0.55 : 1}>
-                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? "var(--chart-1)" : "var(--chart-5)"} stroke={b.kind === "down" ? "var(--chart-ink)" : "none"} rx={2} />
+                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? (cost ? "var(--bad)" : "var(--chart-1)") : cost ? "var(--good)" : "var(--chart-5)"} stroke={b.kind === "down" && !cost ? "var(--chart-ink)" : "none"} rx={2} />
                   <text x={x + barW / 2} y={a - 5} textAnchor="middle" className="val">{valText(b.value, b.kind !== "total")}</text>
                   <text className="tick cat" textAnchor={narrow ? "end" : "middle"} transform={narrow ? `translate(${x + barW / 2 + 4},${plotH + 14}) rotate(-40)` : `translate(${x + barW / 2},${plotH + 16})`}>{short(b.label)}</text>
                   <rect x={i * band} y={-topM} width={band} height={plotH + topM + bottomM - 4} fill="transparent" tabIndex={rov.tab(i)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${b.label} : ${b.text}`}
