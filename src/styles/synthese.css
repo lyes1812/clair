@@ -1,4 +1,4 @@
-/* Synthèse du Studio RH (charte « 101 » : blanc, noir, bleu et leurs dégradés ; le rouge et le vert ne servent qu'à la tendance
+/* Synthèse du Studio RH (charte « 101 » : blanc, noir et bleu ; le rouge et le vert ne servent qu'à la tendance
    d'un coût). Variables de globals.css, échelle typographique de typography.css (--clair-type-kpi, --clair-type-secondary), teintes de
    série de charts.css ; classes partagées réutilisées : .panel, .panel-head, .panel-tools, .filters.bar, .btn, .table-wrap.scroll,
    .data-table, .trend-bad / .trend-good / .trend-legend, .gloss-link, .tile-foot, .nd. */
@@ -36,10 +36,10 @@
 .sy-sub { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); letter-spacing: 0; }
 
 /* Tuiles : valeur en grand (--clair-type-kpi pour un effectif, un ETP ou un taux ; --clair-type-secondary pour un montant),
-   comparaison N-1 sous un filet, liens en pied. Filet de tête en dégradé de bleu : décor sans texte. */
+   comparaison N-1 sous un filet et liens en pied. */
 .sy-tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
-.sy-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(90deg, var(--chart-2), var(--chart-1) 55%, var(--chart-3)) top / 100% 3px no-repeat, #fff; }
-.sy-tile-label { font-size: var(--clair-type-form); font-weight: 600; line-height: 1.35; color: var(--ink); letter-spacing: 0; }
+.sy-tile { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card, 12px); background: #fff; }
+.sy-tile-label { font-size: var(--clair-type-form); font-weight: 500; line-height: 1.45; color: var(--muted); letter-spacing: 0; }
 .sy-tile-label .gloss-link { margin-left: 8px; }
 .sy-tile-sub { margin: 0; font-size: var(--clair-type-label); line-height: 1.4; color: var(--muted); }
 .sy-tile-value { margin: 0; font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -69,7 +69,7 @@
 .sy-nd-action:hover { text-decoration: underline; }
 
 /* Graphiques : deux colonnes, une seule sous 960 px. */
-.sy-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
+.sy-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; }
 .sy-chart { display: grid; gap: 10px; align-content: start; min-width: 0; }
 .sy-chart .chart-head { min-height: 34px; }
 .sy-chart-link { margin: 0; }

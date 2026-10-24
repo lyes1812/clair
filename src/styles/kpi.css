@@ -36,14 +36,17 @@
 /* Tuiles d'indicateurs : valeur en grand, comparaison N-1 sous un filet, paramètres repliés, liens en pied. */
 /* Colonnes régulières (auto-fill) : une tuile isolée garde la largeur d'une colonne au lieu de s'étirer sur tout le panneau. */
 .facts.kpi-tiles { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-/* Filet de tête en dégradé de bleu (marine → bleu → bleu clair) : décor sans texte, la valeur reste en encre sur blanc. */
-.kpi-tiles .kpi-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(90deg, var(--chart-2), var(--chart-1) 55%, var(--chart-3)) top / 100% 3px no-repeat, #fff; min-width: 0; }
-.kpi-tiles .kpi-tile dt { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
+/* Cartes sobres : le chiffre porte la hiérarchie, sans filet décoratif. */
+.kpi-tiles .kpi-tile { display: flex; flex-direction: column; align-content: normal; gap: 12px; padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card, 12px); background: #fff; min-width: 0; }
+.kpi-tiles .kpi-tile dt { font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); line-height: 1.45; }
 .kpi-tiles .kpi-tile dd { margin: 0; font-size: var(--clair-type-kpi); font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi-tiles .kpi-tile dd.lower { color: var(--muted); }
+.kpi-tiles .kpi-tile:first-child dd:not(.nd, .lower) { color: var(--blue); }
 /* Valeur n.d. : la raison s'écrit en texte courant, pas en gros chiffre. */
 .kpi-tiles .kpi-tile dd.nd { font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; line-height: 1.5; }
 .kpi-tile .tile-notes { display: grid; gap: 2px; }
+.kpi-tile .tile-sparkline { display: block; width: 100%; height: 32px; margin-top: 8px; color: #8b95a6; }
+.kpi-tile:first-child .tile-sparkline { color: var(--blue); }
 .kpi-tile .tile-notes .tile-foot { font-style: italic; line-height: 1.45; }
 .kpi-tile .tile-compare { display: grid; gap: 2px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
 .kpi-tile .tile-compare .tile-foot { font-size: var(--clair-type-description); line-height: 1.45; }
@@ -57,12 +60,12 @@
 /* Les cinq blocs d'une tuile (titre, valeur, remarques, N-1 et écart, liens) occupent cinq rangées de la grille des tuiles :
    les rangées s'alignent d'une tuile à l'autre de la même ligne. Sans sous-grille, le pied de tuile reste au bas de la carte. */
 @supports (grid-template-rows: subgrid) {
-  .kpi-tiles .kpi-tile { display: grid; grid-row: span 5; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); row-gap: 6px; align-content: stretch; }
+  .kpi-tiles .kpi-tile { display: grid; grid-row: span 5; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); row-gap: 12px; align-content: stretch; }
   .kpi-tile .tile-links { align-self: end; margin-top: 0; }
 }
 
 /* Lecture graphique : deux colonnes, une seule sous 960 px ; un graphique « large » prend toute la ligne. */
-.kpi-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
+.kpi-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; }
 .kpi-chart { min-width: 0; }
 .kpi-chart.wide { grid-column: 1 / -1; }
 .kpi-chart .chart > .nd { padding: 10px 0; }

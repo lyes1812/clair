@@ -17,7 +17,7 @@ import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import type { Shown } from "@/lib/rh/view";
-import { absenceTypeText, deltaExact } from "@/lib/viz/kpi";
+import { absenceTypeText, absenteeismSeries, deltaExact, etpSeries, headcountSeries } from "@/lib/viz/kpi";
 import {
   AbsenceMonthDetail,
   AbsenceTypeNotes,
@@ -268,6 +268,9 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const s = ctx.settings.values;
 
   const t = dash.tiles;
+  const sparkEtp = etpSeries(dash.rows);
+  const sparkHeadcount = headcountSeries(dash.rows)[0].values;
+  const sparkAbsenteeism = absenteeismSeries(dash.rows)[0].values;
   // N-1 d'une tuile : la valeur seule ; la période N-1 est dans la ligne de contexte et au survol.
   const n1 = (shown: Shown) => shown.text;
   // Écart exact en fractions (valeur − N-1 ; × 100 pour les taux), au survol de la ligne « Écart » : rien de visible sur la tuile,
@@ -397,6 +400,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <dl className="facts kpi-tiles" data-testid="kpi-tiles">
           <KpiTile
             id="etp-end"
+            sparkline={sparkEtp.find((s) => s.key === "etp")?.values}
             slug={slug}
             visible={tileOn("etp-end")}
             label={`ETP contractuel fin ${monthLabel(w.to)}`}
@@ -413,6 +417,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           />
           <KpiTile
             id="etp-avg"
+            sparkline={sparkEtp.find((s) => s.key === "etp")?.values}
             slug={slug}
             visible={tileOn("etp-avg")}
             label="ETP moyen"
@@ -429,6 +434,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           />
           <KpiTile
             id="headcount-avg"
+            sparkline={sparkHeadcount}
             slug={slug}
             visible={tileOn("headcount-avg")}
             label="Effectif moyen (personnes)"
@@ -460,6 +466,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           />
           <KpiTile
             id="absenteeism"
+            sparkline={sparkAbsenteeism}
             slug={slug}
             visible={tileOn("absenteeism")}
             label="Absentéisme"
