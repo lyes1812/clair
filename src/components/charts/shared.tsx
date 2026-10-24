@@ -5,8 +5,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 // jamais le seul porteur d'information : légende nommée, étiquettes et infobulle donnent le nom et la valeur.
 export const PALETTE = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)", "var(--chart-7)", "var(--chart-8)"];
 export const colorOf = (i: number, override?: string) => override ?? PALETTE[i % PALETTE.length];
-// Texte posé sur une teinte de série : blanc sur 1, 2, 3 et 8, encre sur 4 à 7 (≥ 4,5:1 dans les deux cas). Couleur libre : blanc.
-const INK_ON = new Set([4, 5, 6, 7]);
+// Texte posé sur une teinte de série : blanc sur 1, 2, 4 et 5, encre sur 3, 6, 7 et 8 (≥ 4,5:1 dans les deux cas). Couleur libre : blanc.
+const INK_ON = new Set([3, 6, 7, 8]);
 export const onColor = (color: string) => {
   const m = /--chart-(\d)/.exec(color);
   return m && INK_ON.has(Number(m[1])) ? "var(--chart-ink)" : "#fff";

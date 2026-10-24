@@ -13,11 +13,11 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email, families
   const pathname = usePathname();
   const rest = pathname.replace(`/e/${slug}/`, "");
   const item = [...ALL_ITEMS].sort((a, b) => b.path.length - a.path.length).find((i) => rest === i.path || rest.startsWith(`${i.path}/`));
-  const page = rest === "membres" ? "Membres et accès" : rest === "parametres" ? "Paramètres" : item?.label;
+  const page = rest === "membres" ? "Membres et accès" : rest === "parametres" ? "Paramètres" : rest === "glossaire" ? "Glossaire" : rest === "studio-rh" ? "Synthèse du Studio RH" : item?.label;
   return (
     <header className="ws-topbar">
       <div className="topbar-left">
-        <MegaMenu families={families} extras={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Paramètres", href: `/e/${slug}/parametres` }, { label: "Membres et accès", href: `/e/${slug}/membres` }]} />
+        <MegaMenu families={families} extras={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Paramètres", href: `/e/${slug}/parametres` }, { label: "Membres et accès", href: `/e/${slug}/membres` }, { label: "Glossaire", href: `/e/${slug}/glossaire` }]} />
         <nav className="breadcrumb" aria-label="Fil d'Ariane">
           <span className="crumb-space">Espace {workspaceName}</span>
           {page && (<><span className="crumb-sep" aria-hidden="true">/</span><strong>{page}</strong></>)}
@@ -29,6 +29,7 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email, families
           <div className="user-menu-id"><strong>{userName}</strong><span className="muted" data-testid="current-user">{email}</span></div>
           <a href={`/e/${slug}/membres`}>Membres et accès</a>
           <a href={`/e/${slug}/parametres`}>Paramètres de l'espace</a>
+          <a href={`/e/${slug}/glossaire`}>Glossaire</a>
           <a href="/espaces">Changer d'espace</a>
           <a href="/securite">Sécurité</a>
           <SignOutButton />

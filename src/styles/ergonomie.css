@@ -64,3 +64,17 @@
 .prevu-links strong { font-size: var(--clair-type-form); font-weight: 600; color: var(--blue); }
 .prevu-links span { font-size: var(--clair-type-label); line-height: 1.5; color: var(--muted); }
 .prevu-open { margin: 0; padding-left: 18px; display: grid; gap: 6px; max-width: 72ch; font-size: var(--clair-type-form); line-height: 1.55; }
+
+/* Tendances financières : rouge (coût en hausse) et vert (coût en baisse), seules couleurs hors de l'univers bleu / blanc / noir. */
+.trend-bad { color: var(--bad); font-weight: 600; }
+.trend-good { color: var(--good); font-weight: 600; }
+.tile-trend-bad { background: var(--bad-soft); }
+.tile-trend-good { background: var(--good-soft); }
+.trend-legend { display: inline-flex; gap: 14px; font-size: var(--clair-type-label); color: var(--muted); }
+.trend-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.trend-legend .dot.bad { background: var(--bad); }
+.trend-legend .dot.good { background: var(--good); }
+
+/* Renvoi « ? » vers le glossaire. */
+.gloss-link { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 6px; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); font-size: 10px; font-weight: 650; line-height: 1; text-decoration: none; vertical-align: 1px; }
+.gloss-link:hover, .gloss-link:focus-visible { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); }

@@ -24,7 +24,7 @@
 
 /* Zone vide : on dit ce qui manque. */
 .dn-empty { padding: 16px 18px; border: 1px dashed #d8dce5; border-radius: 8px; background: #fff; color: var(--muted); font-size: var(--clair-type-form); }
-.notice.ok { background: #edf8f3; border-color: #cfe9de; }
+.notice.ok { background: var(--blue-soft); border-color: #d6e3ff; }
 .dn-tag-inline { margin-left: 8px; }
 .dn-pill-link { display: inline-flex; text-decoration: none; }
 

@@ -4,13 +4,19 @@
 :root {
   --chart-ink: #141824;
   --chart-1: #155cff;
-  --chart-2: #2d3a55;
-  --chart-3: #1b7861;
-  --chart-4: #5a8cf5;
-  --chart-5: #7b8497;
-  --chart-6: #c2780a;
-  --chart-7: #2a9d8f;
-  --chart-8: #7a52c9;
+  --chart-2: #0b1b4a;
+  --chart-3: #5f8cff;
+  --chart-4: #27428f;
+  --chart-5: #4b5563;
+  --chart-6: #9fb6e8;
+  --chart-7: #7b8497;
+  --chart-8: #c3cbe0;
+  /* Les seules couleurs hors de l'univers bleu / blanc / noir : le rouge et le vert, réservés aux tendances financières
+     (hausse d'un coût : rouge ; baisse d'un coût : vert). */
+  --bad: #c4302b;
+  --good: #138a55;
+  --bad-soft: #fdf1f0;
+  --good-soft: #eef8f3;
 }
 
 .chart { margin: 0; display: grid; gap: 10px; min-width: 0; }

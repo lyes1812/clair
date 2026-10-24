@@ -114,7 +114,7 @@ a.collab-quiet:hover, a.collab-quiet:focus-visible { color: var(--blue); text-de
 /* Pastilles d'état : le libellé porte l'information, la couleur la renforce. */
 .collab-pill { display: inline-flex; align-items: flex-start; gap: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font-size: var(--clair-type-label); font-weight: 600; line-height: 1.4; text-align: left; }
 .collab-pill::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 0.5em; border-radius: 50%; background: currentColor; }
-.collab-pill.s-present { color: var(--ok); background: #edf8f3; border-color: #cfe9de; }
+.collab-pill.s-present { color: var(--blue); background: var(--blue-soft); border-color: #d6e3ff; }
 .collab-pill.s-entered { color: var(--blue); background: var(--blue-soft); border-color: #d6e3ff; }
 .collab-pill.s-exited { color: var(--danger); background: var(--danger-bg); border-color: #f1d6dc; }
 .collab-pill.s-alert { color: var(--danger); background: #fff; border-color: #f1d6dc; border-style: dashed; }

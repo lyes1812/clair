@@ -11,6 +11,8 @@ const users = {
   reader: { name: "Lecteur Test", email: `lecteur-${run}@invite.example` },
 };
 const MENU = ["Données", "Collaborateurs", "KPI RH", "Masse salariale", "Hypothèses budgétaires", "Reporting social"];
+// Le titre « Studio RH » est le lien vers la synthèse du Studio RH ; les cinq sous-modules restent exactement ceux de MENU.
+const MENU_LINKS = ["Données", "Studio RH", ...MENU.slice(1)];
 
 let slug = "";
 let totpSecret = "";
@@ -46,14 +48,14 @@ test.describe.serial("Module 0 — socle", () => {
     await expect(page).toHaveURL(/\/e\/[a-z0-9-]+\/donnees$/);
     slug = page.url().match(/\/e\/([a-z0-9-]+)\//)![1];
     const menu = page.getByTestId("main-menu");
-    await expect(menu.getByRole("link")).toHaveText(MENU);
+    await expect(menu.getByRole("link")).toHaveText(MENU_LINKS);
     await expect(menu.getByText("Studio RH", { exact: true })).toBeVisible();
     await page.screenshot({ path: `${CAPTURES}/01-espace-menu-fige.png`, fullPage: true });
 
     // Studio RH se replie et se déplie.
-    await menu.getByText("Studio RH", { exact: true }).click();
+    await menu.getByRole("button", { name: "Replier le Studio RH" }).click();
     await expect(menu.getByRole("link", { name: "Collaborateurs" })).toBeHidden();
-    await menu.getByText("Studio RH", { exact: true }).click();
+    await menu.getByRole("button", { name: "Déplier le Studio RH" }).click();
     await expect(menu.getByRole("link", { name: "Collaborateurs" })).toBeVisible();
 
     // Modules livrés : sans source retenue, n.d. explicite ; modules à venir : écran d'attente.
@@ -125,7 +127,7 @@ test.describe.serial("Module 0 — socle", () => {
     await reader.goto(invitationPath);
     await reader.getByRole("button", { name: "Accepter l'invitation" }).click();
     await expect(reader).toHaveURL(new RegExp(`/e/${slug}/donnees$`));
-    await expect(reader.getByTestId("main-menu").getByRole("link")).toHaveText(MENU);
+    await expect(reader.getByTestId("main-menu").getByRole("link")).toHaveText(MENU_LINKS);
 
     // Interface : aucun contrôle d'administration.
     await reader.goto(`/e/${slug}/membres`);
