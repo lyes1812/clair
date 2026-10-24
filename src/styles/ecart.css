@@ -121,8 +121,8 @@
 /* Pont volume / coût moyen : trois tuiles et une petite cascade. */
 .pont { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 20px 28px; align-items: start; }
 .pont:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
-.pont-tiles { display: grid; gap: 10px; margin: 0; }
-.pont-tiles > div { display: grid; gap: 4px; align-content: start; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.pont-tiles { display: grid; gap: 14px; margin: 0; }
+.pont-tiles > div { display: grid; gap: 12px; align-content: start; padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card, 12px); background: #fff; }
 .pont-tiles dt { font-size: var(--clair-type-label); font-weight: 600; color: var(--muted); }
 .pont-tiles dd { margin: 0; font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -.5px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .pont-chart { min-width: 0; max-width: 620px; }

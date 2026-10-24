@@ -24,7 +24,7 @@
 /* Une famille : titre souligné d'un filet en dégradé de bleu (décor sans texte), puis ses définitions. */
 .gl-family { display: grid; gap: 0; min-width: 0; scroll-margin-top: 72px; }
 .gl-family + .gl-family { margin-top: 12px; }
-.gl-family-head { display: flex; align-items: center; gap: 10px; padding: 0 0 12px; background: linear-gradient(90deg, var(--chart-2), var(--chart-1) 45%, var(--line) 100%) bottom / 100% 2px no-repeat; }
+.gl-family-head { display: flex; align-items: center; gap: 10px; padding: 0 0 12px; border-bottom: 1px solid var(--line); }
 .gl-family-head h2 { min-width: 0; }
 .gl-top { margin-left: auto; font-size: var(--clair-type-form); font-weight: 600; text-decoration: none; }
 .gl-top:hover { text-decoration: underline; }

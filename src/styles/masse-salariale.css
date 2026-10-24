@@ -1,4 +1,4 @@
-/* Masse salariale — Synthèse, Fixe & variable, Paie & comptabilité, vue DSN (charte « 101 » : blanc, noir, bleu et leurs dégradés ;
+/* Masse salariale — Synthèse, Fixe & variable, Paie & comptabilité, vue DSN (charte « 101 » : blanc, noir et bleu ;
    le rouge et le vert ne servent qu'aux tendances d'un coût).
    Variables de globals.css, échelle typographique de typography.css, teintes de série de charts.css ; classes d'ergonomie.css
    réutilisées : .panel-head, .panel-tools, .table-wrap.scroll, .data-table.sticky(-first), tr.subtotal / tr.total, .filters.bar,
@@ -65,14 +65,17 @@
 /* Une tuile en retrait détaille la précédente (« dont primes »). */
 .ms-tiles .ms-tile.sub { background: var(--sidebar-bg); }
 .ms-tiles .ms-tile.sub dt { color: var(--muted); }
-.ms-tiles .ms-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; min-width: 0; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.ms-tiles .ms-tile dt { font-size: var(--clair-type-form); font-weight: 600; line-height: 1.35; color: var(--ink); }
-.ms-tiles .ms-tile dd { margin: 0; font-size: 22px; font-weight: 550; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ms-tiles .ms-tile { display: flex; flex-direction: column; align-content: normal; gap: 12px; min-width: 0; padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card, 12px); background: #fff; }
+.ms-tiles .ms-tile dt { font-size: var(--clair-type-form); font-weight: 500; line-height: 1.45; color: var(--muted); }
+.ms-tiles .ms-tile dd { margin: 0; font-size: 26px; font-weight: 550; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .ms-tiles .ms-tile.main dd { font-size: var(--clair-type-secondary); }
+.ms-tiles .ms-tile.main dd:not(.nd, .trend-bad, .trend-good) { color: var(--blue); }
 /* Valeur n.d. : « n.d. » en gris italique à la taille de la valeur ; quand la raison est la valeur, elle s'écrit en texte courant. */
 .ms-tiles .ms-tile dd.nd { font-weight: 500; }
 .ms-tiles .ms-tile dd.nd.long { font-size: var(--clair-type-form); letter-spacing: 0; line-height: 1.5; }
 .ms-tile .ms-tile-lead { display: block; line-height: 1.45; }
+.ms-tile .tile-sparkline { display: block; width: 100%; height: 32px; color: #8b95a6; }
+.ms-tile.main .tile-sparkline { color: var(--blue); }
 .ms-tile .ms-tile-compare { display: grid; gap: 2px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
 .ms-tile .ms-tile-compare .tile-foot { font-size: var(--clair-type-description); line-height: 1.45; overflow-wrap: anywhere; }
 .ms-tile dt .gloss-link { margin-left: 8px; }
@@ -85,7 +88,7 @@
 .ms-composition-legend li { display: inline-flex; align-items: center; gap: 7px; }
 
 /* Graphiques : deux colonnes, une seule sous 960 px ; un graphique « large » prend toute la ligne. */
-.ms-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
+.ms-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; }
 .ms-chart { min-width: 0; }
 .ms-chart.wide { grid-column: 1 / -1; }
 .ms-chart .chart > .nd { padding: 10px 0; }
