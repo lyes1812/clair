@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { BarChart, LineChart, type ChartSeries } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { SourceBadge } from "@/components/SourceBadge";
+import { Sparkline } from "@/components/Sparkline";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, formatMonth } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
@@ -220,6 +221,7 @@ export function KpiTile(props: {
   detailN1: string;
   children?: ReactNode;
   visible?: boolean;
+  sparkline?: readonly (number | null)[];
 }) {
   const { id, slug, label, shown, title, n1, n1Title, delta, deltaTitle, qualifiers = [], warning, term, detail, detailN1, children, visible = true } = props;
   if (!visible) return null;
@@ -233,6 +235,7 @@ export function KpiTile(props: {
         {notes.map((q) => <span key={q} className="tile-foot">{q}</span>)}
         {warning}
         {children}
+        {shown.kind === "value" && props.sparkline && <Sparkline values={props.sparkline} />}
       </div>
       <span className="tile-compare">
         <span className="tile-foot" title={n1Title} data-testid={`kpi-tile-${id}-n1`}>N-1 : {n1}</span>

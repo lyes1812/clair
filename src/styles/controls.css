@@ -13,7 +13,7 @@
     min-height:40px;
     padding:var(--clair-button-pad-y) var(--clair-button-pad-x);
     border:1px solid var(--line);
-    border-radius:6px;
+    border-radius:var(--clair-radius-control,8px);
     background:#fff;
     color:var(--ink);
     font-weight:550;

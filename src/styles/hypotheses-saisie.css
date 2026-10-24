@@ -106,9 +106,9 @@ p.hs-empty { margin: 0; padding: 10px 12px; border: 1px dashed #d8dce5; border-r
 .hs-verdict.is-gap { border-color: #f1d6dc; background: var(--danger-bg); color: var(--danger); }
 
 /* Chiffres de référence d'un encart (base figée) : valeur en grand, sous-libellé dessous. */
-.facts.hs-tiles { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.facts.hs-tiles > div { align-content: start; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
-.facts.hs-tiles dd { font-size: 24px; font-weight: 600; letter-spacing: -.4px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.facts.hs-tiles { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.facts.hs-tiles > div { align-content: start; gap: 12px; padding: 18px 18px 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card, 12px); background: #fff; }
+.facts.hs-tiles dd { font-size: 26px; font-weight: 550; letter-spacing: -.4px; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .facts.hs-tiles dd.nd { font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; line-height: 1.5; }
 
 /* --- Recherche et tableaux --------------------------------------------------------------------------------------- */

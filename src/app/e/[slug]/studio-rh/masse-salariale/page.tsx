@@ -219,6 +219,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const svcMonthNd = serviceRows.some((r) => r.cur.months.some((m) => m.kind === "nd"));
   const svcMonthSeries = serviceMonthSeries(serviceRows.map((r) => ({ value: r.value, months: r.cur.months })));
   const brutCotisSeries = brutCotisationsSeries(cur.months);
+  const sparkMasse = masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" })[0].values;
   const costEtpSeries = costSeries(cur.months, etpCur, prev.months, etpPrev, { cur: `Coût par ETP ${year}`, prev: `Coût par ETP ${year - 1} (N-1)` });
   // Clé de lecture des n.d. : écrite une fois sous les graphiques, seulement si l'un d'eux en contient un.
   const anyNd = [masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" }), brutCotisSeries, costEtpSeries, ...(ctx.service.axis && serviceRows.length > 0 && serviceRows.length <= 8 ? [svcMonthSeries] : [])].some(hasNd);
@@ -297,6 +298,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
             <dl className="facts ms-tiles five">
               <Tile
                 testid="ms-tile-masse"
+                sparkline={sparkMasse}
                 main
                 label="Masse salariale chargée"
                 value={money(cur, (w) => w.masse)}
@@ -318,6 +320,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               />
               <Tile
                 testid="ms-tile-cost-etp"
+                sparkline={costEtpSeries[0].values}
                 label="Coût par ETP-mois"
                 value={costText(cost)}
                 nd={cost.kind === "nd"}
@@ -328,6 +331,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               />
               <Tile
                 testid="ms-tile-brut"
+                sparkline={brutCotisSeries.find((s) => s.key === "brut")?.values}
                 label="Brut"
                 value={money(cur, (w) => w.brut)}
                 nd={cur.kind === "nd"}
@@ -338,6 +342,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               />
               <Tile
                 testid="ms-tile-cotisations"
+                sparkline={brutCotisSeries.find((s) => s.key === "cotisations")?.values}
                 label="Cotisations patronales"
                 value={money(cur, (w) => w.cotisations)}
                 nd={cur.kind === "nd"}

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { BarChart } from "@/components/charts";
 import type { ChartSeries } from "@/components/charts/shared";
 import { GlossaryLink } from "@/components/GlossaryLink";
+import { Sparkline } from "@/components/Sparkline";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import type { MonthPayroll } from "@/lib/payroll/engine";
 import { fmtFixed } from "@/lib/rh/kpi/format";
@@ -160,13 +161,14 @@ export function PeriodBar(p: {
 // `nd` : valeur n.d. (« n.d. » en gris italique, raison listée sous les tuiles) ; `ndLong` : la raison elle-même est la valeur (texte courant).
 // `sub` : la tuile détaille la précédente (« dont primes »), elle est en retrait. `def` + `slug` : « ? » vers l'entrée du glossaire.
 // `trend` : classe de tendance (trend-bad / trend-good, voir trendOf) de la valeur, quand elle est un écart de montant.
-export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: boolean; ndLong?: boolean; main?: boolean; sub?: boolean; lead?: ReactNode; compare?: ReactNode; foot?: ReactNode; def?: string; slug?: string; trend?: string }) {
+export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: boolean; ndLong?: boolean; main?: boolean; sub?: boolean; lead?: ReactNode; compare?: ReactNode; foot?: ReactNode; def?: string; slug?: string; trend?: string; sparkline?: readonly (number | null)[] }) {
   const dd = [p.nd ? (p.ndLong ? "nd long" : "nd") : "", p.nd ? "" : (p.trend ?? "")].filter(Boolean).join(" ");
   return (
     <div data-testid={p.testid} className={["ms-tile", p.main ? "main" : "", p.sub ? "sub" : ""].filter(Boolean).join(" ")}>
       <dt>{p.label}{p.def && p.slug && <GlossaryLink slug={p.slug} term={p.def} label={p.label} />}</dt>
       <dd className={dd || undefined}>{p.value}</dd>
       {p.lead && <span className="tile-foot ms-tile-lead">{p.lead}</span>}
+      {!p.nd && p.sparkline && <Sparkline values={p.sparkline} />}
       {p.compare && <div className="ms-tile-compare">{p.compare}</div>}
       {p.foot}
     </div>
