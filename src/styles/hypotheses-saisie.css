@@ -83,7 +83,7 @@ html[data-clair-theme="airy"] .hs-switch > summary.btn { min-height: 32px; paddi
 .hs-group .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 14px; align-items: start; }
 .hs-group .filters .field-row { flex: none; min-width: 0; max-width: none; }
 .hs-group .filters .input, .hs-group .filters .select { min-width: 0; text-overflow: ellipsis; }
-.hs-hire { display: grid; gap: 14px; }
+.hs-hire { display: grid; gap: 14px; min-width: 0; }
 /* Cases à cocher d'un groupe : de 1 à 3 colonnes (220 px au moins chacune), jamais une pile pleine largeur. */
 .hs-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(220px, calc((100% - 32px) / 3)), 1fr)); gap: 8px 16px; }
 .form-msg { display: grid; gap: 8px; }
@@ -171,7 +171,7 @@ html[data-clair-theme="airy"] .btn.hs-compact { min-height: 30px; padding: 4px 1
 .hs-grid-form[data-tall="1"] > .actions { position: sticky; bottom: 0; z-index: 6; padding: 10px 12px; background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -10px 16px -12px #14182440; }
 
 /* Barre d'outils de la grille. */
-.hs-tools { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.hs-tools { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--clair-radius-card, 12px); background: var(--sidebar-bg); }
 .hs-tools-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; }
 .hs-tools .btn { flex: none; white-space: nowrap; }
 html[data-clair-theme="airy"] .hs-tools .btn, html[data-clair-theme="airy"] .btn.hs-report { min-height: 30px; padding: 4px 10px; font-size: var(--clair-type-form); }
