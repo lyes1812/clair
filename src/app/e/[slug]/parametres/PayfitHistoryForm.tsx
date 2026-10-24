@@ -24,7 +24,7 @@ export function PayfitHistoryForm({ slug, mode, disabled }: { slug: string; mode
       </fieldset>
       {!disabled && (
         <div className="actions">
-          <button className="btn primary" type="submit" disabled={pending} data-testid="setting-payfit-history-save">{pending ? "Enregistrement…" : "Enregistrer"}</button>
+          <button className="btn primary" type="submit" disabled={pending} data-testid="setting-payfit-history-save">{pending ? "Enregistrement…" : "Enregistrer le mode d'historique"}</button>
         </div>
       )}
     </form>

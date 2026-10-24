@@ -4,8 +4,11 @@
 
 /* Lecture d'écran seulement. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Date ou durée qui ne se coupe jamais en deux lignes. */
+.hs-nw { white-space: nowrap; }
 
-/* Titre d'un panneau avec sa phrase de contexte dessous. */
+/* Titre d'un panneau avec sa phrase de contexte dessous : un seul motif pour tous les écrans. Les liens « règle » et
+   « définition » vivent dans la phrase, jamais dans le titre. */
 .hs-title { display: grid; gap: 4px; min-width: 0; }
 .hs-title .desc { line-height: 1.5; max-width: 90ch; }
 .hs-title h3 { font-size: var(--clair-type-section); }
@@ -14,22 +17,61 @@
 .hint { margin: 0; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.45; font-weight: 400; }
 .field-row .hint { max-width: 42ch; }
 
-/* --- En-tête de scénario ------------------------------------------------------------------------------------------ */
+/* Règles détaillées : repliées sous la phrase du titre (le texte complet reste dans « Définitions et règles de calcul »). */
+.hs-rules { display: grid; gap: 4px; }
+.hs-rules-body { display: grid; gap: 6px; max-width: 90ch; padding: 6px 0 2px; color: var(--muted); font-size: var(--clair-type-description); line-height: 1.55; }
+
+/* Commande d'ouverture d'un bloc repliable : bord fin, chevron, survol. */
+summary.hs-disclose { display: inline-flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; min-height: 32px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font-size: var(--clair-type-form); font-weight: 550; line-height: 1.35; cursor: pointer; list-style: none; }
+summary.hs-disclose::-webkit-details-marker { display: none; }
+summary.hs-disclose::before, .hs-defs > summary::before { content: ""; flex: none; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform .15s; }
+details[open] > summary.hs-disclose::before, .hs-defs[open] > summary::before { transform: rotate(45deg); }
+summary.hs-disclose:hover { background: var(--surface); border-color: #d8dce5; }
+summary.hs-disclose.hs-quiet { min-height: 0; padding: 2px 0; border-color: transparent; background: none; color: var(--muted); font-weight: 500; }
+summary.hs-disclose.hs-quiet:hover { background: none; color: var(--ink); }
+
+/* « Définitions et règles de calcul » : un seul bloc, résumé de la hauteur d'une commande, sans vide dessous. */
+details.hs-defs.panel { display: block; padding: 0; }
+.hs-defs > summary { display: flex; align-items: center; gap: 10px; padding: 14px 23px; border-radius: 8px; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); cursor: pointer; list-style: none; }
+.hs-defs > summary::-webkit-details-marker { display: none; }
+.hs-defs > summary:hover { background: var(--surface); }
+.hs-defs[open] > summary { border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; }
+.hs-defs > .defs { padding: 16px 23px 22px; }
+
+/* --- En-tête de scénario : une ligne (nom, pastilles, faits), les actions dessous ------------------------------------ */
 .hs-crumb { position: relative; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; font-size: var(--clair-type-form); }
-.hs-scenario { gap: 14px; }
-.hs-scn-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0; }
+.panel.hs-scenario { gap: 10px; padding: 16px 20px; }
+.hs-scn-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 28px; min-width: 0; }
+.hs-scn-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
 .hs-scn-head h2 { margin-right: 4px; overflow-wrap: anywhere; }
 .hs-status::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 .hs-status.is-draft { background: var(--blue-soft); border-color: #d6e3ff; color: var(--blue); }
 .hs-status.is-frozen { background: var(--ink); border-color: var(--ink); color: #fff; }
-.hs-facts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 24px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.facts.hs-facts { display: flex; flex-wrap: wrap; gap: 2px 22px; margin: 0; padding: 0; border: 0; }
+.facts.hs-facts > div { display: flex; align-items: baseline; gap: 6px; }
+.facts.hs-facts dt { white-space: nowrap; }
+.hs-context { margin: 0; font-size: var(--clair-type-description); color: var(--muted); line-height: 1.5; }
 
-/* Actions sur le scénario : figer, dupliquer, supprimer, regroupées dans un même bandeau. */
-.hs-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.hs-act { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
-.hs-act h3 { font-size: var(--clair-type-form); font-weight: 650; }
-.hs-act .inline-form { margin-top: 4px; }
-.hs-act-danger { border-color: #f1d6dc; background: var(--danger-bg); }
+/* Actions : figer et dupliquer restent à portée, le reste (suppression, aide) est replié dans « Gérer le scénario ». */
+.hs-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 10px; border-top: 1px solid var(--line); }
+.hs-bar .inline-form { flex-wrap: wrap; align-items: center; gap: 8px; }
+.hs-bar .inline-form .form-msg { flex: 1 1 100%; order: 5; }
+.hs-dup { flex: 1 1 360px; max-width: 520px; }
+.hs-dup .field-row { flex: 1 1 200px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hs-dup .field-row label { flex: none; white-space: nowrap; }
+.hs-bar .btn { white-space: nowrap; }
+.hs-bar-note { flex: 1 1 240px; margin: 0; }
+.hs-manage { margin-left: auto; }
+.hs-manage[open] { flex: 1 1 100%; margin-left: 0; order: 9; }
+.hs-manage-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 12px; padding: 12px 0 2px; }
+.hs-manage-body > * { min-width: 0; overflow-wrap: anywhere; }
+.hs-manage-body > .hs-manage-mode { grid-column: 1 / -1; margin: 0; }
+.hs-manage-help { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: var(--clair-type-form); line-height: 1.5; color: var(--muted); }
+.hs-manage-help strong { color: var(--ink); font-weight: 650; }
+.hs-act-danger { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 12px 14px; border: 1px solid #f1d6dc; border-radius: 8px; background: var(--danger-bg); }
+.hs-act-danger h3 { font-size: var(--clair-type-form); font-weight: 650; }
+.hs-chain { margin-top: 2px; }
+.hs-chain > summary { cursor: pointer; }
 
 /* Changer de scénario sans quitter l'entrée du menu en cours. */
 .hs-switch { position: relative; }
@@ -46,9 +88,13 @@ html[data-clair-theme="airy"] .hs-switch > summary.btn { min-height: 32px; paddi
 /* --- Formulaires : groupes de champs, messages ------------------------------------------------------------------- */
 .hs-group { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 8px; }
 .hs-group legend { padding: 0 6px; font-size: var(--clair-type-form-label); font-weight: 650; color: var(--ink); }
-.hs-group .filters { align-items: flex-start; }
-.hs-group .filters .field-row { flex: 1 1 200px; max-width: 320px; }
+/* Grille régulière : mêmes colonnes d'un groupe à l'autre, champs et listes à la même hauteur. */
+.hs-group .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 14px; align-items: start; }
+.hs-group .filters .field-row { flex: none; min-width: 0; max-width: none; }
+.hs-group .filters .input, .hs-group .filters .select { min-width: 0; text-overflow: ellipsis; }
 .hs-hire { display: grid; gap: 14px; }
+/* Cases à cocher d'un groupe : de 1 à 3 colonnes (220 px au moins chacune), jamais une pile pleine largeur. */
+.hs-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(220px, calc((100% - 32px) / 3)), 1fr)); gap: 8px 16px; }
 .form-msg { display: grid; gap: 8px; }
 .form-msg .error, .form-msg .notice { margin: 0; }
 .form-msg .list { margin: 0; }
@@ -61,29 +107,56 @@ html[data-clair-theme="airy"] .hs-switch > summary.btn { min-height: 32px; paddi
 .hs-events summary { cursor: pointer; padding: 11px 0; font-size: var(--clair-type-form); font-weight: 550; }
 .hs-events details[open] > summary { margin-bottom: 8px; }
 .hs-events .form { margin-top: 4px; }
+/* Texte d'état vide d'une grille ou d'une liste. */
+p.hs-empty { margin: 0; padding: 10px 12px; border: 1px dashed #d8dce5; border-radius: 6px; background: var(--sidebar-bg); color: var(--muted); font-size: var(--clair-type-form); }
+
+/* État d'un contrôle : icône, libellé, fond pâle (jamais la couleur seule). */
+.hs-verdict { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border: 1px solid #cfe6dd; border-radius: 999px; background: #eef7f4; color: var(--ok); font-size: var(--clair-type-form); font-weight: 600; white-space: nowrap; }
+.hs-verdict.is-gap { border-color: #f1d6dc; background: var(--danger-bg); color: var(--danger); }
+
+/* Chiffres de référence d'un encart (base figée) : valeur en grand, sous-libellé dessous. */
+.facts.hs-tiles { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.facts.hs-tiles > div { align-content: start; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.facts.hs-tiles dd { font-size: 24px; font-weight: 600; letter-spacing: -.4px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.facts.hs-tiles dd.nd { font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; line-height: 1.5; }
 
 /* --- Recherche et tableaux --------------------------------------------------------------------------------------- */
 .hs-search { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
 .hs-search .field-row { flex: 1 1 260px; max-width: 520px; }
 .hs-search .field-row.hs-narrow { flex: 0 1 220px; }
 .hs-search .btn { min-height: 40px; }
-.hs-table th { white-space: nowrap; }
+/* En-têtes qui passent à la ligne ; cellules en haut de ligne ; valeurs d'hypothèse sur fond bleu (le rouge est réservé aux erreurs). */
+.data-table.hs-table :is(th, td) { padding: 9px 10px; }
+.data-table.hs-table th { white-space: normal; vertical-align: bottom; line-height: 1.3; }
+.data-table.hs-table td { vertical-align: top; }
 .hs-table td.wrap { min-width: 150px; max-width: 280px; }
-.hs-table td.changed, .hs-table th.changed { background: var(--danger-bg); }
+.data-table.hs-table :is(td, th).changed { background: var(--blue-soft); color: var(--ink); font-weight: 600; }
+.data-table.hs-table th.changed { color: var(--blue); }
 .data-table.hs-table tr[aria-current="true"] > :is(td, th) { background: var(--blue-soft); }
 .hs-row-actions { white-space: nowrap; }
 .hs-row-actions a { margin-right: 12px; font-size: var(--clair-type-table-cell); }
 .hs-row-actions a:last-child { margin-right: 0; }
 .hs-table :is(input, select) { min-height: 32px; }
 .hs-table td .input { min-width: 130px; padding: 5px 8px; }
+/* Suppression : bouton compact de style destructif (une confirmation est demandée avant l'envoi). */
+.btn.hs-compact { min-height: 30px; padding: 4px 10px; font-size: var(--clair-type-form); white-space: nowrap; }
+html[data-clair-theme="airy"] .btn.hs-compact { min-height: 30px; padding: 4px 10px; font-size: var(--clair-type-form); }
+.btn.danger.hs-compact { border-color: #f1d6dc; }
 
 /* --- Grilles de saisie mensuelles -------------------------------------------------------------------------------- */
-.hs-grid { display: grid; gap: 10px; min-width: 0; }
-.hs-grid .table-wrap.scroll { max-height: 66vh; }
+.hs-grid { display: grid; gap: 8px; min-width: 0; }
+/* Unité et année écrites au-dessus de la grille. */
+.hs-unit { margin: 0; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); }
 .hs-grid .month-grid th, .hs-grid .month-grid td { padding: 6px 8px; }
 /* Première colonne fixe : libellé qui passe à la ligne plutôt que d'occuper l'écran. */
 .hs-grid .data-table :is(th, td):first-child { min-width: 150px; max-width: 280px; white-space: normal; }
 .hs-grid .hs-consts :is(th, td):first-child, .hs-grid .hs-env :is(th, td):first-child { max-width: none; }
+.hs-scope-note { display: block; font-size: var(--clair-type-label); font-weight: 400; color: var(--muted); }
+/* Saisie : en-tête de mois aligné sur le champ du dessous (même bord gauche, même largeur) ; les listes « Saisie » et « Unité »
+   sont assez larges pour lire leur valeur. */
+.hs-edit.month-grid th.num[data-csv] { text-align: left; }
+.hs-edit.month-grid select.select { width: auto; min-width: 112px; }
+.hs-env.month-grid select.select { min-width: 150px; }
 .hs-grid .month-grid tbody tr:focus-within > td { background: #f3f7ff; }
 .hs-grid .data-table.sticky-first tbody tr:focus-within > td:first-child { background: var(--blue-soft); }
 /* Une seule année à la fois quand la grille en couvre plusieurs ; l'autre reste dans la page et dans le formulaire. */
@@ -94,13 +167,17 @@ html[data-clair-theme="airy"] .hs-switch > summary.btn { min-height: 32px; paddi
 .hs-grid .input[data-dirty="true"] { background: var(--blue-soft); border-color: #8aafff; box-shadow: inset 3px 0 0 var(--blue); }
 .hs-grid .input[data-invalid="true"] { background: var(--danger-bg); border-color: var(--danger); box-shadow: inset 3px 0 0 var(--danger); }
 .hs-grid input[type="checkbox"][data-dirty="true"], .hs-grid select[data-dirty="true"] { outline: 2px solid var(--blue); outline-offset: 2px; }
-/* Bouton d'enregistrement toujours visible sous une grille longue. */
-.hs-grid-form > .actions { position: sticky; bottom: 0; z-index: 6; align-items: center; gap: 14px; padding: 10px 0; background: #fff; border-top: 1px solid var(--line); }
+/* Barre d'enregistrement : dans le flux sous la grille ; collée au bas de la fenêtre seulement quand la grille la dépasse
+   (le formulaire reçoit alors data-tall, voir DirtyIndicator), avec une ombre vers le haut. */
+.hs-grid-form > .actions { align-items: center; gap: 14px; }
+.hs-grid-form[data-tall="1"] > .actions { position: sticky; bottom: 0; z-index: 6; padding: 10px 12px; background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -10px 16px -12px #14182440; }
 
 /* Barre d'outils de la grille. */
 .hs-tools { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
 .hs-tools-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; }
+.hs-tools .btn { flex: none; white-space: nowrap; }
 html[data-clair-theme="airy"] .hs-tools .btn, html[data-clair-theme="airy"] .btn.hs-report { min-height: 30px; padding: 4px 10px; font-size: var(--clair-type-form); }
+.btn.hs-report { white-space: nowrap; }
 .hs-years { display: inline-flex; }
 html[data-clair-theme="airy"] .hs-years .btn { border-radius: 0; margin-left: -1px; min-width: 64px; }
 html[data-clair-theme="airy"] .hs-years .btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
@@ -121,9 +198,22 @@ html[data-clair-theme="airy"] .hs-years .btn[aria-pressed="true"] { position: re
 .hs-dirty[data-n]:not([data-n="0"])::before { content: "●"; margin-right: 6px; font-size: 9px; vertical-align: 1px; }
 .hs-dirty[data-bad]:not([data-bad="0"]) { color: var(--danger); }
 
+@media (max-width: 860px) {
+  /* Sur petit écran le cadre défile : les colonnes gardent leur largeur (jamais écrasées jusqu'à gonfler les lignes) et la
+     page défile verticalement sans second ascenseur. */
+  .hs-grid .data-table { min-width: max-content; }
+  .hs-table td.wrap, .hs-grid .data-table td.wrap { min-width: 200px; max-width: 260px; }
+  .hs-grid .data-table :is(th, td):first-child { min-width: 104px; max-width: 132px; }
+  .hs-grid .hs-consts.sticky-first :is(th, td):first-child, .hs-grid .hs-env.sticky-first :is(th, td):first-child { position: static; box-shadow: none; min-width: 150px; }
+  .hs-grid .month-grid input.input.wide { width: 150px; }
+}
 @media (max-width: 720px) {
   .hs-tools-row { align-items: stretch; }
   .hs-fill { width: 100%; }
   .hs-fill .input { flex: 1 1 100px; }
   .hs-grid-form > .actions { gap: 8px; }
+  .hs-dup { flex: 1 1 100%; max-width: none; }
+  .hs-dup .field-row { flex-wrap: wrap; }
+  .hs-dup .field-row .input { flex: 1 1 180px; }
+  .panel.hs-scenario { padding: 14px; }
 }

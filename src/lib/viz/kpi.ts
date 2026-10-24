@@ -138,6 +138,35 @@ export function repartition(g: GridIn, stock: boolean): { known: string[]; used:
   return { known: knownMonths, used, items, total: items.reduce((s, x) => s + x.v, 0) };
 }
 
+// --- Libellés et typographie d'affichage (aucun calcul)
+
+// Libellé français d'un type d'absence PayFit déjà nommé par l'application (défaut validé des définitions des KPI : « maladie
+// ordinaire »). Un autre code n'a pas de libellé connu : null, et l'écran le montre tel que reçu, sans le deviner.
+const ABSENCE_TYPE_LABELS: Record<string, string> = { fr_maladie_ordinaire: "Maladie ordinaire" };
+export const absenceTypeLabel = (code: string): string | null => ABSENCE_TYPE_LABELS[code] ?? null;
+// Libellé suivi du code entre parenthèses (tableaux de paramètres) ; le code seul s'il n'a pas de libellé.
+export const absenceTypeText = (code: string): string => {
+  const label = absenceTypeLabel(code);
+  return label ? `${label} (${code})` : code;
+};
+
+// Vrai signe moins (U+2212) dans une formule affichée : « = -42500/1079 » → « = −42500/1079 ». Un tiret d'un nom (« N-1 »)
+// ou d'une date (« 2025-10 ») n'est pas touché : seul un tiret qui précède un chiffre en début de terme est remplacé.
+export const typoMinus = (s: string): string => s.replace(/(^|[\s(=×÷])-(?=\d)/g, "$1\u2212");
+
+// Libellé d'un axe de répartition « Catégorie (CDI, CDD, apprenti, stagiaire) » → nom court et précision (null sans parenthèse finale).
+export function splitAxisLabel(label: string): { name: string; detail: string | null } {
+  const i = label.indexOf(" (");
+  if (i < 0 || !label.endsWith(")")) return { name: label, detail: null };
+  return { name: label.slice(0, i), detail: label.slice(i + 2, -1) };
+}
+
+// Vrai si au moins une valeur est connue et que toutes les valeurs connues valent 0 (un taux nul : rien à tracer, mais ce n'est pas un n.d.).
+export function allZero(list: ChartSeries[]): boolean {
+  const known = list.flatMap((s) => s.values).filter((v): v is number => v !== null && v !== undefined);
+  return known.length > 0 && known.every((v) => v === 0);
+}
+
 // Série entièrement absente : le graphique est remplacé par la raison (une ligne vide ou une rangée de colonnes hachurées
 // ne dirait rien). null dès qu'une valeur est connue.
 export function ndSummary(list: ChartSeries[]): string | null {

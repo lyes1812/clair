@@ -4,9 +4,9 @@ import { isMonth } from "@/lib/connectors/months";
 import { formatDate, formatMonth, monthsBetween } from "@/lib/dates";
 import { contractNatureLabel, quotaUnitLabel } from "@/lib/dsn/labels";
 import { monthlyList, type MonthlyRow } from "@/lib/rh/headcount";
-import { fmtNumber, loadCollabContext, MONTH_FLAG_LABELS, personLabel, showCount, showHeadcount, timeUnitLabel } from "@/lib/rh/view";
-import { DEFAULT_PAGE_SIZE, matchesQuery, pageHref, pageOf, pageSizeOf, paginate } from "@/lib/viz/collaborateurs";
-import { CollabHeader, contractHref, EndCell, endText, EventsTable, Field, FindingList, FlagTags, HiddenParams, ListToolbar, MonthSelect, Nature, PersonCell, personHref, ProvenanceDetails, StatePill, Tile } from "./components";
+import { fmtNumber, loadCollabContext, MONTH_FLAG_LABELS, personLabel, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
+import { clearMonths, collectNotes, DEFAULT_PAGE_SIZE, defaultMonth, matchesQuery, pageHref, pageOf, pageSizeOf, paginate, plural } from "@/lib/viz/collaborateurs";
+import { CollabHeader, contractHref, EndCell, endNd, endText, EventsTable, FilterActions, FindingList, FlagTags, HiddenParams, ListToolbar, MonthSelect, NdNote, NdShort, NdTableNote, Nature, PersonCell, personHref, ProvenanceDetails, shownNdReasons, StatePill, Tile } from "./components";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +54,10 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
   const coverageMonths = [...new Set(d.coverage.map((c) => c.month))].sort();
   const months = b.presenceFrom && b.presenceTo ? monthsBetween(b.presenceFrom, b.presenceTo) : coverageMonths;
   const requested = one(sp.mois);
-  const month = isMonth(requested) ? requested : (b.presenceTo ?? coverageMonths[coverageMonths.length - 1] ?? null);
+  // Sans mois demandé : le dernier mois entièrement couvert par la date de référence (le mois en cours à cette date n'a pas encore
+  // d'effectif de fin de mois) ; à défaut, le dernier mois couvert. Un mois demandé dans l'adresse est toujours respecté.
+  const lastCovered = b.presenceTo ?? coverageMonths[coverageMonths.length - 1] ?? null;
+  const month = isMonth(requested) ? requested : defaultMonth(months, b.referenceDate, lastCovered);
   const etab = ctx.establishments.some((e) => e.id === one(sp.etab)) ? one(sp.etab) : "";
   const nature = /^\d{2}$/.test(one(sp.nature)) ? one(sp.nature) : "";
   const etat = one(sp.etat) in STATES ? (one(sp.etat) as keyof typeof STATES) : "";
@@ -87,6 +90,82 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
   const pg = paginate(rows, pageOf(one(sp.page)), size);
   const badCoverage = ml.coverage.filter((c) => c.presenceStatus !== "complete");
 
+  // Cellules n.d. du tableau : « n.d. » court (raison au survol), chaque raison dite une fois sous le tableau.
+  const ndLog: { column: string; reason: string }[] = [];
+  const nd = (reason: string, column: string) => {
+    ndLog.push({ column, reason });
+    return <NdShort reason={reason} />;
+  };
+  const body = pg.items.map((r) => {
+    const m = r.month;
+    const c = r.contract;
+    ndLog.push(...endNd(c));
+    return (
+      <tr key={`${m.contractKey}-${m.establishmentId}`} data-contract={c.externalId}>
+        <td><PersonCell person={r.person} contract={c} slug={slug} /></td>
+        <td>{r.person ? (r.person.employeeNumber ?? nd(r.person.fieldsNd.employeeNumber?.reason ?? "valeur absente", "Matricule")) : "—"}</td>
+        <td><a href={contractHref(slug, c.contractKey)}><code>{c.externalId}</code></a></td>
+        <td><code>{m.establishmentId}</code></td>
+        <td><Nature code={c.nature} /></td>
+        <td className="col-date">{c.startDate ? formatDate(c.startDate) : nd(c.fieldsNd.startDate?.reason ?? "date absente", "Début")}</td>
+        <td className="col-wide"><EndCell c={c} slug={slug} prov={false} short /></td>
+        <td className="col-state"><StatePill code={r.state.code} label={r.state.label} /></td>
+        <td className="col-qty" title={isPayfit ? "valeur à la date de lecture (non historisée par PayFit)" : `quotité du contrat / de référence, ${quotaUnitLabel(m.quotaUnit)}, déclarée pour ${m.month}`}>
+          {isPayfit ? (
+            c.fteAtRead !== null ? `${fmtNumber(c.fteAtRead)} ETP (à la lecture)` : nd(c.fieldsNd.fteAtRead?.reason ?? "non renseigné", "Quotité")
+          ) : m.contractQuota !== null || m.referenceQuota !== null ? (
+            `${m.contractQuota === null ? "n.d." : fmtNumber(m.contractQuota)} / ${m.referenceQuota === null ? "n.d." : fmtNumber(m.referenceQuota)} ${timeUnitLabel(m.quotaUnit, "dsn")} (${m.month})`
+          ) : (
+            nd(m.fieldsNd.contractQuota?.reason ?? "non déclaré", "Quotité")
+          )}
+        </td>
+        <td className="col-qty">
+          {m.paidTime !== null ? (m.paidTime === 0 ? "0 — sous contrat, aucun temps payé" : `${fmtNumber(m.paidTime)} ${timeUnitLabel(m.timeUnit, b.source)}`) : nd(m.fieldsNd.paidTime?.reason ?? "absent", "Temps payé")}
+          {" / "}
+          {m.workedTime !== null ? (m.workedTime === 0 ? "0" : `${fmtNumber(m.workedTime)} ${timeUnitLabel(m.timeUnit, b.source)}`) : nd(m.fieldsNd.workedTime?.reason ?? "absent", "Temps travaillé")}
+        </td>
+        {isPayfit ? (
+          <td>{c.statusSource ?? <span className="nd">n.d.</span>}</td>
+        ) : (
+          <td className="num">{m.paymentCount === null ? <span className="nd">n.d.</span> : m.paymentCount === 0 ? <span title={m.fieldsNd.paymentCount?.reason}>0 — aucun versement</span> : m.paymentCount}</td>
+        )}
+        <td><FlagTags flags={m.flags} labels={MONTH_FLAG_LABELS} /></td>
+        <td><ProvenanceDetails row={m} slug={slug} /></td>
+      </tr>
+    );
+  });
+
+  // Tuiles du mois : les valeurs viennent du moteur ; les raisons n.d. identiques sont dites une fois en tête de panneau.
+  const present = ml.presentAnyDay;
+  const tiles: { id: string; label: string; shown: Shown; def: string }[] = [
+    { id: "headcount-persons", label: "Effectif fin de mois (personnes)", shown: showHeadcount(ml.headcountEnd, "persons"), def: "headcount-persons" },
+    { id: "headcount-contracts", label: "Effectif fin de mois (contrats)", shown: showHeadcount(ml.headcountEnd, "contracts"), def: "headcount-contracts" },
+    {
+      id: "present-any-day",
+      label: "Présents au moins un jour (personnes)",
+      shown: present.kind === "nd" ? { text: `n.d. — ${present.nd.reason}`, kind: "nd" } : present.kind === "lower_bound" ? { text: `≥ ${present.persons}`, kind: "lower", foot: present.qualifiers.join(" · ") } : { text: String(present.persons), kind: "value", foot: plural(present.contracts, "contrat") },
+      def: "month-end",
+    },
+    { id: "entries-count", label: "Entrées", shown: showCount(ml.entriesCount), def: "movements" },
+    { id: "exits-count", label: "Sorties", shown: showCount(ml.exitsCount), def: "movements" },
+    { id: "all-contracts", label: "Contrats présents, toutes natures", shown: showHeadcount(ml.headcountEnd, "allContracts"), def: "all-contracts" },
+    {
+      id: "out-of-scope",
+      label: "Hors effectif (par nature)",
+      shown:
+        ml.headcountEnd.kind === "nd"
+          ? { text: `n.d. — ${ml.headcountEnd.nd.reason}`, kind: "nd" }
+          : {
+              text: Object.entries(ml.headcountEnd.outOfScope.byNature).map(([n, c]) => `${n === "nd" ? "nature n.d." : contractNatureLabel(n)} : ${c}`).join(" · ") || "0",
+              kind: "value",
+              foot: [ml.headcountEnd.outOfScope.withoutPerson ? `contrats sans personne : ${ml.headcountEnd.outOfScope.withoutPerson}` : null, ml.headcountEnd.outOfScope.unpositioned ? `non positionnables : ${ml.headcountEnd.outOfScope.unpositioned}` : null].filter(Boolean).join(" · ") || undefined,
+            },
+      def: "all-contracts",
+    },
+  ];
+  // La raison du blocage du mois est toujours écrite (en tête), puis les autres raisons n.d. des tuiles, sans doublon.
+  const tileNd = [...new Set([...(ml.gate ? [clearMonths(ml.gate.reason)] : []), ...shownNdReasons(tiles.map((t) => t.shown))])];
+
   // Adresses : la barre de période (mois, établissement) et la barre du tableau (recherche, nature, état, taille) se conservent l'une l'autre.
   const sizeParam = size === DEFAULT_PAGE_SIZE ? undefined : String(size);
   const listParams = { mois: month, etab: etab || undefined, nature: nature || undefined, etat: etat || undefined, q: q || undefined, taille: sizeParam };
@@ -106,7 +185,7 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
             </select>
           </div>
         )}
-        <button className="btn" type="submit">Afficher</button>
+        <FilterActions label="Afficher" />
       </form>
 
       {badCoverage.map((c) => (
@@ -114,56 +193,32 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
           {formatMonth(c.month)} · {c.establishmentId} : {c.presenceStatus === "lower_bound" ? "borne basse" : c.presenceStatus === "missing" ? "mois non couvert" : c.presenceStatus === "incomplete" ? "mois incomplet" : "mois bloqué"} — {c.presenceReason ?? "n.d."}
         </p>
       ))}
-      {ml.coverage.length === 0 && ml.gate && (
-        <p className="notice" data-testid="coverage-notice">{formatMonth(month)} : n.d. — {ml.gate.reason}</p>
-      )}
 
-      <section className="panel collab-panel">
+      <section className="panel collab-panel" data-testid="collab-month-panel">
         <h2>{formatMonth(month)}</h2>
+        {/* Une seule explication n.d. en tête de panneau ; les tuiles disent « n.d. » (raison au survol). */}
+        {ml.gate ? (
+          <NdNote reasons={tileNd} testid="month-nd">
+            <p className="muted">
+              La liste du mois n'est pas affichée : aucune valeur n'est reconstituée. Voir <a href={`/e/${slug}/donnees/${isPayfit ? "payfit" : "dsn"}`}>Données › {isPayfit ? "PayFit" : "DSN"}</a>.
+            </p>
+          </NdNote>
+        ) : (
+          <NdNote reasons={tileNd} testid="month-tiles-nd" />
+        )}
         <dl className="facts collab-tiles">
-          <Tile id="headcount-persons" label="Effectif fin de mois (personnes)" shown={showHeadcount(ml.headcountEnd, "persons")} def="headcount-persons" />
-          <Tile id="headcount-contracts" label="Effectif fin de mois (contrats)" shown={showHeadcount(ml.headcountEnd, "contracts")} def="headcount-contracts" />
-          <Tile
-            id="present-any-day"
-            label="Présents au moins un jour (personnes)"
-            shown={ml.presentAnyDay.kind === "nd" ? { text: `n.d. — ${ml.presentAnyDay.nd.reason}`, kind: "nd" } : ml.presentAnyDay.kind === "lower_bound" ? { text: `≥ ${ml.presentAnyDay.persons}`, kind: "lower", foot: ml.presentAnyDay.qualifiers.join(" · ") } : { text: String(ml.presentAnyDay.persons), kind: "value", foot: `${ml.presentAnyDay.contracts} contrat(s)` }}
-            def="month-end"
-          />
-          <Tile id="entries-count" label="Entrées" shown={showCount(ml.entriesCount)} def="movements" />
-          <Tile id="exits-count" label="Sorties" shown={showCount(ml.exitsCount)} def="movements" />
-          <Tile id="all-contracts" label="Contrats présents, toutes natures" shown={showHeadcount(ml.headcountEnd, "allContracts")} def="all-contracts" />
-          <Tile
-            id="out-of-scope"
-            label="Hors effectif (par nature)"
-            shown={
-              ml.headcountEnd.kind === "nd"
-                ? { text: `n.d. — ${ml.headcountEnd.nd.reason}`, kind: "nd" }
-                : {
-                    text: Object.entries(ml.headcountEnd.outOfScope.byNature).map(([n, c]) => `${n === "nd" ? "nature n.d." : contractNatureLabel(n)} : ${c}`).join(" · ") || "0",
-                    kind: "value",
-                    foot: [ml.headcountEnd.outOfScope.withoutPerson ? `contrats sans personne : ${ml.headcountEnd.outOfScope.withoutPerson}` : null, ml.headcountEnd.outOfScope.unpositioned ? `non positionnables : ${ml.headcountEnd.outOfScope.unpositioned}` : null].filter(Boolean).join(" · ") || undefined,
-                  }
-            }
-            def="all-contracts"
-          />
+          {tiles.map((t) => <Tile key={t.id} id={t.id} label={t.label} shown={t.shown} def={t.def} />)}
         </dl>
         {ml.headcountEnd.kind !== "nd" && Object.keys(ml.headcountEnd.bySiret).length > 1 && (
           <p className="desc">
-            Par établissement : {Object.entries(ml.headcountEnd.bySiret).map(([s, v]) => `${s} : ${v.persons} personne(s), ${v.contracts} contrat(s)`).join(" · ")}
+            Par établissement : {Object.entries(ml.headcountEnd.bySiret).map(([s, v]) => `${s} : ${v.persons} personne${v.persons > 1 ? "s" : ""}, ${v.contracts} contrat${v.contracts > 1 ? "s" : ""}`).join(" · ")}
           </p>
         )}
       </section>
 
-      {ml.gate ? (
-        <section className="placeholder" data-testid="month-nd">
-          <h3>n.d. — {ml.gate.reason}</h3>
-          <p className="muted">
-            La liste du mois n'est pas affichée : aucune valeur n'est reconstituée. Voir <a href={`/e/${slug}/donnees/${isPayfit ? "payfit" : "dsn"}`}>Données › {isPayfit ? "PayFit" : "DSN"}</a>.
-          </p>
-        </section>
-      ) : (
+      {!ml.gate && (
         <section className="panel collab-panel" data-testid="collab-monthly-panel">
-          <h2>Contrats du mois <span className="desc">— {rows.length} ligne(s){rows.length !== ml.rows.length ? ` sur ${ml.rows.length}` : ""}</span></h2>
+          <h2>Contrats du mois <span className="desc">— {plural(rows.length, "ligne")}{rows.length !== ml.rows.length ? ` sur ${ml.rows.length}` : ""}</span></h2>
           <ListToolbar testid="month-toolbar" label="Recherche et filtres du tableau des contrats du mois" hidden={{ mois: month, etab: etab || undefined }} q={q} size={size} resetHref={resetHref}>
             <div className="field-row">
               <label htmlFor="nature">Nature</label>
@@ -180,7 +235,7 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
               </select>
             </div>
           </ListToolbar>
-          <div className="table-wrap scroll collab-scroll">
+          <div className={pg.items.length > 12 ? "table-wrap scroll collab-scroll" : "table-wrap scroll collab-flat"}>
             <table className="data-table sticky sticky-first collab-table collab-who" data-testid="collab-monthly-table">
               <caption className="collab-sr">Contrats du mois — {formatMonth(month)} : une ligne par contrat et par établissement</caption>
               <thead>
@@ -191,47 +246,10 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
                   <th scope="col">Drapeaux</th><th scope="col">Provenance</th>
                 </tr>
               </thead>
-              <tbody>
-                {pg.items.map((r) => {
-                  const m = r.month;
-                  const c = r.contract;
-                  return (
-                    <tr key={`${m.contractKey}-${m.establishmentId}`} data-contract={c.externalId}>
-                      <td><PersonCell person={r.person} contract={c} slug={slug} /></td>
-                      <td>{r.person ? <Field row={r.person} field="employeeNumber" value={r.person.employeeNumber} slug={slug} prov={false} /> : "—"}</td>
-                      <td><a href={contractHref(slug, c.contractKey)}><code>{c.externalId}</code></a></td>
-                      <td><code>{m.establishmentId}</code></td>
-                      <td><Nature code={c.nature} /></td>
-                      <td className="col-date">{c.startDate ? formatDate(c.startDate) : <span className="nd">n.d. — {c.fieldsNd.startDate?.reason ?? "date absente"}</span>}</td>
-                      <td className="col-wide"><EndCell c={c} slug={slug} prov={false} /></td>
-                      <td className="col-state"><StatePill code={r.state.code} label={r.state.label} /></td>
-                      <td className="col-qty" title={isPayfit ? "valeur à la date de lecture (non historisée par PayFit)" : `quotité du contrat / de référence, ${quotaUnitLabel(m.quotaUnit)}, déclarée pour ${m.month}`}>
-                        {isPayfit ? (
-                          c.fteAtRead !== null ? `${fmtNumber(c.fteAtRead)} ETP (à la lecture)` : <span className="nd">n.d. — {c.fieldsNd.fteAtRead?.reason ?? "non renseigné"}</span>
-                        ) : m.contractQuota !== null || m.referenceQuota !== null ? (
-                          `${m.contractQuota === null ? "n.d." : fmtNumber(m.contractQuota)} / ${m.referenceQuota === null ? "n.d." : fmtNumber(m.referenceQuota)} ${timeUnitLabel(m.quotaUnit, "dsn")} (${m.month})`
-                        ) : (
-                          <span className="nd">n.d. — {m.fieldsNd.contractQuota?.reason ?? "non déclaré"}</span>
-                        )}
-                      </td>
-                      <td className="col-qty">
-                        {m.paidTime !== null ? (m.paidTime === 0 ? "0 — sous contrat, aucun temps payé" : `${fmtNumber(m.paidTime)} ${timeUnitLabel(m.timeUnit, b.source)}`) : <span className="nd">n.d. — {m.fieldsNd.paidTime?.reason ?? "absent"}</span>}
-                        {" / "}
-                        {m.workedTime !== null ? (m.workedTime === 0 ? "0" : `${fmtNumber(m.workedTime)} ${timeUnitLabel(m.timeUnit, b.source)}`) : <span className="nd">n.d. — {m.fieldsNd.workedTime?.reason ?? "absent"}</span>}
-                      </td>
-                      {isPayfit ? (
-                        <td>{c.statusSource ?? <span className="nd">n.d.</span>}</td>
-                      ) : (
-                        <td className="num">{m.paymentCount === null ? <span className="nd">n.d.</span> : m.paymentCount === 0 ? <span title={m.fieldsNd.paymentCount?.reason}>0 — aucun versement</span> : m.paymentCount}</td>
-                      )}
-                      <td><FlagTags flags={m.flags} labels={MONTH_FLAG_LABELS} /></td>
-                      <td><ProvenanceDetails row={m} slug={slug} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+              <tbody>{body}</tbody>
             </table>
           </div>
+          <NdTableNote notes={collectNotes(ndLog)} testid="collab-monthly-notes" />
           {rows.length === 0 && <p className="muted">Aucune ligne pour ces filtres.</p>}
           <Pager page={pg.page} pageSize={size} total={pg.total} href={(p) => pageHref(listParams, p)} testid="collab-monthly-pager" />
           <p className="collab-note">Les états de fin de mois suivent <a href="#def-presence">la définition de la présence</a> ; les natures comptées sont un paramètre de l'espace.</p>
@@ -253,7 +271,7 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
             {ml.outOfScope.otherNatures.length > 0 && (
               <ul className="list">
                 {ml.outOfScope.otherNatures.map((r) => (
-                  <li key={r.contract.contractKey}><span><PersonCell person={r.person} contract={r.contract} slug={slug} /> · <code>{r.contract.externalId}</code></span><span><Nature code={r.contract.nature} /></span></li>
+                  <li key={r.contract.contractKey}><span><PersonCell person={r.person} contract={r.contract} slug={slug} inline /> · <code>{r.contract.externalId}</code></span><span><Nature code={r.contract.nature} /></span></li>
                 ))}
               </ul>
             )}

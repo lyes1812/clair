@@ -85,17 +85,18 @@ export default async function MembresPage({ params }: { params: Promise<{ slug: 
         <p className="desc">Trois rôles par espace : chaque action est contrôlée côté serveur, quel que soit l'écran.</p>
       </PageHead>
 
-      <ul className="mb-roles" data-testid="mb-roles">
+      {/* Définitions des trois rôles : de l'information, pas des choix. Seul « Votre rôle » est mis en évidence, par un badge. */}
+      <dl className="mb-roles" data-testid="mb-roles">
         {ROLES.map((r) => (
-          <li key={r} data-current={workspace.role === r ? "true" : undefined}>
-            <span className="mb-role-title">
-              <strong>{ROLE_LABELS[r]}</strong>
+          <div key={r} data-current={workspace.role === r ? "true" : undefined}>
+            <dt>
+              {ROLE_LABELS[r]}
               {workspace.role === r && <span className="tag">Votre rôle</span>}
-            </span>
-            <span className="desc">{ROLE_NOTES[r]}</span>
-          </li>
+            </dt>
+            <dd>{ROLE_NOTES[r]}</dd>
+          </div>
         ))}
-      </ul>
+      </dl>
 
       <section className="panel" aria-labelledby="members-title" id="membres">
         <div className="dn-section-head">
@@ -174,15 +175,15 @@ export default async function MembresPage({ params }: { params: Promise<{ slug: 
           {events.length === 0 ? (
             <Empty>Aucun événement.</Empty>
           ) : (
-            <div className="table-wrap scroll">
+            <div className="table-wrap scroll mb-journal">
               <table className="data-table sticky" data-testid="event-list">
                 <thead><tr><th scope="col">Date</th><th scope="col">Événement</th><th scope="col">Par</th></tr></thead>
                 <tbody>
                   {events.map((ev) => (
                     <tr key={ev.id}>
-                      <td>{dateFmt.format(ev.occurredAt)}</td>
-                      <td>{(EVENT_LABELS as Record<string, string>)[ev.kind] ?? ev.kind}</td>
-                      <td>{ev.actorUserId ? (nameOf.get(ev.actorUserId) ?? <span className="nd">ancien membre</span>) : <span className="nd">n.d.</span>}</td>
+                      <td className="mb-ev-date">{dateFmt.format(ev.occurredAt)}</td>
+                      <td className="mb-ev-kind">{(EVENT_LABELS as Record<string, string>)[ev.kind] ?? ev.kind}</td>
+                      <td className="mb-ev-by">{ev.actorUserId ? (nameOf.get(ev.actorUserId) ?? <span className="nd">ancien membre</span>) : <span className="nd">n.d. — auteur non enregistré</span>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -195,7 +196,7 @@ export default async function MembresPage({ params }: { params: Promise<{ slug: 
       {isAdmin && (
         <section className="panel" id="espace">
           <div className="dn-section-head">
-            <h2>Espace</h2>
+            <h2>Renommer l'espace</h2>
             <p className="desc">Le nom est affiché dans le menu et en tête de chaque écran.</p>
           </div>
           <RenameForm slug={slug} name={workspace.name} />

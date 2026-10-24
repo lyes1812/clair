@@ -45,9 +45,14 @@ export function EcartChart(p: EcartChartProps) {
   // Une version sans aucune valeur n'a pas de courbe : sa raison est écrite ici (l'infobulle ne la montre que pour un mois survolé).
   const empty = d ? d.series.filter((s) => s.values.every((v) => v === null)) : [];
   const partial = d ? d.series.map((s) => ({ name: s.name, n: s.values.filter((v) => v === null).length, all: s.values.length })).filter((x) => x.n > 0 && x.n < x.all) : [];
+  // L'aire teintée sous un scénario n'est tracée que depuis zéro : sur un axe ajusté elle partirait du bas de l'axe et agrandirait
+  // l'écart à l'œil.
+  const series = d ? d.series.map((s) => (zero ? s : { ...s, area: false })) : [];
+  const shaded = zero && series.some((s) => s.area);
+  // Deux messages distincts : la lecture du graphique (au-dessus) et ses limites (en dessous, avec la mention d'axe du composant).
+  const reading = `Trait plein : version 1 · pointillés : versions suivantes${shaded ? " · zone teintée : scénario" : ""}. Chaque point est la valeur du mois, chaque version étant lue sur sa propre année à rang de mois égal.`;
   const note = [
-    "Trait plein : version 1 · pointillés : versions suivantes · zone teintée : scénario.",
-    "Chaque point est la valeur du mois, chaque version étant lue sur sa propre année à rang de mois égal ; le tableau donne la valeur de la période (moyenne des ETP de fin de mois, inscrits en fin de période, somme pour les entrées, les sorties et les montants).",
+    "Le tableau donne la valeur de la période (moyenne des ETP de fin de mois, inscrits en fin de période, somme pour les entrées, les sorties et les montants), pas celle du mois.",
     partial.length ? `Mois sans valeur (n.d. ou rubrique sans objet ; courbe interrompue, raison au survol) : ${partial.map((x) => `${x.name} : ${x.n} mois`).join(" ; ")}.` : null,
     empty.length ? `Aucune valeur à tracer : ${empty.map((s) => `${s.name} (${reasonsOf(s)})`).join(" ; ")}.` : null,
   ].filter(Boolean).join(" ");
@@ -70,6 +75,7 @@ export function EcartChart(p: EcartChartProps) {
           <span>Axe vertical à partir de zéro</span>
         </label>
       </div>
+      {d && drawn && <p className="ecart-reading" data-testid={`${p.testid}-lecture`}>{reading}</p>}
       {d && drawn ? (
         <LineChart
           testid={p.testid}
@@ -77,7 +83,7 @@ export function EcartChart(p: EcartChartProps) {
           title={`${label} — par mois, ${p.period}`}
           categories={p.categories}
           categoryTitles={p.categoryTitles}
-          series={d.series}
+          series={series}
           unit={d.unit}
           zero={zero}
           note={note}

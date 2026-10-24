@@ -1,7 +1,7 @@
 "use client";
 import { useId, useState } from "react";
-import { WaterfallChart } from "@/components/charts";
 import type { WaterfallData } from "@/lib/viz/ecart";
+import { TitledWaterfall } from "./TitledWaterfall";
 
 // Cascade de l'analyse des écarts : une rubrique à la fois (ETP ou masse salariale chargée), choisie sans recharger la page ;
 // le choix est reporté dans l'adresse. Chaque cascade est la lecture graphique du tableau exact placé dessous.
@@ -41,7 +41,7 @@ export function AnalyseChart(p: AnalyseChartProps) {
           <p className="nd">n.d. — {item.data.reason}</p>
         </div>
       ) : (
-        <WaterfallChart
+        <TitledWaterfall
           testid={`wf-${rub}`}
           label={item.ariaLabel}
           title={item.title}

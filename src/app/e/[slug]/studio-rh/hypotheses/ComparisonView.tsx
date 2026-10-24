@@ -6,13 +6,13 @@ import { formatEuros } from "@/lib/money";
 import { roundDiv } from "@/lib/budget/engine";
 import { bridge, gap, type Layer, type Point, type Series } from "@/lib/budget/series";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
-import { affichageOf, bridgeWaterfall, comparisonSeries, gapSeries, hasValues, layerSpans, monthAxis, ndReadings, showCharts, showTables, withAffichage } from "@/lib/viz/hypotheses";
+import { affichageOf, bridgeWaterfall, comparisonSeries, frDates, gapSeries, hasValues, layerSpans, monthAxis, ndReadings, showCharts, showTables, withAffichage } from "@/lib/viz/hypotheses";
 import { monthShort } from "../masse-salariale/components";
 
 const LAYER: Record<Layer, string> = { reel: "réel", "projete-parent": "projeté (parent)", projete: "projeté", budget: "budget" };
 const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
 const cell = (p: Point | undefined) => (!p ? "n.d." : p.kind === "nd" ? "n.d." : formatEuros(p.cost));
-const why = (p: Point | undefined) => (!p ? "mois non couvert par cette lecture" : p.kind === "nd" ? p.reason : undefined);
+const why = (p: Point | undefined) => (!p ? "mois non couvert par cette lecture" : p.kind === "nd" ? frDates(p.reason) : undefined);
 const pctText = (pct: { num: number; den: number } | null) => (pct ? `${pct.num > 0 ? "+" : ""}${fmtPercent(pct)}` : "n.d. (référence nulle)");
 
 export type Option = { value: string; label: string };
@@ -73,7 +73,10 @@ export function ComparisonView({
 
       {compared.length > 0 && (
         <section className="panel">
-          <h2>Écarts {year} <span className="desc">— {principal.label} − lecture comparée ; positif = au-dessus</span></h2>
+          <div className="hr-title">
+            <h2>Écarts {year}</h2>
+            <p className="desc">{principal.label} − lecture comparée ; positif = au-dessus.</p>
+          </div>
           <dl className="facts hr-tiles hr-tiles-sm">
             {compared.map((c) => {
               const y = gap(principal, c, months);
@@ -81,11 +84,11 @@ export function ComparisonView({
               return (
                 <div key={c.key} className="hr-tile" data-testid={`cmp-tile-${c.key}`}>
                   <dt>vs {c.label}{" "}<span className="hr-sub">écart sur l'année {year}</span></dt>
-                  <dd className={y.kind === "nd" ? "nd" : undefined}>{y.kind === "nd" ? `n.d. — ${y.reason}` : `${signed(y.delta)} · ${pctText(y.pct)}`}</dd>
+                  <dd className={y.kind === "nd" ? "nd" : undefined}>{y.kind === "nd" ? `n.d. — ${frDates(y.reason)}` : `${signed(y.delta)} · ${pctText(y.pct)}`}</dd>
                   {y.kind === "value" && <span className="tile-foot">{formatEuros(y.a)} contre {formatEuros(y.b)} sur l'année</span>}
                   {ytd && (
                     <span className="tile-foot" data-testid={`cmp-ytd-${c.key}`}>
-                      {monthShort(done[0])}–{monthShort(done.at(-1)!)} (mêmes mois) : {ytd.kind === "nd" ? `n.d. — ${ytd.reason}` : `${signed(ytd.delta)} · ${pctText(ytd.pct)}`}
+                      {monthShort(done[0])}–{monthShort(done.at(-1)!)} (mêmes mois) : {ytd.kind === "nd" ? `n.d. — ${frDates(ytd.reason)}` : `${signed(ytd.delta)} · ${pctText(ytd.pct)}`}
                     </span>
                   )}
                 </div>
@@ -100,7 +103,7 @@ export function ComparisonView({
           <div className="hr-title">
             <h2>Courbes mensuelles — {year}</h2>
             <p className="desc">
-              Coût employeur de chaque mois : {principal.label} (trait plein bleu) {compared.length ? "face aux lectures choisies" : "seul : choisir des lectures à comparer dans le formulaire ci-dessus"}. Le graphique est une lecture : les montants exacts, à l'euro près, sont dans {aff === "graphique" ? <a href={withAffichage(here, "tableau")}>l'affichage Tableau</a> : "le tableau « Mois par mois » plus bas"}. Définitions : <a href="#def-budget-saisi">budget saisi</a>, <a href="#def-pont">pont d'écart</a>.
+              Coût employeur de chaque mois : {principal.label} (trait plein bleu) {compared.length ? "face aux lectures choisies" : "seul : choisir des lectures à comparer dans le formulaire ci-dessus"}. Montants exacts : {aff === "graphique" ? <a href={withAffichage(here, "tableau")}>affichage Tableau</a> : "tableau « Mois par mois » plus bas"}. Définitions : <a href="#def-budget-saisi">budget saisi</a>, <a href="#def-pont">pont d'écart</a>.
             </p>
           </div>
           <div className="hr-charts">
@@ -174,7 +177,7 @@ export function ComparisonView({
                 })}
               </tbody>
               <tfoot>
-                <tr data-testid="cmp-total">
+                <tr className="total" data-testid="cmp-total">
                   <td>Année {year}</td>
                   <td className="num" data-col="principal">{(() => { const g = gap(principal, principal, months); return g.kind === "nd" ? "n.d." : formatEuros(g.a); })()}</td>
                   {compared.map((c) => {
@@ -195,7 +198,10 @@ export function ComparisonView({
 
       {compared.length > 0 && (
         <section className="panel" data-testid="cmp-bridge">
-          <h2>Pont d'écart {year} — volume et coût moyen <span className="desc">— <a href="#def-pont">Définition</a></span></h2>
+          <div className="hr-title">
+            <h2>Pont d'écart {year}</h2>
+            <p className="desc">Volume et coût moyen. <a href="#def-pont">Définition</a></p>
+          </div>
           {showCharts(aff) && (
             <div className="hr-charts-2" data-testid="cmp-bridge-charts">
               {bridges.map(({ c, b }) => {
@@ -218,7 +224,7 @@ export function ComparisonView({
                     ) : (
                       <div className="hr-nd">
                         <p className="hr-nd-title">Pont d'écart {year} — {c.label}</p>
-                        <p className="nd">n.d. — {w.kind === "nd" ? w.reason : w.text}</p>
+                        <p className="nd">n.d. — {w.kind === "nd" ? frDates(w.reason) : w.text}</p>
                       </div>
                     )}
                   </div>
@@ -232,7 +238,7 @@ export function ComparisonView({
                 <thead><tr><th>Lecture comparée</th><th className="num">Écart total</th><th className="num">Effet volume</th><th className="num">Effet coût moyen</th><th>Effet de structure</th><th className="num">ETP-mois</th><th className="num">Coût par ETP-mois</th></tr></thead>
                 <tbody>
                   {bridges.map(({ c, b }) => {
-                    if (b.kind === "nd") return <tr key={c.key} data-bridge={c.key}><td>{c.label}</td><td colSpan={6} className="nd wrap">n.d. — {b.reason}</td></tr>;
+                    if (b.kind === "nd") return <tr key={c.key} data-bridge={c.key}><td>{c.label}</td><td colSpan={6} className="nd wrap">n.d. — {frDates(b.reason)}</td></tr>;
                     const cpe = (x: { cost: number; etpMonths4: number }) => formatEuros(roundDiv(BigInt(x.cost) * 10000n, BigInt(x.etpMonths4)));
                     return (
                       <tr key={c.key} data-bridge={c.key}>

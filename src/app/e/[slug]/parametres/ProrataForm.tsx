@@ -19,7 +19,7 @@ export function ProrataForm({ slug, current, labels, disabled }: { slug: string;
       </fieldset>
       {!disabled && (
         <div className="actions">
-          <button className="btn primary" type="submit" disabled={pending} data-testid="setting-projection-save">{pending ? "Enregistrement…" : "Enregistrer"}</button>
+          <button className="btn primary" type="submit" disabled={pending} data-testid="setting-projection-save">{pending ? "Enregistrement…" : "Enregistrer le prorata"}</button>
         </div>
       )}
     </form>

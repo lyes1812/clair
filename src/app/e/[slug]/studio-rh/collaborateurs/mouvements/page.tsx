@@ -1,26 +1,34 @@
 import "@/styles/collaborateurs.css";
 import { BarChart } from "@/components/charts";
 import { isMonth } from "@/lib/connectors/months";
-import { addMonths, formatDate, formatMonth, monthsBetween } from "@/lib/dates";
+import { addMonths, formatDate, monthsBetween } from "@/lib/dates";
 import { monthlyList, movements, type Count } from "@/lib/rh/headcount";
 import { loadCollabContext, personLabel, showCount } from "@/lib/rh/view";
-import { monthAxis, monthLongLabel, movementSeries, ndSummary } from "@/lib/viz/collaborateurs";
-import { CollabHeader, contractHref, EventsTable, MonthSelect, PersonCell } from "../components";
+import { atLeast, clearMonths, countedPhrase, groupMonthReasons, monthAxis, monthLabel, monthLongLabel, movementSeries, ndSummary, periodLabel } from "@/lib/viz/collaborateurs";
+import { CollabHeader, contractHref, EventsTable, FilterActions, MonthSelect, NdShort, PersonCell } from "../components";
 
 export const dynamic = "force-dynamic";
 
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
-// Une cellule du tableau des mois : le nombre, « ≥ n » (borne basse) ou « n.d. — raison » ; jamais zéro à la place d'un n.d.
+// Une cellule du tableau des mois : le nombre, « au moins n » (borne basse) ou « n.d. » (raison au survol et dans la note sous le tableau) ;
+// jamais zéro à la place d'un n.d.
 function CountCell({ c }: { c: Count }) {
   const s = showCount(c);
-  return (
-    <td className={s.kind === "nd" ? "col-nd" : "num"}>
-      <span className={s.kind === "nd" ? "nd" : s.kind === "lower" ? "lower" : undefined}>{s.text}</span>
-      {s.foot && <span className="tile-foot"> {s.foot}</span>}
-    </td>
-  );
+  if (s.kind === "nd") return <td className="num"><NdShort reason={clearMonths(s.text.replace(/^n\.d\. — /, ""))} /></td>;
+  if (s.kind === "lower") {
+    const why = s.foot ? clearMonths(s.foot) : null;
+    return (
+      <td className="num">
+        <span className="lower" title={why ?? undefined}>
+          {atLeast(s.text)}
+          {why && <span className="collab-sr"> — {why}</span>}
+        </span>
+      </td>
+    );
+  }
+  return <td className="num">{s.text}</td>;
 }
 
 export default async function CollaborateursMouvementsPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
@@ -62,6 +70,8 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
   const series = movementSeries(perMonth);
   const chartNd = ndSummary(series);
   const axis = monthAxis(span);
+  // Raisons identiques regroupées : « oct. à déc. 2026 : n.d. — période postérieure à la date de référence ».
+  const noteGroups = groupMonthReasons(mv.notes);
 
   return (
     <CollabHeader ctx={ctx} tab="mouvements">
@@ -77,23 +87,15 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
             </select>
           </div>
         )}
-        <button className="btn" type="submit">Afficher</button>
+        <FilterActions label="Afficher" />
       </form>
-
-      {mv.notes.length > 0 && (
-        <section className="notice" data-testid="movements-notes">
-          <strong>Mois non exacts sur la période :</strong>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-            {mv.notes.map((n) => <li key={`${n.month}-${n.reason}`}>{n.month} : {n.reason}</li>)}
-          </ul>
-        </section>
-      )}
 
       <section className="panel collab-panel" data-testid="movements-chart-panel">
         <div className="panel-head">
           <div className="collab-title">
             <h2>Entrées et sorties par mois</h2>
-            <p className="desc">{formatMonth(from)} → {formatMonth(to)} · nombre de contrats, natures comptées · <a href="#def-movements">Définition</a></p>
+            <p className="desc">{periodLabel(from, to)} · nombre de contrats, natures comptées · <a href="#def-movements">Définition</a></p>
+            <p className="desc">Entrées : contrats dont la date de début tombe dans le mois ; sorties : date de fin. Les contrats continus d'une même personne ne sont pas neutralisés ici (le turnover du KPI RH applique la règle choisie dans Paramètres).</p>
           </div>
         </div>
         <div className="collab-chart-grid">
@@ -104,24 +106,23 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
               <BarChart
                 testid="movements-chart"
                 label={`Entrées et sorties comptées par mois, en nombre de contrats, période ${monthLongLabel(from)} → ${monthLongLabel(to)}`}
-                title="Entrées et sorties par mois"
                 categories={axis.categories}
                 categoryTitles={axis.titles}
                 series={series}
                 unit="nombre"
                 height={280}
-                note="Entrées : contrats dont la date de début tombe dans le mois ; sorties : date de fin. Les contrats continus d'une même personne ne sont pas neutralisés ici (le turnover du KPI RH applique la règle choisie dans Paramètres). Un mois n.d. ou en borne basse n'est pas tracé : voir le tableau."
+                note="Un mois n.d. ou en borne basse n'est pas tracé : ses valeurs et sa raison sont dans le tableau et dans les notes dessous."
               />
             )}
           </div>
-          <div className="table-wrap scroll">
+          <div className="table-wrap scroll collab-months">
             <table className="data-table sticky collab-table" data-testid="movements-months">
               <caption className="collab-sr">Entrées et sorties comptées par mois, valeurs exactes du graphique</caption>
               <thead><tr><th scope="col">Mois</th><th scope="col" className="num">Entrées</th><th scope="col" className="num">Sorties</th></tr></thead>
               <tbody>
                 {perMonth.map((m) => (
                   <tr key={m.month} data-month={m.month}>
-                    <th scope="row">{formatMonth(m.month)}</th>
+                    <th scope="row">{monthLabel(m.month)}</th>
                     <CountCell c={m.entries} />
                     <CountCell c={m.exits} />
                   </tr>
@@ -130,14 +131,22 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
             </table>
           </div>
         </div>
+        {noteGroups.length > 0 && (
+          <div className="collab-ndnote" data-testid="movements-notes">
+            <p><strong>Mois non exacts sur la période</strong> (leurs valeurs sont n.d. ou en borne basse, et ne sont pas tracées dans le graphique) :</p>
+            <ul>
+              {noteGroups.map((g) => <li key={`${g.label}-${g.reason}`}><strong>{g.label}</strong> : {clearMonths(g.reason)}</li>)}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className="panel collab-panel">
-        <h2>Entrées <span className="desc">— {from} → {to} · {mv.entries.filter((r) => r.inScope).length} comptée(s), {mv.entries.length} au total</span></h2>
+        <h2>Entrées <span className="desc">— {periodLabel(from, to)} · {countedPhrase(mv.entries.filter((r) => r.inScope).length, mv.entries.length)}</span></h2>
         <EventsTable rows={mv.entries} slug={slug} kind="entry" testId="movements-entries" source={b.source} />
       </section>
       <section className="panel collab-panel">
-        <h2>Sorties <span className="desc">— {from} → {to} · {mv.exits.filter((r) => r.inScope).length} comptée(s), {mv.exits.length} au total</span></h2>
+        <h2>Sorties <span className="desc">— {periodLabel(from, to)} · {countedPhrase(mv.exits.filter((r) => r.inScope).length, mv.exits.length)}</span></h2>
         <EventsTable rows={mv.exits} slug={slug} kind="exit" testId="movements-exits" source={b.source} />
       </section>
 
@@ -147,7 +156,7 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
           <ul className="list">
             {mv.upcoming.map((r) => (
               <li key={`${r.event.contractKey}-${r.event.kind}`}>
-                <span>{r.event.kind === "entry" ? "Entrée" : "Sortie"} le {formatDate(r.event.date)} · <PersonCell person={r.person} contract={r.contract} slug={slug} /> · <code>{r.contract.externalId}</code></span>
+                <span>{r.event.kind === "entry" ? "Entrée" : "Sortie"} le {formatDate(r.event.date)} · <PersonCell person={r.person} contract={r.contract} slug={slug} inline /> · <code>{r.contract.externalId}</code></span>
                 <span className="tag">{r.event.flags.includes("pending") ? "en attente chez PayFit" : "à venir"}</span>
               </li>
             ))}

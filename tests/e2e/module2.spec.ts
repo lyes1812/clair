@@ -83,10 +83,10 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   const exitsCovered2025 = months("2025-01", "2025-12").filter((m) => !lower(m)).length;
   expect(lower("2025-04")).toBe(true); // vrai tant que la lecture a lieu avant mai 2026 + 12 mois
   // Avril 2025 — 7 personnes (borne basse), 1 entrée (002).
-  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("≥ 7");
-  await expect(page.getByTestId("headcount-contracts").locator("dd")).toHaveText("≥ 7");
-  await expect(page.getByTestId("present-any-day").locator("dd")).toHaveText("≥ 7");
-  await expect(page.getByTestId("entries-count").locator("dd")).toHaveText("≥ 1");
+  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("au moins 7");
+  await expect(page.getByTestId("headcount-contracts").locator("dd")).toHaveText("au moins 7");
+  await expect(page.getByTestId("present-any-day").locator("dd")).toHaveText("au moins 7");
+  await expect(page.getByTestId("entries-count").locator("dd")).toHaveText("au moins 1");
   await expect(page.getByTestId("exits-count").locator("dd")).toContainText("n.d.");
   const row002 = page.getByTestId("collab-monthly-table").locator("tr[data-contract='TEST-A-CONTRACT-002']");
   await expect(row002).toContainText("entré le 01/04/2025");
@@ -95,14 +95,14 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   await page.screenshot({ path: `${CAPTURES}/2-01b-mois-signale.png`, fullPage: true });
 
   await page.goto(`${collab}?mois=2025-12`);
-  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText(lowerAt("2025-12-31") ? "≥ 7" : "7");
+  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText(lowerAt("2025-12-31") ? "au moins 7" : "7");
   if (lower("2025-12")) await expect(page.getByTestId("exits-count").locator("dd")).toContainText("n.d.");
   else await expect(page.getByTestId("exits-count").locator("dd")).toHaveText("1");
   await expect(page.getByTestId("collab-monthly-table").locator("tr[data-contract='TEST-A-CONTRACT-003']")).toContainText("sorti le 31/12/2025");
   await expect(page.getByTestId("month-exits")).toContainText("PayFit n'expose pas le motif");
 
   await page.goto(`${collab}?mois=2024-10`);
-  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("≥ 6");
+  await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("au moins 6");
   await expect(page.getByTestId("headcount-persons")).toContainText("borne basse");
   await expect(page.getByTestId("exits-count").locator("dd")).toContainText("n.d.");
   await expect(page.getByTestId("coverage-notice")).toContainText("hypothèse à confirmer");
@@ -120,12 +120,12 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
 
   // Année 2025 : 7 lignes, 6 au 01/01, 7 au 31/12.
   await page.goto(`${collab}/annee?annee=2025`);
-  await expect(page.getByTestId("year-jan1").locator("dd")).toHaveText("≥ 6");
-  await expect(page.getByTestId("year-dec31").locator("dd")).toHaveText(lowerAt("2025-12-31") ? "≥ 7" : "7");
-  await expect(page.getByTestId("year-entries").locator("dd")).toHaveText("≥ 1");
+  await expect(page.getByTestId("year-jan1").locator("dd")).toHaveText("au moins 6");
+  await expect(page.getByTestId("year-dec31").locator("dd")).toHaveText(lowerAt("2025-12-31") ? "au moins 7" : "7");
+  await expect(page.getByTestId("year-entries").locator("dd")).toHaveText("au moins 1");
   // Sorties connues seulement sur les mois postérieurs au mois charnière.
   if (exitsCovered2025 > 0) {
-    await expect(page.getByTestId("year-exits").locator("dd")).toHaveText(lower("2025-12") ? "≥ 0" : "≥ 1");
+    await expect(page.getByTestId("year-exits").locator("dd")).toHaveText(lower("2025-12") ? "au moins 0" : "au moins 1");
     await expect(page.getByTestId("year-exits")).toContainText(`sur les mois couverts (${exitsCovered2025}/12)`);
   } else await expect(page.getByTestId("year-exits")).toContainText("n.d.");
   await expect(page.getByTestId("collab-annual-table").getByRole("row")).toHaveCount(8);

@@ -29,6 +29,24 @@ export function monthAxis(months: string[]): { categories: string[]; titles: str
   const years = new Set(months.map((m) => m.slice(0, 4)));
   return { categories: months.map((m) => (years.size > 1 ? `${monthShortLabel(m)} ${m.slice(2, 4)}` : monthShortLabel(m))), titles: months.map(monthLongLabel) };
 }
+// Années couvertes par des mois : « 2026 » ou « 2026–2027 » (titre d'un graphique).
+export function yearSpan(months: string[]): string {
+  const ys = [...new Set(months.map((m) => m.slice(0, 4)))].sort();
+  return ys.length === 0 ? "" : ys.length === 1 ? ys[0] : `${ys[0]}–${ys.at(-1)}`;
+}
+// Dates et mois ISO d'un texte écrit par le moteur (raisons n.d.) : « 16/11/2026 » pour un jour, « novembre 2026 » pour un mois.
+// Un seul format à l'écran ; ce qui ressemble à une date sans en être une (mois 13, 31 février, identifiant collé) reste intact.
+// « de » devant avril, août ou octobre s'élide (« paie d'avril 2026 »). Sans lookbehind : le fichier peut partir au navigateur.
+const ISO_TOKEN = /(^|[^\w-])(\d{4})-(0[1-9]|1[0-2])(?:-(0[1-9]|[12]\d|3[01]))?(?![\w-])/g;
+const DE_VOYELLE = /(^|[^\w'’-])(de|De) (?=(?:avril|août|octobre) \d{4})/g;
+export const frDates = (text: string): string =>
+  text
+    .replace(ISO_TOKEN, (all, before: string, y: string, m: string, d: string | undefined) => {
+      if (d === undefined) return `${before}${LONG[Number(m) - 1]} ${y}`;
+      const lastDay = new Date(Date.UTC(Number(y), Number(m), 0)).getUTCDate();
+      return Number(d) <= lastDay ? `${before}${d}/${m}/${y}` : all;
+    })
+    .replace(DE_VOYELLE, (_all, before: string, de: string) => `${before}${de === "De" ? "D" : "d"}'`);
 const span = (months: string[]): string => (months.length === 0 ? "" : months.length === 1 ? monthShortLabel(months[0]) : `${monthShortLabel(months[0])}–${monthShortLabel(months.at(-1)!)}`);
 
 export const hasValues = (series: ChartSeries[]): boolean => series.some((s) => s.values.some((v) => v !== null && v !== undefined));
@@ -69,7 +87,7 @@ export const etpSeries = (rows: RowIn[]): ChartSeries[] =>
 // Mois dont le coût est n.d., raisons groupées (« raison (2026-11 → 2026-12) »).
 export const ndMonthsNote = (rows: RowIn[]): string | null => {
   const nd = rows.filter((r) => r.cost === null);
-  return nd.length ? groupReasons(nd.map((r) => ({ month: r.month, reason: r.nd ?? "coût employeur n.d." }))) : null;
+  return nd.length ? frDates(groupReasons(nd.map((r) => ({ month: r.month, reason: r.nd ?? "coût employeur n.d." })))) : null;
 };
 
 // --- Projection : coût projeté par nature de contribution du moteur (somme des contributions de chaque nature)
@@ -107,15 +125,17 @@ export function distinctColors(preferred: string[]): string[] {
   });
 }
 
-export type NatureChart = { categories: string[]; titles: string[]; series: ChartSeries[] };
+// contributing[série][mois] : au moins une contribution du moteur de cette nature ce mois-là (sinon la somme vide vaut 0 et le
+// tableau écrit « — », jamais un 0,00 € qui se confondrait avec un solde calculé nul).
+export type NatureChart = { categories: string[]; titles: string[]; series: ChartSeries[]; contributing: boolean[][] };
 // Une série par nature présente (au moins une contribution non nulle sur l'horizon) ; un mois n.d. n'a aucune valeur (colonne
 // hachurée, raison portée par la première série) ; une nature sans contribution un mois donné vaut 0 : somme vide du moteur.
 export function natureChart(months: ProjectedMonth[]): NatureChart {
   const per = months.map((m) => {
     if (m.kind !== "value") return null;
-    const s = new Map<NatureKey, number>();
-    for (const c of m.contributions) s.set(NATURE_OF[c.kind], (s.get(NATURE_OF[c.kind]) ?? 0) + c.cost);
-    return s;
+    const sums = new Map<NatureKey, number>();
+    for (const c of m.contributions) sums.set(NATURE_OF[c.kind], (sums.get(NATURE_OF[c.kind]) ?? 0) + c.cost);
+    return sums;
   });
   const present = NATURES.filter((n) => per.some((s) => s !== null && (s.get(n.key) ?? 0) !== 0));
   const colors = distinctColors(present.map((n) => n.color));
@@ -125,9 +145,23 @@ export function natureChart(months: ProjectedMonth[]): NatureChart {
     name: n.name,
     color: colors[first],
     values: per.map((s) => (s === null ? null : (s.get(n.key) ?? 0))),
-    reasons: months.map((m) => (m.kind === "nd" && first === 0 ? m.reasons.join(" ; ") : null)),
+    reasons: months.map((m) => (m.kind === "nd" && first === 0 ? frDates(m.reasons.join(" ; ")) : null)),
   }));
-  return { categories, titles, series };
+  return { categories, titles, series, contributing: present.map((n) => per.map((s) => s !== null && s.has(n.key))) };
+}
+
+// Contributions seules : la base (coût déjà acquis, bien plus haut que chaque contribution) écrase l'échelle du graphique complet ; sans elle, ce qui
+// varie d'un mois à l'autre se lit. Mêmes séries, mêmes teintes, mêmes valeurs du moteur : seule la base est retirée. La raison d'un
+// mois n.d., portée par la première série du graphique complet, passe à la première série restante.
+export function contributionsChart(nature: NatureChart): NatureChart {
+  const keep = nature.series.map((s) => s.key !== "base");
+  const series = nature.series.filter((_, i) => keep[i]);
+  const contributing = nature.contributing.filter((_, i) => keep[i]);
+  if (series.length > 0) {
+    const carrier = nature.series[0].reasons ?? [];
+    series[0] = { ...series[0], reasons: nature.categories.map((_, i) => carrier[i] ?? series[0].reasons?.[i] ?? null) };
+  }
+  return { categories: nature.categories, titles: nature.titles, series, contributing };
 }
 
 // --- Embauches prévisionnelles : nombre de postes par mois de début, par groupe
@@ -159,7 +193,7 @@ export function hiresByMonth(hires: HireIn[], months: string[]): HiresByMonth {
 const cellOf = (s: Series, m: string): { v: number | null; reason: string | null } => {
   const p = s.points.get(m);
   if (!p) return { v: null, reason: "mois non couvert par cette lecture" };
-  return p.kind === "value" ? { v: p.cost, reason: null } : { v: null, reason: p.reason };
+  return p.kind === "value" ? { v: p.cost, reason: null } : { v: null, reason: frDates(p.reason) };
 };
 
 // Style d'une lecture : le scénario en trait plein bleu avec aire, le réel en trait plein noir, les autres lectures en pointillés
@@ -201,7 +235,7 @@ export function ndReadings(all: Series[], months: string[]): string[] {
       const c = cellOf(s, m);
       return c.v === null ? [{ month: m, reason: c.reason ?? "n.d." }] : [];
     });
-    return nd.length ? [`${s.label} : ${groupReasons(nd)}`] : [];
+    return nd.length ? [frDates(`${s.label} : ${groupReasons(nd)}`)] : [];
   });
 }
 
@@ -300,7 +334,7 @@ export function sensitivityBars(rows: SensitivityRow[]): BarsIn {
   const eff = rows.map((r) => r.effect);
   const nd = (i: number) => {
     const e = eff[i];
-    return e.kind === "nd" ? e.reason : null;
+    return e.kind === "nd" ? frDates(e.reason) : null;
   };
   return {
     kind: "value",

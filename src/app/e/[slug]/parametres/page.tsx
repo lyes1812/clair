@@ -4,7 +4,7 @@ import { workspaceSetting } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { ABSENCE_STATUSES } from "@/lib/connectors/payfit/client";
-import { getKpiSettings, kpiOriginText, type KpiSettingKey } from "@/lib/rh-kpi-settings";
+import { getKpiSettings, KPI_DEFAULT_STATUS, KPI_DEFAULTS_VALIDATED_ON, kpiOriginText, type KpiSettingKey } from "@/lib/rh-kpi-settings";
 import { getHeadcountNatures, getPayfitHistoryMode, HEADCOUNT_NATURES_KEY, natureChoices, PAYFIT_HISTORY_KEY } from "@/lib/rh-settings";
 import { PAYFIT_ARCHIVED_RETENTION_MONTHS } from "@/lib/rh/referential/build-payfit";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
@@ -27,7 +27,9 @@ import { loadCollabContext } from "@/lib/rh/view";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { personLabel } from "@/lib/rh/view";
 import { ParamLayout } from "@/components/ParamLayout";
-import { PageHead, Pill, type Tone } from "../donnees/ui";
+import { absenceTypeLabel } from "@/lib/viz/kpi";
+import { defaultsNote, PageHead, Pill, type OriginKind, type Tone } from "../donnees/ui";
+import { NavDisclosure } from "./NavDisclosure";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +41,20 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const readTypes = active ? await loadAbsenceTypes(workspace.id, active.id) : [];
   const typeRows = [...new Set([...readTypes.map((t) => t.type), ...kpi.values.absenceTypes])].sort().map((type) => {
     const t = readTypes.find((x) => x.type === type);
-    return { type, count: t?.count ?? 0, inRead: Boolean(t) };
+    return { type, label: absenceTypeLabel(type), count: t?.count ?? 0, inRead: Boolean(t) };
   });
   const origins = Object.fromEntries((Object.keys(kpi.origins) as KpiSettingKey[]).map((k) => [k, kpiOriginText(k, kpi.origins[k], (d) => dateTimeFmt.format(d))]));
+  // Nature de l'origine de chaque règle : seule une règle qui n'est pas un défaut validé porte sa propre mention ; les défauts
+  // validés sont dits une seule fois par carte.
+  const kinds = Object.fromEntries(
+    (Object.keys(kpi.origins) as KpiSettingKey[]).map((k) => [k, kpi.origins[k].origin === "default" ? KPI_DEFAULT_STATUS[k] : kpi.origins[k].origin === "setting" ? "setting" : "invalid"]),
+  ) as Record<KpiSettingKey, OriginKind>;
+  const cardNote = (keys: KpiSettingKey[]) => defaultsNote(keys.map((k) => kinds[k]), KPI_DEFAULTS_VALIDATED_ON);
+  const notes = {
+    etp: cardNote(["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"]),
+    turnover: cardNote(["turnoverFormula", "neutralizeContinuity", "excludedExitNatures"]),
+    absence: cardNote(["absenceTypes", "absenceStatuses", "dayBasis"]),
+  };
   const updatedAt = (key: string) =>
     withWorkspace(workspace.id, (tx) =>
       tx.select({ updatedAt: workspaceSetting.updatedAt }).from(workspaceSetting).where(and(eq(workspaceSetting.workspaceId, workspace.id), eq(workspaceSetting.key, key))),
@@ -65,31 +78,37 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  // État de chaque règle pour la navigation de la page : valeur par défaut, modifiée, à corriger ou à renseigner.
-  const stateOf = (origin: "default" | "setting"): { text: string; tone: Tone } => (origin === "default" ? { text: "Par défaut", tone: "neutral" } : { text: "Modifiée", tone: "preview" });
+  // Exceptions seulement : une règle par défaut ne porte aucune pastille ; une règle modifiée, illisible ou manquante la porte.
+  type State = { text: string; tone: Tone } | null;
+  const stateOf = (origin: "default" | "setting"): State => (origin === "default" ? null : { text: "Modifiée", tone: "preview" });
   const kpiOrigins = Object.values(kpi.origins).map((o) => o.origin);
-  const nav: { id: string; label: string; state: { text: string; tone: Tone } }[] = [
+  const nav: { id: string; label: string; state: State }[] = [
     { id: "effectif", label: "Définition de l'effectif", state: stateOf(natures.origin) },
     { id: "payfit-historique", label: "Historique PayFit", state: stateOf(history.origin) },
     { id: "kpi", label: "Définitions des KPI", state: kpi.invalid.length > 0 ? { text: "À corriger", tone: "failed" } : stateOf(kpiOrigins.includes("setting") ? "setting" : "default") },
     { id: "masse-salariale", label: "Masse salariale : grille de comptes", state: stateOf(payroll.origin) },
-    { id: "projection", label: "Projection : conventions de calcul", state: projection ? { text: "Renseignée", tone: "applied" } : { text: "À renseigner", tone: "failed" } },
+    { id: "projection", label: "Projection : conventions de calcul", state: projection ? null : { text: "À renseigner", tone: "failed" } },
   ];
   const navItem = (id: string) => nav.find((n) => n.id === id)!;
+  const stateTag = (id: string) => {
+    const st = navItem(id).state;
+    return st ? <Pill tone={st.tone}>{st.text}</Pill> : null;
+  };
 
   const aside = (
     <nav aria-label="Sections des paramètres" className="pm-nav-box" data-testid="pm-nav">
-      <span className="label">Sur cette page</span>
-      <ol className="pm-nav">
-        {nav.map((n) => (
-          <li key={n.id}>
-            <a href={`#${n.id}`}>
-              <span>{n.label}</span>
-              <Pill tone={n.state.tone}>{n.state.text}</Pill>
-            </a>
-          </li>
-        ))}
-      </ol>
+      <NavDisclosure title="Sur cette page">
+        <ol className="pm-nav">
+          {nav.map((n) => (
+            <li key={n.id}>
+              <a href={`#${n.id}`}>
+                <span>{n.label}</span>
+                {n.state && <Pill tone={n.state.tone}>{n.state.text}</Pill>}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </NavDisclosure>
     </nav>
   );
 
@@ -110,7 +129,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           <section className="panel pm-panel" data-testid="setting-headcount" id="effectif">
             <div className="pm-panel-head">
               <h3>Définition de l'effectif</h3>
-              <Pill tone={navItem("effectif").state.tone}>{navItem("effectif").state.text}</Pill>
+              {stateTag("effectif")}
             </div>
             <p className="pm-lead">
               <strong>Effectif à une date</strong> = nombre de personnes ayant au moins un contrat en cours à cette date (début et fin inclus), parmi les natures
@@ -127,7 +146,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           <section className="panel pm-panel" data-testid="setting-payfit-history" id="payfit-historique">
             <div className="pm-panel-head">
               <h3>Historique PayFit</h3>
-              <Pill tone={navItem("payfit-historique").state.tone}>{navItem("payfit-historique").state.text}</Pill>
+              {stateTag("payfit-historique")}
             </div>
             <p className="pm-lead">
               PayFit ne renvoie plus les contrats archivés depuis plus de {PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois. Pour les mois antérieurs à la date de
@@ -145,7 +164,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           <section className="panel pm-panel" data-testid="setting-kpi" id="kpi">
             <div className="pm-panel-head">
               <h3>Définitions des KPI</h3>
-              <Pill tone={navItem("kpi").state.tone}>{navItem("kpi").state.text}</Pill>
+              {stateTag("kpi")}
             </div>
             <p className="pm-lead">
               Règles appliquées par Studio RH › KPI RH. Elles sont recalculées à chaque affichage, sans reconstruire le référentiel. Les natures comptées
@@ -155,6 +174,8 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
               slug={slug}
               values={kpi.values}
               origins={origins}
+              kinds={kinds}
+              notes={notes}
               natures={natureChoices().map((n) => ({ code: n.code, label: n.label }))}
               types={typeRows}
               readLabel={active ? `lecture du ${dateTimeFmt.format(active.startedAt)}` : null}
@@ -173,7 +194,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           <section className="panel pm-panel" data-testid="setting-payroll" id="masse-salariale">
             <div className="pm-panel-head">
               <h3>Masse salariale : grille de comptes</h3>
-              <Pill tone={navItem("masse-salariale").state.tone}>{navItem("masse-salariale").state.text}</Pill>
+              {stateTag("masse-salariale")}
             </div>
             <p className="pm-lead">
               Studio RH › Masse salariale lit le journal comptable de paie renvoyé par PayFit. Chaque compte est classé dans la rubrique dont un préfixe est le
@@ -204,7 +225,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           <section className="panel pm-panel" data-testid="setting-projection" id="projection">
             <div className="pm-panel-head">
               <h3>Projection : conventions de calcul</h3>
-              <Pill tone={navItem("projection").state.tone}>{navItem("projection").state.text}</Pill>
+              {stateTag("projection")}
             </div>
             <p className="pm-lead">
               Studio RH › Hypothèses budgétaires projette chaque contrat mois par mois. La règle de prorata des entrées et sorties en cours de mois n'a pas de
@@ -218,7 +239,11 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
             <div className="pm-sub">
               <h4>Catégories de contrat</h4>
               <p className="desc pm-origin" data-testid="setting-category-origin">
-                {categories.origin === "default" ? "Valeur proposée (nomenclature DSN : 01 CDI, 02 CDD, 29 convention de stage), modifiable. Aucun code n'est rattaché à « apprenti » : PayFit code certains apprentis en CDD, corrigez-les salarié par salarié dans le scénario." : "Modifié par un administrateur."} Un contrat dont la nature n'est dans aucune catégorie est « non classé ».
+                {categories.origin === "default" ? "Valeur proposée (nomenclature DSN : 01 CDI, 02 CDD, 29 convention de stage), modifiable." : "Modifié par un administrateur."}
+              </p>
+              <p className="desc">
+                Un contrat dont la nature n'est dans aucune catégorie est « non classé ».
+                {categories.natures.apprenti.length === 0 && " Aucun code n'est rattaché à « apprenti » : PayFit code certains apprentis en CDD, à corriger contrat par contrat ci-dessous."}
               </p>
               <CategoryNaturesForm slug={slug} natures={categories.natures} disabled={!isAdmin} />
             </div>

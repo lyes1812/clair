@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { onColor } from "@/components/charts/shared";
 import { unitFormat } from "@/components/charts/units";
 import { formatEuros } from "@/lib/money";
 import { monthPayroll, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
@@ -9,13 +10,20 @@ import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 import {
   brutCotisationsSeries,
   brutParts,
+  capital,
+  COLORS,
   costPerEtpCents,
   costSeries,
   dsnPoint,
   dsnSeries,
+  euros,
+  eurosSigned,
+  FAMILY_HUES,
+  familyColor,
   fixeVariableMonths,
   fixeVariableSeries,
   hasData,
+  hueReuseNote,
   masseSeries,
   monthLongLabel,
   monthShortLabel,
@@ -23,14 +31,20 @@ import {
   monthsAxis,
   ndGroups,
   ndLines,
+  ndNote,
+  ndShape,
+  noPeriod,
+  pluriel,
   primesSeries,
   provisionParts,
   provisionTotals,
+  reasonText,
   reconMonthSeries,
   reconRubricChart,
   serviceColor,
   seriesReasons,
   serviceMonthSeries,
+  sourceReason,
   servicesParts,
   type DsnIn,
   type EtpIn,
@@ -146,31 +160,31 @@ describe("répartition par service", () => {
       { value: null, cur: { kind: "value", masse: 0 } },
     ]);
     expect(parts).toEqual([
-      { key: "A", name: "A", value: 700000, color: "var(--chart-1)" },
-      { key: "B", name: "B", value: 300000, color: "var(--chart-2)" },
-      { key: "C", name: "C", value: null, reason: "ligne 2026-01#7 du compte 641100 sans montant", color: "var(--chart-3)" },
+      { key: "A", name: "A", value: 700000, color: "var(--chart-3)" },
+      { key: "B", name: "B", value: 300000, color: "var(--chart-8)" },
+      { key: "C", name: "C", value: null, reason: "ligne 2026-01#7 du compte 641100 sans montant", color: "var(--chart-4)" },
     ]);
     expect(omitted).toEqual([`Non ventilé (${formatEuros(0)})`]);
   });
   it("« non ventilé » à coût positif : une part nommée comme dans le tableau, teinte de son rang", () => {
     const { parts } = servicesParts([{ value: "A", cur: { kind: "value", masse: 5 } }, { value: null, cur: { kind: "value", masse: 1000 } }]);
-    expect(parts[1]).toEqual({ key: "__nv__", name: "Non ventilé", value: 1000, color: "var(--chart-2)" });
+    expect(parts[1]).toEqual({ key: "__nv__", name: "Non ventilé", value: 1000, color: "var(--chart-8)" });
   });
   it("teintes : huit teintes de la charte, puis retour à la première ; le rang compte même pour un service sans secteur", () => {
-    expect([0, 1, 7, 8, 9].map(serviceColor)).toEqual(["var(--chart-1)", "var(--chart-2)", "var(--chart-8)", "var(--chart-1)", "var(--chart-2)"]);
-    // Le service de rang 2 garde la teinte 3 même si celui de rang 1 (masse nulle) n'a pas de secteur.
+    expect([0, 1, 7, 8, 9].map(serviceColor)).toEqual(["var(--chart-3)", "var(--chart-8)", "var(--chart-2)", "var(--chart-3)", "var(--chart-8)"]);
+    // Le service de rang 2 garde sa teinte (4) même si celui de rang 1 (masse nulle) n'a pas de secteur.
     const { parts } = servicesParts([
       { value: "A", cur: { kind: "value", masse: 10 } },
       { value: "B", cur: { kind: "value", masse: 0 } },
       { value: "C", cur: { kind: "value", masse: 5 } },
     ]);
-    expect(parts.map((p) => [p.key, p.color])).toEqual([["A", "var(--chart-1)"], ["C", "var(--chart-3)"]]);
+    expect(parts.map((p) => [p.key, p.color])).toEqual([["A", "var(--chart-3)"], ["C", "var(--chart-4)"]]);
   });
   it("par mois et par service : une série par service, la somme des services égale le total du mois, un mois n.d. reste n.d.", () => {
     const a = [value("2026-01", { salaires: 1000, primes: 0, stages: 0, indemnites: 0 }, 300), value("2026-02", { salaires: 1100, primes: 0, stages: 0, indemnites: 0 }, 330)];
     const b = [value("2026-01", { salaires: 500, primes: 0, stages: 0, indemnites: 0 }, 150), ND("2026-02", "ligne 2026-02#3 du compte 641100 sans montant")];
     const s = serviceMonthSeries([{ value: "A", months: a }, { value: null, months: b }]);
-    expect(s.map((x) => [x.key, x.name, x.color])).toEqual([["A", "A", "var(--chart-1)"], ["__nv__", "Non ventilé", "var(--chart-2)"]]);
+    expect(s.map((x) => [x.key, x.name, x.color])).toEqual([["A", "A", "var(--chart-3)"], ["__nv__", "Non ventilé", "var(--chart-8)"]]);
     expect(s[0].values).toEqual([1300, 1430]);
     expect(s[1].values).toEqual([650, null]);
     expect(s[1].reasons).toEqual([null, "ligne 2026-02#3 du compte 641100 sans montant"]);
@@ -380,29 +394,151 @@ describe("branchement sur le moteur et sur les graphiques", () => {
 
 // Les colonnes empilées écrivent leur montant en blanc dans le segment : chaque teinte de série empilée doit rester lisible
 // sous du texte blanc (RGAA : 4,5:1). Calcul de la luminance relative WCAG, teintes lues dans charts.css.
-describe("teintes des colonnes empilées : contraste du montant écrit en blanc", () => {
+describe("teintes des colonnes empilées : contraste du montant écrit dans la colonne", () => {
   const css = readFileSync(fileURLToPath(new URL("../../src/styles/charts.css", import.meta.url)), "utf8");
-  const hexOf = (token: string) => {
-    const n = /--chart-(\d)\)/.exec(token)?.[1];
-    const m = new RegExp(`--chart-${n}:\\s*#([0-9a-fA-F]{6})`).exec(css);
-    if (!m) throw new Error(`teinte introuvable : ${token}`);
+  const hexOfVar = (name: string) => {
+    const m = new RegExp(`--${name}:\\s*#([0-9a-fA-F]{6})`).exec(css);
+    if (!m) throw new Error(`teinte introuvable : ${name}`);
     return m[1];
   };
+  const hexOf = (token: string) => hexOfVar(/var\(--([a-z0-9-]+)\)/.exec(token)![1]);
   const channel = (c: number) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
   const luminance = (hex: string) => 0.2126 * channel(parseInt(hex.slice(0, 2), 16)) + 0.7152 * channel(parseInt(hex.slice(2, 4), 16)) + 0.0722 * channel(parseInt(hex.slice(4, 6), 16));
-  const contrastWithWhite = (hex: string) => 1.05 / (luminance(hex) + 0.05);
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
   it("quelques valeurs de référence : blanc sur #155cff ≈ 5,3:1, sur l'ambre #d9a34a ≈ 2,3:1", () => {
-    expect(contrastWithWhite("155cff")).toBeGreaterThan(5.2);
-    expect(contrastWithWhite("155cff")).toBeLessThan(5.4);
-    expect(contrastWithWhite("d9a34a")).toBeLessThan(2.4);
+    expect(contrast("ffffff", "155cff")).toBeGreaterThan(5.2);
+    expect(contrast("ffffff", "155cff")).toBeLessThan(5.4);
+    expect(contrast("ffffff", "d9a34a")).toBeLessThan(2.4);
   });
-  it("brut, cotisations, fixe, variable, gratifications, congés payés, charges : au moins 4,5:1", () => {
+  it("brut, cotisations, fixe, variable, gratifications, congés payés, charges, familles de prime, services : texte blanc ou encre à 4,5:1 au moins", () => {
     const stacked = [
       ...brutCotisationsSeries([]),
       ...fixeVariableSeries([]),
       ...provisionParts([]),
+      ...primesSeries([0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ label: `F${i}` })), []),
+      ...serviceMonthSeries([0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ value: `S${i}`, months: [] }))),
     ];
-    expect(stacked.length).toBe(7);
-    for (const s of stacked) expect(contrastWithWhite(hexOf(s.color!)), `${s.key} ${s.color}`).toBeGreaterThanOrEqual(4.5);
+    expect(stacked.length).toBe(2 + 3 + 2 + 8 + 8);
+    for (const s of stacked) {
+      const text = onColor(s.color!) === "#fff" ? "ffffff" : hexOfVar("chart-ink");
+      expect(contrast(text, hexOf(s.color!)), `${s.key} ${s.color}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+// Une teinte = une notion métier d'un écran : aucune teinte reprise pour une notion voisine.
+describe("teintes : une par notion métier d'un écran", () => {
+  const hues = (list: { color?: string }[]) => list.map((s) => s.color);
+  it("Synthèse : N et N-1 (bleu, gris) ; brut, cotisations et services ont des teintes toutes différentes tant qu'il y a au plus cinq services", () => {
+    const masse = hues(masseSeries([], [], { cur: "N", prev: "N-1" }));
+    const bc = hues(brutCotisationsSeries([]));
+    const services = [0, 1, 2, 3, 4].map(serviceColor);
+    const all = [...masse, ...bc, ...services];
+    expect(new Set(all).size).toBe(all.length);
+    expect(masse).toEqual([COLORS.now, COLORS.before]);
+  });
+  it("Fixe & variable : fixe, variable, gratifications et cinq familles de prime : sept teintes différentes ; l'anneau reprend celles des colonnes", () => {
+    const fv = hues(fixeVariableSeries([]));
+    const fam = [0, 1, 2, 3, 4].map(familyColor);
+    const all = [...fv, ...fam];
+    expect(new Set(all).size).toBe(all.length);
+    expect(hues(primesSeries([{ label: "A" }, { label: "B" }], [])).concat()).toEqual([familyColor(0), familyColor(1)]);
+    expect(brutParts({ fixe: 1, variable: 1, stages: 1 }).map((p) => p.color)).toEqual(fv);
+  });
+  it("Paie & comptabilité : congés payés, charges, journal de paie et comptabilité ont chacun leur teinte ; N en bleu, N-1 en gris", () => {
+    const all = [COLORS.conges, COLORS.charges, COLORS.journal, COLORS.compta, COLORS.now, COLORS.before];
+    expect(new Set(all).size).toBe(all.length);
+    expect(hues(provisionParts([]))).toEqual([COLORS.conges, COLORS.charges]);
+    expect(hues(reconMonthSeries([]))).toEqual([COLORS.journal, COLORS.compta]);
+    expect(hues(provisionTotals([], [], { cur: "N", prev: "N-1" }))).toEqual([COLORS.now, COLORS.before]);
+  });
+});
+
+// La mention « colonne hachurée » n'est écrite que si le graphique contient réellement un n.d.
+describe("mention des n.d. d'un graphique", () => {
+  const s = (key: string, values: (number | null)[]) => ({ key, name: key, values });
+  it("aucun n.d. : aucune mention", () => {
+    expect(ndShape([s("a", [1, 2]), s("b", [3, 0])])).toEqual({ columns: 0, values: 0 });
+    expect(ndNote([s("a", [1, 2]), s("b", [3, 0])])).toBe("");
+    expect(ndNote([s("a", [1, 2])], "courbe")).toBe("");
+    expect(ndNote([])).toBe("");
+  });
+  it("un mois où aucune série n'a de valeur : colonne hachurée (une colonne), la valeur absente d'une seule série est comptée à part", () => {
+    // Colonne 2 : toutes les séries n.d. (hachurée) ; colonne 1 : une seule série n.d. (non tracée, pas hachurée).
+    const list = [s("a", [10, null, null]), s("b", [20, 5, null])];
+    expect(ndShape(list)).toEqual({ columns: 1, values: 1 });
+    expect(ndNote(list)).toMatch(/colonne hachurée est un mois n\.d\./);
+  });
+  it("valeur n.d. sans colonne entièrement n.d. : pas de hachure, mais la valeur absente n'est jamais dessinée comme zéro", () => {
+    const list = [s("a", [10, null]), s("b", [20, 5])];
+    expect(ndShape(list)).toEqual({ columns: 0, values: 1 });
+    const note = ndNote(list);
+    expect(note).not.toMatch(/hachurée/);
+    expect(note).toMatch(/jamais dessinée comme zéro/);
+  });
+  it("courbe : un mois n.d. interrompt la courbe ; un zéro réel n'est pas un n.d.", () => {
+    expect(ndNote([s("a", [1, null, 3])], "courbe")).toMatch(/interrompt la courbe/);
+    expect(ndNote([s("a", [0, 0, 0])], "courbe")).toBe("");
+  });
+  it("sur les adaptateurs : 2026 avec mars n.d. et 2025 avec février n.d. → aucune colonne hachurée (une série connue chaque mois) ; janvier seul connu partout → rien", () => {
+    expect(ndShape(masseSeries(cur, prev, { cur: "N", prev: "N-1" }))).toEqual({ columns: 0, values: 2 });
+    expect(ndNote(masseSeries([cur[0]], [prev[0]], { cur: "N", prev: "N-1" }))).toBe("");
+    // Mars 2026 n.d. et mars 2025 n.d. : colonne hachurée.
+    expect(ndShape(masseSeries([cur[2]], [ND("2025-03", "x")], { cur: "N", prev: "N-1" })).columns).toBe(1);
+  });
+});
+
+describe("montants signés et raisons", () => {
+  it("vrai signe moins (U+2212), « + » devant un écart positif, rien devant zéro ; centimes entiers", () => {
+    expect(eurosSigned(-17500)).toBe(`\u2212${formatEuros(17500)}`);
+    expect(eurosSigned(54600)).toBe(`+${formatEuros(54600)}`);
+    expect(eurosSigned(0)).toBe(formatEuros(0));
+    expect(euros(-655550)).toBe(`\u2212${formatEuros(655550)}`);
+    // Référence écrite à la main : −6 555,50 € (espaces insécables de la mise en forme française).
+    expect(euros(-655550)).toMatch(/^\u22126[\s\u202f\u00a0]555,50[\s\u00a0]€$/);
+    expect(euros(-655550).startsWith("-")).toBe(false);
+    // Un montant positif n'est pas modifié.
+    expect(euros(1234)).toBe(formatEuros(1234));
+  });
+  it("raison de source : sans point final, première lettre en minuscule sauf sigle ; nom propre en tête préservé par noPeriod", () => {
+    expect(reasonText("Aucune source appliquée pour ce domaine.")).toBe("aucune source appliquée pour ce domaine");
+    expect(reasonText("API choisie par l'administrateur, mais aucune lecture API appliquée.")).toBe("API choisie par l'administrateur, mais aucune lecture API appliquée");
+    expect(reasonText("Fichiers choisis par l'administrateur, mais aucun dépôt appliqué.")).toBe("fichiers choisis par l'administrateur, mais aucun dépôt appliqué");
+    expect(noPeriod("Pennylane non lu pour 2026-09. ")).toBe("Pennylane non lu pour 2026-09");
+    expect(capital("ventilation par service désactivée")).toBe("Ventilation par service désactivée");
+  });
+  it("pluriel : « 1 famille », « 2 familles », « 0 famille »", () => {
+    expect([0, 1, 2].map((n) => pluriel(n, "famille"))).toEqual(["0 famille", "1 famille", "2 familles"]);
+  });
+});
+
+// Jusqu'à huit familles de prime (limite du graphique) : huit teintes différentes dans le même graphique ; au-delà de cinq, les
+// teintes reprises le sont en dernier, et la mention le dit.
+describe("familles de prime au-delà de cinq, mention de reprise des teintes", () => {
+  it("huit familles : huit teintes toutes différentes, les cinq premières sans reprise du fixe, du variable ni des gratifications", () => {
+    const hues = [0, 1, 2, 3, 4, 5, 6, 7].map(familyColor);
+    expect(new Set(hues).size).toBe(8);
+    expect(FAMILY_HUES.length).toBe(8);
+    const taken = new Set(fixeVariableSeries([]).map((s) => s.color));
+    for (const h of hues.slice(0, 5)) expect(taken.has(h)).toBe(false);
+    // Dans le graphique : une série par famille, chacune avec sa teinte.
+    const families = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ label: `F${i}` }));
+    const list = primesSeries(families, [{ month: "2026-01", kind: "value", byFamily: families.map(() => 100) }]);
+    expect(new Set(list.map((s) => s.color)).size).toBe(8);
+  });
+  it("mention de reprise des teintes : rien jusqu'à cinq, puis une phrase qui renvoie à la légende", () => {
+    expect(hueReuseNote(5, "services", "brut")).toBe("");
+    expect(hueReuseNote(0, "services", "brut")).toBe("");
+    expect(hueReuseNote(6, "services", "masse chargée, brut, cotisations")).toBe("Au-delà de 5 services, une teinte est reprise d'une autre notion de l'écran (masse chargée, brut, cotisations) : la légende de chaque graphique fait foi.");
+  });
+  it("raison d'une source en parenthèses : sans capitale ni point final ; le début de la phrase et la suite sont conservés", () => {
+    expect(sourceReason("aucune source RH retenue (Aucune source appliquée pour ce domaine.) : connectez PayFit ou déposez des DSN dans Données")).toBe("aucune source RH retenue (aucune source appliquée pour ce domaine) : connectez PayFit ou déposez des DSN dans Données");
+    // Un sigle en tête garde ses capitales.
+    expect(sourceReason("aucune source RH retenue (API choisie par l'administrateur, mais aucune lecture API appliquée.) : connectez PayFit")).toBe("aucune source RH retenue (API choisie par l'administrateur, mais aucune lecture API appliquée) : connectez PayFit");
+    // Une autre raison n'est pas touchée.
+    expect(sourceReason("journal comptable non lu : droit refusé (Lecture seule.)")).toBe("journal comptable non lu : droit refusé (Lecture seule.)");
   });
 });

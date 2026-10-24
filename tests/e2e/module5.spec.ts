@@ -126,7 +126,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   expect(await txt(row("2026-11"))).toBe("23 844,30 €");
   expect(await txt(row("2026-12"))).toBe("24 005,80 €");
   expect(await txt(page.getByTestId("proj-tile-landing").locator("dd"))).toBe("281 250,10 €");
-  expect(await txt(page.getByTestId("proj-tile-headcount").locator("dd"))).toBe("7 · 6,10 ETP");
+  expect(await txt(page.getByTestId("proj-tile-headcount").locator("dd"))).toBe("7 personnes · 6,10 ETP");
   await page.screenshot({ path: `${CAPTURES}/5-02-projection.png`, fullPage: true });
 
   // Critère d'acceptation : clic sur un mois projeté → hypothèses qui le composent, la somme tombe juste.
@@ -341,13 +341,13 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await expect(page.getByTestId("hyp-context")).toContainText("Base dérivée du scénario « Révisé T4 2026 »");
   expect(await txt(row("2027-01"))).toBe("22 705,80 €");
   expect(await txt(page.getByTestId("proj-tile-landing").locator("dd"))).toBe("272 469,60 €");
-  expect(await txt(page.getByTestId("proj-tile-headcount").locator("dd"))).toBe("7 · 6,10 ETP");
+  expect(await txt(page.getByTestId("proj-tile-headcount").locator("dd"))).toBe("7 personnes · 6,10 ETP");
   await page.screenshot({ path: `${CAPTURES}/5-05-budget-n1.png`, fullPage: true });
   // Base dérivée : coût projeté de décembre 2026 par le révisé = base + primes de fin d'année (1 300,00 €, non reprises).
   await tab("Bases individuelles").click();
   await expect(page.getByTestId("hyp-base-masse")).toContainText("Coût projeté de décembre 2026 par « Révisé T4 2026 »");
   expect(await txt(page.getByTestId("hyp-base-masse").locator("dd"))).toBe("24 005,80 €");
-  await expect(page.getByTestId("hyp-base-gap")).toContainText("éléments ponctuels de 2026-12 1 300,00 €");
+  await expect(page.getByTestId("hyp-base-gap")).toContainText("éléments ponctuels de décembre 2026 1 300,00 €");
   await tab("Résultat").click();
   // Budget 2027 contre 2026 (réel janv.–sept. + projeté du révisé oct.–déc. = 281 250,10 €) : −8 780,50 €.
   await page.getByTestId("res-tabs").getByRole("link", { name: "Comparaison" }).click();
@@ -371,8 +371,10 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   // (à quelques centimes d'arrondi par contrat près), jamais appliqué à l'embauche ; total 22 705,80 € + 636,17 €.
   await tab("Hypothèses globales").click();
   const gr = page.getByTestId("glob-rates-table");
-  await expect(gr).toContainText("Cadres dirigeants (0 contrat)");
-  await expect(gr).toContainText("Hors cadres dirigeants (6 contrats)");
+  await expect(gr).toContainText("Cadres dirigeants");
+  await expect(gr).toContainText("0 contrat");
+  await expect(gr).toContainText("Hors cadres dirigeants");
+  await expect(gr).toContainText("6 contrats");
   await gr.locator("input[name='rate|statut:autres|2027-01']").fill("3");
   await gr.locator("input[name='rate|statut:dirigeant|2027-01']").fill("5");
   await page.getByTestId("glob-rates-form").getByRole("button", { name: "Enregistrer les taux" }).click();

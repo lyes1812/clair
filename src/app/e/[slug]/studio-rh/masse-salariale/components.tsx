@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
 import { BarChart } from "@/components/charts";
 import type { ChartSeries } from "@/components/charts/shared";
-import { formatEuros } from "@/lib/money";
 import type { MonthPayroll } from "@/lib/payroll/engine";
 import { fmtFixed } from "@/lib/rh/kpi/format";
-import { COLORS, hasData, masseSeries, monthShortYear, monthsAxis, seriesReasons } from "@/lib/viz/masse";
+import { COLORS, euros, hasData, masseSeries, monthShortYear, monthsAxis, ndNote, seriesReasons } from "@/lib/viz/masse";
 
 const MONTH_SHORT = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 export const monthShort = (m: string) => MONTH_SHORT[Number(m.slice(5, 7)) - 1];
@@ -18,7 +17,8 @@ export type Affichage = "tout" | "graphique" | "tableau";
 export const AFFICHAGES: Affichage[] = ["tout", "graphique", "tableau"];
 export const isAffichage = (v: string): v is Affichage => (AFFICHAGES as string[]).includes(v);
 
-// En-tête : titre de l'entrée, une phrase, puis la source (une ligne) et le détail technique de la lecture, replié.
+// En-tête : titre de l'entrée et une phrase, comme les autres écrans de la famille (la source et le détail de la lecture
+// viennent sous les onglets : la barre d'onglets reste au même endroit d'un écran à l'autre).
 export function MsHead({ title, summary, children }: { title: string; summary: string; children?: ReactNode }) {
   return (
     <div className="ms-head">
@@ -41,11 +41,32 @@ export function ReadDetails({ children }: { children: ReactNode }) {
   );
 }
 
+// Ligne de source (une ligne) et, à sa suite, le détail de la lecture replié.
+export function MsRead({ source, children }: { source?: ReactNode; children?: ReactNode }) {
+  if (!source && !children) return null;
+  return (
+    <div className="ms-read">
+      {source}
+      {children && <ReadDetails>{children}</ReadDetails>}
+    </div>
+  );
+}
+
 export function PanelTitle({ title, desc }: { title: ReactNode; desc?: ReactNode }) {
   return (
     <div className="ms-panel-title">
       <h2>{title}</h2>
       {desc && <p className="desc">{desc}</p>}
+    </div>
+  );
+}
+
+// En-tête de panneau : titre, phrase de contexte dessous, actions à droite. Le même sur tous les panneaux de l'écran.
+export function PanelHead({ title, desc, tools }: { title: ReactNode; desc?: ReactNode; tools?: ReactNode }) {
+  return (
+    <div className="panel-head">
+      <PanelTitle title={title} desc={desc} />
+      {tools && <div className="panel-tools">{tools}</div>}
     </div>
   );
 }
@@ -109,9 +130,10 @@ export function PeriodBar(p: {
 // Tuile d'indicateur : valeur en grand, repère de lecture, comparaison N-1 sous un filet, lien vers la définition. Une seule
 // balise <dd> par tuile : la valeur ; tout le reste est dans des <span> / <div> (tests et lecteurs d'écran lisent la valeur seule).
 // `nd` : valeur n.d. (« n.d. » en gris italique, raison listée sous les tuiles) ; `ndLong` : la raison elle-même est la valeur (texte courant).
-export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: boolean; ndLong?: boolean; main?: boolean; lead?: ReactNode; compare?: ReactNode; foot?: ReactNode; def?: string }) {
+// `sub` : la tuile détaille la précédente (« dont primes »), elle est en retrait.
+export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: boolean; ndLong?: boolean; main?: boolean; sub?: boolean; lead?: ReactNode; compare?: ReactNode; foot?: ReactNode; def?: string }) {
   return (
-    <div data-testid={p.testid} className={p.main ? "ms-tile main" : "ms-tile"}>
+    <div data-testid={p.testid} className={["ms-tile", p.main ? "main" : "", p.sub ? "sub" : ""].filter(Boolean).join(" ")}>
       <dt>{p.label}</dt>
       <dd className={p.nd ? (p.ndLong ? "nd long" : "nd") : undefined}>{p.value}</dd>
       {p.lead && <span className="tile-foot ms-tile-lead">{p.lead}</span>}
@@ -143,18 +165,36 @@ export function ScrollTable({ label, gap, children }: { label: string; gap?: boo
   );
 }
 
-// Pied d'une zone de graphiques : le graphique est une lecture, le tableau exact fait foi.
+// Pied d'une zone de graphiques : une seule mention par carte. Le graphique est une lecture, le tableau exact fait foi ; le sens
+// d'un « n.d. » (colonne hachurée, courbe interrompue) est dans les définitions.
 export function GraphFoot({ aff, tableHref, testid = "ms-graph-foot" }: { aff: Affichage; tableHref: string; testid?: string }) {
   return (
     <p className="tile-foot ms-graph-foot" data-testid={testid}>
-      Un graphique est une lecture : le tableau exact, à l'euro près, fait foi — {aff === "graphique" ? <>dans l'affichage <a href={tableHref}>Tableau</a>.</> : "plus bas dans cette page."}
+      Un graphique est une lecture : le tableau exact, à l'euro près, fait foi — {aff === "graphique" ? <>dans l'affichage <a href={tableHref}>Tableau</a></> : "plus bas dans cette page"}. Sens de « n.d. » : <a href="#def-nd">définitions</a>.
     </p>
   );
 }
 
-// Note commune sous un graphique mensuel : mois provisoires et mois n.d. (la raison est au survol, au clavier et sous le tableau).
-export const monthlyNote = (open: string[]) =>
-  `${open.length ? `Paie non clôturée à la lecture (montants provisoires) : ${open.map(monthShortYear).join(", ")}. ` : ""}Une colonne hachurée est un mois n.d. ; une valeur absente d'une série n'est jamais dessinée comme zéro.`;
+// Note commune sous un graphique mensuel : mois provisoires, puis la mention des n.d. seulement si le graphique en contient
+// (`series` : les séries tracées ; sans elles, aucune mention de n.d.). La raison est au survol, au clavier et sous le tableau.
+export const monthlyNote = (open: string[], series?: ChartSeries[]): string =>
+  [open.length ? `Paie non clôturée à la lecture (montants provisoires) : ${open.map(monthShortYear).join(", ")}.` : "", series ? ndNote(series) : ""].filter(Boolean).join(" ");
+
+// État vide « n.d. » : un seul composant pour tout l'écran (graphique non tracé, rapprochement sans comptabilité, services
+// absents). Titre « n.d. » (ou `title`), la raison écrite une fois, puis l'action pour y remédier.
+export function NdState({ testid, heading, title = "n.d.", reason, reasons = [], more = 0, action, children }: { testid: string; heading?: string; title?: string; reason?: ReactNode; reasons?: string[]; more?: number; action?: { href: string; label: string }; children?: ReactNode }) {
+  return (
+    <div className="ms-nd-state" data-testid={testid}>
+      {heading && <h3 className="ms-sub">{heading}</h3>}
+      <p className="ms-nd-title">{title}</p>
+      {reason && <p className="ms-nd-reason">{reason}</p>}
+      {children}
+      {reasons.length > 0 && <ul className="ms-nd-reasons">{reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
+      {more > 0 && <p className="tile-foot">… et {more} autre{more > 1 ? "s" : ""} raison{more > 1 ? "s" : ""}.</p>}
+      {action && <a className="ms-nd-action" href={action.href}>{action.label}<span aria-hidden="true"> →</span></a>}
+    </div>
+  );
+}
 
 // Graphique dont aucune valeur n'est connue : non tracé, avec la raison (un axe à zéro, ou une courbe vide, ferait croire à des
 // valeurs nulles). Les raisons sont celles des mois n.d. (`lines` : raisons déjà regroupées par l'écran, à défaut celles des
@@ -163,15 +203,7 @@ export function ChartGuard({ testid, title, series, lines, children }: { testid:
   if (hasData(series)) return <>{children}</>;
   const reasons = lines && lines.length > 0 ? lines : seriesReasons(series);
   const shown = reasons.slice(0, 3);
-  const more = reasons.length - shown.length;
-  return (
-    <div className="ms-nd-block" data-testid={`${testid}-vide`}>
-      <h3 className="ms-sub">{title}</h3>
-      <p className="nd">n.d. — aucune valeur connue sur la période : le graphique n'est pas tracé (un axe à zéro ferait croire à des valeurs nulles).</p>
-      {shown.length > 0 && <ul className="ms-nd-reasons">{shown.map((r) => <li key={r}>{r}</li>)}</ul>}
-      {more > 0 && <p className="tile-foot">… et {more} autre{more > 1 ? "s" : ""} raison{more > 1 ? "s" : ""}.</p>}
-    </div>
-  );
+  return <NdState testid={`${testid}-vide`} heading={title} reason="Aucune valeur connue sur la période : le graphique n'est pas tracé (un axe à zéro ferait croire à des valeurs nulles)." reasons={shown} more={reasons.length - shown.length} />;
 }
 
 // Tendance mensuelle : barres groupées, masse chargée de l'année N et du même mois un an plus tôt (N-1). Un mois n.d. est une
@@ -181,7 +213,7 @@ export function TrendChart({ rows, previous, lines }: { rows: MonthPayroll[]; pr
   const prevYear = previous[0]?.month.slice(0, 4) ?? "";
   const open = [...rows, ...previous].filter((r) => r.open).map((r) => r.month);
   const axis = monthsAxis(rows.map((r) => r.month), previous.map((r) => r.month), open);
-  const title = `Masse chargée par mois — ${year} face à ${prevYear} (N-1)`;
+  const title = `Masse chargée par mois, ${year} face à ${prevYear} (N-1)`;
   const series = masseSeries(rows, previous, { cur: `Masse chargée ${year}`, prev: `Masse chargée ${prevYear} (N-1)` });
   return (
     <ChartGuard testid="ms-trend" title={title} series={series} lines={lines}>
@@ -194,7 +226,7 @@ export function TrendChart({ rows, previous, lines }: { rows: MonthPayroll[]; pr
         series={series}
         unit="eur"
         height={300}
-        note={monthlyNote(open)}
+        note={monthlyNote(open, series)}
       />
     </ChartGuard>
   );
@@ -214,8 +246,8 @@ export function Composition({ brut, cotisations }: { brut: number; cotisations: 
         <span style={{ width: width(cotisations), background: COLORS.cotisations }} />
       </div>
       <ul className="ms-composition-legend">
-        <li><i className="swatch" style={{ background: COLORS.brut }} aria-hidden="true" />Brut {pct(brut)} % · {formatEuros(brut)}</li>
-        <li><i className="swatch" style={{ background: COLORS.cotisations }} aria-hidden="true" />Cotisations patronales {pct(cotisations)} % · {formatEuros(cotisations)}</li>
+        <li><i className="swatch" style={{ background: COLORS.brut }} aria-hidden="true" />Brut {pct(brut)} % · {euros(brut)}</li>
+        <li><i className="swatch" style={{ background: COLORS.cotisations }} aria-hidden="true" />Cotisations patronales {pct(cotisations)} % · {euros(cotisations)}</li>
       </ul>
     </div>
   );

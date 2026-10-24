@@ -1,7 +1,10 @@
 import type { Cascade, masseByRubric } from "@/lib/budget/cascade";
 import type { Bridge } from "@/lib/budget/series";
 import { ROW_LABELS, ROW_UNIT, type Cell, type RowKey, type Version } from "@/lib/budget/versions";
+import { formatEuros } from "@/lib/money";
 import type { ChartSeries } from "@/components/charts/shared";
+import { niceTicks } from "@/components/charts/scale";
+import { unitFormat, type UnitName } from "@/components/charts/units";
 
 // Adaptateurs purs de l'écart budgétaire et de l'analyse des écarts vers les graphiques : ils ne calculent rien de neuf,
 // ils rangent les valeurs déjà calculées (grille de versions, cascade, pont). Une valeur absente reste null avec sa raison :
@@ -120,3 +123,11 @@ export function pontWaterfall(p: Bridge): WaterfallData {
     steps: [{ label: "Effet volume", value: p.volume }, { label: "Effet coût moyen", value: p.averageCost }],
   };
 }
+
+export { waterfallAxisBadge } from "./waterfall-axis";
+
+// Signe moins typographique (« − », comme les ETP et les pourcentages) : formatEuros et String() écrivent un trait d'union.
+// Réservé à l'affichage ; les exports CSV gardent le trait d'union (lisible par un tableur).
+export const neg = (text: string) => (text.startsWith("-") ? `−${text.slice(1)}` : text);
+// Montant en centimes avec son signe écrit : « +3 550,00 € », « −79,51 € », « 0,00 € ».
+export const eurosSigned = (cents: number) => `${cents > 0 ? "+" : ""}${neg(formatEuros(cents))}`;

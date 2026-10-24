@@ -1,4 +1,4 @@
-// Entrées de la famille KPI RH, dans l'ordre du cahier. « Suivi des effectifs » est l'écran historique complet (tous les
+// Entrées de la famille KPI RH, dans l'ordre de la barre d'onglets. « Suivi des effectifs » est l'écran historique complet (tous les
 // indicateurs, le tableau mois par mois et la ventilation par catégorie) ; Turnover et Absentéisme en sont des lectures
 // ciblées ; Effectifs mensuels ventile une mesure par axe. Une entrée « Prévu » n'a pas encore de comportement établi.
 export const KPI_VUES = [

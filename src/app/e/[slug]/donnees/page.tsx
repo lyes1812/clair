@@ -1,15 +1,14 @@
 import "@/styles/donnees.css";
-import { Banknote, FileText, Gauge, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 import { DATA_ITEM, STUDIO_RH_ITEMS } from "@/lib/nav";
-import { dateTimeFmt } from "@/lib/connectors/labels";
+import { dateTimeFmt, PROVIDER_LABELS } from "@/lib/connectors/labels";
 import { activeSync, getConnection, lastSync, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
 import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
 import { fecCoverage, listFecFiles } from "@/lib/fec/import";
-import { PROVIDER_LABELS } from "@/lib/connectors/labels";
-import { DOMAINS, resolveSource, SOURCE_MODE_LABELS, type SourceDomain, type SourceMode, type SourceResolution } from "@/lib/sources";
-import { chooseSource } from "./actions";
-import { PageHead, Pill, syncTone } from "./ui";
+import { resolveSource, SOURCE_MODE_LABELS, type SourceDomain, type SourceMode, type SourceResolution } from "@/lib/sources";
+import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
+import { chooseSource } from "./actions";
+import { PageHead, Pill, primaryAction, syncTone, type SourceAction } from "./ui";
 
 export const dynamic = "force-dynamic";
 
@@ -18,26 +17,10 @@ const SOURCES = [
   { id: "pennylane", label: "Pennylane", summary: "Plan comptable et écritures des classes 6 et 7 et des comptes 421, 431, 437." },
 ] as const;
 
-// Accès aux cinq familles du Studio RH (organisation figée). Textes : ce que l'écran fait aujourd'hui, rien de plus.
-const FAMILY_ICONS: Record<string, LucideIcon> = {
-  "studio-rh/collaborateurs": Users,
-  "studio-rh/kpi": Gauge,
-  "studio-rh/masse-salariale": Banknote,
-  "studio-rh/hypotheses": SlidersHorizontal,
-  "studio-rh/reporting-social": FileText,
-};
-const FAMILY_NOTES: Record<string, string> = {
-  "studio-rh/collaborateurs": "Fiches individuelles, listes mensuelle et annuelle, entrées et sorties datées.",
-  "studio-rh/kpi": "ETP, effectif moyen, turnover et absentéisme, avec leurs définitions.",
-  "studio-rh/masse-salariale": "Brut, charges et coût chargé, rapprochés des comptes de paie.",
-  "studio-rh/hypotheses": "Hypothèses datées, scénarios et projection traçable de la masse salariale.",
-  "studio-rh/reporting-social": "Index égalité FH et BDESE : entrées prévues, pas encore construites.",
-};
-
 // Ce que chaque domaine demande pour devenir utilisable (texte de l'étape suivante).
-const DOMAIN_WORDS: Record<SourceDomain, { api: string; files: string; anchor: string }> = {
-  rh: { api: "PayFit", files: "des fichiers DSN", anchor: "domaine-rh" },
-  accounting: { api: "Pennylane", files: "des fichiers FEC", anchor: "domaine-comptabilite" },
+const DOMAIN_WORDS: Record<SourceDomain, { api: string; files: string }> = {
+  rh: { api: "PayFit", files: "des fichiers DSN" },
+  accounting: { api: "Pennylane", files: "des fichiers FEC" },
 };
 
 type SyncRow = Awaited<ReturnType<typeof lastSync>>;
@@ -63,121 +46,106 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
   const complete = coverage.filter((c) => c.status === "complete").length;
   const [rhSource, accountingSource] = await Promise.all([resolveSource(workspace.id, "rh"), resolveSource(workspace.id, "accounting")]);
   const isAdmin = workspace.role === "admin";
+  const canWrite = hasAtLeast(workspace.role, "editor");
   const byId = Object.fromEntries(states.map((s) => [s.id, s]));
   // Dépôts additifs : « Appliquée » suffit, il n'y a pas de lecture « active » unique.
   const fileStatus = (status: string) => (status === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[status as SyncStatus]);
-  const lastRead = (row: SyncRow, label: (s: string) => string) =>
+
+  // Un aperçu en attente de validation (API ou fichiers) : seule exception signalée dans l'état du domaine.
+  type Candidate = { label: string; row: SyncRow };
+  const pendingOf = (api: Candidate, files: Candidate) => [api, files].find((c) => c.row?.status === "preview") ?? null;
+
+  // Dernière ligne d'une carte de fichiers : date du dernier dépôt et son statut, ou n.d. avec la raison.
+  const lastDeposit = (row: SyncRow) =>
     row ? (
       <>
-        {dateTimeFmt.format(row.startedAt)} <Pill tone={syncTone(row.status)}>{label(row.status)}</Pill>
+        {dateTimeFmt.format(row.startedAt)} <Pill tone={syncTone(row.status)}>{fileStatus(row.status)}</Pill>
       </>
     ) : (
-      <span className="nd">n.d. — aucune lecture</span>
+      <span className="nd">n.d. — aucun dépôt</span>
     );
 
-  // « Où en suis-je » : une tuile par domaine (source retenue, dernière lecture, étape suivante).
-  const domainTile = (domain: SourceDomain, r: SourceResolution, apiLast: SyncRow, filesLast: SyncRow) => {
+  // Action principale de la carte (bouton plein) puis « Gérer » (bouton neutre vers la page de la source).
+  const cardFoot = (action: SourceAction, href: string, label: string) => (
+    <div className="dn-card-foot">
+      {action && (
+        <a className="btn primary" href={`${href}#${action.anchor}`} aria-label={`${action.label} : ${label}`}>
+          {action.label}
+        </a>
+      )}
+      <a className="btn" href={href} aria-label={`Gérer ${label}`}>Gérer</a>
+    </div>
+  );
+
+  // Source retenue : dite une seule fois par domaine, avec la règle de choix et, au besoin, l'étape suivante.
+  const sourceChoice = (domain: SourceDomain, r: SourceResolution, pending: Candidate | null) => {
     const w = DOMAIN_WORDS[domain];
-    const candidates = [
-      { label: w.api, row: apiLast, status: (s: string) => SYNC_STATUS_LABELS[s as SyncStatus] },
-      { label: PROVIDER_LABELS[DOMAINS[domain].files], row: filesLast, status: fileStatus },
-    ];
-    const pending = candidates.find((c) => c.row?.status === "preview");
-    const latest = candidates.filter((c) => c.row).sort((a, b) => b.row!.startedAt.getTime() - a.row!.startedAt.getTime())[0];
     return (
-      <li key={domain} className="dn-tile" data-testid={`dn-tile-${domain}`}>
-        <span className="label">{DOMAINS[domain].label}</span>
-        <p className={r.chosen ? "dn-tile-main" : "dn-tile-main nd"}>{r.chosen ? PROVIDER_LABELS[r.chosen] : "n.d."}</p>
-        <p className="desc">
-          {r.chosen ? `Source retenue${r.appliedAt ? ` — lecture appliquée le ${dateTimeFmt.format(r.appliedAt)}` : ""}.` : r.reason}
-        </p>
-        <p className="dn-tile-last">
-          <span className="desc">Dernière lecture</span>
-          <span>
-            {latest ? (
-              <>
-                {latest.label} · {dateTimeFmt.format(latest.row!.startedAt)} <Pill tone={syncTone(latest.row!.status)}>{latest.status(latest.row!.status)}</Pill>
-              </>
+      <section className="panel source-choice dn-choice" data-testid={`source-choice-${domain}`}>
+        <div className="source-head">
+          <div>
+            <h3>Source retenue pour les modules</h3>
+            <p data-testid={`source-chosen-${domain}`}>
+              {r.chosen ? <strong>{PROVIDER_LABELS[r.chosen]}</strong> : <strong>n.d.</strong>} <span className="desc">— {r.reason}</span>
+            </p>
+            {pending ? (
+              <p className="dn-next">
+                Un aperçu attend une validation ({pending.label}). <a href={`/e/${slug}/donnees/synchro/${pending.row!.id}`}>Ouvrir l'aperçu</a>
+              </p>
             ) : (
-              <span className="nd">n.d. — aucune lecture</span>
+              !r.chosen && (
+                <p className="dn-next">
+                  <strong>À faire :</strong>{" "}
+                  {isAdmin
+                    ? `${r.mode === "api" ? `connectez ${w.api}` : r.mode === "files" ? `déposez ${w.files}` : `connectez ${w.api} ou déposez ${w.files}`}, puis appliquez l'aperçu.`
+                    : `${r.mode === "api" ? `un administrateur connecte ${w.api}` : r.mode === "files" ? `un éditeur ou un administrateur dépose ${w.files}` : `un administrateur connecte ${w.api}, ou un éditeur dépose ${w.files}`}, puis l'aperçu est appliqué.`}
+                </p>
+              )
             )}
-          </span>
-        </p>
-        <p className="dn-tile-next">
-          {pending ? (
-            <>
-              <strong>À faire :</strong> un aperçu attend une validation ({pending.label}).{" "}
-              <a href={`/e/${slug}/donnees/synchro/${pending.row!.id}`}>Ouvrir l'aperçu</a>
-            </>
-          ) : r.chosen ? (
-            <>
-              <strong>Prêt :</strong> une lecture est appliquée, les écrans du Studio RH qui dépendent de ce domaine l'utilisent.
-            </>
+          </div>
+          {isAdmin ? (
+            <form action={chooseSource.bind(null, slug, domain)} className="inline-form dn-rule">
+              <div className="field-row">
+                <label htmlFor={`mode-${domain}`}>Règle</label>
+                <select className="select" id={`mode-${domain}`} name="mode" defaultValue={r.mode}>
+                  {(Object.keys(SOURCE_MODE_LABELS) as SourceMode[]).map((m) => <option key={m} value={m}>{SOURCE_MODE_LABELS[m]}</option>)}
+                </select>
+              </div>
+              <button className="btn" type="submit">Appliquer</button>
+            </form>
           ) : (
-            <>
-              <strong>À faire :</strong>{" "}
-              {isAdmin
-                ? `${r.mode === "api" ? `connectez ${w.api}` : r.mode === "files" ? `déposez ${w.files}` : `connectez ${w.api} ou déposez ${w.files}`}, puis appliquez l'aperçu.`
-                : `${r.mode === "api" ? `un administrateur connecte ${w.api}` : r.mode === "files" ? `un éditeur ou un administrateur dépose ${w.files}` : `un administrateur connecte ${w.api}, ou un éditeur dépose ${w.files}`}, puis l'aperçu est appliqué.`}{" "}
-              <a href={`#${w.anchor}`}>Voir les sources</a>
-            </>
+            <span className="tag">{SOURCE_MODE_LABELS[r.mode]}</span>
           )}
-        </p>
-      </li>
+        </div>
+      </section>
     );
   };
 
-  const sourceChoice = (domain: SourceDomain, r: SourceResolution) => (
-    <section className="panel source-choice dn-choice" data-testid={`source-choice-${domain}`}>
-      <div className="source-head">
-        <div>
-          <h3>Source retenue pour les modules</h3>
-          <p data-testid={`source-chosen-${domain}`}>
-            {r.chosen ? <strong>{PROVIDER_LABELS[r.chosen]}</strong> : <strong>n.d.</strong>} <span className="desc">— {r.reason}</span>
-          </p>
-        </div>
-        {isAdmin ? (
-          <form action={chooseSource.bind(null, slug, domain)} className="inline-form dn-rule">
-            <div className="field-row">
-              <label htmlFor={`mode-${domain}`}>Règle</label>
-              <select className="select" id={`mode-${domain}`} name="mode" defaultValue={r.mode}>
-                {(Object.keys(SOURCE_MODE_LABELS) as SourceMode[]).map((m) => <option key={m} value={m}>{SOURCE_MODE_LABELS[m]}</option>)}
-              </select>
-            </div>
-            <button className="btn" type="submit">Appliquer</button>
-          </form>
-        ) : (
-          <span className="tag">{SOURCE_MODE_LABELS[r.mode]}</span>
-        )}
-      </div>
-    </section>
-  );
-
+  // Carte d'une source API : connexion, dernière lecture appliquée (une seule ligne), lecture plus récente seulement si elle diffère.
   const apiCard = ({ id, label, summary, conn, last, active }: (typeof states)[number], chosen: boolean) => (
-    <section key={id} className="panel dn-card" data-testid={`source-${id}`}>
+    <section key={id} className="panel dn-card" data-testid={`source-${id}`} data-chosen={chosen ? "true" : undefined}>
       <div className="dn-card-head">
         <div>
           <h3>{label} <span className="tag">API</span></h3>
           <p className="desc">{summary}</p>
         </div>
-        {chosen && <Pill tone="applied">Source retenue</Pill>}
       </div>
       <dl className="facts dn-facts">
         <div>
           <dt>Connexion</dt>
           <dd data-testid={`${id}-connection`}>
             {conn ? (
-              <>
-                <Pill tone="applied">Vérifiée</Pill>{` — ${conn.companyName ?? "société"}`}
-              </>
+              <span className="dn-conn">
+                <Pill tone="applied">Vérifiée</Pill>
+                {conn.companyName ? <span>{conn.companyName}</span> : <span className="nd">n.d. — nom de société non enregistré</span>}
+              </span>
             ) : (
               <Pill>Non connectée</Pill>
             )}
           </dd>
         </div>
-        <div><dt>Dernière lecture</dt><dd>{lastRead(last, (s) => SYNC_STATUS_LABELS[s as SyncStatus])}</dd></div>
         <div>
-          <dt>Source active</dt>
+          <dt>Dernière lecture</dt>
           <dd data-testid={`${id}-active`}>
             {active?.decidedAt ? (
               <>
@@ -188,21 +156,26 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
             )}
           </dd>
         </div>
+        {last && last.id !== active?.id && (
+          <div>
+            <dt>Lecture plus récente</dt>
+            <dd>
+              {dateTimeFmt.format(last.startedAt)} <Pill tone={syncTone(last.status)}>{SYNC_STATUS_LABELS[last.status as SyncStatus]}</Pill>
+            </dd>
+          </div>
+        )}
       </dl>
-      <div className="dn-card-foot">
-        <a className="btn" href={`/e/${slug}/donnees/${id}`} aria-label={`Gérer ${label}`}>Gérer</a>
-      </div>
+      {cardFoot(primaryAction("api", { connected: Boolean(conn), isAdmin, canWrite }), `/e/${slug}/donnees/${id}`, label)}
     </section>
   );
 
   const dsnCard = (
-    <section className="panel dn-card" data-testid="source-dsn">
+    <section className="panel dn-card" data-testid="source-dsn" data-chosen={rhSource.chosen === "dsn" ? "true" : undefined}>
       <div className="dn-card-head">
         <div>
           <h3>Fichiers DSN <span className="tag">Fichier</span></h3>
           <p className="desc">Déclarations mensuelles déposées fichier par fichier : individus, contrats, rémunérations, activités.</p>
         </div>
-        {rhSource.chosen === "dsn" && <Pill tone="applied">Source retenue</Pill>}
       </div>
       <dl className="facts dn-facts">
         <div>
@@ -211,87 +184,55 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
         </div>
         <div>
           <dt>Dernier dépôt</dt>
-          <dd>{lastRead(dsnLast, fileStatus)}</dd>
+          <dd>{lastDeposit(dsnLast)}</dd>
         </div>
         <div>
           <dt>Couverture</dt>
           <dd data-testid="dsn-coverage-summary">
-            {coverage.length === 0 ? "n.d. — aucune déclaration appliquée" : `${complete} mois × établissement complet(s) sur ${coverage.length}`}
+            {coverage.length === 0 ? <span className="nd">n.d. — aucune déclaration appliquée</span> : `${complete} mois × établissement complet(s) sur ${coverage.length}`}
           </dd>
         </div>
       </dl>
-      <div className="dn-card-foot">
-        <a className="btn" href={`/e/${slug}/donnees/dsn`} aria-label="Gérer les fichiers DSN">Gérer</a>
-      </div>
+      {cardFoot(primaryAction("files", { connected: true, isAdmin, canWrite }), `/e/${slug}/donnees/dsn`, "les fichiers DSN")}
     </section>
   );
 
   const fecCard = (
-    <section className="panel dn-card" data-testid="source-fec">
+    <section className="panel dn-card" data-testid="source-fec" data-chosen={accountingSource.chosen === "fec" ? "true" : undefined}>
       <div className="dn-card-head">
         <div>
           <h3>Fichiers FEC <span className="tag">Fichier</span></h3>
           <p className="desc">Fichier des écritures comptables, un par exercice : toutes les écritures, journaux et comptes.</p>
         </div>
-        {accountingSource.chosen === "fec" && <Pill tone="applied">Source retenue</Pill>}
       </div>
       <dl className="facts dn-facts">
         <div><dt>Fichiers conservés</dt><dd data-testid="fec-files-count">{fecFiles.length === 0 ? "aucun" : fecFiles.length}</dd></div>
-        <div><dt>Dernier dépôt</dt><dd>{lastRead(fecLast, fileStatus)}</dd></div>
+        <div><dt>Dernier dépôt</dt><dd>{lastDeposit(fecLast)}</dd></div>
         <div>
           <dt>Exercices en vigueur</dt>
-          <dd data-testid="fec-coverage-summary">{exercises.length === 0 ? "n.d. — aucun FEC appliqué" : exercises.map((e) => `${e.firstDate} → ${e.lastDate}`).join(" ; ")}</dd>
+          <dd data-testid="fec-coverage-summary">
+            {exercises.length === 0 ? <span className="nd">n.d. — aucun FEC appliqué</span> : exercises.map((e) => `${e.firstDate} → ${e.lastDate}`).join(" ; ")}
+          </dd>
         </div>
       </dl>
-      <div className="dn-card-foot">
-        <a className="btn" href={`/e/${slug}/donnees/fec`} aria-label="Gérer les fichiers FEC">Gérer</a>
-      </div>
+      {cardFoot(primaryAction("files", { connected: true, isAdmin, canWrite }), `/e/${slug}/donnees/fec`, "les fichiers FEC")}
     </section>
   );
 
   return (
     <>
       <PageHead kicker="Données" title={DATA_ITEM.label}>
-        <p className="desc">Toutes les sources de l'espace, lues à la demande, en lecture seule. Chaque lecture passe par un aperçu avant d'être appliquée.</p>
+        <p className="desc">
+          Toutes les sources de l'espace, en lecture seule. Rien n'est lu tant qu'une synchronisation n'est pas lancée, et chaque lecture passe par un aperçu avant d'être appliquée.
+        </p>
       </PageHead>
-
-      <section className="panel dn-overview" aria-labelledby="dn-where" data-testid="dn-overview">
-        <div className="dn-section-head">
-          <h2 id="dn-where">Où en suis-je</h2>
-          <p className="desc">État des sources à l'instant de l'affichage. Rien n'est lu tant que vous ne lancez pas une synchronisation.</p>
-        </div>
-        <ul className="dn-tiles">
-          {domainTile("rh", rhSource, byId.payfit.last, dsnLast)}
-          {domainTile("accounting", accountingSource, byId.pennylane.last, fecLast)}
-        </ul>
-        <div className="dn-section-head">
-          <h3>Poursuivre dans le Studio RH</h3>
-        </div>
-        <ul className="dn-families" data-testid="dn-families">
-          {STUDIO_RH_ITEMS.map((item) => {
-            const Icon = FAMILY_ICONS[item.path];
-            return (
-              <li key={item.path}>
-                <a className="dn-family" href={`/e/${slug}/${item.path}`}>
-                  <span className="dn-family-title">
-                    {Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}
-                    {item.label}
-                    {item.path === "studio-rh/reporting-social" && <span className="tag">Prévu</span>}
-                  </span>
-                  <span className="desc">{FAMILY_NOTES[item.path] ?? item.summary}</span>
-                </a>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
 
       <section className="dn-domain" id="domaine-rh" aria-labelledby="dn-rh-title">
         <div className="dn-section-head">
           <h2 id="dn-rh-title" className="group-title">Ressources humaines</h2>
           <p className="desc">Par l'API PayFit, ou par les DSN que PayFit génère.</p>
         </div>
-        {sourceChoice("rh", rhSource)}
+        {sourceChoice("rh", rhSource, pendingOf({ label: "PayFit", row: byId.payfit.last }, { label: PROVIDER_LABELS.dsn, row: dsnLast }))}
         <div className="dn-cards">
           {apiCard(byId.payfit, rhSource.chosen === "payfit")}
           {dsnCard}
@@ -303,12 +244,21 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
           <h2 id="dn-acc-title" className="group-title">Comptabilité</h2>
           <p className="desc">Par l'API Pennylane, ou par le FEC que Pennylane génère.</p>
         </div>
-        {sourceChoice("accounting", accountingSource)}
+        {sourceChoice("accounting", accountingSource, pendingOf({ label: "Pennylane", row: byId.pennylane.last }, { label: PROVIDER_LABELS.fec, row: fecLast }))}
         <div className="dn-cards">
           {apiCard(byId.pennylane, accountingSource.chosen === "pennylane")}
           {fecCard}
         </div>
       </section>
+
+      <nav className="dn-studio" aria-label="Aller au Studio RH">
+        <span className="label">Studio RH</span>
+        <ul>
+          {STUDIO_RH_ITEMS.map((item) => (
+            <li key={item.path}><a href={`/e/${slug}/${item.path}`}>{item.label}</a></li>
+          ))}
+        </ul>
+      </nav>
     </>
   );
 }

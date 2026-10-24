@@ -82,7 +82,8 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   expect(`${window[0]}-${String(lastDay(window[0])).padStart(2, "0")}` >= cutoff).toBe(true); // ETP de fin de mois exacts sur toute la fenêtre
 
   await expect(page.getByTestId("kpi-closed-month")).toContainText(closed);
-  await expect(page.getByTestId("kpi-payfit-notice")).toBeVisible();
+  await expect(page.getByTestId("kpi-read-limits")).toBeVisible(); // bloc « Limites de la lecture » : résumé visible, textes dans le DOM
+  await expect(page.getByTestId("kpi-payfit-notice")).toBeAttached();
   await expect(page.getByTestId("kpi-payfit-notice")).toContainText("Quotités à la date de lecture");
   // Historique PayFit brut (défaut validé le 22/10/2026) : une seule mention en tête d'écran, pas de « ≥ » ni de n.d. de conservation.
   await expect(page.getByTestId("payfit-history-notice")).toContainText("Données telles que remontées par l'API PayFit");
@@ -96,7 +97,7 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(page.getByTestId("kpi-tile-turnover").locator("dd")).toHaveText("14,46 %");
   await expect(page.getByTestId("kpi-tile-turnover-n1")).toContainText("53,85 %");
   await expect(page.getByTestId("kpi-tile-absenteeism").locator("dd")).toHaveText("0,00 %");
-  await expect(page.getByTestId("kpi-absence-types")).toContainText("absents de la lecture : fr_maladie_ordinaire");
+  await expect(page.getByTestId("kpi-absence-types")).toContainText("absents de la lecture : Maladie ordinaire");
   await page.goto(kpi);
   await expect(page.getByTestId("kpi-monthly-table").locator("tbody tr")).toHaveCount(12);
   await expect(page.getByTestId("kpi-definitions")).toBeAttached();
@@ -109,8 +110,8 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
 
   // Paramètres : défaut « maladie ordinaire » remplacé par les trois types d'absence de la lecture fictive.
   await page.goto(`/e/${slug}/parametres`);
-  await expect(page.getByTestId("setting-kpi-origin-absence-types")).toContainText("Valeur par défaut validée le 22/10/2026");
-  await expect(page.getByTestId("setting-kpi-origin-etp-forfait-jours")).toContainText("Valeur par défaut validée le 22/10/2026");
+  await expect(page.getByTestId("setting-kpi-defaults-absence")).toContainText("Valeurs par défaut validées le 22/10/2026");
+  await expect(page.getByTestId("setting-kpi-defaults-etp")).toContainText("Valeurs par défaut validées le 22/10/2026");
   await expect(page.getByTestId("setting-kpi-etp-forfait-jours")).toBeChecked();
   const types = page.getByTestId("setting-kpi-absence-types");
   await expect(types).toHaveCount(4);

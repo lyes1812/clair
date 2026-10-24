@@ -3,9 +3,9 @@ import { Pager } from "@/components/Pager";
 import { formatDate } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { annualList, type AnnualRow, type StripCell } from "@/lib/rh/headcount";
-import { loadCollabContext, personLabel, showCount, showHeadcount } from "@/lib/rh/view";
-import { DEFAULT_PAGE_SIZE, matchesQuery, pageHref, pageOf, pageSizeOf, paginate, quarters, stripCellTitle, stripLabel } from "@/lib/viz/collaborateurs";
-import { CollabHeader, contractHref, FindingList, HiddenParams, ListToolbar, Nature, personHref, ShortId, Tile, YesNoPill } from "../components";
+import { loadCollabContext, personLabel, showCount, showHeadcount, type Shown } from "@/lib/rh/view";
+import { clearMonths, collectNotes, DEFAULT_PAGE_SIZE, groupMonthReasons, matchesQuery, pageHref, pageOf, pageSizeOf, paginate, plural, quarters, shortQualifier, stripCellTitle, stripLabel } from "@/lib/viz/collaborateurs";
+import { CollabHeader, contractHref, FilterActions, FindingList, HiddenParams, ListToolbar, Nature, NdNote, NdShort, NdTableNote, personHref, ShortId, shownNdReasons, Tile, YesNoPill } from "../components";
 
 export const dynamic = "force-dynamic";
 
@@ -59,10 +59,19 @@ function rowCells(r: AnnualRow): (string | number | null | undefined)[] {
   ];
 }
 
+// Présence à une date : « oui » / « non », ou « n.d. » court (la raison est dite une fois sous le tableau).
 function PresenceCell({ p }: { p: Presence }) {
-  if (p.state === "nd") return <td className="col-wide"><span className="nd">n.d. — {p.nd.reason}</span></td>;
+  if (p.state === "nd") return <td><NdShort reason={p.nd.reason} /></td>;
   return <td><YesNoPill yes={p.state === "present"} title={p.state === "absent" ? p.reason : undefined} /></td>;
 }
+
+// Total annuel (entrées, sorties) : « au moins n » avec le qualificatif ; la liste des mois n.d. n'est retirée du pied de tuile que si
+// chacun de ces mois a déjà sa raison écrite en tête de panneau (said), sinon elle reste.
+const yearShown = (c: Parameters<typeof showCount>[0], said: readonly string[]): Shown => {
+  const s = showCount(c);
+  if (c.kind === "lower_bound" && c.qualifiers.length) return { ...s, foot: [...new Set(c.qualifiers.map((q) => shortQualifier(q, said)))].join(" · ") };
+  return s;
+};
 
 export default async function CollaborateursAnneePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
@@ -93,6 +102,24 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
   const natures = [...new Set(d.contracts.map((c) => c.nature).filter((n): n is string => n !== null))].sort();
   const covered = al.coveredMonths.length;
 
+  // Tuiles de l'année ; les raisons n.d. déjà dites par la liste des mois non couverts ne sont pas répétées.
+  const shownJan1 = showHeadcount(al.headcountJan1, "persons");
+  const shownDec31 = showHeadcount(al.headcountDec31, "persons");
+  const saidMonths = al.uncovered.map((u) => u.month);
+  const shownEntries = yearShown(al.entriesCount, saidMonths);
+  const shownExits = yearShown(al.exitsCount, saidMonths);
+  // Mois non couverts : une ligne par raison, les mois regroupés (« oct. à déc. 2026 »).
+  const uncoveredGroups = groupMonthReasons(al.uncovered);
+  const saidReasons = new Set(uncoveredGroups.map((g) => clearMonths(g.reason)));
+  const tileNd = shownNdReasons([shownJan1, shownDec31, shownEntries, shownExits]).filter((r) => !saidReasons.has(r));
+  // Cellules n.d. du tableau : « n.d. » court, chaque raison dite une fois sous le tableau.
+  const ndLog: { column: string; reason: string }[] = [];
+  for (const r of pg.items) {
+    if (r.person.employeeNumber === null) ndLog.push({ column: "Matricule", reason: r.person.fieldsNd.employeeNumber?.reason ?? "valeur absente" });
+    if (r.presentJan1.state === "nd") ndLog.push({ column: "Présent au 01/01", reason: r.presentJan1.nd.reason });
+    if (r.presentDec31.state === "nd") ndLog.push({ column: "Présent au 31/12", reason: r.presentDec31.nd.reason });
+  }
+
   // Adresses : la barre de période (année, établissement) et la barre du tableau (recherche, nature, taille) se conservent l'une l'autre.
   const sizeParam = size === DEFAULT_PAGE_SIZE ? undefined : String(size);
   const listParams = { annee: String(year), etab: etab || undefined, nature: nature || undefined, q: q || undefined, taille: sizeParam };
@@ -117,27 +144,35 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
             </select>
           </div>
         )}
-        <button className="btn" type="submit">Afficher</button>
+        <FilterActions label="Afficher" />
       </form>
 
-      <section className="panel collab-panel">
+      <section className="panel collab-panel" data-testid="collab-year-panel">
         <h2>Année {year}</h2>
-        <dl className="facts collab-tiles">
-          <Tile id="year-jan1" label={`Effectif au 01/01/${year} (personnes)`} shown={showHeadcount(al.headcountJan1, "persons")} def="headcount-persons" />
-          <Tile id="year-dec31" label={`Effectif au 31/12/${year} (personnes)`} shown={showHeadcount(al.headcountDec31, "persons")} def="headcount-persons" />
-          <Tile id="year-entries" label="Entrées de l'année" shown={showCount(al.entriesCount)} def="movements" />
-          <Tile id="year-exits" label="Sorties de l'année" shown={showCount(al.exitsCount)} def="movements" />
+        {uncoveredGroups.length > 0 && (
+          <div className="collab-ndnote" data-testid="year-uncovered">
+            <ul>
+              {uncoveredGroups.map((g) => <li key={g.reason}><strong>n.d.</strong> — {g.label} : {clearMonths(g.reason)}</li>)}
+            </ul>
+          </div>
+        )}
+        <NdNote reasons={tileNd} testid="year-tiles-nd" />
+        <dl className="facts collab-tiles five">
+          <Tile id="year-jan1" label={`Effectif au 01/01/${year} (personnes)`} shown={shownJan1} def="headcount-persons" />
+          <Tile id="year-dec31" label={`Effectif au 31/12/${year} (personnes)`} shown={shownDec31} def="headcount-persons" />
+          <Tile id="year-entries" label="Entrées de l'année" shown={shownEntries} def="movements" />
+          <Tile id="year-exits" label="Sorties de l'année" shown={shownExits} def="movements" />
           <Tile
             id="year-covered"
             label="Mois couverts"
-            shown={covered === 12 ? { text: "12/12", kind: "value" } : { text: `${covered}/12`, kind: covered === 0 ? "nd" : "lower", foot: al.uncovered.map((u) => `${u.month} : ${u.reason}`).join(" · ") }}
+            shown={covered === 12 ? { text: "12/12", kind: "value" } : { text: `${covered}/12`, kind: "value", foot: covered === 0 ? undefined : `${12 - covered} mois non ${12 - covered > 1 ? "couverts" : "couvert"}` }}
             def="reference-date"
           />
         </dl>
       </section>
 
       <section className="panel collab-panel" data-testid="collab-annual-panel">
-        <h2>Personnes <span className="desc">— {rows.length} ligne(s){rows.length !== al.rows.length ? ` sur ${al.rows.length}` : ""}</span></h2>
+        <h2>Personnes <span className="desc">— {plural(rows.length, "ligne")}{rows.length !== al.rows.length ? ` sur ${al.rows.length}` : ""}</span></h2>
         <ListToolbar testid="year-toolbar" label="Recherche et filtres du tableau des personnes de l'année" hidden={{ annee: String(year), etab: etab || undefined }} q={q} size={size} resetHref={resetHref}>
           <div className="field-row">
             <label htmlFor="nature">Nature</label>
@@ -147,7 +182,13 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
             </select>
           </div>
         </ListToolbar>
-        <div className="table-wrap scroll collab-scroll">
+        <p className="collab-legend" data-testid="strip-legend">
+          <span>Colonne « Fin de mois » : un carré par mois, par trimestre —</span>
+          <span><i className="sw present" aria-hidden="true" />présent</span>
+          <span><i className="sw" aria-hidden="true" />absent</span>
+          <span><i className="sw nd" aria-hidden="true" />n.d. (raison au survol)</span>
+        </p>
+        <div className={pg.items.length > 12 ? "table-wrap scroll collab-scroll" : "table-wrap scroll collab-flat"}>
           <table className="data-table sticky sticky-first collab-table collab-who" data-testid="collab-annual-table">
             <caption className="collab-sr">Personnes de l'année {year}, une ligne par personne</caption>
             <thead>
@@ -160,8 +201,17 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
             <tbody>
               {pg.items.map((r) => (
                 <tr key={r.person.personKey}>
-                  <td><a href={personHref(slug, r.person.personKey)}>{personLabel(r.person) ?? <span className="nd">{ndName(r.person)}</span>}</a> <ShortId id={r.person.externalId} /></td>
-                  <td className="col-nd">{r.person.employeeNumber ?? <span className="nd">{ndMatricule(r.person)}</span>}</td>
+                  <td className="collab-who-cell">
+                    <span className="collab-person-cell">
+                      <a href={personHref(slug, r.person.personKey)}>{personLabel(r.person) ?? <span className="nd">{ndName(r.person)}</span>}</a>{" "}
+                      <ShortId id={r.person.externalId} sub />
+                    </span>
+                  </td>
+                  <td>
+                    {r.person.employeeNumber ?? (
+                      <NdShort reason={r.person.fieldsNd.employeeNumber?.reason ?? "valeur absente"} />
+                    )}
+                  </td>
                   <td>
                     <ul className="collab-contracts">
                       {r.contracts.map((c) => <li key={c.contractKey}><a href={contractHref(slug, c.contractKey)}><code>{c.externalId}</code></a> <Nature code={c.nature} /></li>)}
@@ -180,14 +230,9 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
             </tbody>
           </table>
         </div>
+        <NdTableNote notes={collectNotes(ndLog)} testid="collab-annual-notes" />
         {rows.length === 0 && <p className="muted">Aucune personne pour ces filtres.</p>}
         <Pager page={pg.page} pageSize={size} total={pg.total} href={(p) => pageHref(listParams, p)} testid="collab-annual-pager" />
-        <p className="collab-legend" data-testid="strip-legend">
-          <span>Frise de fin de mois, par trimestre :</span>
-          <span><i className="sw present" aria-hidden="true" />présent</span>
-          <span><i className="sw" aria-hidden="true" />absent</span>
-          <span><i className="sw nd" aria-hidden="true" />n.d. (mois non couvert, raison au survol)</span>
-        </p>
       </section>
 
       {(al.withoutPerson.length > 0 || al.personsWithoutContract.length > 0) && (

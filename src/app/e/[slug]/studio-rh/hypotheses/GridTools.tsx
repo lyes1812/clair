@@ -309,6 +309,12 @@ export function DirtyIndicator() {
     // Les valeurs enregistrées changent (React met à jour defaultValue) : on relit.
     const observer = new MutationObserver(later);
     observer.observe(form, { subtree: true, attributes: true, attributeFilter: ["value", "checked", "selected"] });
+    // La barre d'enregistrement n'est collée au bas de la fenêtre que si le formulaire dépasse la fenêtre (data-tall, lu par le style).
+    const fit = () => form.setAttribute("data-tall", form.getBoundingClientRect().height > window.innerHeight - 120 ? "1" : "0");
+    const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    sizes?.observe(form);
+    window.addEventListener("resize", fit);
+    fit();
     later();
     return () => {
       cancelAnimationFrame(frame);
@@ -316,6 +322,9 @@ export function DirtyIndicator() {
       form.removeEventListener("change", later);
       form.removeEventListener("reset", afterReset);
       observer.disconnect();
+      sizes?.disconnect();
+      window.removeEventListener("resize", fit);
+      form.removeAttribute("data-tall");
     };
   }, []);
 

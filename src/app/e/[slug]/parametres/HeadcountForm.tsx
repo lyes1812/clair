@@ -10,7 +10,7 @@ export function HeadcountForm({ slug, choices, selected, disabled }: { slug: str
   return (
     <form className="form" action={action}>
       <Feedback state={state} />
-      <fieldset className="checks pm-checks" disabled={disabled}>
+      <fieldset className="checks pm-checks pm-chips" disabled={disabled}>
         <legend className="label">Natures comptées dans l'effectif</legend>
         {choices.map((c) => (
           <label key={c.code} className="check">
@@ -25,7 +25,7 @@ export function HeadcountForm({ slug, choices, selected, disabled }: { slug: str
       </div>
       {!disabled && (
         <div className="actions">
-          <button className="btn primary" type="submit" disabled={pending}>{pending ? "Enregistrement…" : "Enregistrer"}</button>
+          <button className="btn primary" type="submit" disabled={pending}>{pending ? "Enregistrement…" : "Enregistrer les natures comptées"}</button>
         </div>
       )}
     </form>

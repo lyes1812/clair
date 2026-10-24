@@ -30,7 +30,7 @@ import type { KpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
-import { absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, movementSeries, ndSummary, type CategoryMonthIn } from "@/lib/viz/kpi";
+import { absenceTypeLabel, absenteeismSeries, allZero, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, movementSeries, ndSummary, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
 // Composants de l'écran KPI RH : en-tête, tuiles (valeur, N-1, écart, paramètres), tableau mensuel, détail d'un chiffre.
@@ -56,7 +56,8 @@ const cls = (s: Shown) => (s.kind === "nd" ? "nd" : s.kind === "lower" ? "lower"
 
 // --- En-tête
 
-export function KpiHeader({ ctx, closedMonth, children }: { ctx: KpiContext; closedMonth: string | null; children?: ReactNode }) {
+// bare : page « Prévu » (aucun chiffre) : ni dernier mois clos ni détails de la lecture, qui n'ont rien à qualifier.
+export function KpiHeader({ ctx, closedMonth, children, bare = false }: { ctx: KpiContext; closedMonth: string | null; children?: ReactNode; bare?: boolean }) {
   const { slug, source, state, switchedAt } = ctx.collab;
   return (
     <>
@@ -66,7 +67,7 @@ export function KpiHeader({ ctx, closedMonth, children }: { ctx: KpiContext; clo
         <p className="desc">{ITEM.summary}</p>
         <div className="kpi-read-strip">
           <SourceBadge resolution={source} slug={slug} />
-          {ctx.collab.data && (
+          {ctx.collab.data && !bare && (
             <p className="desc" data-testid="kpi-closed-month">
               Dernier mois clos : {closedMonth ? <strong>{closedMonth}</strong> : <span className="nd">n.d. — aucun mois clos à la date de référence</span>}
               {(ctx.input?.openMonths ?? []).length > 0 && (
@@ -80,7 +81,7 @@ export function KpiHeader({ ctx, closedMonth, children }: { ctx: KpiContext; clo
             Source RH changée le {dateTimeFmt.format(switchedAt)} par un administrateur ({source.reason}). Les identifiants PayFit et DSN sont distincts : aucune comparaison n'est faite entre les deux sources.
           </p>
         )}
-        {ctx.collab.data && (
+        {ctx.collab.data && !bare && (
           <details className="kpi-read-details" data-testid="kpi-read-details">
             <summary>Détails de la lecture</summary>
             <BuildInfo ctx={ctx.collab} />
@@ -106,29 +107,71 @@ export function KpiHeader({ ctx, closedMonth, children }: { ctx: KpiContext; clo
   );
 }
 
-// PayFit : quotités à la lecture et limite de conservation des contrats archivés. En mode « brut » (défaut), la limite est dite
-// une fois par PayfitHistoryNotice ; en mode « signalé », les mois concernés sont listés ici.
+// PayFit : limites de la lecture (quotités à la date de lecture, limite de conservation des contrats archivés), réunies dans un
+// seul bloc repliable dont le résumé reste visible. En mode « brut » (défaut), la limite de conservation est dite une fois par
+// PayfitHistoryNotice ; en mode « signalé », les mois concernés sont listés dans le second paragraphe.
 export function PayfitNotice({ ctx }: { ctx: KpiContext }) {
   const data = ctx.collab.data;
   if (!data || data.build.source !== "payfit") return null;
-  const raw = ctx.collab.payfitHistory?.mode === "raw";
+  const history = ctx.collab.payfitHistory;
+  const raw = history?.mode === "raw";
   const lower = [...new Set(data.coverage.filter((c) => c.presenceStatus === "lower_bound").map((c) => c.month))].sort();
   const exactFrom = payfitExactFrom(data);
+  const archive = !raw && lower.length > 0 && !!exactFrom;
+  // Un résumé court par limite : ce qui reste lisible bloc fermé.
+  const digests = [
+    ...(raw ? [history?.limit ? "contrats archivés de plus de 12 mois non renvoyés par PayFit" : "historique PayFit tel que renvoyé par l'API"] : []),
+    ...(archive ? ["mois en borne basse (contrats archivés non renvoyés)"] : []),
+    `quotités à la date de lecture (${formatDate(data.build.referenceDate)})`,
+  ];
   return (
-    <>
-      {raw && <PayfitHistoryNotice ctx={ctx.collab} />}
-      <p className="notice" data-testid="kpi-payfit-notice">
-        Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.{" "}
-        {raw ? null : lower.length > 0 && exactFrom ? (
-          <>
-            PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois (constaté sur le compte pilote, à vérifier pour chaque espace) : l'effectif et l'ETP sont exacts à partir du {formatDate(exactFrom)} ; les entrées, sorties et
+    <details className="kpi-limits" data-testid="kpi-read-limits">
+      <summary>
+        <span className="kpi-limits-title">Limites de la lecture ({digests.length})</span>
+        <span className="kpi-limits-digest">{digests.join(" · ")}</span>
+      </summary>
+      <div className="kpi-limits-body">
+        {raw && <PayfitHistoryNotice ctx={ctx.collab} />}
+        <p className="notice" data-testid="kpi-payfit-notice">
+          Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.{" "}
+          {raw || archive ? null : <>Aucun mois de la lecture n'est en borne basse.</>}
+        </p>
+        {archive && (
+          <p className="notice" data-testid="kpi-payfit-archive-notice">
+            PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois (constaté sur le compte pilote, à vérifier pour chaque espace) : l'effectif et l'ETP sont exacts à partir du {formatDate(exactFrom!)} ; les entrées, sorties et
             absences des mois {monthRanges(lower)} sont incomplètes, et tout turnover ou absentéisme d'une période qui contient l'un de ces mois est n.d.
-          </>
-        ) : (
-          <>Aucun mois de la lecture n'est en borne basse.</>
+          </p>
         )}
-      </p>
-    </>
+      </div>
+    </details>
+  );
+}
+
+// --- Types d'absence : libellé français quand l'application le connaît, sinon le code tel que reçu de PayFit (discret)
+
+// withCode : dans un tableau de détail (traçabilité), le code PayFit reste écrit à côté du libellé, pas seulement en infobulle.
+export function AbsenceType({ code, withCode = false }: { code: string; withCode?: boolean }) {
+  const label = absenceTypeLabel(code);
+  if (!label) return <code className="kpi-code" title="Type affiché tel que reçu de PayFit">{code}</code>;
+  return withCode ? <><span>{label}</span> <code className="kpi-code">{code}</code></> : <span title={`Code PayFit : ${code}`}>{label}</span>;
+}
+export function AbsenceTypes({ codes }: { codes: string[] }) {
+  return <>{codes.map((c, i) => <span key={c}>{i > 0 ? ", " : ""}<AbsenceType code={c} /></span>)}</>;
+}
+
+// Tuile Absentéisme : types d'absence comptés, présents non comptés, comptés mais sans aucune absence dans la lecture.
+export function AbsenceTypeNotes({ chosen, other, missing, slug }: { chosen: { type: string; count: number }[]; other: { type: string; count: number }[]; missing: { type: string }[]; slug: string }) {
+  const list = (xs: { type: string; count: number }[]) =>
+    xs.length ? xs.map((x, i) => <span key={x.type}>{i > 0 ? ", " : ""}<AbsenceType code={x.type} /> ({x.count})</span>) : "aucun";
+  return (
+    <span className="tile-foot tile-types" data-testid="kpi-absence-types">
+      <span><strong>Types comptés</strong> : {list(chosen)}</span>
+      <span><strong>Autres types présents dans la lecture, non comptés</strong> : {list(other)}</span>
+      {missing.length > 0 && <span><strong>Types comptés absents de la lecture</strong> : <AbsenceTypes codes={missing.map((x) => x.type)} /></span>}
+      <span>
+        Entre parenthèses : nombre d'absences dans toute la lecture, tous mois et tous contrats. Un type sans libellé français est affiché tel que reçu de PayFit. <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
+      </span>
+    </span>
   );
 }
 
@@ -159,12 +202,11 @@ export function KpiTile(props: {
     <div className="kpi-tile" data-testid={`kpi-tile-${id}`}>
       <dt>{label}</dt>
       <dd className={cls(shown)} title={title}>{shown.text}</dd>
-      {(notes.length > 0 || warning) && (
-        <span className="tile-notes">
-          {notes.map((q) => <span key={q} className="tile-foot">{q}</span>)}
-          {warning}
-        </span>
-      )}
+      {/* Toujours présent, même vide : la rangée des remarques garde la grille des tuiles alignée (N-1, écart, paramètres, liens). */}
+      <span className="tile-notes">
+        {notes.map((q) => <span key={q} className="tile-foot">{q}</span>)}
+        {warning}
+      </span>
       <span className="tile-compare">
         <span className="tile-foot" data-testid={`kpi-tile-${id}-n1`}>{n1}</span>
         <span className="tile-foot" data-testid={`kpi-tile-${id}-delta`}>
@@ -241,7 +283,7 @@ export function KpiCharts({ vue, rows, turnover, absenteeism, isPayfit }: { vue:
     ),
     absenteisme: (
       <Slot key="absenteisme" id="absenteisme" title="Absentéisme par mois" list={abs}>
-        <LineChart testid="kpi-chart-absenteisme" label="Absentéisme de chaque mois, période affichée et N-1" title="Absentéisme par mois, période affichée et N-1" categories={axisN1.categories} categoryTitles={axisN1.titles} series={abs} unit="bps" zero height={H} note="Taux du mois seul (jours d'absence ÷ jours théoriques du mois) ; le taux de la période est la somme des jours sur la somme des jours théoriques, jamais une moyenne de ces taux." />
+        <LineChart testid="kpi-chart-absenteisme" label="Absentéisme de chaque mois, période affichée et N-1" title="Absentéisme par mois, période affichée et N-1" categories={axisN1.categories} categoryTitles={axisN1.titles} series={abs} unit="bps" zero height={H} note={`Taux du mois seul (jours d'absence ÷ jours théoriques du mois) ; le taux de la période est la somme des jours sur la somme des jours théoriques, jamais une moyenne de ces taux.${allZero(abs) ? " Tous les taux tracés valent 0,00 % : la courbe reste sur zéro (un mois n.d. n'est pas tracé)." : ""}`} />
       </Slot>
     ),
     turnover: (
@@ -251,7 +293,7 @@ export function KpiCharts({ vue, rows, turnover, absenteeism, isPayfit }: { vue:
     ),
     absenteismePeriode: (
       <Slot key="absenteisme-periode" id="absenteisme-periode" title="Absentéisme par période" list={absPeriod.series}>
-        <BarChart testid="kpi-chart-absenteisme-periode" label="Taux d'absentéisme, période précédente et période affichée" title="Absentéisme par période" categories={absPeriod.categories} categoryTitles={absPeriod.titles} series={absPeriod.series} unit="bps" mode="grouped" height={H} note="Taux de chaque période : somme des jours d'absence ÷ somme des jours théoriques." />
+        <BarChart testid="kpi-chart-absenteisme-periode" label="Taux d'absentéisme, période précédente et période affichée" title="Absentéisme par période" categories={absPeriod.categories} categoryTitles={absPeriod.titles} series={absPeriod.series} unit="bps" mode="grouped" height={H} note={`Taux de chaque période : somme des jours d'absence ÷ somme des jours théoriques.${allZero(absPeriod.series) ? " Tous les taux tracés valent 0,00 % : aucune barre n'est visible (une période n.d. n'est pas tracée)." : ""}`} />
       </Slot>
     ),
   };
@@ -652,7 +694,7 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
                   <td><code>{s.absenceId}</code></td>
                   <td><Person personKey={s.personKey} contractKey={s.contractKey} maps={maps} slug={slug} /></td>
                   <td><ContractLink contractKey={s.contractKey} externalId={s.externalId} slug={slug} /></td>
-                  <td><code>{s.type}</code></td>
+                  <td><AbsenceType code={s.type} withCode /></td>
                   <td>{statusText(s.status)}</td>
                   <td className="wrap">{boundText(s.start)}</td>
                   <td className="wrap">{boundText(s.end)}</td>
@@ -679,7 +721,7 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
                   <tr key={`${x.absenceId}-${x.why}`}>
                     <td><code>{x.absenceId}</code></td>
                     <td><code>{x.contractId}</code></td>
-                    <td><code>{x.type}</code></td>
+                    <td><AbsenceType code={x.type} withCode /></td>
                     <td>{statusText(x.status)}</td>
                     <td className="num">{x.uncertain ? <span className="lower">{x.uncertain}</span> : 0}</td>
                     <td className="wrap">{x.label}</td>
@@ -764,10 +806,12 @@ export function AbsenteeismWindowDetail({ v, theoretical, detailHref }: { v: Abs
 
 const RH_REUSED = new Set(["presence", "headcount-persons", "movements", "reference-date", "lower-bound"]);
 
-export function KpiDefinitions({ slug, params }: { slug: string; params: { label: string; value: string; origin: string; testId: string }[] }) {
+// extra : définitions propres à l'entrée affichée (Effectifs mensuels), réunies avec les définitions des KPI dans un seul bloc.
+export function KpiDefinitions({ slug, params, extra }: { slug: string; params: { label: string; value: string; origin: string; testId: string }[]; extra?: ReactNode }) {
   return (
     <details className="panel" data-testid="kpi-definitions" id="definitions">
       <summary>Définitions, paramètres et raisons des « n.d. »</summary>
+      {extra}
       <dl className="defs">
         {KPI_DEFINITIONS.map((d) => (
           <div key={d.id} id={`def-${d.id}`}>

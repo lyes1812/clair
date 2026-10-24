@@ -17,7 +17,7 @@ export function ServiceAxisForm({ slug, axes, current, disabled }: { slug: strin
           </select>
         </div>
         {!disabled && (
-          <button className="btn" type="submit" disabled={pending} data-testid="setting-payroll-axis-save">{pending ? "Enregistrement…" : "Enregistrer l'axe"}</button>
+          <button className="btn primary" type="submit" disabled={pending} data-testid="setting-payroll-axis-save">{pending ? "Enregistrement…" : "Enregistrer l'axe"}</button>
         )}
       </div>
     </form>

@@ -4,13 +4,16 @@
 
 .ms-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-/* En-tête : titre, une phrase, la source sur une ligne ; le détail technique de la lecture est replié. */
-.ms-head { display: grid; gap: 10px; min-width: 0; }
+/* En-tête : titre et une phrase, comme les autres écrans de la famille ; la source (une ligne) et le détail technique de la lecture,
+   replié, viennent sous les onglets. */
+.ms-head { display: grid; gap: 8px; min-width: 0; }
 .ms-head .desc { max-width: 78ch; }
-.ms-source { line-height: 1.5; }
+.ms-read { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+.ms-source { flex: 1 1 auto; min-width: 0; line-height: 1.5; }
 .ms-source strong { color: var(--ink); font-weight: 600; }
-.ms-read-details { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
-.ms-read-details[open] { justify-self: stretch; }
+.ms-nowrap { white-space: nowrap; }
+.ms-read-details { flex: none; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+.ms-read-details[open] { flex: 1 0 100%; }
 .ms-read-details > summary { cursor: pointer; padding: 7px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
 .ms-read-details[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
 .ms-read-body { display: grid; gap: 8px; padding: 10px 12px 12px; }
@@ -36,12 +39,21 @@
 .ms-panel-title { display: grid; gap: 4px; min-width: 0; }
 .ms-panel-title .desc { max-width: 78ch; line-height: 1.5; }
 .panel-head .ms-panel-title { flex: 1 1 320px; }
+.ms-detail-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ms-sub { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); letter-spacing: 0; }
 
 /* Tuiles d'indicateurs : valeur en grand, repère de lecture, comparaison N-1 sous un filet, lien vers la définition. */
 .facts.ms-tiles { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+/* Cinq tuiles : trois sur la première rangée, deux sur la seconde, sans emplacement vide. Quatre tuiles : une rangée. */
+.facts.ms-tiles.five { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.ms-tiles.five > .ms-tile { grid-column: span 2; }
+.ms-tiles.five > .ms-tile:nth-child(n + 4) { grid-column: span 3; }
+.facts.ms-tiles.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 /* Une seule tuile : largeur d'une tuile, pas de la page. */
 .facts.ms-tiles.single { grid-template-columns: minmax(230px, 360px); }
+/* Une tuile en retrait détaille la précédente (« dont primes »). */
+.ms-tiles .ms-tile.sub { background: var(--sidebar-bg); }
+.ms-tiles .ms-tile.sub dt { color: var(--muted); }
 .ms-tiles .ms-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; min-width: 0; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .ms-tiles .ms-tile dt { font-size: var(--clair-type-form); font-weight: 600; line-height: 1.35; color: var(--ink); }
 .ms-tiles .ms-tile dd { margin: 0; font-size: 22px; font-weight: 550; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -52,7 +64,6 @@
 .ms-tile .ms-tile-lead { display: block; line-height: 1.45; }
 .ms-tile .ms-tile-compare { display: grid; gap: 2px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
 .ms-tile .ms-tile-compare .tile-foot { font-size: var(--clair-type-description); line-height: 1.45; overflow-wrap: anywhere; }
-.ms-tile .ms-tile-note { font-style: italic; line-height: 1.45; }
 .ms-tile .ms-tile-def { margin-top: auto; padding-top: 4px; }
 
 /* Composition brut / cotisations : barre fine et légende nommée (mêmes teintes que le graphique empilé). */
@@ -70,31 +81,35 @@
 /* Répartition à gauche (anneau), lecture mensuelle à droite (colonnes empilées) : comme le panneau « Graphiques » du webinaire. */
 .ms-charts-split { display: grid; grid-template-columns: minmax(250px, 340px) minmax(0, 1fr); gap: 24px 32px; align-items: start; }
 @media (max-width: 1100px) { .ms-charts-split { grid-template-columns: minmax(0, 1fr); } }
-.ms-nd-block { display: grid; gap: 8px; padding: 16px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); }
+/* Les têtes de graphiques d'une même rangée ont la même hauteur (avec ou sans bascule Empiler / Désempiler) : titres et tracés alignés. */
+.ms-chart .chart-head { min-height: 34px; }
 .ms-graph-foot { line-height: 1.5; }
+/* Tuile de la provision à gauche de son graphique. */
+.ms-tile-split > .facts { margin: 0; }
 @media (max-width: 960px) { .ms-charts { grid-template-columns: minmax(0, 1fr); } }
 
-/* Tableaux : en-tête fixe, première colonne fixe, colonnes N-1 en gris, ligne du mois ouvert en détail surlignée. */
-.data-table.ms-table :is(th, td) { padding: 9px 12px; }
-.ms-table thead th { vertical-align: bottom; line-height: 1.35; }
+/* Tableaux compacts : en-tête fixe, première colonne fixe, intitulés de colonne sur deux lignes, totaux en tr.total / tr.subtotal,
+   colonnes N-1 en gris, ligne du mois ouvert en détail surlignée. */
+.data-table.ms-table :is(th, td) { padding: 7px 10px; }
+.ms-table thead th { white-space: normal; vertical-align: bottom; line-height: 1.3; }
 .ms-table tbody th[scope="row"], .ms-table tfoot th[scope="row"] { text-align: left; font-size: var(--clair-type-table-cell); font-weight: 400; color: var(--ink); white-space: nowrap; }
+.ms-table tbody th[scope="row"].wrap { white-space: normal; min-width: 180px; }
 .ms-table tbody th[scope="row"] { background: #fff; }
-.ms-table tfoot :is(td, th) { background: var(--surface); font-weight: 600; border-top: 1px solid var(--line); border-bottom: 0; }
-.ms-table tfoot th[scope="row"] { font-weight: 600; }
-.data-table.ms-table.sticky-first tfoot tr > :first-child { background: var(--surface); }
 .data-table.ms-table.sticky-first tbody tr:hover > :first-child { background: #f7f8fb; }
 .ms-table tr.subtotal > :is(td, th) { background: var(--surface); font-weight: 600; }
-.ms-table tr.total > :is(td, th) { background: #eef1f6; font-weight: 650; border-top: 1px solid #d8dce5; }
-.ms-table .n1, .ms-table td.n1 a { color: var(--muted); }
-.ms-table td.ms-wrap { white-space: normal; line-height: 1.45; }
-.ms-table tfoot td.tile-foot { font-weight: 400; }
+.ms-table tr.total > :is(td, th), .ms-table tfoot tr.total > th[scope="row"] { background: #eef1f6; font-weight: 650; border-top: 1px solid #d8dce5; }
+.data-table.ms-table.sticky-first tr.subtotal > :first-child { background: var(--surface); }
+.data-table.ms-table.sticky-first tr.total > :first-child { background: #eef1f6; }
+/* Pas de trait sous la dernière ligne : la règle globale ne retire que celui des cellules td, pas celui de la première colonne (th). */
+.ms-table tbody tr:last-child > :is(th, td), .ms-table tfoot tr > :is(td, th) { border-bottom: 0; }
+.ms-table .n1, .ms-table td.n1 a { color: #5b6270; }
 .ms-table tbody tr.selected > :is(td, th), .data-table.ms-table.sticky-first tbody tr.selected > :first-child { background: var(--blue-soft); }
 .ms-table tbody tr.selected th[scope="row"] a, .ms-table tbody tr.selected td a.ms-detail-link { font-weight: 600; }
 .ms-table-gap { margin-top: 12px; display: grid; gap: 8px; }
 /* Zone de défilement d'un tableau, focalisable au clavier : même anneau de focus que les graphiques et les champs. */
 .ms-scroll:focus-visible { outline: 3px solid #8aafff; outline-offset: 1px; }
 .ms-scroll-gap { margin-top: 12px; }
-.ms-prov { margin-left: 8px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; font-weight: 500; color: var(--muted); }
+.ms-prov { margin-left: 8px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--muted); }
 
 /* Liens de détail : soulignés en pointillés avec un chevron décoratif. */
 .ms-detail-link { text-decoration: underline dotted; text-underline-offset: 3px; }
@@ -107,15 +122,29 @@ th[scope="row"] > .ms-detail-link::after { content: " ›"; content: " ›" / ""
 .ms-nd-lines ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; line-height: 1.45; overflow-wrap: anywhere; }
 .ms-detail-nav .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; pointer-events: none; }
 
-/* Définitions : titre du bloc replié. */
-.ms-defs > summary { cursor: pointer; font-size: var(--clair-type-subheading); font-weight: 550; }
-.ms-defs[open] > summary { margin-bottom: 14px; }
+/* Rapport et comptabilité : le ratio sous le rapprochement. */
+.ms-ratio { display: grid; gap: 6px; padding-top: 14px; border-top: 1px solid var(--line); }
 
+/* État vide « n.d. » : un seul composant (titre, raison une fois, action). */
+.ms-nd-state { display: grid; gap: 6px; padding: 16px 18px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); min-width: 0; }
+.ms-nd-title { margin: 0; font-size: var(--clair-type-secondary); font-style: italic; font-weight: 500; color: #5b6270; line-height: 1.2; }
+.ms-nd-reason { margin: 0; max-width: 78ch; font-size: var(--clair-type-form); line-height: 1.55; color: var(--ink); overflow-wrap: anywhere; }
+.ms-nd-reasons { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: var(--clair-type-form); color: #5b6270; line-height: 1.45; overflow-wrap: anywhere; }
+.ms-nd-action { justify-self: start; margin-top: 2px; font-size: var(--clair-type-form); font-weight: 600; color: var(--blue); text-decoration: none; }
+.ms-nd-action:hover { text-decoration: underline; }
+
+@media (max-width: 1100px) {
+  .facts.ms-tiles.five, .facts.ms-tiles.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ms-tiles.five > .ms-tile, .ms-tiles.five > .ms-tile:nth-child(n + 4) { grid-column: auto; }
+  .ms-tiles.five > .ms-tile:last-child { grid-column: 1 / -1; }
+}
 @media (max-width: 720px) {
   .ms-toolbar { align-items: flex-start; }
   .ms-toolbar .view-switch { flex-wrap: wrap; }
-  .facts.ms-tiles, .facts.ms-tiles.single { grid-template-columns: minmax(0, 1fr); }
+  .facts.ms-tiles, .facts.ms-tiles.single, .facts.ms-tiles.five, .facts.ms-tiles.four { grid-template-columns: minmax(0, 1fr); }
+  .ms-tiles.five > .ms-tile:last-child { grid-column: auto; }
+  /* Tableaux : première colonne étroite (le nom se coupe), marges réduites ; les colonnes essentielles viennent en premier. */
+  .data-table.ms-table :is(th, td) { padding: 6px 8px; }
+  .data-table.ms-table tbody th[scope="row"], .data-table.ms-table tfoot th[scope="row"] { white-space: normal; max-width: 132px; overflow-wrap: anywhere; }
+  .data-table.ms-table tbody th[scope="row"].wrap { min-width: 0; }
 }
-
-/* Graphique non tracé (aucune valeur connue) : raisons des mois n.d. sous le message. */
-.ms-nd-reasons { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }

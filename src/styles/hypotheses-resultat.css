@@ -1,10 +1,10 @@
 /* Hypothèses budgétaires › écrans de résultat (projection, comparaison, atterrissage, embauches prévisionnelles), charte « 101 ».
    Classes de ergonomie.css et charts.css réutilisées : .view-switch, .panel-head, .panel-tools, .swatch, .ver-badge. Préfixe hr-. */
 
-/* Barre d'affichage : « Afficher tout / Graphique / Tableau » à gauche, rappel de lecture à droite. */
-.hr-switch { display: flex; align-items: center; justify-content: space-between; gap: 6px 20px; flex-wrap: wrap; }
+/* Barre d'affichage : le contrôle « Afficher tout / Graphique / Tableau », puis sa phrase de lecture dessous (jamais à côté). */
+.hr-switch { display: grid; justify-items: start; gap: 8px; }
 .hr-switch .view-switch { flex: none; }
-.hr-switch .hr-hint { margin: 0; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.45; max-width: 62ch; }
+.hr-switch .hr-hint { margin: 0; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.5; max-width: 72ch; }
 
 /* Titre d'un panneau avec sa phrase de contexte dessous. */
 .hr-title { display: grid; gap: 4px; min-width: 0; }
@@ -43,14 +43,40 @@
 .hr-seg a:hover { background: #f7f8fb; border-color: #d8dce5; position: relative; }
 .hr-seg a[aria-current="true"] { background: var(--blue-soft); border-color: #d6e3ff; color: var(--blue); font-weight: 600; position: relative; }
 .hr-seg a:focus-visible { outline: 3px solid #8aafff; outline-offset: 2px; position: relative; z-index: 1; }
-.hr-seg span[aria-disabled="true"] { color: var(--muted); background: var(--surface); cursor: not-allowed; }
+/* Regroupement n.d. : la hachure ne veut dire que « n.d. » (comme dans les graphiques), jamais un bouton actif. */
+.hr-seg span[aria-disabled="true"] { color: #5b6270; background: repeating-linear-gradient(45deg, #fff, #fff 3px, #eef0f5 3px, #eef0f5 6px); cursor: not-allowed; }
 .hr-seg span em { font-size: var(--clair-type-label); }
 
 /* Tableau d'une répartition : pastille de la teinte du graphique devant le libellé. */
 .data-table .hr-group { display: inline-flex; align-items: center; gap: 8px; }
 
-/* Liste des postes : première colonne fixe, libellé qui passe à la ligne. */
-.data-table.hr-hires :is(th, td):first-child { min-width: 190px; max-width: 300px; white-space: normal; }
+/* Ligne de total ou de sous-total : la première cellule d'un tableau à première colonne fixe garde le fond de la ligne
+   (la règle de la colonne fixe, plus spécifique, la remettrait en blanc). */
+.data-table.sticky-first tr.total > :is(td, th):first-child { background: #eef1f6; }
+.data-table.sticky-first tr.subtotal > :is(td, th):first-child { background: var(--surface); }
+
+/* Une date ne se coupe jamais (« 16/11/2026 », pas « 16/11/ » puis « 2026 »). */
+.hr-date { white-space: nowrap; }
+
+/* Liste des postes : neuf colonnes qui tiennent à 1280 px sans défilement (effectif, remplacement et fin du poste sont des
+   lignes d'appoint de leur cellule), en-têtes qui passent à la ligne, taux de charges et suppression toujours visibles. */
+.data-table.hr-hires { table-layout: auto; }
+.data-table.hr-hires :is(th, td) { padding: 9px 8px; vertical-align: top; }
+.data-table.hr-hires thead th { white-space: normal; vertical-align: bottom; line-height: 1.3; }
+.data-table.hr-hires tr > :is(th, td):first-child { min-width: 150px; max-width: 280px; white-space: normal; padding-left: 12px; }
+.data-table.hr-hires td.wrap { min-width: 92px; max-width: 220px; }
+.data-table.hr-hires td.num { white-space: nowrap; }
+.hr-hires .hr-line { display: block; margin-top: 2px; font-size: var(--clair-type-label); font-weight: 400; color: #5b6270; line-height: 1.4; }
+.hr-hires .hr-text { display: block; line-height: 1.4; }
+@media (min-width: 721px) { html[data-clair-theme="airy"] .hr-hires .btn { min-height: 30px; padding: 4px 10px; } }
+.hr-hires .inline-form { display: block; }
+.hr-hires .inline-form .actions { margin: 0; }
+.hr-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Formulaire d'une embauche : une grille régulière (colonnes de 200 px au moins, même alignement d'un groupe à l'autre). */
+form[data-testid="hyp-form-embauche"] .hs-group .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 14px; align-items: start; }
+form[data-testid="hyp-form-embauche"] .hs-group .filters .field-row { flex: none; min-width: 0; max-width: none; }
+form[data-testid="hyp-form-embauche"] .input, form[data-testid="hyp-form-embauche"] .select { width: 100%; min-width: 0; text-overflow: ellipsis; }
 
 /* Notes sous un graphique ou un tableau. */
 .hr-notes { display: grid; gap: 4px; margin: 0; }

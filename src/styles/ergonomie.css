@@ -28,6 +28,8 @@
 }
 
 /* Tableaux : défilement interne avec en-tête fixe, première colonne fixe, lignes de sous-total. */
+/* Le cadre défilant contient ses éléments positionnés (textes réservés aux lecteurs d'écran) : ils ne doivent pas élargir la page. */
+.table-wrap { position: relative; }
 .table-wrap.scroll { overflow: auto; }
 @media (min-width: 861px) { .table-wrap.scroll { max-height: 72vh; } }
 .data-table.sticky thead th { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--line); }

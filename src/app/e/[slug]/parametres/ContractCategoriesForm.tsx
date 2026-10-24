@@ -26,6 +26,7 @@ export function ContractCategoriesForm({ slug, rows, disabled }: { slug: string;
           <p className="desc" aria-live="polite">{q === "" ? `${rows.length} contrat${rows.length > 1 ? "s" : ""} en cours` : `${shown} contrat${shown > 1 ? "s" : ""} affiché${shown > 1 ? "s" : ""} sur ${rows.length}`}</p>
         </div>
       )}
+      {/* Sous 520 px, chaque contrat devient une carte (nom, nature, catégorie proposée, puis le menu en pleine largeur). */}
       <div className="table-wrap scroll pm-contracts">
         <table className="data-table sticky" data-testid="setting-contract-categories">
           <thead><tr><th scope="col">Contrat en cours</th><th scope="col">Nature</th><th scope="col">Proposée</th><th scope="col">Catégorie retenue</th></tr></thead>
@@ -35,10 +36,10 @@ export function ContractCategoriesForm({ slug, rows, disabled }: { slug: string;
             )}
             {rows.map((r) => (
               <tr key={r.id} hidden={!visible(r)}>
-                <td>{r.label}<input type="hidden" name="listed" value={r.id} /></td>
-                <td>{r.natureLabel}</td>
-                <td>{r.proposed ? CATEGORY_LABELS[r.proposed] : <span className="nd">non classé</span>}</td>
-                <td>
+                <td className="pm-c-name">{r.label}<input type="hidden" name="listed" value={r.id} /></td>
+                <td data-label="Nature">{r.natureLabel}</td>
+                <td data-label="Proposée">{r.proposed ? CATEGORY_LABELS[r.proposed] : <span className="nd">non classé</span>}</td>
+                <td className="pm-c-choice" data-label="Catégorie retenue">
                   <span className="pm-choice-cell">
                     <select className="select" name={`c:${r.id}`} defaultValue={r.chosen ?? ""} disabled={disabled} aria-label={`Catégorie de ${r.label}`}>
                       <option value="">Selon la nature</option>
@@ -52,7 +53,7 @@ export function ContractCategoriesForm({ slug, rows, disabled }: { slug: string;
           </tbody>
         </table>
       </div>
-      {!disabled && <div className="actions"><button className="btn primary" type="submit" disabled={pending} data-testid="setting-contract-categories-save">{pending ? "Enregistrement…" : "Enregistrer"}</button></div>}
+      {!disabled && <div className="actions"><button className="btn primary" type="submit" disabled={pending} data-testid="setting-contract-categories-save">{pending ? "Enregistrement…" : "Enregistrer les corrections"}</button></div>}
     </form>
   );
 }

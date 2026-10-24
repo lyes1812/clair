@@ -9,18 +9,18 @@ export function CategoryNaturesForm({ slug, natures, disabled }: { slug: string;
   return (
     <form className="form" action={action}>
       <Feedback state={state} />
-      <fieldset className="checks pm-grid-fields pm-grid-compact" disabled={disabled}>
+      <fieldset className="checks pm-grid-fields pm-grid-codes" disabled={disabled}>
         <legend className="label">Codes de nature de contrat (DSN) par catégorie, séparés par des virgules</legend>
         {CATEGORY_IDS.map((id) => (
           <div className="field-row" key={id}>
             <label htmlFor={`cat-${id}`}>{CATEGORY_LABELS[id]}</label>
-            <input className="input" id={`cat-${id}`} name={id} defaultValue={natures[id].join(", ")} data-testid={`setting-category-${id}`} />
+            <input className="input" id={`cat-${id}`} name={id} defaultValue={natures[id].join(", ")} placeholder="aucun code" data-testid={`setting-category-${id}`} />
           </div>
         ))}
       </fieldset>
       {!disabled && (
         <div className="actions">
-          <button className="btn primary" type="submit" disabled={pending} data-testid="setting-category-save">{pending ? "Enregistrement…" : "Enregistrer"}</button>
+          <button className="btn primary" type="submit" disabled={pending} data-testid="setting-category-save">{pending ? "Enregistrement…" : "Enregistrer les catégories"}</button>
         </div>
       )}
     </form>

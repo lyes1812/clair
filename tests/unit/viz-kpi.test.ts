@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { unitFormat } from "@/components/charts/units";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import {
+  absenceTypeLabel,
+  absenceTypeText,
   absenteeismSeries,
+  allZero,
   categorySeries,
   comparedRate,
   etpSeries,
@@ -14,6 +17,8 @@ import {
   ndSummary,
   ratioBps,
   repartition,
+  splitAxisLabel,
+  typoMinus,
   type CategoryMonthIn,
   type GridIn,
   type RowIn,
@@ -223,5 +228,45 @@ describe("grille des effectifs mensuels", () => {
   });
   it("séries sérialisables", () => {
     expect(() => structuredClone(gridSeries(grid))).not.toThrow();
+  });
+});
+
+describe("libellés et typographie d'affichage", () => {
+  it("le type d'absence connu a son libellé français, les autres restent tels que reçus", () => {
+    expect(absenceTypeLabel("fr_maladie_ordinaire")).toBe("Maladie ordinaire");
+    expect(absenceTypeLabel("test_maternity")).toBeNull();
+    expect(absenceTypeText("fr_maladie_ordinaire")).toBe("Maladie ordinaire (fr_maladie_ordinaire)");
+    expect(absenceTypeText("test_maternity")).toBe("test_maternity");
+  });
+  it("formule d'écart : 12/83 − 7/13 = −425/1079, soit −42500/1079 après × 100, avec le vrai signe moins", () => {
+    // 12 × 13 = 156 ; 7 × 83 = 581 ; (156 − 581) / (83 × 13 = 1079) = −425/1079.
+    expect(typoMinus("(12/83 − 7/13) × 100 = -42500/1079")).toBe("(12/83 − 7/13) × 100 = \u221242500/1079");
+    expect(typoMinus("-5")).toBe("\u22125");
+    // 0/1 − 7/13 = −7/13 ; × 100 = −700/13 ; un terme négatif en tête ou après le signe moins est converti aussi.
+    expect(typoMinus("(0/1 − 7/13) × 100 = -700/13")).toBe("(0/1 − 7/13) × 100 = \u2212700/13");
+    expect(typoMinus("-1/2 − -3/4 = 1/4")).toBe("\u22121/2 − \u22123/4 = 1/4");
+  });
+  it("un tiret de nom, de date ou d'opération espacée n'est pas remplacé", () => {
+    expect(typoMinus("N-1 (12 mois glissants : octobre 2024 → septembre 2025)")).toBe("N-1 (12 mois glissants : octobre 2024 → septembre 2025)");
+    expect(typoMinus("2025-10 - 2025-09")).toBe("2025-10 - 2025-09");
+    expect(typoMinus("0/1 = 0/1")).toBe("0/1 = 0/1");
+  });
+  it("axe de répartition : nom court et précision entre parenthèses", () => {
+    expect(splitAxisLabel("Catégorie (CDI, CDD, apprenti, stagiaire)")).toEqual({ name: "Catégorie", detail: "CDI, CDD, apprenti, stagiaire" });
+    expect(splitAxisLabel("Service (code analytique du journal)")).toEqual({ name: "Service", detail: "code analytique du journal" });
+    expect(splitAxisLabel("Direction")).toEqual({ name: "Direction", detail: null });
+  });
+});
+
+describe("série toute à zéro", () => {
+  const s = (values: (number | null)[]) => ({ key: "k", name: "k", values });
+  it("des zéros connus (et un mois n.d.) : tout à zéro", () => {
+    expect(allZero([s([0, 0, null])])).toBe(true);
+    expect(allZero([s([0, 0]), s([0, null])])).toBe(true);
+  });
+  it("une valeur non nulle, ou aucune valeur connue : pas « tout à zéro »", () => {
+    expect(allZero([s([0, 691])])).toBe(false);
+    expect(allZero([s([null, null])])).toBe(false);
+    expect(allZero([])).toBe(false);
   });
 });

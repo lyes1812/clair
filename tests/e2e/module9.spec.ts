@@ -98,7 +98,26 @@ test("Menu général : toutes les entrées s'ouvrent, pas de débordement mobile
   for (const [i, e] of all.entries()) {
     await page.goto(e.href, { waitUntil: "networkidle" });
     const w = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
-    if (w.sw > w.iw + 1) overflow.push(`${e.href} : largeur ${w.sw} > ${w.iw}`);
+    if (w.sw > w.iw + 1) {
+      // Éléments qui dépassent et ne sont pas dans une zone de défilement : le coupable à corriger.
+      const culprits = await page.evaluate(() => {
+        const iw = window.innerWidth;
+        const inScroll = (el: Element) => {
+          for (let p = el.parentElement; p; p = p.parentElement) {
+            const o = getComputedStyle(p).overflowX;
+            if (o === "auto" || o === "scroll" || o === "hidden") return true;
+          }
+          return false;
+        };
+        const out: string[] = [];
+        for (const el of document.body.querySelectorAll("*")) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.right > iw + 1 && !inScroll(el)) out.push(`${el.tagName.toLowerCase()}.${String(el.className).split(" ")[0]}[${el.getAttribute("data-testid") ?? ""}] ${Math.round(r.right)}`);
+        }
+        return out.slice(0, 6);
+      });
+      overflow.push(`${e.href} : largeur ${w.sw} > ${w.iw} ; ${culprits.join(" | ")}`);
+    }
     await page.screenshot({ path: `${CAPTURES}/9-390-${slugOf(e.text, i)}.png`, fullPage: true });
   }
   expect(overflow).toEqual([]);

@@ -6,14 +6,15 @@ import type { ScenarioRow } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis, PresentPerson, Projection } from "@/lib/budget/types";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import { matchesQuery, pageNumber, paginate } from "@/lib/viz/hyp-saisie";
+import { frDates } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { deleteHypothesisAction, importHypothesesAction } from "./actions";
-import { detailOf, Field, KIND } from "./shared";
+import { CardTitle, detailOf, Field, KIND, Rules, Verdict } from "./shared";
 
 export type OtherScenario = { id: string; name: string; label: string };
 const IMPORT_KINDS: { kind: Hypothesis["kind"]; label: string }[] = [
   { kind: "depart", label: "Départs" }, { kind: "embauche", label: "Embauches" }, { kind: "augmentation", label: "Augmentations" },
-  { kind: "absence", label: "Congés non payés" }, { kind: "categorie", label: "Catégories" }, { kind: "changement", label: "Changements de service ou de quotité" },
+  { kind: "absence", label: "Congés non payés" }, { kind: "categorie", label: "Catégories" }, { kind: "changement", label: "Changements de service / quotité" },
   { kind: "base", label: "Corrections de base" }, { kind: "ponctuel", label: "Éléments ponctuels" }, { kind: "enveloppe", label: "Enveloppes" },
   { kind: "constante", label: "Constantes de référence" }, { kind: "realise", label: "Non récurrents réalisés" },
 ];
@@ -24,7 +25,7 @@ const nameOf = (base: BaseSnapshot, hyps: Hypothesis[], key: string) => base.con
 // étant les salariés comptés présents en fin de mois et non présents (ou l'inverse) le mois précédent ; contrôle de la
 // base contre le réel du mois de référence.
 export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnapshot; hypotheses: Hypothesis[]; proj: Projection }) {
-  if (proj.kind === "error") return <section className="panel"><h2>Contrôles effectifs</h2><ul className="list">{proj.errors.map((e) => <li key={e} className="nd">{e}</li>)}</ul></section>;
+  if (proj.kind === "error") return <section className="panel"><CardTitle title="Contrôles effectifs" /><ul className="list">{proj.errors.map((e) => <li key={e} className="nd">{frDates(e)}</li>)}</ul></section>;
   const start: Record<string, PresentPerson> = Object.fromEntries(base.contracts.filter((c) => c.counted && !enteredAfter(base, c)).map((c) => [c.contractKey, { etp4: c.etp4, category: c.category ?? null, service: c.service }]));
   const refReal = base.actuals.find((a) => a.month === base.refMonth);
   const refHeadcount = refReal?.kind === "value" ? refReal.headcount : null;
@@ -42,21 +43,21 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
   return (
     <>
       <section className="panel" data-testid="ctrl-base">
-        <h2>Contrôle de la base <span className="desc">— <a href="#def-controles">règle</a></span></h2>
+        <CardTitle title="Contrôle de la base">Effectif de la base figée comparé au réel du mois de référence. <a href="#def-controles">Règle</a></CardTitle>
         <p data-testid="ctrl-base-line">
           Effectif compté fin {formatMonth(base.refMonth).toLowerCase()} : {refHeadcount === null ? <span className="nd">n.d. — réel du mois de référence non disponible</span> : <strong>{refHeadcount} (réel)</strong>} · contrats comptés de la base : <strong>{baseCount}</strong>
-          {refHeadcount !== null && <> · {refHeadcount === baseCount ? <span data-testid="ctrl-base-ok">concordant</span> : <span className="nd" data-testid="ctrl-base-gap">écart de {baseCount - refHeadcount}</span>}</>}
+          {refHeadcount !== null && <> · {refHeadcount === baseCount ? <Verdict ok testid="ctrl-base-ok">Conforme</Verdict> : <Verdict ok={false} testid="ctrl-base-gap">Écart de {baseCount - refHeadcount}</Verdict>}</>}
         </p>
         {refHeadcount !== null && refHeadcount !== baseCount && <p className="tile-foot">Un écart vient d'un contrat présent à la date de lecture mais pas fin {formatMonth(base.refMonth).toLowerCase()} (ou l'inverse), ou d'une nature non comptée dans l'effectif (Paramètres › KPI).</p>}
       </section>
       <section className="panel" data-testid="ctrl-effectifs">
-        <h2>Contrôles effectifs <span className="desc">— effectif de début + entrées − sorties = effectif de fin · <a href="#def-controles">règle</a></span></h2>
+        <CardTitle title="Contrôles effectifs">Chaque mois : effectif de début + entrées − sorties = effectif de fin. <a href="#def-controles">Règle</a></CardTitle>
         <div className="table-wrap scroll" role="region" aria-label="Contrôle de l'effectif par mois" tabIndex={0}>
           <table className="data-table sticky sticky-first" data-testid="ctrl-eff-table">
             <thead><tr><th>Mois</th><th className="num">Effectif début</th><th className="num">Entrées</th><th className="num">Sorties</th><th className="num">Effectif fin</th><th className="num">ETP fin</th><th>Contrôle</th></tr></thead>
             <tbody>
               {rows.map((r) => ("nd" in r ? (
-                <tr key={r.month} data-month={r.month}><td>{formatMonth(r.month)}</td><td colSpan={6} className="nd">n.d. — {r.nd}</td></tr>
+                <tr key={r.month} data-month={r.month}><td>{formatMonth(r.month)}</td><td colSpan={6} className="nd">n.d. — {frDates(r.nd)}</td></tr>
               ) : (
                 <tr key={r.month} data-month={r.month}>
                   <td>{formatMonth(r.month)}</td>
@@ -65,7 +66,7 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
                   <td className="num" data-col="sorties" title={r.sorties.map((k) => nameOf(base, hypotheses, k)).join(", ")}>{r.sorties.length || "—"}</td>
                   <td className="num" data-col="fin">{r.fin}</td>
                   <td className="num">{r.etp4 === null ? <span title={r.etpNd ?? undefined}>n.d.</span> : fmtEtp4(r.etp4)}</td>
-                  <td data-col="controle">{r.debut + r.entrees.length - r.sorties.length === r.fin && r.fin === r.headcount ? "✓ égalité vérifiée" : <span className="nd">écart</span>}</td>
+                  <td data-col="controle">{r.debut + r.entrees.length - r.sorties.length === r.fin && r.fin === r.headcount ? <Verdict ok>Conforme : égalité vérifiée</Verdict> : <Verdict ok={false}>Écart</Verdict>}</td>
                 </tr>
               )))}
             </tbody>
@@ -80,7 +81,9 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
             ]))}
           </ul>
         </details>
-        <p className="tile-foot">Compté présent en fin de mois : contrat dont la nature est comptée dans l'effectif (ou embauche déclarée « comptée »), commencé et non terminé le dernier jour du mois. Un salarié en congé non payé reste dans l'effectif. Un contrat dont l'ETP est n.d. rend l'ETP du mois n.d.</p>
+        <Rules summary="Lecture du tableau">
+          <p>Compté présent en fin de mois : contrat dont la nature est comptée dans l'effectif (ou embauche déclarée « comptée »), commencé et non terminé le dernier jour du mois. Un salarié en congé non payé reste dans l'effectif. Un contrat dont l'ETP est n.d. rend l'ETP du mois n.d.</p>
+        </Rules>
       </section>
     </>
   );
@@ -100,7 +103,7 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
   const kind = kinds.some((k) => k.kind === type) ? (type as Hypothesis["kind"]) : null;
   const rows = hypotheses
     .map((h) => ({ h, detail: detailOf(h, base, hypotheses) }))
-    .filter(({ h, detail }) => (kind === null || h.kind === kind) && matchesQuery([KIND[h.kind], h.label, detail], q));
+    .filter(({ h, detail }) => (kind === null || h.kind === kind) && matchesQuery([KIND[h.kind], h.label, frDates(h.label), detail], q));
   const paged = paginate(rows, pageNumber(page), CHANGES_PAGE);
   const filtered = kind !== null || q !== "";
   const here = `/e/${slug}/studio-rh/hypotheses?scenario=${scenario.id}&vue=ctrl-changements`;
@@ -108,18 +111,15 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
   return (
     <>
       <section className="panel" data-testid="hyp-list-hyps">
-        <div className="hs-title">
-          <h2>Contrôles des changements <span className="desc">— {hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} du scénario</span></h2>
-          <p className="desc">Chaque hypothèse avec son effet sur le coût projeté : de quoi vérifier d'un coup d'œil ce que le scénario change. <a href="#def-controles">Règle</a></p>
-        </div>
-        {proj.kind === "error" && <ul className="list" data-testid="hyp-errors">{proj.errors.map((e) => <li key={e} className="nd">{e}</li>)}</ul>}
+        <CardTitle title="Contrôles des changements">{hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} du scénario, chacune avec son effet sur le coût projeté : de quoi vérifier d'un coup d'œil ce que le scénario change. <a href="#def-controles">Règle</a></CardTitle>
+        {proj.kind === "error" && <ul className="list" data-testid="hyp-errors">{proj.errors.map((e) => <li key={e} className="nd">{frDates(e)}</li>)}</ul>}
         {ndMonths > 0 && <p className="notice">{ndMonths} mois projeté(s) n.d. : leurs contributions ne sont pas comptées dans la colonne « Coût attribué sur l'horizon ».</p>}
         {hypotheses.length > CHANGES_PAGE / 2 && (
           <form method="get" action={`/e/${slug}/studio-rh/hypotheses`} className="hs-search" data-testid="hyp-filter" role="search" aria-label="Filtre des hypothèses">
             <input type="hidden" name="scenario" value={scenario.id} />
             <input type="hidden" name="vue" value="ctrl-changements" />
             <div className="field-row">
-              <label htmlFor="hyp-q">Rechercher</label>
+              <label htmlFor="hyp-q">Recherche</label>
               <input className="input" id="hyp-q" name="q" type="search" defaultValue={q} placeholder="Libellé, détail, type…" autoComplete="off" />
             </div>
             <div className="field-row">
@@ -149,25 +149,26 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
                     return (
                       <tr key={h.id} data-hyp={h.label}>
                         <td>{KIND[h.kind]}</td>
-                        <td>{h.label}</td>
+                        <td>{frDates(h.label)}</td>
                         <td className="wrap">{detail}</td>
                         <td className="num" data-col="effet">{h.kind === "realise" || h.kind === "constante" ? "—" : e === null ? "n.d." : formatEuros(e)}</td>
-                        {canEdit && <td><ActionForm action={deleteHypothesisAction.bind(null, slug, scenario.id, h.id)} submit="Supprimer" testid={`hyp-delete-${h.id}`} className="inline-form" danger /></td>}
+                        {canEdit && <td><ActionForm action={deleteHypothesisAction.bind(null, slug, scenario.id, h.id)} submit="Supprimer" testid={`hyp-delete-${h.id}`} className="inline-form" danger compact confirm={`Supprimer l'hypothèse « ${frDates(h.label)} » du scénario ?`} hint={`Supprimer l'hypothèse « ${frDates(h.label)} »`} srLabel={`l'hypothèse « ${frDates(h.label)} »`} /></td>}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <Pager page={paged.page} pageSize={CHANGES_PAGE} total={rows.length} href={pageHref} testid="hyp-pager" />
+            {paged.pages > 1 ? <Pager page={paged.page} pageSize={CHANGES_PAGE} total={rows.length} href={pageHref} testid="hyp-pager" /> : <p className="tile-foot" data-testid="hyp-pager">{paged.from}–{paged.to} sur {rows.length}</p>}
           </>
         )}
-        <p className="tile-foot">Coût attribué : somme, sur les mois projetés, des lignes de la projection rattachées à l'hypothèse (pour une correction de base : le coût du contrat qu'elle porte ; pour un départ : la réduction de paie et les coûts de sortie). Les éléments « réalisés » et les constantes n'entrent pas dans la projection.</p>
+        <Rules summary="Lecture de la colonne « Coût attribué »">
+          <p>Coût attribué : somme, sur les mois projetés, des lignes de la projection rattachées à l'hypothèse (pour une correction de base : le coût du contrat qu'elle porte ; pour un départ : la réduction de paie et les coûts de sortie). Les éléments « réalisés » et les constantes n'entrent pas dans la projection.</p>
+        </Rules>
       </section>
       {canEdit && others.length > 0 && (
         <section className="panel" data-testid="hyp-import">
-          <h2>Reprendre des hypothèses d'un autre scénario <span className="desc">— <a href="#def-recopie">règle</a></span></h2>
-          <p className="desc">Copie, dans ce scénario, les hypothèses du type choisi d'un autre scénario. Chacune est contrôlée contre la base et l'horizon de ce scénario : celles qui ne sont plus calculables (date hors horizon, contrat absent de la base…) ne sont pas reprises et sont listées avec leur raison.</p>
+          <CardTitle title="Reprendre des hypothèses d'un autre scénario">Copie, dans ce scénario, les hypothèses du type choisi d'un autre scénario. Chacune est contrôlée contre la base et l'horizon de ce scénario : celles qui ne sont plus calculables (date hors horizon, contrat absent de la base…) ne sont pas reprises et sont listées avec leur raison. <a href="#def-recopie">Règle</a></CardTitle>
           <ActionForm action={importHypothesesAction.bind(null, slug, scenario.id)} submit="Reprendre ces hypothèses" testid="hyp-import-form">
             <div className="filters">
               <Field id="imp-source" label="Scénario source">
@@ -177,9 +178,11 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
                 </select>
               </Field>
             </div>
-            <fieldset className="check-group">
-              <legend className="label">Types à reprendre</legend>
-              {IMPORT_KINDS.map((k) => <label key={k.kind} className="check"><input type="checkbox" name="kind" value={k.kind} /><span>{k.label}</span></label>)}
+            <fieldset className="hs-group">
+              <legend>Types à reprendre</legend>
+              <div className="hs-checks">
+                {IMPORT_KINDS.map((k) => <label key={k.kind} className="check"><input type="checkbox" name="kind" value={k.kind} /><span>{k.label}</span></label>)}
+              </div>
             </fieldset>
           </ActionForm>
         </section>

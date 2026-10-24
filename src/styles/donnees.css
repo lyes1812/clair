@@ -28,33 +28,20 @@
 .dn-tag-inline { margin-left: 8px; }
 .dn-pill-link { display: inline-flex; text-decoration: none; }
 
-/* --- Données : « Où en suis-je » --------------------------------------------------------------------------------------- */
-.dn-overview { gap: 22px; }
-.dn-tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; }
-.dn-tile { display: grid; gap: 8px; align-content: start; min-width: 0; padding: 18px 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
-.dn-tile p { margin: 0; }
-.dn-tile-main { font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -0.02em; line-height: 1.15; }
-.dn-tile-main.nd { font-style: normal; font-size: var(--clair-type-panel); font-weight: 500; letter-spacing: -0.01em; }
-.dn-tile-last { display: grid; gap: 2px; font-size: var(--clair-type-form); }
-.dn-tile-last .status-pill { vertical-align: 1px; }
-.dn-tile-next { padding-top: 10px; border-top: 1px solid var(--line); font-size: var(--clair-type-form); line-height: 1.55; }
-
-/* Accès aux cinq familles du Studio RH. */
-.dn-families { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
-.dn-family { display: grid; gap: 4px; align-content: start; height: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-decoration: none; transition: border-color 0.15s, background 0.15s; }
-.dn-family:hover { border-color: #c7cedd; background: var(--surface); }
-.dn-family-title { display: flex; align-items: center; gap: 8px; font-size: var(--clair-type-form); font-weight: 600; }
-.dn-family-title svg { flex: none; color: var(--muted); }
-.dn-family-title .tag { margin-left: auto; }
-
 /* Un domaine (RH, comptabilité) : règle de choix puis les deux sources côte à côte. */
 .dn-domain { display: grid; gap: 16px; min-width: 0; scroll-margin-top: 16px; }
+.dn-domain > .dn-section-head .group-title { font-size: var(--clair-type-panel); } /* la section pèse plus que les cartes qu'elle contient */
 .dn-choice { padding: 18px 20px; }
 .dn-choice h3 { font-size: var(--clair-type-subheading); }
+.dn-choice .source-head > div { gap: 4px; }
+.dn-next { font-size: var(--clair-type-form); line-height: 1.55; }
 .dn-rule { flex: 1 1 380px; justify-content: flex-end; }
 .dn-rule .field-row { flex: 1 1 260px; max-width: 360px; }
 .dn-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 16px; }
 .panel.dn-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* Carte de la source retenue : simple repère visuel (l'état est dit en toutes lettres dans « Source retenue pour les modules »). */
+.panel.dn-card[data-chosen="true"] { box-shadow: inset 0 3px 0 var(--blue); }
+.dn-conn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .dn-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
 .dn-card-head > div { display: grid; gap: 6px; min-width: 0; flex: 1 1 220px; }
 .dn-card-head h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--clair-type-section); }
@@ -64,6 +51,11 @@
 .facts.dn-facts dd { overflow-wrap: anywhere; line-height: 1.5; }
 .facts.dn-facts .status-pill { vertical-align: 1px; }
 @media (max-width: 520px) { .facts.dn-facts > div { grid-template-columns: minmax(0, 1fr); } }
+
+/* Accès au Studio RH : simple rangée de liens en bas de page (les entrées sont déjà dans le menu). */
+.dn-studio { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.dn-studio ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.dn-studio a { display: inline-block; padding: 6px 0; font-size: var(--clair-type-form); }
 
 /* --- Données : formulaires --------------------------------------------------------------------------------------------- */
 .dn-fields { align-items: flex-end; gap: 12px; }
@@ -93,6 +85,8 @@
 .dn-steps li[data-state="current"] { border-color: var(--blue); background: var(--blue-soft); }
 .dn-steps li[data-state="current"] .dn-step-no { background: var(--blue); border-color: var(--blue); color: #fff; }
 .dn-steps li[data-state="current"] .desc { color: var(--ink); }
+/* Ancres des actions de la page Données (Connecter, Synchroniser, Déposer) : la barre du haut est collante sur téléphone. */
+#connexion, #synchroniser, #deposer { scroll-margin-top: 72px; }
 .dn-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; align-items: start; }
 .dn-split > .panel { min-width: 0; }
 
@@ -107,23 +101,44 @@
 
 /* --- Paramètres -------------------------------------------------------------------------------------------------------- */
 .pm-group { display: grid; gap: 16px; min-width: 0; }
-.panel.pm-panel { gap: 14px; scroll-margin-top: 16px; }
+.panel.pm-panel { gap: 14px; scroll-margin-top: 72px; }
 .pm-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-.pm-lead { max-width: 82ch; line-height: 1.6; }
-/* Origine d'une valeur : défaut validé, modification datée, ou règle manquante (alors en rouge, en toutes lettres). */
+/* Introduction de carte : grise, 13 px (les options à régler pèsent autant que le texte qui les explique). */
+.pm-lead { max-width: 82ch; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.pm-lead strong { color: var(--ink); }
+.pm-panel .check, .pm-panel .pm-item-title { font-size: 13px; }
+.pm-panel .field-row > label { font-size: var(--clair-type-form); }
+/* Origine d'une valeur : dite une fois par carte (défaut validé) ; seules les exceptions portent leur mention (modifiée,
+   proposée, illisible ou manquante : alors en rouge, en toutes lettres). */
 .pm-origin { display: block; position: relative; padding-left: 14px; line-height: 1.5; }
 .pm-origin::before { content: ""; position: absolute; left: 0; top: 0.6em; width: 6px; height: 6px; border-radius: 50%; background: #9aa3b5; }
 .pm-origin[data-missing="true"] { color: var(--danger); font-weight: 600; }
 .pm-origin[data-missing="true"]::before { background: var(--danger); }
+.pm-card-note { margin: 0; }
 .pm-sub { display: grid; gap: 12px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--line); }
 .pm-sub h4 { margin: 0; font-size: var(--clair-type-subheading); font-weight: 550; }
+.pm-vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-/* Navigation de la page (volet de gauche). */
-.pm-nav-box { display: grid; gap: 10px; }
+/* Navigation de la page (volet de gauche) : déployée sur grand écran, repliée sous 960 px dans un <details>. */
+.pm-nav-box { display: block; }
+.pm-disclosure > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0; cursor: pointer; }
+.pm-disclosure > summary::-webkit-details-marker { display: none; }
+.pm-disclosure > summary::after { content: ""; flex: none; width: 7px; height: 7px; margin-right: 4px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); transition: transform 0.15s; }
+.pm-disclosure[open] > summary { margin-bottom: 10px; }
+.pm-disclosure[open] > summary::after { transform: rotate(-135deg); }
 .pm-nav { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .pm-nav a { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 9px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: var(--clair-type-form); font-weight: 500; line-height: 1.35; }
 .pm-nav a:hover { background: #f0f2f6; }
-@media (max-width: 960px) { .pm-nav { grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); } }
+@media (min-width: 961px) {
+  .pm-disclosure > summary { margin-bottom: 10px; cursor: default; pointer-events: none; }
+  .pm-disclosure > summary::after { display: none; }
+  .pm-disclosure::details-content { content-visibility: visible; display: block; }
+}
+@media (max-width: 960px) {
+  .param-panel:has(.pm-nav-box) { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
+  .pm-nav { grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); }
+  .pm-nav a { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+}
 
 /* Choix : une carte par case ou bouton radio, mise en évidence quand elle est cochée. */
 .pm-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 8px; }
@@ -133,8 +148,17 @@
 .pm-checks .check:has(input:checked), .pm-item > .check:has(input:checked) { border-color: #d6e3ff; background: var(--blue-soft); }
 .pm-checks .check code { color: var(--muted); }
 .pm-checks .check:has(input:checked) code { color: var(--ink); } /* le gris n'atteint que 4,3:1 sur le bleu clair */
+/* Sélection compacte (natures de contrat, statuts) : des pastilles qui passent à la ligne au lieu d'une liste de cartes. */
+.pm-checks.pm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pm-chips .check { align-items: center; padding: 5px 11px; border-radius: 999px; line-height: 1.4; }
+.pm-chips .check input { margin: 0; }
+.pm-chips .check code { font-size: var(--clair-type-label); }
+/* Type d'absence : libellé et code, puis le nombre d'absences lues dessous. */
+.pm-type { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.pm-type .desc { color: var(--muted); }
+.pm-checks .check:has(input:checked) .pm-type .desc { color: var(--ink); }
 
-/* Définitions des KPI : trois cartes (titre au-dessus), chaque règle avec son origine dessous. */
+/* Définitions des KPI : trois cartes (titre au-dessus), chaque règle avec, au besoin, sa mention d'exception dessous. */
 .pm-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 16px; align-items: start; }
 .pm-card { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 4px; }
 .pm-card.pm-wide { grid-column: 1 / -1; }
@@ -143,31 +167,55 @@
 .pm-item { display: grid; gap: 8px; min-width: 0; }
 .pm-item + .pm-item { padding-top: 16px; border-top: 1px solid var(--line); }
 .pm-item-title { font-size: var(--clair-type-form-label); font-weight: 650; line-height: 1.45; }
+.pm-item > .desc:not(.pm-origin) { margin: -4px 0 0; }
+@media (max-width: 520px) {
+  .panel.pm-panel { padding: 16px 14px; }
+  .pm-card-body { padding: 12px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+}
 
 /* Champs en grille. */
 .pm-grid-fields { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; align-items: start; }
-.pm-grid-compact { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+/* Grille de comptes : deux colonnes de hauteurs voisines (Brut à gauche ; Cotisations puis Hors masse à droite). */
+.pm-grid-fields.pm-grid-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pm-col { display: grid; gap: 14px; align-content: start; min-width: 0; }
+@media (max-width: 640px) { .pm-grid-fields.pm-grid-two { grid-template-columns: minmax(0, 1fr); } }
+/* Codes de nature par catégorie : les quatre champs sur une ligne, ou en 2 × 2 sur petit écran. */
+.pm-grid-fields.pm-grid-codes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
 .pm-box { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
 .pm-box-title { font-size: var(--clair-type-form-label); font-weight: 650; }
 .pm-field-narrow { max-width: 420px; }
 .pm-inline { align-items: flex-end; gap: 12px; }
 .pm-inline .field-row { flex: 1 1 280px; }
 
-/* Correction contrat par contrat : filtre, tableau à en-tête fixe. */
+/* Correction contrat par contrat : filtre, tableau à en-tête fixe ; sous 520 px, une carte par contrat. */
 .pm-table-tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 20px; }
 .pm-table-tools .field-row { flex: 1 1 260px; }
 .pm-table-tools .desc { margin: 0 0 10px; }
 .table-wrap.scroll.pm-contracts { max-height: 440px; }
 .pm-choice-cell { display: inline-flex; align-items: center; gap: 10px; }
 .pm-contracts .select { min-width: 190px; }
+.pm-contracts tr[hidden] { display: none !important; } /* le filtre masque des lignes, y compris quand elles sont des cartes */
+@media (max-width: 520px) {
+  .table-wrap.scroll.pm-contracts { max-height: none; overflow: visible; border: 0; border-radius: 0; background: none; }
+  .table-wrap.pm-contracts table, .table-wrap.pm-contracts tbody, .table-wrap.pm-contracts tr, .table-wrap.pm-contracts td { display: block; width: 100%; }
+  .table-wrap.pm-contracts thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .table-wrap.pm-contracts tr { margin: 0 0 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .table-wrap.pm-contracts td, .table-wrap.pm-contracts tbody tr:hover > td { padding: 2px 0; border: 0; background: transparent; white-space: normal; font-size: var(--clair-type-form); }
+  .table-wrap.pm-contracts td[data-label]::before { content: attr(data-label) " : "; color: var(--muted); }
+  .table-wrap.pm-contracts .pm-c-name { padding-bottom: 4px; font-size: 13px; font-weight: 600; }
+  .table-wrap.pm-contracts .pm-c-choice { padding-top: 8px; }
+  .table-wrap.pm-contracts .pm-c-choice::before { display: block; margin-bottom: 4px; }
+  .pm-choice-cell { display: grid; gap: 6px; width: 100%; }
+  .table-wrap.pm-contracts .select { width: 100%; min-width: 0; }
+}
 
 /* --- Membres et accès -------------------------------------------------------------------------------------------------- */
-.mb-roles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
-.mb-roles li { display: grid; gap: 6px; align-content: start; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.mb-roles li[data-current="true"] { border-color: var(--blue); background: var(--blue-soft); }
-.mb-roles li[data-current="true"] .desc { color: var(--ink); }
-.mb-role-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.mb-roles li[data-current="true"] .tag { background: #fff; }
+/* Les trois rôles : une liste de définitions, pas des cartes à choisir ; « Votre rôle » est un badge. */
+.mb-roles { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 14px 28px; }
+.mb-roles > div { display: grid; gap: 4px; align-content: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.mb-roles dt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--clair-type-subheading); font-weight: 600; }
+.mb-roles dt .tag { font-size: var(--clair-type-label); font-weight: 600; color: var(--blue); border-color: #d6e3ff; background: var(--blue-soft); }
+.mb-roles dd { margin: 0; font-size: var(--clair-type-description); line-height: 1.55; color: var(--muted); }
 .mb-members li { padding: 12px 0; }
 .mb-person { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .mb-person .avatar { flex: none; width: 34px; height: 34px; font-size: 11px; }
@@ -186,17 +234,35 @@
 .mb-link .code { flex: 1 1 260px; min-width: 0; user-select: all; }
 .mb-link .desc { flex: 1 1 100%; min-height: 1em; }
 .mb-link .desc:empty { display: none; }
+/* Journal : colonnes resserrées (la date prend sa largeur utile, l'événement le reste) ; sous 520 px, une liste :
+   l'événement, puis « date · auteur » dessous. */
+.mb-journal th:first-child, .mb-journal td.mb-ev-date { width: 1%; white-space: nowrap; }
+.mb-journal th:last-child, .mb-journal td.mb-ev-by { width: 24%; }
+.mb-journal td.mb-ev-kind { white-space: normal; }
+@media (max-width: 520px) {
+  .table-wrap.scroll.mb-journal { max-height: none; overflow: visible; border: 0; border-radius: 0; background: none; }
+  .table-wrap.mb-journal table, .table-wrap.mb-journal tbody { display: block; width: 100%; }
+  .table-wrap.mb-journal thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .table-wrap.mb-journal tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .table-wrap.mb-journal tbody tr:last-child { border-bottom: 0; }
+  .table-wrap.mb-journal td, .table-wrap.mb-journal tbody tr:last-child td, .table-wrap.mb-journal tbody tr:hover > td { display: block; width: auto; padding: 0; border: 0; background: transparent; white-space: normal; font-size: var(--clair-type-form); }
+  .table-wrap.mb-journal td.mb-ev-kind { order: -1; flex: 1 1 100%; font-size: 13px; font-weight: 550; }
+  .table-wrap.mb-journal td.mb-ev-date, .table-wrap.mb-journal td.mb-ev-by { color: var(--muted); }
+  .table-wrap.mb-journal td.mb-ev-by::before { content: "· "; }
+}
 
-/* --- Reporting social : chapitres de la BDESE (tous « Prévu ») --------------------------------------------------------- */
-.rs-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
-.rs-tools { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
+/* --- Reporting social : aperçu du catalogue de la BDESE (rien n'est construit : les cartes sont inertes) ------------------ */
+.panel.rs-preview { gap: 16px; }
+.rs-banner { margin: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: var(--clair-type-form); }
+.rs-tools { display: grid; gap: 8px; }
 .rs-tools h3 { font-size: var(--clair-type-note); font-weight: 650; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
-.rs-tools ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.rs-tools li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-size: var(--clair-type-form); }
-.rs-chapters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
-.rs-chapter { display: flex; align-items: stretch; min-height: 96px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
-.rs-no { flex: none; display: grid; place-items: center; width: 64px; background: var(--chart-2); color: #fff; font-size: var(--clair-type-secondary); font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.rs-body { display: grid; gap: 4px; align-content: center; justify-items: start; min-width: 0; padding: 14px 16px; }
+.rs-tools ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; }
+.rs-tools li, .rs-chapter { cursor: default; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.rs-tools li { padding: 12px 14px; font-size: var(--clair-type-form); color: var(--ink); }
+.rs-chapters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.rs-chapter { display: flex; align-items: stretch; min-height: 84px; overflow: hidden; }
+.rs-no { flex: none; display: grid; place-items: center; width: 60px; background: #e7eaf0; color: #5b6270; font-size: var(--clair-type-secondary); font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rs-body { display: grid; gap: 4px; align-content: center; justify-items: start; min-width: 0; padding: 12px 16px; }
 .rs-body strong { font-size: var(--clair-type-subheading); font-weight: 600; line-height: 1.3; }
 .rs-kicker { font-size: var(--clair-type-label); color: var(--muted); }
-@media (max-width: 960px) { .rs-layout { grid-template-columns: minmax(0, 1fr); } }
+.rs-note { margin: 0; }

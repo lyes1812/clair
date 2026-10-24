@@ -12,7 +12,7 @@ import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { selectableYears } from "@/lib/rh/kpi/period";
 import type { KpiInput } from "@/lib/rh/kpi/types";
-import { gridSeries, groupColor, monthAxis, monthShortLabel, repartition } from "@/lib/viz/kpi";
+import { gridSeries, groupColor, monthAxis, monthShortLabel, repartition, splitAxisLabel } from "@/lib/viz/kpi";
 
 type Unit = "etp" | "nombre" | "eur";
 // Part d'un groupe : sans total positif, elle n'est pas définie (n.d. avec sa raison, jamais 0 %).
@@ -20,7 +20,7 @@ const share = (v: number, total: number) => (total > 0 ? fmtPercent({ num: v, de
 const text = (v: number, unit: Unit) => (unit === "eur" ? formatEuros(v) : unit === "etp" ? fmtFixed({ num: v, den: 10000 }, 2) : String(v));
 
 // Effectifs mensuels : une rubrique, un axe de répartition, une version (réel PayFit ou scénario) et une année ; tout passe par l'adresse.
-// Mise en page de l'outil observé : volet « J'analyse mes… / Par… / Répartis par… » à gauche, filtres Version et Année en haut, puis
+// Mise en page : volet « J'analyse mes… / Par… / Répartis par… » à gauche, filtres Version et Année en haut, puis
 // le panneau « Graphiques » (anneau de répartition et barres par mois), la répartition et le tableau mensuel exact.
 export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { slug: string; workspaceId: string; kpi: KpiInput | null; search: { mesure: string; axe: string; version: string; annee: string } }) {
   const pay = await loadPayrollContext(slug);
@@ -43,7 +43,8 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
   const grid = monthlyGrid({ measure, axis, year, real, scenario: full ? { base: full.base, hyps: full.hypotheses, proj: project(full.base, full.scenario.firstMonth, full.scenario.lastMonth, full.hypotheses, full.scenario.conventions) } : null });
   const unit = mdef.unit;
   const stock = measure === "etp" || measure === "inscrit";
-  const axisLabel = AXES.find((a) => a.key === axis)!.label.split(" (")[0].toLowerCase();
+  const axisParts = splitAxisLabel(AXES.find((a) => a.key === axis)!.label);
+  const axisLabel = axisParts.name.toLowerCase();
   const versionLabel = versions.find((v) => v.value === version)!.label;
   // Répartition : stocks au dernier mois connu, flux sur le cumul des mois connus.
   const repart = grid.kind === "value" ? repartition(grid, stock) : null;
@@ -96,11 +97,12 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
               <ParamSection title="Répartis par…" icon={<PieChart size={16} aria-hidden="true" />}>
                 <div className="field-row">
                   <label htmlFor="axe">Axe de répartition</label>
-                  <select className="select" id="axe" name="axe" defaultValue={axis}>
-                    {AXES.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+                  <select className="select" id="axe" name="axe" defaultValue={axis} aria-describedby={axisParts.detail ? "axe-detail" : undefined}>
+                    {AXES.map((a) => <option key={a.key} value={a.key} title={a.label}>{splitAxisLabel(a.label).name}</option>)}
                     {UNAVAILABLE_AXES.map((a) => <option key={a.label} value={`nd-${a.label}`} disabled>{a.label} — indisponible</option>)}
                   </select>
                 </div>
+                {axisParts.detail && <p className="em-param-note" id="axe-detail" data-testid="em-axis-detail">Axe affiché : {axisParts.name} ({axisParts.detail}).</p>}
                 <details className="em-param-note" data-testid="em-axes-nd">
                   <summary>Axes indisponibles ({UNAVAILABLE_AXES.length})</summary>
                   <ul>{UNAVAILABLE_AXES.map((a) => <li key={a.label}><strong>{a.label}</strong> : {a.reason}</li>)}</ul>
@@ -118,8 +120,10 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
               <label htmlFor="annee">Année</label>
               <select className="select" id="annee" name="annee" defaultValue={year}>{(years.length ? years : [year]).map((y) => <option key={y} value={y}>{y}</option>)}</select>
             </div>
-            <button className="btn primary" type="submit">Afficher</button>
-            <a className="btn" href={`${base}?vue=effectifs`}>Réinitialiser</a>
+            <div className="kpi-actions">
+              <button className="btn primary" type="submit">Afficher</button>
+              <a className="btn" href={`${base}?vue=effectifs`}>Réinitialiser</a>
+            </div>
           </div>
           <p className="desc" data-testid="em-context">{mdef.label} ({mdef.kind}) · par {axisLabel} · {versionLabel} · {year}{full ? " — mois réalisés lus dans le réel PayFit courant, mois projetés dans le scénario" : ""}</p>
 
@@ -198,56 +202,66 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
                   </table>
                 </div>
               </section>
-
-              <section className="panel" data-testid="em-monthly-panel">
-                <div className="panel-head">
-                  <h2>Répartition mensuelle</h2>
-                  <span className="desc">valeurs exactes du graphique ; un mois n.d. garde sa raison</span>
-                </div>
-                <div className="table-wrap scroll">
-                  <table className="data-table kpi-table sticky sticky-first" data-testid="em-table">
-                    <thead>
-                      <tr>
-                        <th>Groupe</th>
-                        {grid.months.map((m) => <th key={m} className="num">{monthShortLabel(m)}{grid.layers.get(m) === "projete" ? <span className="tile-foot"> proj.</span> : null}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grid.groups.map((g) => (
-                        <tr key={g} data-group={g}>
-                          <td><i className="swatch" style={{ background: color(g), marginRight: 8 }} aria-hidden="true" />{g}</td>
-                          {grid.months.map((m) => {
-                            const c = grid.cell(g, m);
-                            return <td key={m} className="num" data-month={m}>{c.kind === "value" ? text(c.v, unit) : <abbr className="nd" title={c.kind === "nd" ? c.reason : undefined}>n.d.</abbr>}</td>;
-                          })}
-                        </tr>
-                      ))}
-                      <tr data-group="total" className="total">
-                        <th>Total</th>
-                        {grid.months.map((m) => {
-                          const c = grid.total(m);
-                          return <td key={m} className="num" data-month={m} data-col="total">{c.kind === "value" ? text(c.v, unit) : <abbr className="nd" title={c.kind === "nd" ? c.reason : undefined}>n.d.</abbr>}</td>;
-                        })}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                {ndReasons.length > 0 && <details data-testid="em-nd-list"><summary>Mois n.d. ({ndReasons.length})</summary><ul className="list">{ndReasons.map((r) => <li key={r} className="desc">{r}</li>)}</ul></details>}
-              </section>
             </>
           )}
         </ParamLayout>
       </form>
-      <details className="panel" data-testid="em-definitions">
-        <summary>Définitions et règles de calcul</summary>
-        <dl className="defs" id="def-effectifs-mensuels">
-          <div><dt>Mesures</dt><dd>ETP : somme des quotités des contrats comptés présents le dernier jour du mois (ETP contractuel, voir les définitions des KPI). Inscrit fin de mois : effectif compté ce jour-là. Entrées et sorties : mouvements comptés du mois (règles du turnover : natures, contrats continus, sorties exclues). Masse salariale chargée : brut + cotisations du mois. Les stocks (ETP, inscrit) ne s'additionnent pas dans le temps ; les flux (entrées, sorties, masse) oui.</dd></div>
-          <div><dt>Ventilation</dt><dd>Catégorie : CDI, CDD, apprenti, stagiaire (nature du contrat corrigée contrat par contrat dans Paramètres). Contrat : nature DSN. Établissement : SIRET du contrat. Statut : cadre dirigeant ou non, tel que déclaré dans PayFit (le statut cadre / non-cadre de la classification n'est pas fourni). Service : code analytique des lignes de paie (masse et ETP seulement ; effectif et mouvements par service ne sont pas historisés). Direction, métier, motif d'embauche, sexe : absents des données lues, listés comme indisponibles avec leur raison. Un groupe sans salarié un mois connu vaut 0 ; un mois n.d. reste n.d. avec sa raison. La somme des groupes est le total du mois.</dd></div>
-          <div><dt>Version et mois projetés</dt><dd>Réel PayFit : mois clos lus. Scénario : les mois jusqu'au mois de référence du scénario sont lus dans le réel PayFit courant (et non dans le réel figé du scénario) ; les mois suivants sont ceux de sa projection. Pour les mois projetés, seuls les axes catégorie, contrat (nature de la base ou « embauche prévisionnelle ») et service sont disponibles ; établissement et statut ne sont pas conservés dans la base du scénario. Les quotités PayFit sont celles de la date de lecture (non historisées).</dd></div>
-          <div><dt>Répartition</dt><dd>Stocks : part de chaque groupe au dernier mois connu de l'année. Flux : part de chaque groupe dans le cumul des mois connus ; les mois n.d. ne sont pas comptés et sont signalés. Un anneau n'est utilisé que jusqu'à huit parts : au-delà, la répartition se lit en barres horizontales classées. Un groupe à zéro n'a pas de part dans l'anneau ; il reste dans le tableau.</dd></div>
-          <div><dt>Graphiques</dt><dd>Les barres reprennent, mois par mois, les cellules du tableau « Répartition mensuelle » : une barre par mois et un groupe par teinte, la même teinte que dans l'anneau et le tableau. « Empiler » superpose les groupes (la hauteur est le total du mois) et « Désempiler » les place côte à côte ; la disposition ne change aucune valeur. L'axe vertical part toujours de zéro. Un mois n.d. est une colonne hachurée et sa raison s'affiche dans l'infobulle ; il n'est jamais tracé à zéro. Au-delà de huit groupes les teintes se répètent : l'infobulle et le tableau nomment chaque groupe. Le tableau reste la référence.</dd></div>
-        </dl>
-      </details>
+      {/* Hors du volet de paramètres : le tableau prend toute la largeur de la page et se lit en entier (colonnes mois compactes). */}
+      {grid.kind === "value" && repart && axisMonths && (
+        <section className="panel" data-testid="em-monthly-panel">
+          <div className="panel-head">
+            <h2>Répartition mensuelle</h2>
+            <span className="desc">valeurs exactes du graphique ; un mois n.d. garde sa raison</span>
+          </div>
+          <p className="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite pour voir les autres mois.</p>
+          <div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Répartition mensuelle, tableau défilant">
+            <table className="data-table kpi-table em-monthly sticky sticky-first" data-testid="em-table">
+              <thead>
+                <tr>
+                  <th>Groupe</th>
+                  {grid.months.map((m) => <th key={m} className="num">{monthShortLabel(m)}{grid.layers.get(m) === "projete" ? <span className="tile-foot"> proj.</span> : null}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {grid.groups.map((g) => (
+                  <tr key={g} data-group={g}>
+                    <td title={g}><i className="swatch" style={{ background: color(g), marginRight: 8 }} aria-hidden="true" />{g}</td>
+                    {grid.months.map((m) => {
+                      const c = grid.cell(g, m);
+                      return <td key={m} className="num" data-month={m}>{c.kind === "value" ? text(c.v, unit) : <abbr className="nd" title={c.kind === "nd" ? c.reason : undefined}>n.d.</abbr>}</td>;
+                    })}
+                  </tr>
+                ))}
+                <tr data-group="total" className="total">
+                  <th>Total</th>
+                  {grid.months.map((m) => {
+                    const c = grid.total(m);
+                    return <td key={m} className="num" data-month={m} data-col="total">{c.kind === "value" ? text(c.v, unit) : <abbr className="nd" title={c.kind === "nd" ? c.reason : undefined}>n.d.</abbr>}</td>;
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {ndReasons.length > 0 && <details data-testid="em-nd-list"><summary>Mois n.d. ({ndReasons.length})</summary><ul className="list">{ndReasons.map((r) => <li key={r} className="desc">{r}</li>)}</ul></details>}
+        </section>
+      )}
     </>
+  );
+}
+
+// Définitions propres à Effectifs mensuels : affichées dans le bloc « Définitions, paramètres et raisons des n.d. » de la page,
+// avec celles des KPI (un seul bloc de définitions par écran).
+export function EffectifsDefinitions() {
+  return (
+    <div data-testid="em-definitions">
+      <h3>Effectifs mensuels : définitions et règles de calcul</h3>
+      <dl className="defs" id="def-effectifs-mensuels">
+        <div><dt>Mesures</dt><dd>ETP : somme des quotités des contrats comptés présents le dernier jour du mois (ETP contractuel, voir les définitions des KPI). Inscrit fin de mois : effectif compté ce jour-là. Entrées et sorties : mouvements comptés du mois (règles du turnover : natures, contrats continus, sorties exclues). Masse salariale chargée : brut + cotisations du mois. Les stocks (ETP, inscrit) ne s'additionnent pas dans le temps ; les flux (entrées, sorties, masse) oui.</dd></div>
+        <div><dt>Ventilation</dt><dd>Catégorie : CDI, CDD, apprenti, stagiaire (nature du contrat corrigée contrat par contrat dans Paramètres). Contrat : nature DSN. Établissement : SIRET du contrat. Statut : cadre dirigeant ou non, tel que déclaré dans PayFit (le statut cadre / non-cadre de la classification n'est pas fourni). Service : code analytique des lignes de paie (masse et ETP seulement ; effectif et mouvements par service ne sont pas historisés). Direction, métier, motif d'embauche, sexe : absents des données lues, listés comme indisponibles avec leur raison. Un groupe sans salarié un mois connu vaut 0 ; un mois n.d. reste n.d. avec sa raison. La somme des groupes est le total du mois.</dd></div>
+        <div><dt>Version et mois projetés</dt><dd>Réel PayFit : mois clos lus. Scénario : les mois jusqu'au mois de référence du scénario sont lus dans le réel PayFit courant (et non dans le réel figé du scénario) ; les mois suivants sont ceux de sa projection. Pour les mois projetés, seuls les axes catégorie, contrat (nature de la base ou « embauche prévisionnelle ») et service sont disponibles ; établissement et statut ne sont pas conservés dans la base du scénario. Les quotités PayFit sont celles de la date de lecture (non historisées).</dd></div>
+        <div><dt>Répartition</dt><dd>Stocks : part de chaque groupe au dernier mois connu de l'année. Flux : part de chaque groupe dans le cumul des mois connus ; les mois n.d. ne sont pas comptés et sont signalés. Un anneau n'est utilisé que jusqu'à huit parts : au-delà, la répartition se lit en barres horizontales classées. Un groupe à zéro n'a pas de part dans l'anneau ; il reste dans le tableau.</dd></div>
+        <div><dt>Graphiques</dt><dd>Les barres reprennent, mois par mois, les cellules du tableau « Répartition mensuelle » : une barre par mois et un groupe par teinte, la même teinte que dans l'anneau et le tableau. « Empiler » superpose les groupes (la hauteur est le total du mois) et « Désempiler » les place côte à côte ; la disposition ne change aucune valeur. L'axe vertical part toujours de zéro. Un mois n.d. est une colonne hachurée et sa raison s'affiche dans l'infobulle ; il n'est jamais tracé à zéro. Au-delà de huit groupes les teintes se répètent : l'infobulle et le tableau nomment chaque groupe. Le tableau reste la référence.</dd></div>
+      </dl>
+    </div>
   );
 }

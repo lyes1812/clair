@@ -1,20 +1,22 @@
 import "@/styles/ecart.css";
-import { WaterfallChart } from "@/components/charts";
 import { formatEuros } from "@/lib/money";
 import { bridge, type Series } from "@/lib/budget/series";
-import { etpCascade, masseByRubric, STEP_LABELS, type StepId } from "@/lib/budget/cascade";
+import { etpCascade, masseByRubric, STEP_LABELS } from "@/lib/budget/cascade";
 import { ECART_DEFINITIONS } from "@/lib/budget/ecart-definitions";
 import { aggregate, alignedSeries, diff, type RowKey } from "@/lib/budget/versions";
 import { etpWaterfall, masseWaterfall, pontWaterfall } from "@/lib/viz/ecart";
-import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
+import { fmtFixed } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { loadVersions } from "../ecart-data";
-import { GapPct, MsHeader, MsTabs, periodText, pctSign, PickerForm, scopeText, signOf } from "../EcartParts";
+import { GapPct, MsHeader, MsTabs, neg, PanelTitle, periodText, pctSign, PickerForm, scopeText, signOf, TBL, VersionChain } from "../EcartParts";
 import { peopleIndex } from "../people-index";
 import { LiveViewSwitch } from "../ecart/LiveRub";
 import { AnalyseChart, type AnalyseItem } from "./AnalyseChart";
+import { STEP_COMMENTS } from "./comments";
+import { Weight } from "./Weight";
+import { TitledWaterfall } from "./TitledWaterfall";
 
 export const dynamic = "force-dynamic";
 type Search = Record<string, string | string[] | undefined>;
@@ -23,16 +25,8 @@ const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/masse-salariale")
 type Affichage = "tout" | "graphique" | "tableau";
 const AFFICHAGES: Affichage[] = ["tout", "graphique", "tableau"];
 const etp = (n: number) => fmtFixed({ num: n, den: 10000 }, 2);
+const eur = (n: number) => neg(formatEuros(n));
 const sg = (n: number, f: (x: number) => string) => `${n > 0 ? "+" : ""}${f(n)}`;
-const COMMENT: Record<StepId, string> = {
-  "entrees-new": "Salariés présents dans la version B et jamais présents dans la version A.",
-  "entrees-report": "Salariés présents dans les deux versions, plus de mois présents en B qu'en A : effet en année pleine d'une entrée survenue pendant A.",
-  sorties: "Salariés présents dans la version A et jamais présents dans la version B.",
-  "sorties-deport": "Salariés présents dans les deux versions, moins de mois présents en B qu'en A : sortie survenue pendant B.",
-  "etp-change": "Salariés présents dans les deux versions dont la quotité moyenne diffère, pondérée par leur présence en B.",
-};
-// Poids d'une contribution dans l'écart total : contribution ÷ écart total, exact (fraction d'entiers), signe écrit.
-const weight = (n: number, total: number) => (total === 0 ? "n.d." : `${(n < 0) !== (total < 0) ? "−" : "+"}${fmtPercent({ num: Math.abs(n), den: Math.abs(total) })}`);
 const RUBRIC_OPTIONS = [{ key: "etp", label: "ETP (moyenne des ETP de fin de mois)" }, { key: "masse", label: "Masse salariale chargée" }];
 
 export default async function AnalysePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
@@ -92,7 +86,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
       <MsTabs slug={slug} current="analyse" />
       <section className="panel" data-testid="analyse">
         <div className="panel-head">
-          <h2>Analyse des écarts <span className="desc">— d'où vient l'écart entre deux versions · <a href="#def-cascade">règles</a></span></h2>
+          <PanelTitle title="Analyse des écarts">D'où vient l'écart entre deux versions · <a href="#def-cascade">règles</a></PanelTitle>
           {a && b && (
             <LiveViewSwitch
               initialRub={rub}
@@ -108,7 +102,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
         <PickerForm path={base} loaded={loaded} columns={2} hidden={hidden} />
         {!a || !b ? <p className="desc" data-testid="analyse-empty">Choisissez deux versions à comparer (version 1 = départ, version 2 = arrivée).</p> : (
           <p className="desc" data-testid="analyse-context">
-            <span className="ver-badge" aria-hidden="true">1</span>{s0} → <span className="ver-badge" aria-hidden="true">2</span>{s1} · {period} (rangs de mois {loaded.from}–{loaded.to}) · {scope} · <a href={ecartHref}>voir le tableau d'écart par rubrique</a>
+            <VersionChain labels={[a.label, b.label]} /> · {period} (rangs de mois {loaded.from}–{loaded.to}) · {scope} · <a href={ecartHref}>voir le tableau d'écart par rubrique</a>
           </p>
         )}
       </section>
@@ -116,7 +110,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
       {showGraph && items && (
         <section className="panel" data-testid="analyse-graph" id="graphique">
           <div className="panel-head">
-            <h2>Cascade de l'écart <span className="desc">— de la version 1 à la version 2 · <a href="#def-cascade">règles</a></span></h2>
+            <PanelTitle title="Cascade de l'écart">De la version 1 à la version 2 · <a href="#def-cascade">règles</a></PanelTitle>
           </div>
           <AnalyseChart initial={rub} options={RUBRIC_OPTIONS} items={items} />
           {!showTables && <p className="tile-foot">La cascade est une lecture : les valeurs exactes de chaque contribution sont dans <a href={affHref("tableau")}>l'affichage Tableau</a>.</p>}
@@ -126,33 +120,34 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
       {showTables && a && b && cascade && (
         <section className="panel" data-testid="analyse-etp" id="tableau">
           <div className="panel-head">
-            <h2>ETP — de la version 1 à la version 2 <span className="desc">— moyenne des ETP de fin de mois · <a href="#def-cascade">règle</a></span></h2>
+            <PanelTitle title="ETP — de la version 1 à la version 2">Moyenne des ETP de fin de mois · <a href="#def-cascade">règle</a></PanelTitle>
           </div>
           {cascade.kind === "nd" ? (
             <p className="nd" data-testid="analyse-etp-nd">n.d. — {cascade.reason}</p>
           ) : (
             <>
               <div className="table-wrap scroll">
-                <table className="data-table sticky ecart-table analyse-table" data-testid="analyse-etp-table">
-                  <caption className="ecart-sr">Cascade des ETP de {s0} à {s1} : départ, contributions, arrivée</caption>
-                  <thead><tr><th scope="col">Rubrique</th><th scope="col" className="num" title="Départ et arrivée : valeur ; autres lignes : écart signé">ETP (valeur ou écart)</th><th scope="col" className="num">Poids des écarts</th><th scope="col" className="num" title="Écart ÷ valeur de départ, défini pour le total">Écart (%)</th><th scope="col">Commentaire</th></tr></thead>
-                  <tbody>
-                    <tr data-step="start" className="total"><th scope="row">ETP {s0}</th><td className="num" data-col="valeur">{etp(cascade.start)}</td><td /><td /><td className="wrap">Moyenne des ETP de fin de mois sur {cascade.months} mois.</td></tr>
+                <table className="data-table sticky sticky-first ecart-table analyse-table stack-sm" data-testid="analyse-etp-table" {...TBL.table}>
+                  <caption className="ecart-sr">Cascade des ETP de {s0} à {s1} : départ, contributions, écart total, arrivée</caption>
+                  <thead {...TBL.group}><tr {...TBL.row}><th scope="col" {...TBL.head}>Rubrique</th><th scope="col" className="num" title="Départ et arrivée : valeur ; autres lignes : écart signé" {...TBL.head}>ETP (valeur ou écart)</th><th scope="col" className="num" {...TBL.head}>Poids des écarts</th><th scope="col" className="num" title="Écart ÷ valeur de départ, défini pour l'écart total" {...TBL.head}>Écart (%)</th><th scope="col" {...TBL.head}>Commentaire</th></tr></thead>
+                  <tbody {...TBL.group}>
+                    <tr data-step="start" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>ETP {s0}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{etp(cascade.start)}</td><td {...TBL.cell} /><td {...TBL.cell} /><td className="wrap" data-label="Commentaire" {...TBL.cell}>Moyenne des ETP de fin de mois sur {cascade.months} mois.</td></tr>
                     {cascade.steps.map((s) => (
-                      <tr key={s.id} data-step={s.id} className="child">
-                        <th scope="row">{STEP_LABELS[s.id]}</th>
-                        <td className="num" data-col="valeur" data-sign={signOf(s.etp4)}>{sg(s.etp4, etp)}</td>
-                        <td className="num">{s.etp4 === 0 ? "—" : weight(s.etp4, cascade.end - cascade.start)}</td>
-                        <td className="num">—</td>
-                        <td className="wrap">{COMMENT[s.id]}</td>
+                      <tr key={s.id} data-step={s.id} className="child" {...TBL.row}>
+                        <th scope="row" {...TBL.rowhead}>{STEP_LABELS[s.id]}</th>
+                        <td className="num" data-col="valeur" data-sign={signOf(s.etp4)} data-label="Écart" {...TBL.cell}>{sg(s.etp4, etp)}</td>
+                        <td className="num" data-label="Poids des écarts" {...TBL.cell}><Weight n={s.etp4} total={cascade.end - cascade.start} /></td>
+                        <td className="num" data-label="Écart (%)" {...TBL.cell}>—</td>
+                        <td className="wrap" data-label="Commentaire" {...TBL.cell}>{STEP_COMMENTS[s.id]}</td>
                       </tr>
                     ))}
-                    <tr data-step="residual" className="child"><th scope="row">Résiduel d'arrondi</th><td className="num" data-col="valeur">{sg(cascade.residual, etp)}</td><td /><td /><td className="wrap">Nul par construction : chaque palier cumulé est arrondi une seule fois.</td></tr>
-                    <tr data-step="end" className="total"><th scope="row">ETP {s1}</th><td className="num" data-col="valeur">{etp(cascade.end)}</td><td className="num" data-col="ecart" data-sign={signOf(cascade.end - cascade.start)}>écart {sg(cascade.end - cascade.start, etp)}</td><td className="num" data-col="pct" data-sign={etpPct ? pctSign(etpPct) : undefined}>{etpPct ? <GapPct d={etpPct} /> : "—"}</td><td className="wrap">Départ + contributions + résiduel = arrivée.</td></tr>
+                    <tr data-step="residual" className="child" {...TBL.row}><th scope="row" {...TBL.rowhead}>Résiduel d'arrondi</th><td className="num" data-col="valeur" data-label="Écart" {...TBL.cell}>{sg(cascade.residual, etp)}</td><td {...TBL.cell} /><td {...TBL.cell} /><td className="wrap" data-label="Commentaire" {...TBL.cell}>Nul par construction : chaque palier cumulé est arrondi une seule fois.</td></tr>
+                    <tr data-step="total" className="subtotal" {...TBL.row}><th scope="row" {...TBL.rowhead}>Écart total (version 2 − version 1)</th><td className="num" data-col="valeur" data-sign={signOf(cascade.end - cascade.start)} data-label="Écart" {...TBL.cell}>{sg(cascade.end - cascade.start, etp)}</td><td {...TBL.cell} /><td className="num" data-col="pct" data-sign={etpPct ? pctSign(etpPct) : undefined} data-label="Écart (%)" {...TBL.cell}>{etpPct ? <GapPct d={etpPct} /> : "—"}</td><td className="wrap" data-label="Commentaire" {...TBL.cell}>Somme des contributions et du résiduel.</td></tr>
+                    <tr data-step="end" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>ETP {s1}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{etp(cascade.end)}</td><td {...TBL.cell} /><td {...TBL.cell} /><td className="wrap" data-label="Commentaire" {...TBL.cell}>Départ + contributions + résiduel = arrivée.</td></tr>
                   </tbody>
                 </table>
               </div>
-              <p className="tile-foot">Poids = contribution ÷ écart total. Écart (%) = écart ÷ ETP de départ, donné pour le total seulement : une contribution n'a pas de valeur de départ propre. La flèche indique seulement le sens.</p>
+              <p className="tile-foot">Poids = contribution ÷ écart total. Écart (%) = écart total ÷ ETP de départ, donné pour l'écart total seulement : une contribution n'a pas de valeur de départ propre. La flèche indique seulement le sens.</p>
               {canZoom ? (
                 <details data-testid="analyse-etp-who">
                   <summary>Salariés derrière chaque contribution</summary>
@@ -169,31 +164,32 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
       {showTables && a && b && masse && (
         <section className="panel" data-testid="analyse-masse">
           <div className="panel-head">
-            <h2>Masse salariale chargée <span className="desc">— contributions par rubrique · <a href="#def-contributions">règle</a></span></h2>
+            <PanelTitle title="Masse salariale chargée">Contributions par rubrique · <a href="#def-contributions">règle</a></PanelTitle>
           </div>
           {masse.kind === "nd" ? (
             <p className="nd" data-testid="analyse-masse-nd">n.d. — {masse.reason}</p>
           ) : (
             <>
               <div className="table-wrap scroll">
-                <table className="data-table sticky ecart-table analyse-table" data-testid="analyse-masse-table">
+                <table className="data-table sticky sticky-first ecart-table analyse-table stack-sm" data-testid="analyse-masse-table" {...TBL.table}>
                   <caption className="ecart-sr">Contribution de chaque rubrique à l'écart de masse salariale chargée de {s0} à {s1}</caption>
-                  <thead><tr><th scope="col">Rubrique</th><th scope="col" className="num" title="Départ et arrivée : montant ; autres lignes : écart signé">Montant (valeur ou écart)</th><th scope="col" className="num">Poids des écarts</th><th scope="col" className="num" title="Écart ÷ valeur de la rubrique dans la version 1 (comme dans l'écart budgétaire)">Écart (%)</th></tr></thead>
-                  <tbody>
-                    <tr data-step="start" className="total"><th scope="row">{s0}</th><td className="num" data-col="valeur">{formatEuros(masse.start)}</td><td /><td /></tr>
+                  <thead {...TBL.group}><tr {...TBL.row}><th scope="col" {...TBL.head}>Rubrique</th><th scope="col" className="num" title="Départ et arrivée : montant ; autres lignes : écart signé" {...TBL.head}>Montant (valeur ou écart)</th><th scope="col" className="num" {...TBL.head}>Poids des écarts</th><th scope="col" className="num" title="Écart ÷ valeur de la rubrique dans la version 1 (comme dans l'écart budgétaire)" {...TBL.head}>Écart (%)</th></tr></thead>
+                  <tbody {...TBL.group}>
+                    <tr data-step="start" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>{s0}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{eur(masse.start)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
                     {masse.steps.map((s) => {
                       const pct = pctOf(s.key as RowKey);
                       return (
-                        <tr key={s.key} data-step={s.key} className="child">
-                          <th scope="row">{s.label}</th>
-                          <td className="num" data-col="valeur" data-sign={s.delta === null ? undefined : signOf(s.delta)}>{s.delta === null ? <abbr className="nd" title={s.reason ?? undefined}>n.d.</abbr> : sg(s.delta, formatEuros)}</td>
-                          <td className="num">{s.delta === null || s.delta === 0 ? "—" : weight(s.delta, masse.end - masse.start)}</td>
-                          <td className="num" data-sign={pct ? pctSign(pct) : undefined}>{pct ? <GapPct d={pct} /> : "—"}</td>
+                        <tr key={s.key} data-step={s.key} className="child" {...TBL.row}>
+                          <th scope="row" {...TBL.rowhead}>{s.label}</th>
+                          <td className="num" data-col="valeur" data-sign={s.delta === null ? undefined : signOf(s.delta)} data-label="Écart" {...TBL.cell}>{s.delta === null ? <abbr className="nd" title={s.reason ?? undefined}>n.d.</abbr> : sg(s.delta, eur)}</td>
+                          <td className="num" data-label="Poids des écarts" {...TBL.cell}><Weight n={s.delta} total={masse.end - masse.start} reason={s.reason} /></td>
+                          <td className="num" data-sign={pct ? pctSign(pct) : undefined} data-label="Écart (%)" {...TBL.cell}>{pct ? <GapPct d={pct} /> : "—"}</td>
                         </tr>
                       );
                     })}
-                    <tr data-step="residual" className="child"><th scope="row">{masse.steps.some((s) => s.delta === null) ? "Résiduel (part de l'écart portée par les rubriques n.d.)" : "Résiduel"}</th><td className="num" data-col="valeur">{sg(masse.residual ?? 0, formatEuros)}</td><td /><td /></tr>
-                    <tr data-step="end" className="total"><th scope="row">{s1}</th><td className="num" data-col="valeur">{formatEuros(masse.end)}</td><td className="num" data-col="ecart" data-sign={signOf(masse.end - masse.start)}>écart {sg(masse.end - masse.start, formatEuros)}</td><td className="num" data-col="pct" data-sign={massePct ? pctSign(massePct) : undefined}>{massePct ? <GapPct d={massePct} /> : "—"}</td></tr>
+                    <tr data-step="residual" className="child" {...TBL.row}><th scope="row" {...TBL.rowhead}>{masse.steps.some((s) => s.delta === null) ? "Résiduel (part de l'écart portée par les rubriques n.d.)" : "Résiduel"}</th><td className="num" data-col="valeur" data-label="Écart" {...TBL.cell}>{sg(masse.residual ?? 0, eur)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
+                    <tr data-step="total" className="subtotal" {...TBL.row}><th scope="row" {...TBL.rowhead}>Écart total (version 2 − version 1)</th><td className="num" data-col="valeur" data-sign={signOf(masse.end - masse.start)} data-label="Écart" {...TBL.cell}>{sg(masse.end - masse.start, eur)}</td><td {...TBL.cell} /><td className="num" data-col="pct" data-sign={massePct ? pctSign(massePct) : undefined} data-label="Écart (%)" {...TBL.cell}>{massePct ? <GapPct d={massePct} /> : "—"}</td></tr>
+                    <tr data-step="end" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>{s1}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{eur(masse.end)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
                   </tbody>
                 </table>
               </div>
@@ -212,7 +208,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
       {a && b && pont && (
         <section className="panel" data-testid="analyse-pont">
           <div className="panel-head">
-            <h2>Pont volume / coût moyen <span className="desc">— le même écart de masse, en deux effets · <a href="#def-contributions">définition</a></span></h2>
+            <PanelTitle title="Pont volume / coût moyen">Le même écart de masse, en deux effets · <a href="#def-contributions">définition</a></PanelTitle>
           </div>
           {pont.kind === "nd" ? (
             <p className="nd" data-testid="analyse-pont-nd">n.d. — {pont.reason}</p>
@@ -220,14 +216,14 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
             <div className="pont">
               {aff !== "graphique" && (
                 <dl className="pont-tiles">
-                  <div data-testid="pont-delta"><dt>Écart de masse salariale</dt><dd data-sign={signOf(pont.delta)}>{sg(pont.delta, formatEuros)}</dd><span className="tile-foot">{s1} − {s0}</span></div>
-                  <div data-testid="pont-volume"><dt>Effet volume</dt><dd data-sign={signOf(pont.volume)}>{sg(pont.volume, formatEuros)}</dd><span className="tile-foot">écart d'ETP-mois ({etp(pont.a.etpMonths4)} − {etp(pont.b.etpMonths4)} = {sg(pont.a.etpMonths4 - pont.b.etpMonths4, etp)}) × coût par ETP-mois de {s0}</span></div>
-                  <div data-testid="pont-cout"><dt>Effet coût moyen</dt><dd data-sign={signOf(pont.averageCost)}>{sg(pont.averageCost, formatEuros)}</dd><span className="tile-foot">le reste : la somme des deux effets égale l'écart. L'effet de structure (mix) n'est pas calculé.</span></div>
+                  <div data-testid="pont-delta"><dt>Écart de masse salariale</dt><dd data-sign={signOf(pont.delta)}>{sg(pont.delta, eur)}</dd><span className="tile-foot">{s1} − {s0}</span></div>
+                  <div data-testid="pont-volume"><dt>Effet volume</dt><dd data-sign={signOf(pont.volume)}>{sg(pont.volume, eur)}</dd><span className="tile-foot">écart d'ETP-mois ({etp(pont.a.etpMonths4)} − {etp(pont.b.etpMonths4)} = {sg(pont.a.etpMonths4 - pont.b.etpMonths4, etp)}) × coût par ETP-mois de {s0}</span></div>
+                  <div data-testid="pont-cout"><dt>Effet coût moyen</dt><dd data-sign={signOf(pont.averageCost)}>{sg(pont.averageCost, eur)}</dd><span className="tile-foot">le reste : la somme des deux effets égale l'écart. L'effet de structure (mix) n'est pas calculé.</span></div>
                 </dl>
               )}
               {aff !== "tableau" && wfPont && wfPont.kind === "value" && (
                 <div className="pont-chart">
-                  <WaterfallChart
+                  <TitledWaterfall
                     testid="wf-pont"
                     label={`Pont de la masse salariale chargée de ${s0} à ${s1} : effet volume et effet coût moyen`}
                     title="Du coût de la version 1 à celui de la version 2"
@@ -246,7 +242,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
         </section>
       )}
 
-      <details className="panel" data-testid="analyse-definitions" id="definitions">
+      <details className="panel ecart-defs" data-testid="analyse-definitions" id="definitions">
         <summary>Définitions et règles de calcul</summary>
         <dl className="defs">{ECART_DEFINITIONS.map((d) => <div key={d.id} id={`def-${d.id}`}><dt>{d.title}</dt><dd>{d.text}</dd></div>)}</dl>
       </details>

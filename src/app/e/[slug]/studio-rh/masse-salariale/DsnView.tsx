@@ -1,13 +1,12 @@
 import { BarChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { formatMonth } from "@/lib/dates";
-import { formatEuros } from "@/lib/money";
 import { dsnBrutWindow, type DsnMonth, type DsnWindow } from "@/lib/payroll/dsn";
 import { shiftYear } from "@/lib/payroll/engine";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { fmtPercent } from "@/lib/rh/kpi/format";
-import { dsnPoint, dsnSeries, monthShortYear, monthsAxis, ndGroups, ndLines, reasonLines } from "@/lib/viz/masse";
-import { AFFICHAGES, ChartGuard, GraphFoot, isAffichage, MM, MONTH_NAMES, monthShort, MsHead, NdLines, PanelTitle, PeriodBar, ReadDetails, ScrollTable, Tile, type Affichage } from "./components";
+import { dsnPoint, dsnSeries, euros, eurosSigned, monthShortYear, monthsAxis, ndGroups, ndLines, ndNote, ndShape, reasonLines } from "@/lib/viz/masse";
+import { AFFICHAGES, ChartGuard, GraphFoot, isAffichage, MM, MONTH_NAMES, monthShort, MsHead, MsRead, NdLines, NdState, PanelHead, PeriodBar, ScrollTable, Tile, type Affichage } from "./components";
 
 // Masse salariale quand la source RH retenue est la DSN : brut déclaré (S21.G00.51 type 001) des déclarations qui font
 // foi. Les cotisations patronales ne sont pas portées salarié par salarié de façon fiable par la DSN : la masse chargée
@@ -23,7 +22,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
   const last = usable.at(-1) ?? null;
   const source = (
     <p className="desc ms-source" data-testid="ms-source">
-      Source : <strong>DSN déposées</strong> (déclarations qui font foi, module Données) · mois couverts {covered[0] ?? "n.d."} → {covered.at(-1) ?? "n.d."} ·{" "}
+      Source : <strong>DSN déposées</strong> (déclarations qui font foi, module Données) · mois couverts <span className="ms-nowrap">{covered[0] ?? "n.d."}</span> → <span className="ms-nowrap">{covered.at(-1) ?? "n.d."}</span> ·{" "}
       <a href={`/e/${slug}/donnees`}>Données</a>
     </p>
   );
@@ -33,10 +32,9 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
   if (!last) {
     return (
       <>
-        <MsHead title={ITEM.label} summary={ITEM.summary}>{source}</MsHead>
-        <section className="placeholder" data-testid="ms-nd">
-          <h3>n.d. — aucune DSN appliquée avec une rémunération de type 001</h3>
-        </section>
+        <MsHead title={ITEM.label} summary={ITEM.summary} />
+        <MsRead source={source} />
+        <NdState testid="ms-nd" reason="Aucune DSN appliquée avec une rémunération de type 001." action={{ href: `/e/${slug}/donnees`, label: "Déposer des DSN dans Données" }} />
       </>
     );
   }
@@ -57,7 +55,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
   const cur = dsnBrutWindow(dsn, months);
   const prev = dsnBrutWindow(dsn, prevMonths);
   const label = (ms: string[]) => (ms.length === 1 ? formatMonth(ms[0]) : `${MONTH_NAMES[Number(ms[0].slice(5)) - 1]} → ${MONTH_NAMES[Number(ms.at(-1)!.slice(5)) - 1]} ${ms[0].slice(0, 4)}`);
-  const show = (w: DsnWindow) => (w.kind === "nd" ? "n.d." : formatEuros(w.brutCents));
+  const show = (w: DsnWindow) => (w.kind === "nd" ? "n.d." : euros(w.brutCents));
   // Raisons des n.d. des tuiles : écrites une fois sous les tuiles.
   const tileNd = reasonLines([
     { label: `Période (${label(months)})`, reason: cur.kind === "nd" ? cur.reason : null },
@@ -79,14 +77,14 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
   const brutSeries = dsnSeries(months.map((m) => dsn.get(m)), prevMonths.map((m) => dsn.get(m)), { cur: `Brut déclaré ${year}`, prev: `Brut déclaré ${year - 1} (N-1)` });
   // Raisons des mois n.d. du graphique (mêmes raisons que les tuiles), écrites sous le graphique quand le tableau est masqué.
   const dsnNd = ndLines(ndGroups([...months, ...prevMonths].map((m) => ({ month: m, reason: dsnPoint(dsn.get(m)).reason }))));
+  // Mention des n.d. seulement si le graphique en contient : une colonne hachurée est un mois sans DSN exploitable.
+  const ndText = ndShape(brutSeries).columns > 0 ? "Une colonne hachurée est un mois sans DSN exploitable (non déposée, bloquée ou sans rémunération de type 001) : n.d., jamais zéro." : ndNote(brutSeries);
   const incompleteNote = incomplete.length ? `Mois dont la DSN est incomplète (un établissement n'a pas déclaré ; ⚠ dans le tableau) : ${incomplete.map(monthShortYear).join(", ")}. ` : "";
   return (
     <>
-      <MsHead title={ITEM.label} summary={ITEM.summary}>
-        {source}
-        <ReadDetails>{rawNotice}</ReadDetails>
-      </MsHead>
+      <MsHead title={ITEM.label} summary={ITEM.summary} />
       <div className="ms-controls">
+        <MsRead source={source}>{rawNotice}</MsRead>
         <PeriodBar years={years} year={year} from={from} to={to} hidden={aff !== "tout" ? { affichage: aff } : {}} presets={presets} resetHref={aff !== "tout" ? `${base}?affichage=${aff}` : base} />
         {notices.map((n) => <p key={n} className="notice" data-testid="ms-param-notice">{n}</p>)}
         <div className="ms-toolbar">
@@ -104,7 +102,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
         </div>
       </div>
       <section className="panel">
-        <PanelTitle title={`Vue d'ensemble — ${label(months)}`} desc={`Comparée à ${label(prevMonths)} (N-1) ; chaque chiffre renvoie à sa définition.`} />
+        <PanelHead title={`Vue d'ensemble — ${label(months)}`} desc={`Comparée à ${label(prevMonths)} (N-1) ; chaque chiffre renvoie à sa définition.`} />
         <dl className="facts ms-tiles">
           <Tile
             testid="ms-tile-brut"
@@ -127,7 +125,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
             value={evo ? `${evo.delta > 0 ? "+" : ""}${fmtPercent(evo.ratio)}` : cur.kind === "nd" || prev.kind === "nd" ? "n.d." : "n.d. — N-1 nul : % non défini"}
             nd={!evo}
             ndLong={!evo && cur.kind === "value" && prev.kind === "value"}
-            lead={evo ? `${evo.delta > 0 ? "+" : ""}${formatEuros(evo.delta)}` : undefined}
+            lead={evo ? eurosSigned(evo.delta) : undefined}
             def="brut-dsn"
           />
           <Tile testid="ms-tile-masse" label="Masse salariale chargée" value={`n.d. — ${ND_CHARGES}`} nd ndLong def="masse-dsn" />
@@ -136,20 +134,20 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
       </section>
       {showGraph && (
         <section className="panel" data-testid="ms-graphs">
-          <PanelTitle title="Graphique" desc={`Brut déclaré (type 001) par mois, ${label(months)} face à ${label(prevMonths)} (N-1) ; montants en euros.`} />
+          <PanelHead title="Graphiques" desc={`${label(months)} · montants en euros.`} />
           <div className="ms-charts">
             <div className="ms-chart wide">
-              <ChartGuard testid="ms-trend" title={`Brut déclaré par mois — ${year} face à ${year - 1} (N-1)`} series={brutSeries}>
+              <ChartGuard testid="ms-trend" title={`Brut déclaré par mois, ${year} face à ${year - 1} (N-1)`} series={brutSeries}>
                 <BarChart
                   testid="ms-trend"
                   label={`Brut déclaré en DSN par mois, ${year} et ${year - 1}, en euros`}
-                  title={`Brut déclaré par mois — ${year} face à ${year - 1} (N-1)`}
+                  title={`Brut déclaré par mois, ${year} face à ${year - 1} (N-1)`}
                   categories={axis.categories}
                   categoryTitles={axis.titles}
                   series={brutSeries}
                   unit="eur"
                   height={300}
-                  note={`${incompleteNote}Une colonne hachurée est un mois sans DSN exploitable (non déposée, bloquée ou sans rémunération de type 001) : n.d., jamais zéro.`}
+                  note={`${incompleteNote}${ndText}`.trim() || undefined}
                 />
               </ChartGuard>
             </div>
@@ -160,12 +158,12 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
       )}
       {showTable && (
         <section className="panel">
-          <PanelTitle title="Mois par mois" desc="Brut déclaré (type 001) de chaque mois ; les autres types de rémunération sont listés sans être additionnés." />
+          <PanelHead title="Mois par mois" desc="Brut déclaré (type 001) de chaque mois ; les autres types de rémunération sont listés sans être additionnés." />
           <ScrollTable label="Tableau du brut déclaré mois par mois">
             <table className="data-table sticky sticky-first ms-table" data-testid="ms-monthly-table">
               <caption className="ms-sr">Brut déclaré en DSN mois par mois, {label(months)}, comparé à {label(prevMonths)}</caption>
               <thead>
-                <tr><th scope="col">Mois</th><th scope="col">DSN</th><th scope="col" className="num">Brut déclaré (001)</th><th scope="col" className="num n1">Brut N-1</th><th scope="col" className="num">Écart</th><th scope="col">Autres types déclarés (non additionnés)</th></tr>
+                <tr><th scope="col">Mois</th><th scope="col" className="num">Brut déclaré (001)</th><th scope="col" className="num n1">Brut N-1</th><th scope="col" className="num">Écart</th><th scope="col">DSN</th><th scope="col">Autres types déclarés (non additionnés)</th></tr>
               </thead>
               <tbody>
                 {months.map((m) => {
@@ -178,11 +176,11 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
                   return (
                     <tr key={m} data-month={m}>
                       <th scope="row">{formatMonth(m)}</th>
+                      <td className="num" data-col="brut">{b === undefined ? "n.d." : euros(b)}</td>
+                      <td className="num n1" data-col="brut-n1">{bp === undefined ? "n.d." : `${euros(bp)}${pInc}`}</td>
+                      <td className="num" data-col="ecart">{b === undefined || bp === undefined ? "n.d." : eurosSigned(b - bp)}</td>
                       <td>{d ? STATUS[d.status] : <span className="nd">non déposée</span>}</td>
-                      <td className="num" data-col="brut">{b === undefined ? "n.d." : formatEuros(b)}</td>
-                      <td className="num n1" data-col="brut-n1">{bp === undefined ? "n.d." : `${formatEuros(bp)}${pInc}`}</td>
-                      <td className="num" data-col="ecart">{b === undefined || bp === undefined ? "n.d." : `${b - bp > 0 ? "+" : ""}${formatEuros(b - bp)}`}</td>
-                      <td className="wrap tile-foot">{others.length ? others.map(([t, c]) => `type ${t} : ${formatEuros(c)}`).join(" · ") : "—"}</td>
+                      <td className="wrap tile-foot">{others.length ? others.map(([t, c]) => `type ${t} : ${euros(c)}`).join(" · ") : "—"}</td>
                     </tr>
                   );
                 })}
@@ -192,10 +190,11 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
         </section>
       )}
       <details className="panel ms-defs" data-testid="ms-definitions" id="definitions">
-        <summary>Définitions et limites (source DSN)</summary>
+        <summary>Définitions et règles de calcul</summary>
         <dl className="defs">
           <div id="def-brut-dsn"><dt>Brut déclaré</dt><dd>Somme des rémunérations S21.G00.51 de type 001 (rémunération brute non plafonnée) des déclarations qui font foi pour chaque mois, tous établissements (sélection du module Données : numéro d'ordre, annule et remplace, fractions). Les autres types de rémunération sont listés sans être additionnés.</dd></div>
           <div id="def-masse-dsn"><dt>Masse chargée</dt><dd>n.d. en source DSN : {ND_CHARGES}.</dd></div>
+          <div id="def-nd"><dt>n.d. (donnée non disponible)</dt><dd>Une donnée absente de la source s'écrit « n.d. », avec sa raison ; elle n'est jamais remplacée par zéro. Dans un graphique, une colonne hachurée est un mois n.d.</dd></div>
           <div id="def-mois-dsn"><dt>Mois incomplet, bloqué ou non déposé</dt><dd>Incomplet : un établissement connu n'a pas déclaré ce mois (le brut ne couvre que les établissements déclarés, signalé ⚠). Bloqué ou non déposé : n.d., jamais zéro.</dd></div>
         </dl>
       </details>

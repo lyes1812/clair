@@ -142,7 +142,6 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   expect(await txt(page.getByTestId("pc-tile-provision").locator("dd"))).toBe("2 622,20 €");
   expect(await txt(page.getByTestId("pc-tile-provision-n1"))).toContain("2 251,20 €");
   await expect(page.getByTestId("pc-recon-nd")).toContainText("aucune source comptable retenue");
-  await expect(page.getByTestId("pc-ratio-value")).toContainText("n.d. — aucune source comptable retenue");
   // Avec Pennylane fictif (641100 = brut total, pas de compte 6413 ni de provision) : l'écart sort rubrique par rubrique.
   await page.goto(`/e/${slug}/donnees/pennylane`);
   await page.getByLabel("Clé API Pennylane").fill("fixture-pl-A-1");
@@ -156,7 +155,7 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   await expect(page.getByTestId("sync-status")).toHaveText("Appliquée (active)");
   await page.goto(`${ms}?vue=paie-compta`);
   const ecart = (r: string) => page.getByTestId("pc-recon-rubrics").locator(`tr[data-rubric='${r}'] td[data-col='ecart']`);
-  expect(await txt(ecart("salaires"))).toBe("-6 555,50 €");
+  expect(await txt(ecart("salaires"))).toBe("−6 555,50 €");
   expect(await txt(ecart("primes"))).toBe("+6 555,50 €");
   expect(await txt(ecart("cotisations"))).toBe("0,00 €");
   expect(await txt(ecart("provisions-cp"))).toBe("+546,00 €");

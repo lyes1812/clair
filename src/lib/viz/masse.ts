@@ -18,23 +18,31 @@ export type WindowIn = { kind: "value"; masse: number } | ({ kind: "nd" } & Nd);
 export type ProvisionIn = { kind: "value"; conges: number | null; charges: number | null; total: number | null; missing: string[] } | { kind: "nd"; reason: string };
 export type DsnIn = { status: "complete" | "incomplete" | "blocked"; byType: Record<string, number> };
 
-// --- Teintes : celles de la charte (charts.css). Une même grandeur garde la même teinte dans tout l'écran
-// (brut en bleu nuit, cotisations en bleu ; N en bleu, N-1 en gris). La teinte ne porte jamais seule l'information :
-// légende nommée, étiquettes et infobulle donnent le nom et la valeur. Les séries des colonnes empilées portent leur montant en
-// blanc dans la colonne : elles prennent les teintes assez sombres de la charte (chart-1, 2, 3 ; contraste ≥ 4,5:1 avec le blanc).
+// --- Teintes : celles de la charte (charts.css). Une teinte = une notion métier sur un écran : aucune teinte n'est reprise
+// pour une autre notion voisine (N en bleu, N-1 en gris ; brut en bleu nuit, cotisations en orange ; fixe en bleu nuit, variable
+// en bleu, gratifications en vert ; primes, services et familles prennent les teintes restantes). La teinte ne porte jamais
+// seule l'information : légende nommée, étiquettes et infobulle donnent le nom et la valeur. Le montant écrit dans une colonne
+// empilée prend la couleur de texte lisible sur sa teinte (blanc ou encre, 4,5:1 au moins : voir onColor des graphiques).
 export const COLORS = {
-  now: "var(--chart-1)",
-  before: "var(--muted)",
+  now: "var(--chart-1)", // l'année N (masse chargée, coût par ETP, provision, brut DSN)
+  before: "var(--muted)", // le même mois un an plus tôt (N-1)
   brut: "var(--chart-2)",
-  cotisations: "var(--chart-1)",
+  cotisations: "var(--chart-6)",
   fixe: "var(--chart-2)",
   variable: "var(--chart-1)",
   stages: "var(--chart-3)",
   conges: "var(--chart-3)",
-  charges: "var(--chart-1)",
-  journal: "var(--chart-1)",
-  compta: "var(--chart-2)",
+  charges: "var(--chart-6)",
+  journal: "var(--chart-2)",
+  compta: "var(--chart-8)",
 } as const;
+
+// --- Montants : un seul formateur signé pour tout l'écran. Le moins est le vrai signe moins (U+2212), comme pour les
+// pourcentages et les ETP ; « + » devant un écart positif ; un montant nul n'a pas de signe. Valeurs en centimes entiers.
+const minus = (s: string) => s.replace(/^[-\u2212]/, "\u2212");
+export const euros = (cents: number): string => minus(formatEuros(cents));
+export const eurosSigned = (cents: number): string => `${cents > 0 ? "+" : ""}${euros(cents)}`;
+export const pluriel = (n: number, mot: string): string => `${n} ${mot}${n > 1 ? "s" : ""}`;
 
 // --- Axe des mois
 const SHORT = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
@@ -103,7 +111,22 @@ export function costSeries(cur: MonthIn[], etpCur: EtpIn[], prev: MonthIn[], etp
 
 // Teinte d'un service : son rang dans le tableau Services (classé par coût décroissant, non ventilé en dernier). L'anneau et les
 // colonnes empilées par mois donnent ainsi la même teinte au même service, même quand un service sans coût positif n'a pas de secteur.
-export const serviceColor = (rank: number): string => `var(--chart-${(rank % 8) + 1})`;
+// Les teintes prises par brut / cotisations / masse chargée (1, 2, 6) viennent en dernier : tant qu'il y a au plus cinq services,
+// aucun ne reprend la teinte d'une autre notion de l'écran.
+export const SERVICE_HUES = [3, 8, 4, 7, 5, 6, 1, 2] as const;
+export const serviceColor = (rank: number): string => `var(--chart-${SERVICE_HUES[rank % SERVICE_HUES.length]})`;
+
+// Teinte d'une famille de prime : ni le bleu nuit du fixe, ni le bleu du variable, ni le vert des gratifications de stage pour les
+// cinq premières familles, et les teintes proches du bleu (4) et du vert (7) ne viennent qu'en quatrième et cinquième. Les trois
+// suivantes (jusqu'à huit familles, limite du graphique) reprennent celles du fixe, du variable et des gratifications : chaque
+// série du graphique garde ainsi une teinte différente de ses voisines.
+export const FAMILY_HUES = [8, 6, 5, 4, 7, 3, 1, 2] as const;
+export const familyColor = (rank: number): string => `var(--chart-${FAMILY_HUES[rank % FAMILY_HUES.length]})`;
+
+// Au-delà de cinq services (ou familles), une teinte est reprise d'une autre notion de l'écran : la légende de chaque graphique le dit.
+export const HUES_DISTINCT = 5;
+export const hueReuseNote = (count: number, noun: string, others: string): string =>
+  count > HUES_DISTINCT ? `Au-delà de ${HUES_DISTINCT} ${noun}, une teinte est reprise d'une autre notion de l'écran (${others}) : la légende de chaque graphique fait foi.` : "";
 
 // Répartition par service : une part par service (masse chargée de la période). Un service n.d. est listé avec sa raison ;
 // un service sans masse positive n'a pas de secteur : il est nommé dans `omitted` (son montant est dans le tableau).
@@ -160,7 +183,7 @@ export function brutParts(w: { fixe: number; variable: number; stages: number })
 // Primes par famille (libellé de paie) et par mois : une série par famille, empilées elles font le total des primes du mois.
 export type PrimesMonth = { month: string; kind: "value"; byFamily: number[] } | { month: string; kind: "nd"; reason: string };
 export function primesSeries(families: { label: string }[], list: PrimesMonth[]): ChartSeries[] {
-  return families.map((f, i) => series(`prime-${i}`, f.label, list.map((m) => (m.kind === "nd" ? absent(m.reason) : m.byFamily[i] === undefined ? absent("famille absente du mois") : known(m.byFamily[i])))));
+  return families.map((f, i) => series(`prime-${i}`, f.label, list.map((m) => (m.kind === "nd" ? absent(m.reason) : m.byFamily[i] === undefined ? absent("famille absente du mois") : known(m.byFamily[i]))), { color: familyColor(i) }));
 }
 
 // --- Paie et comptabilité
@@ -231,6 +254,40 @@ export function dsnSeries(cur: (DsnIn | undefined)[], prev: (DsnIn | undefined)[
 export const hasData = (list: ChartSeries[]): boolean => list.some((s) => s.values.some((v) => v !== null && v !== undefined));
 // Raisons distinctes des valeurs absentes, dans l'ordre d'apparition (séries puis mois).
 export const seriesReasons = (list: ChartSeries[]): string[] => [...new Set(list.flatMap((s) => (s.reasons ?? []).filter((r): r is string => Boolean(r))))];
+
+// --- Mention « n.d. » d'un graphique : écrite seulement quand le graphique contient réellement un n.d. Une colonne hachurée est
+// une catégorie (un mois) où aucune série n'a de valeur ; une valeur absente d'une seule série n'est pas tracée, sans hachure.
+export function ndShape(list: ChartSeries[]): { columns: number; values: number } {
+  const n = Math.max(0, ...list.map((s) => s.values.length));
+  let columns = 0;
+  let values = 0;
+  for (let c = 0; c < n; c++) {
+    const col = list.map((s) => s.values[c] ?? null);
+    const missing = col.filter((v) => v === null).length;
+    if (missing === col.length && col.length > 0) columns++;
+    else values += missing;
+  }
+  return { columns, values };
+}
+export function ndNote(list: ChartSeries[], kind: "barres" | "courbe" = "barres"): string {
+  const { columns, values } = ndShape(list);
+  if (kind === "courbe") return columns + values > 0 ? "Un mois n.d. interrompt la courbe : sa raison est dans l'infobulle." : "";
+  if (columns > 0) return "Une colonne hachurée est un mois n.d. : sa raison est dans l'infobulle et dans la liste des raisons de la page.";
+  if (values > 0) return "Une valeur n.d. n'est pas tracée, jamais dessinée comme zéro : sa raison est dans l'infobulle.";
+  return "";
+}
+
+// Première lettre en capitale (la raison d'un n.d. est écrite en minuscule dans les sources, elle ouvre une phrase à l'écran).
+export const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;
+
+// Raison d'un n.d. sans point final, pour s'insérer dans une phrase (« aucune source… : raison »).
+export const noPeriod = (r: string): string => r.trim().replace(/[.\s]+$/, "");
+// La même, avec la première lettre en minuscule (la raison d'une source commence par une capitale). Un sigle en tête (FEC, API,
+// DSN) garde ses capitales ; à n'utiliser que sur les raisons de source, jamais sur un texte qui commence par un nom propre.
+export const reasonText = (r: string): string => noPeriod(r).replace(/^(\p{Lu})(?=\p{Ll})/u, (c) => c.toLowerCase());
+// « aucune source RH retenue (Aucune source appliquée pour ce domaine.) : … » : la raison de la source, entre parenthèses, perd sa
+// capitale et son point (« (aucune source appliquée pour ce domaine) »). Le début de la phrase est conservé tel quel.
+export const sourceReason = (r: string): string => r.replace(/^(aucune source RH retenue) \((.+?)\)( : .*)$/s, (_m, head: string, inner: string, tail: string) => `${head} (${reasonText(inner)})${tail}`);
 
 // --- Raisons des n.d. : regroupées par raison identique, dans l'ordre d'apparition, pour être listées sous le tableau.
 export function ndGroups(items: { month: string; reason: string | null | undefined }[]): { reason: string; months: string[] }[] {

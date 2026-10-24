@@ -141,16 +141,17 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   expect(await txt(step("analyse-masse-table", "primes"))).toBe("+1 000,00 €");
   expect(await txt(step("analyse-masse-table", "charges"))).toBe("+675,00 €");
   expect(await txt(step("analyse-masse-table", "residual"))).toBe("0,00 €");
-  expect(await txt(step("analyse-masse-table", "end", "ecart"))).toBe("écart +3 550,00 €");
+  expect(await txt(step("analyse-masse-table", "total"))).toBe("+3 550,00 €");
+  expect(await txt(step("analyse-masse-table", "total", "pct"))).toBe("+5,34 %");
   // Pont : volume = (19,30 − 18,30) ÷ 18,30 × 66 420 € = 3 629,51 € ; coût moyen = 3 550,00 − 3 629,51 = −79,51 €.
   expect(await txt(page.getByTestId("pont-delta").locator("dd"))).toBe("+3 550,00 €");
   expect(await txt(page.getByTestId("pont-volume").locator("dd"))).toBe("+3 629,51 €");
-  expect(await txt(page.getByTestId("pont-cout").locator("dd"))).toBe("-79,51 €");
+  expect(await txt(page.getByTestId("pont-cout").locator("dd"))).toBe("−79,51 €");
   await page.screenshot({ path: `${CAPTURES}/6-03-analyse.png`, fullPage: true });
 
   // Entrées « Prévu » de Masse salariale (croisée, par organisation, écart réel, suivi réel / budget) : ouvertes, étiquetées, sans simulation.
   const ms = `/e/${slug}/studio-rh/masse-salariale`;
-  for (const [vue, label, marker] of [["croisee", "Masse salariale croisée", "non réalisé"], ["organisation", "MS par organisation", "non réalisée"], ["reel", "Écart réel", "rubrique de bulletin"], ["suivi", "Suivi réel / budget", "reste à préciser"]] as const) {
+  for (const [vue, label, marker] of [["croisee", "Masse salariale croisée", "Non réalisé"], ["organisation", "MS par organisation", "Non réalisé"], ["reel", "Écart réel", "rubrique de bulletin"], ["suivi", "Suivi réel / budget", "Non réalisé"]] as const) {
     await page.goto(`${ms}/${vue}`);
     await expect(page.getByTestId("ms-tabs").getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
     await expect(page.getByTestId("prevu")).toContainText(marker);

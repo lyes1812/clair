@@ -12,53 +12,104 @@
 .collab-title .desc { max-width: 78ch; }
 .panel-head .collab-title { flex: 1 1 320px; }
 
-/* En-tête : titre, source visible ; le détail de la lecture est replié. */
+/* En-tête : titre, source visible ; les limites de la lecture tiennent dans un seul bloc repliable (résumé visible). */
 .collab-head { display: grid; gap: 8px; }
 .collab-read-details { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
-.collab-read-details[open] { justify-self: stretch; }
-.collab-read-details > summary { cursor: pointer; padding: 6px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
+.collab-read-details[open], .collab-read-details.collab-limits { justify-self: stretch; }
+.collab-read-details > summary { cursor: pointer; padding: 7px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
 .collab-read-details[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
-.collab-read-details > p { padding: 10px 12px 12px; overflow-wrap: anywhere; line-height: 1.55; }
+.collab-limits > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; list-style: none; }
+.collab-limits > summary::-webkit-details-marker { display: none; }
+.collab-limits > summary::before { content: ""; flex: none; align-self: center; width: 6px; height: 6px; margin: 0 2px 2px 0; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; }
+.collab-limits[open] > summary::before { transform: rotate(45deg); margin-bottom: 4px; }
+.collab-limits-title { font-weight: 600; color: var(--ink); }
+.collab-limits-resume { flex: 1 1 320px; min-width: 0; font-weight: 400; color: var(--muted); line-height: 1.45; }
+.collab-limits[open] .collab-limits-resume { display: none; }
+.collab-limits-body { display: grid; gap: 10px; padding: 10px 12px 12px; }
+.collab-limits-body > p { overflow-wrap: anywhere; line-height: 1.55; font-size: var(--clair-type-form); }
+.collab-limit { padding-left: 10px; border-left: 3px solid #d6e3ff; color: var(--ink); }
+.collab-limits-sub { font-size: var(--clair-type-label); font-weight: 600; color: var(--muted); }
 
-/* Tuiles d'indicateurs : valeur en grand quand elle est courte, raison en texte courant quand elle est n.d. */
-.facts.collab-tiles { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-.collab-tiles > .collab-tile { gap: 6px; padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 0; }
+/* Tuiles d'indicateurs : grille régulière (4 colonnes, 5 pour l'année), valeur courte en grand, « n.d. » court (raison dite une fois
+   en tête de panneau et au survol). Une dernière rangée incomplète est étirée pour ne laisser aucun emplacement vide. */
+.facts.collab-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.facts.collab-tiles.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.collab-tiles > .collab-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 0; }
 .collab-tile dt { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
 .collab-tile dd { overflow-wrap: anywhere; line-height: 1.45; }
 .collab-tile dd.big { font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.collab-tile dd.nd { font-weight: 500; line-height: 1.5; }
-.collab-tile dd.lower { color: var(--muted); }
-.collab-tile .tile-foot { line-height: 1.45; overflow-wrap: anywhere; }
+.collab-tile dd.nd { font-size: var(--clair-type-secondary); font-weight: 450; line-height: 1.1; }
+.collab-tile .tile-foot { margin-top: auto; padding-top: 2px; line-height: 1.45; overflow-wrap: anywhere; }
+@media (min-width: 1101px) {
+  .collab-tile dt { min-height: calc(2 * 1.35em); }
+  .collab-tiles:not(.five) > .collab-tile:last-child:nth-child(4n + 3) { grid-column: span 2; }
+  .collab-tiles:not(.five) > .collab-tile:last-child:nth-child(4n + 2) { grid-column: span 3; }
+  .collab-tiles:not(.five) > .collab-tile:last-child:nth-child(4n + 1) { grid-column: span 4; }
+}
+@media (max-width: 1100px) {
+  .facts.collab-tiles, .facts.collab-tiles.five { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .collab-tiles > .collab-tile:last-child:nth-child(3n + 2) { grid-column: span 2; }
+  .collab-tiles > .collab-tile:last-child:nth-child(3n + 1) { grid-column: span 3; }
+}
+@media (max-width: 560px) {
+  .facts.collab-tiles, .facts.collab-tiles.five { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .collab-tiles > .collab-tile:last-child:nth-child(3n + 2), .collab-tiles > .collab-tile:last-child:nth-child(3n + 1) { grid-column: auto; }
+  .collab-tiles > .collab-tile:last-child:nth-child(2n + 1) { grid-column: span 2; }
+}
 
-/* Barre d'outils au-dessus d'un tableau : recherche sur toutes les colonnes, filtres du tableau, lignes par page. */
+/* Explication n.d. : une seule fois, en tête d'un panneau ou sous un tableau. */
+.collab-ndnote { display: grid; gap: 6px; padding: 10px 14px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); font-size: var(--clair-type-form); line-height: 1.5; }
+.collab-ndnote p { margin: 0; }
+.collab-ndnote ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.collab-ndnote strong { font-weight: 600; }
+.collab-months .lower { color: var(--ink); }
+
+/* Barre d'outils au-dessus d'un tableau : recherche sur toutes les colonnes, filtres du tableau, lignes par page ; l'action principale
+   (bleu plein) puis l'action secondaire (Réinitialiser) sur une même ligne. */
 .filters.collab-toolbar { align-items: flex-end; gap: 10px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
 .filters.collab-toolbar .field-row { flex: 0 1 190px; }
 .filters.collab-toolbar .field-row.collab-search { flex: 2 1 300px; }
 .filters.collab-toolbar .field-row.collab-size { flex: 0 0 130px; }
-.filters.collab-toolbar .btn { flex: none; }
-.collab-reset { align-self: center; font-size: var(--clair-type-form); color: var(--muted); }
+.collab-actions { display: flex; align-items: center; gap: 14px; flex: none; }
+.collab-actions .btn { flex: none; }
+.collab-reset { font-size: var(--clair-type-form); color: var(--muted); }
 .collab-reset:hover { color: var(--blue); }
-.filters.bar.collab-bar .field-row { flex: 1 1 170px; }
-.filters.bar.collab-bar .btn { flex: none; }
+.filters.bar.collab-bar .field-row { flex: 0 1 260px; }
+.filters.bar.collab-bar .field-row.collab-month { flex: 0 1 220px; }
 
-/* Tableaux : défilement interne, en-tête et première colonne fixes. */
+/* Tableaux : défilement interne, en-tête et première colonne fixes. Un tableau court (12 lignes ou moins) n'a pas de hauteur
+   maximale : aucune ligne n'est coupée par le défilement vertical. */
 .collab-scroll { max-height: 72vh; }
+.table-wrap.scroll.collab-flat { max-height: none; }
 .data-table.collab-table :is(th, td) { vertical-align: middle; }
 .data-table.collab-table thead th { vertical-align: bottom; }
 .data-table.collab-table code { font-size: 11px; }
 .data-table.collab-table .col-date { font-variant-numeric: tabular-nums; }
 .data-table.collab-table td.col-wide, .data-table.collab-table th.col-wide { min-width: 170px; max-width: 340px; white-space: normal; }
-.data-table.collab-table td.col-nd { min-width: 150px; max-width: 250px; white-space: normal; }
 .data-table.collab-table tbody th { background: #fff; color: var(--ink); font-size: var(--clair-type-table-cell); font-weight: 500; }
 .data-table.collab-table :is(td, th).col-qty, .data-table.collab-table :is(td, th).col-state { min-width: 170px; white-space: normal; }
-.data-table.collab-table.collab-who :is(th, td):first-child { min-width: 230px; }
+.data-table.collab-table.collab-who :is(th, td):first-child { min-width: 200px; }
 .data-table.collab-table.sticky-first tbody tr:hover > td:first-child { background: #f7f8fb; }
 .data-table.collab-table .num { font-variant-numeric: tabular-nums; }
 .collab-contracts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
-.collab-contracts li { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; }
+.collab-contracts li { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; white-space: nowrap; }
 .collab-dates { white-space: normal; }
 .collab-dates .col-date { white-space: nowrap; }
 .collab-note { font-size: var(--clair-type-label); color: var(--muted); }
+
+/* Nom du collaborateur (lien) et, dessous, l'identifiant technique de la source ; provenance d'une date en ligne secondaire. */
+.collab-person-cell { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; max-width: 100%; }
+.collab-person-cell.inline { display: inline; }
+.collab-person-cell > a { white-space: nowrap; }
+.collab-sub { display: block; font-size: var(--clair-type-label); font-weight: 400; color: var(--muted); line-height: 1.4; }
+.data-table.collab-table code.collab-sub { font-size: 11px; }
+a.collab-prov { width: fit-content; text-decoration: underline dotted; }
+a.collab-prov:hover { color: var(--blue); }
+.collab-contracts .collab-sub { display: inline; }
+a.collab-quiet { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-decoration: underline dotted; }
+a.collab-quiet:hover, a.collab-quiet:focus-visible { color: var(--blue); text-decoration: underline; }
+.collab-fiche-table td.fiche-name a { font-weight: 550; }
+.collab-fiche-table td.fiche-open .btn { min-height: 32px; padding-block: 4px; }
 
 /* Pastilles d'état : le libellé porte l'information, la couleur la renforce. */
 .collab-pill { display: inline-flex; align-items: flex-start; gap: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font-size: var(--clair-type-label); font-weight: 600; line-height: 1.4; text-align: left; }
@@ -82,10 +133,13 @@
 .collab-legend .sw.present { background: var(--ok); border-color: var(--ok); }
 .collab-legend .sw.nd { background: repeating-linear-gradient(45deg, #fff, #fff 2px, #dfe3ea 2px, #dfe3ea 4px); border-color: #c7cedd; }
 
-/* Mouvements : graphique à gauche, tableau exact à droite (une colonne sous 1100 px). */
-.collab-chart-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(340px, 1fr); gap: 20px 28px; align-items: start; }
+/* Mouvements : graphique à gauche, tableau exact compact à droite (une colonne sous 1100 px) ; les 12 mois sont visibles. */
+.collab-chart-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 20px 28px; align-items: start; }
 .collab-chart-grid > * { min-width: 0; }
-.collab-chart-grid .table-wrap.scroll { max-height: 380px; }
+.collab-chart-grid .table-wrap.scroll { max-height: none; }
+.collab-months .data-table :is(th, td) { padding: 7px 12px; }
+.collab-months .data-table thead th { padding-block: 9px; }
+.collab-months .data-table td.num, .collab-months .data-table th.num { min-width: 68px; }
 .collab-chart .chart > .nd { padding: 10px 0; }
 @media (max-width: 1100px) { .collab-chart-grid { grid-template-columns: minmax(0, 1fr); } }
 
@@ -124,7 +178,22 @@
 @media (max-width: 720px) {
   .data-table.collab-table.collab-who :is(th, td):first-child { min-width: 150px; }
   .filters.collab-toolbar .field-row, .filters.collab-toolbar .field-row.collab-search, .filters.collab-toolbar .field-row.collab-size { flex: 1 1 100%; }
+  .filters.bar.collab-bar .field-row, .filters.bar.collab-bar .field-row.collab-month { flex: 1 1 100%; }
+  .collab-actions { width: 100%; }
+  .collab-actions .btn { flex: 1 1 auto; }
   .person-id h2 { font-size: 22px; }
+
+  /* Liste des fiches : une carte par collaborateur (nom, matricule, contrats, bouton) à la place d'un tableau qui déborde. */
+  .data-table.collab-fiche-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .data-table.collab-fiche-table, .data-table.collab-fiche-table tbody, .data-table.collab-fiche-table tr, .data-table.collab-fiche-table td { display: block; width: 100%; }
+  .data-table.collab-fiche-table tr { display: grid; gap: 4px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .data-table.collab-fiche-table tbody tr:last-child { border-bottom: 0; }
+  .data-table.collab-fiche-table td { padding: 0; border: 0; white-space: normal; }
+  .data-table.collab-fiche-table td.fiche-name a { font-size: var(--clair-type-secondary); }
+  .data-table.collab-fiche-table td[data-label="Matricule"]::before { content: "Matricule : "; color: var(--muted); }
+  .data-table.collab-fiche-table td.fiche-open { padding-top: 6px; }
+  .data-table.collab-fiche-table td.fiche-open .btn { width: 100%; }
+  .data-table.collab-fiche-table .collab-contracts li { white-space: normal; }
 }
 
 /* Fiche : les blocs se suivent avec le même rythme que les panneaux de la page. */

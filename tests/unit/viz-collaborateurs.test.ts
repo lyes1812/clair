@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { unitFormat } from "@/components/charts/units";
 import {
+  atLeast,
+  clearMonths,
+  collectNotes,
+  countedPhrase,
   DEFAULT_PAGE_SIZE,
+  defaultMonth,
   fold,
+  groupMonthReasons,
   matchesQuery,
   monthAxis,
+  monthLabel,
   monthLongLabel,
+  monthRangeLabel,
+  monthsOfRanges,
   monthShortLabel,
   movementSeries,
   ndSummary,
@@ -13,7 +22,10 @@ import {
   pageOf,
   pageSizeOf,
   paginate,
+  periodLabel,
+  plural,
   quarters,
+  shortQualifier,
   stripCellTitle,
   stripLabel,
   type MonthCountsIn,
@@ -60,20 +72,20 @@ describe("entrées et sorties par mois", () => {
   });
   it("une borne basse n'est pas tracée comme une valeur exacte : null, la valeur est dans la raison", () => {
     expect(entrees.values[1]).toBeNull();
-    expect(entrees.reasons?.[1]).toBe("borne basse (≥ 1) : source incomplète, non tracée comme valeur exacte");
+    expect(entrees.reasons?.[1]).toBe("borne basse (au moins 1) : source incomplète, non tracée comme valeur exacte");
   });
   it("une borne basse qualifiée par le moteur : les qualificatifs sont dans la raison, la valeur reste non tracée", () => {
     const [e, s] = movementSeries([
       { month: "2026-10", entries: { kind: "lower_bound", value: 3, qualifiers: ["mois en cours à la date de référence : connu jusqu'au 15/10/2026"] }, exits: { kind: "lower_bound", value: 0, qualifiers: ["A", "B"] } },
     ]);
     expect(e.values).toEqual([null]);
-    expect(e.reasons).toEqual(["borne basse (≥ 3) : mois en cours à la date de référence : connu jusqu'au 15/10/2026 — non tracée comme valeur exacte"]);
+    expect(e.reasons).toEqual(["borne basse (au moins 3) : mois en cours à la date de référence : connu jusqu'au 15/10/2026 — non tracée comme valeur exacte"]);
     expect(s.values).toEqual([null]);
-    expect(s.reasons).toEqual(["borne basse (≥ 0) : A · B — non tracée comme valeur exacte"]);
+    expect(s.reasons).toEqual(["borne basse (au moins 0) : A · B — non tracée comme valeur exacte"]);
   });
   it("un n.d. reste null avec sa raison, jamais zéro", () => {
     expect(sorties.values[1]).toBeNull();
-    expect(sorties.reasons?.[1]).toBe("sorties de 2026-02 inconnues");
+    expect(sorties.reasons?.[1]).toBe("sorties de févr. 2026 inconnues");
     expect(entrees.values[2]).toBeNull();
     expect(entrees.reasons?.[2]).toBe("période postérieure à la date de référence");
   });
@@ -182,9 +194,11 @@ describe("frise de présence", () => {
     { month: "2026-03", state: "nd", reason: "mois non couvert" },
   ];
   it("titre d'une case : mois et état, avec la raison", () => {
-    expect(stripCellTitle(cells[0])).toBe("2026-01 : présent en fin de mois");
-    expect(stripCellTitle(cells[1])).toBe("2026-02 : absent (aucun contrat)");
-    expect(stripCellTitle(cells[2])).toBe("2026-03 : n.d. — mois non couvert");
+    expect(stripCellTitle(cells[0])).toBe("janv. 2026 : présent en fin de mois");
+    expect(stripCellTitle(cells[1])).toBe("févr. 2026 : absent (aucun contrat)");
+    expect(stripCellTitle(cells[2])).toBe("mars 2026 : n.d. — mois non couvert");
+    expect(stripCellTitle({ month: "2026-04", state: "nd", reason: "couverture : 2024-10 → 2026-03" })).toBe("avr. 2026 : n.d. — couverture : oct. 2024 à mars 2026");
+    expect(stripCellTitle({ month: "2026-05", state: "nd", reason: null })).toBe("mai 2026 : n.d.");
   });
   it("lecture à voix haute", () => {
     expect(stripLabel(cells)).toBe("Présence en fin de mois : janv. présent, févr. absent, mars n.d.");
@@ -194,5 +208,113 @@ describe("frise de présence", () => {
     expect(quarters(year)).toEqual([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]);
     expect(quarters([1, 2, 3, 4])).toEqual([[1, 2, 3], [4]]);
     expect(quarters([])).toEqual([]);
+  });
+});
+
+describe("mois en clair", () => {
+  it("un seul format : « oct. 2026 », jamais « 2026-10 »", () => {
+    expect(monthLabel("2026-10")).toBe("oct. 2026");
+    expect(monthLabel("2026-08")).toBe("août 2026");
+    expect(monthLabel("2026-03")).toBe("mars 2026");
+    expect(periodLabel("2025-11", "2026-10")).toBe("nov. 2025 → oct. 2026");
+    expect(periodLabel("2026-10", "2026-10")).toBe("oct. 2026");
+  });
+  it("plages contiguës : l'année n'est écrite qu'une fois si elle est commune, un trou coupe la plage", () => {
+    expect(monthRangeLabel(["2026-10", "2026-11", "2026-12"])).toBe("oct. à déc. 2026");
+    expect(monthRangeLabel(["2026-12", "2026-10", "2026-11"])).toBe("oct. à déc. 2026");
+    expect(monthRangeLabel(["2025-11", "2025-12", "2026-01", "2026-02"])).toBe("nov. 2025 à févr. 2026");
+    expect(monthRangeLabel(["2026-01", "2026-10", "2026-11"])).toBe("janv. 2026, oct. à nov. 2026");
+    expect(monthRangeLabel(["2026-10"])).toBe("oct. 2026");
+    expect(monthRangeLabel([])).toBe("");
+  });
+  it("mois ISO d'un texte du moteur écrits en clair ; les dates complètes restent intactes", () => {
+    expect(clearMonths("2 sur les mois couverts (10/12) ; n.d. : 2026-11 → 2026-12")).toBe("2 sur les mois couverts (10/12) ; n.d. : nov. à déc. 2026");
+    expect(clearMonths("mois 2025-03 non couvert")).toBe("mois mars 2025 non couvert");
+    expect(clearMonths("connu jusqu'au 2026-10-24")).toBe("connu jusqu'au 2026-10-24");
+    expect(clearMonths("TEST-A-CONTRACT-001")).toBe("TEST-A-CONTRACT-001");
+    expect(clearMonths("2026-12 → 2026-10")).toBe("déc. 2026 → oct. 2026");
+  });
+});
+
+describe("mois par défaut de la liste mensuelle", () => {
+  const months = ["2026-08", "2026-09", "2026-10"];
+  it("le dernier mois dont le dernier jour est couvert par la date de référence (pas le mois en cours)", () => {
+    expect(defaultMonth(months, "2026-10-24", "2026-10")).toBe("2026-09");
+    expect(defaultMonth(months, "2026-09-30", "2026-10")).toBe("2026-09");
+    expect(defaultMonth(months, "2026-10-31", "2026-10")).toBe("2026-10");
+  });
+  it("aucun mois clos ou date absente : le repli donné", () => {
+    expect(defaultMonth(months, "2026-08-15", "2026-10")).toBe("2026-10");
+    expect(defaultMonth(months, null, "2026-10")).toBe("2026-10");
+    expect(defaultMonth([], "2026-10-24", null)).toBeNull();
+  });
+});
+
+describe("n.d. regroupés", () => {
+  it("« ≥ n » écrit « au moins n » ; le reste est inchangé", () => {
+    expect(atLeast("≥ 0")).toBe("au moins 0");
+    expect(atLeast("≥ 12")).toBe("au moins 12");
+    expect(atLeast("12")).toBe("12");
+    expect(atLeast("n.d.")).toBe("n.d.");
+  });
+  it("trois mois n.d. pour la même raison : une seule ligne, les mois en plage", () => {
+    const g = groupMonthReasons([
+      { month: "2026-10", reason: "période postérieure" },
+      { month: "2026-11", reason: "période postérieure" },
+      { month: "2026-12", reason: "période postérieure" },
+      { month: "2026-01", reason: "non couvert" },
+    ]);
+    expect(g).toEqual([
+      { reason: "période postérieure", months: ["2026-10", "2026-11", "2026-12"], label: "oct. à déc. 2026" },
+      { reason: "non couvert", months: ["2026-01"], label: "janv. 2026" },
+    ]);
+  });
+  it("notes sous un tableau : une raison n'est écrite qu'une fois, avec ses colonnes dans l'ordre d'apparition", () => {
+    expect(
+      collectNotes([
+        { column: "Présent au 01/01", reason: "R" },
+        { column: "Présent au 31/12", reason: "R" },
+        { column: "Matricule", reason: "Q" },
+        { column: "Présent au 31/12", reason: "R" },
+      ]),
+    ).toEqual([
+      { reason: "R", columns: ["Présent au 01/01", "Présent au 31/12"] },
+      { reason: "Q", columns: ["Matricule"] },
+    ]);
+    expect(collectNotes([])).toEqual([]);
+  });
+  it("mois d'une liste du moteur : plages développées, format inconnu refusé", () => {
+    expect(monthsOfRanges("2026-11 → 2026-12")).toEqual(["2026-11", "2026-12"]);
+    expect(monthsOfRanges("2026-01, 2026-03 → 2026-05")).toEqual(["2026-01", "2026-03", "2026-04", "2026-05"]);
+    expect(monthsOfRanges("2026-12 → 2026-10")).toBeNull();
+    expect(monthsOfRanges("novembre")).toBeNull();
+  });
+  it("qualificatif de total annuel : la liste des mois n.d. n'est retirée que si chacun de ces mois est déjà dit ailleurs", () => {
+    const q = "1 sur les mois couverts (10/12) ; n.d. : 2026-11 → 2026-12";
+    // Mois n.d. tous déjà écrits en tête de panneau (oct. à déc.) : la liste est retirée.
+    expect(shortQualifier(q, ["2026-10", "2026-11", "2026-12"])).toBe("1 sur les mois couverts (10/12)");
+    // Un mois n.d. (déc.) n'est pas dit ailleurs : la liste reste, aucun mois n'est passé sous silence.
+    expect(shortQualifier(q, ["2026-10", "2026-11"])).toBe(q);
+    expect(shortQualifier(q)).toBe(q);
+    expect(shortQualifier("2 sur les mois couverts (9/12) ; n.d. : 2025-01 → 2025-03", ["2026-10"])).toBe("2 sur les mois couverts (9/12) ; n.d. : 2025-01 → 2025-03");
+    // Pas de liste de mois, ou liste illisible : texte inchangé.
+    expect(shortQualifier("mois en cours à la date de référence", ["2026-10"])).toBe("mois en cours à la date de référence");
+    expect(shortQualifier("1 sur les mois couverts (10/12) ; n.d. : plusieurs mois", ["2026-11"])).toBe("1 sur les mois couverts (10/12) ; n.d. : plusieurs mois");
+  });
+});
+
+describe("accords", () => {
+  it("« comptée » s'accorde, sans « (s) »", () => {
+    expect(countedPhrase(1, 1)).toBe("1 comptée sur 1");
+    expect(countedPhrase(2, 3)).toBe("2 comptées sur 3");
+    expect(countedPhrase(0, 2)).toBe("aucune comptée sur 2");
+    expect(countedPhrase(0, 0)).toBe("aucune sur la période");
+  });
+  it("zéro et un au singulier, milliers à la française", () => {
+    expect(plural(0, "ligne")).toBe("0 ligne");
+    expect(plural(1, "ligne")).toBe("1 ligne");
+    expect(plural(7, "ligne")).toBe("7 lignes");
+    expect(plural(3, "mois", "mois")).toBe("3 mois");
+    expect(plural(1250, "ligne").replace(/\s/g, " ")).toBe("1 250 lignes");
   });
 });

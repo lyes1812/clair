@@ -10,6 +10,7 @@ import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
 import { getScenario, KIND_LABELS, listBudgets, listScenarios, type BudgetRow } from "@/lib/budget/store";
 import { budgetSeries, liveSeries, scenarioSeries, shifted, type Series } from "@/lib/budget/series";
 import { monthRange } from "@/lib/connectors/months";
+import { dateFr } from "@/lib/viz/hyp-saisie";
 import { formatEuros } from "@/lib/money";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { monthPayroll } from "@/lib/payroll/engine";
@@ -31,7 +32,7 @@ import { EmbauchesView } from "./EmbauchesView";
 import { EnveloppesView } from "./EnveloppesView";
 import { GlobalesView } from "./GlobalesView";
 import { PostesView } from "./PostesView";
-import { Field, FieldGroup } from "./shared";
+import { CardTitle, Field, FieldGroup } from "./shared";
 import { resolveVue, SOUS, VUES } from "./tabs";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ function Header({ children }: { children?: React.ReactNode }) {
 
 function Definitions() {
   return (
-    <details className="panel" data-testid="hyp-definitions" id="definitions">
+    <details className="panel hs-defs" data-testid="hyp-definitions" id="definitions">
       <summary>Définitions et règles de calcul</summary>
       <dl className="defs">
         {BUDGET_DEFINITIONS.map((d) => (
@@ -157,7 +158,7 @@ function BudgetsSection({ slug, budgets, canEdit }: { slug: string; budgets: Bud
   };
   return (
     <section className="panel" data-testid="hyp-budgets">
-      <h2>Budgets saisis <span className="desc">— référence des comparaisons : coût employeur global par mois</span></h2>
+      <CardTitle title="Budgets saisis">Référence des comparaisons : coût employeur global par mois.</CardTitle>
       {budgets.length === 0 ? (
         <p className="desc">Aucun budget saisi.</p>
       ) : (
@@ -187,7 +188,7 @@ function BudgetsSection({ slug, budgets, canEdit }: { slug: string; budgets: Bud
       )}
       {canEdit && (
         <details>
-          <summary>Saisir un budget</summary>
+          <summary className="hs-disclose">Saisir un budget</summary>
           <BudgetForm slug={slug} budget={null} testid="budget-create" />
         </details>
       )}
@@ -261,6 +262,10 @@ export default async function HypothesesPage({ params, searchParams }: { params:
       : !canEdit
         ? "Brouillon en lecture seule : votre rôle ne permet pas de modifier les hypothèses."
         : "Brouillon : les saisies s'enregistrent à l'envoi de chaque formulaire ; figer le scénario le verrouille.";
+    // Phrase de mode : toujours visible pour un scénario figé ou en lecture seule (elle explique pourquoi rien ne se saisit) ;
+    // pour un brouillon modifiable, c'est une aide, rangée dans « Gérer le scénario ».
+    const modeVisible = !canEdit || !draft;
+    const modeLine = <p className={`tile-foot${modeVisible ? "" : " hs-manage-mode"}`} data-testid="hyp-mode">{mode} <a href="#definitions">Définitions et règles de calcul</a></p>;
     return (
       <Header>
         <div className="hs-crumb">
@@ -268,73 +273,77 @@ export default async function HypothesesPage({ params, searchParams }: { params:
           <ScenarioSwitch current={s.id} rows={all} hrefOf={switchHref} />
         </div>
         <section className="panel hs-scenario" data-testid="hyp-scenario">
-          <div className="hs-scn-head">
-            <h2>{s.name}</h2>
-            <span className="tag">{KIND_LABELS[s.kind]}</span>
-            <span className={`tag hs-status ${draft ? "is-draft" : "is-frozen"}`} data-testid="hyp-status">{STATUS[s.status]}</span>
+          <div className="hs-scn-line">
+            <div className="hs-scn-head">
+              <h2>{s.name}</h2>
+              <span className="tag">{KIND_LABELS[s.kind]}</span>
+              <span className={`tag hs-status ${draft ? "is-draft" : "is-frozen"}`} data-testid="hyp-status">{STATUS[s.status]}</span>
+            </div>
+            <dl className="facts hs-facts">
+              <div><dt>Projection</dt><dd>{formatMonth(s.firstMonth)} → {formatMonth(s.lastMonth)} <span className="hs-nw">({nMonths} mois)</span></dd></div>
+              <div><dt>Prorata</dt><dd>{PRORATA_SHORT[s.conventions.prorata]}</dd></div>
+              <div data-testid="hyp-count"><dt>Hypothèses</dt><dd><a href={href("ctrl-changements")} title="Voir toutes les hypothèses et leur effet">{full.hypotheses.length}</a></dd></div>
+              <div><dt>Créé le</dt><dd className="hs-nw">{dateTimeFmt.format(s.createdAt)}</dd></div>
+              {s.frozenAt && <div><dt>Figé le</dt><dd className="hs-nw">{dateTimeFmt.format(s.frozenAt)}</dd></div>}
+            </dl>
           </div>
-          <p className="desc" data-testid="hyp-context">
+          <p className="hs-context" data-testid="hyp-context">
             {full.base.origin
-              ? <>Base dérivée du scénario « {full.base.origin.scenarioName} » (état projeté fin {formatMonth(full.base.origin.month).toLowerCase()}, le {full.base.origin.at})</>
-              : <>Base figée sur {formatMonth(full.base.refMonth).toLowerCase()} (lecture PayFit du {full.base.readAt})</>}
+              ? <>Base dérivée du scénario « {full.base.origin.scenarioName} » (état projeté fin {formatMonth(full.base.origin.month).toLowerCase()}, le <span className="hs-nw">{dateFr(full.base.origin.at)}</span>)</>
+              : <>Base figée sur {formatMonth(full.base.refMonth).toLowerCase()} (lecture PayFit du <span className="hs-nw">{dateFr(full.base.readAt)}</span>)</>}
           </p>
-          <dl className="facts hs-facts">
-            <div><dt>Projection</dt><dd>{formatMonth(s.firstMonth)} → {formatMonth(s.lastMonth)} <span className="tile-foot">({nMonths} mois)</span></dd></div>
-            <div><dt>Prorata</dt><dd>{PRORATA_SHORT[s.conventions.prorata]}</dd></div>
-            <div data-testid="hyp-count"><dt>Hypothèses</dt><dd><a href={href("ctrl-changements")} title="Voir toutes les hypothèses et leur effet">{full.hypotheses.length}</a></dd></div>
-            <div><dt>Créé le</dt><dd>{dateTimeFmt.format(s.createdAt)}</dd></div>
-            {s.frozenAt && <div><dt>Figé le</dt><dd>{dateTimeFmt.format(s.frozenAt)}</dd></div>}
-          </dl>
-          <p className="tile-foot" data-testid="hyp-mode">{mode} <a href="#definitions">Définitions et règles de calcul</a></p>
-          {canEdit && (
-            <div className="hs-actions" role="group" aria-label="Actions sur le scénario">
-              {draft && (
-                <div className="hs-act">
-                  <h3>Figer</h3>
-                  <p className="hint">Verrouille les hypothèses : plus aucune modification. Un scénario figé peut servir de base au budget suivant.</p>
-                  <ActionForm action={freezeScenarioAction.bind(null, slug, s.id)} submit="Figer le scénario" testid="hyp-freeze" className="inline-form" />
-                </div>
-              )}
-              <div className="hs-act">
-                <h3>Dupliquer</h3>
-                <p className="hint">Crée un brouillon indépendant avec les mêmes hypothèses.</p>
-                <ActionForm action={duplicateScenarioAction.bind(null, slug, s.id)} submit="Dupliquer" testid="hyp-duplicate" className="inline-form">
+          {modeVisible && modeLine}
+          {canEdit && vue !== "societes" && (
+            <>
+              <div className="hs-bar" role="group" aria-label="Actions sur le scénario">
+                {draft && <ActionForm action={freezeScenarioAction.bind(null, slug, s.id)} submit="Figer le scénario" testid="hyp-freeze" className="inline-form" plain hint="Verrouille les hypothèses : plus aucune modification" />}
+                <ActionForm action={duplicateScenarioAction.bind(null, slug, s.id)} submit="Dupliquer" testid="hyp-duplicate" className="inline-form hs-dup" plain hint="Crée un brouillon indépendant avec les mêmes hypothèses">
                   <div className="field-row">
                     <label htmlFor="dup-name">Nom de la copie</label>
                     <input className="input" id="dup-name" name="name" defaultValue={`${s.name} (copie)`} maxLength={120} required />
                   </div>
                 </ActionForm>
+                {draft && <p className="tile-foot hs-bar-note" data-testid="hyp-chain-frozen-only">Simulateur N+1 : figez ce scénario pour en dériver le budget suivant.</p>}
+                <details className="hs-manage" data-testid="hyp-manage">
+                  <summary className="hs-disclose">Gérer le scénario</summary>
+                  <div className="hs-manage-body">
+                    {!modeVisible && modeLine}
+                    <ul className="hs-manage-help">
+                      {draft && <li><strong>Figer</strong> : verrouille les hypothèses, plus aucune modification. Un scénario figé peut servir de base au budget suivant.</li>}
+                      <li><strong>Dupliquer</strong> : crée un brouillon indépendant avec les mêmes hypothèses.</li>
+                    </ul>
+                    {draft && (
+                      <div className="hs-act-danger">
+                        <h3>Supprimer</h3>
+                        <p className="hint">Suppression définitive du brouillon et de ses hypothèses.</p>
+                        <ActionForm action={deleteScenarioAction.bind(null, slug, s.id)} submit="Supprimer le brouillon" testid="hyp-delete" className="inline-form" danger confirm={`Supprimer définitivement le brouillon « ${s.name} » et ses hypothèses ?`} />
+                      </div>
+                    )}
+                  </div>
+                </details>
               </div>
-              {draft && (
-                <div className="hs-act hs-act-danger">
-                  <h3>Supprimer</h3>
-                  <p className="hint">Suppression définitive du brouillon et de ses hypothèses.</p>
-                  <ActionForm action={deleteScenarioAction.bind(null, slug, s.id)} submit="Supprimer le brouillon" testid="hyp-delete" className="inline-form" danger confirm={`Supprimer définitivement le brouillon « ${s.name} » et ses hypothèses ?`} />
-                </div>
+              {!draft && (
+                <details className="hs-chain">
+                  <summary className="hs-disclose">Préparer le budget suivant (simulateur N+1)</summary>
+                  <p className="desc" style={{ margin: "10px 0" }}>Nouveau scénario dont la base est l'état projeté de celui-ci fin {formatMonth(s.lastMonth).toLowerCase()} : contrats encore présents au salaire du mois complet (augmentations comprises), embauches reprises, départs et éléments ponctuels non repris. Projection à partir de {formatMonth(addMonths(s.lastMonth, 1)).toLowerCase()}.</p>
+                  <ActionForm action={createChainedScenarioAction.bind(null, slug, s.id)} submit="Créer le scénario dérivé" testid="hyp-chain">
+                    <FieldGroup title="Scénario dérivé">
+                      <Field id="chain-name" label="Nom" hint="120 caractères au plus."><input className="input" id="chain-name" name="name" maxLength={120} required /></Field>
+                      <Field id="chain-kind" label="Type" hint="Sans effet sur le calcul.">
+                        <select className="select" id="chain-kind" name="kind" defaultValue="">
+                          <option value="" disabled>Choisir…</option>
+                          <option value="budget">Budget</option>
+                          <option value="revise">Révisé</option>
+                          <option value="simulation">Simulation</option>
+                        </select>
+                      </Field>
+                      <Field id="chain-last" label="Dernier mois projeté" hint="24 mois au plus, à partir du mois qui suit ce scénario."><input className="input" type="month" id="chain-last" name="lastMonth" defaultValue={`${addMonths(s.lastMonth, 1).slice(0, 4)}-12`} required /></Field>
+                    </FieldGroup>
+                  </ActionForm>
+                </details>
               )}
-            </div>
+            </>
           )}
-          {canEdit && !draft && (
-            <details style={{ marginTop: 4 }}>
-              <summary>Préparer le budget suivant (simulateur N+1)</summary>
-              <p className="desc">Nouveau scénario dont la base est l'état projeté de celui-ci fin {formatMonth(s.lastMonth).toLowerCase()} : contrats encore présents au salaire du mois complet (augmentations comprises), embauches reprises, départs et éléments ponctuels non repris. Projection à partir de {formatMonth(addMonths(s.lastMonth, 1)).toLowerCase()}.</p>
-              <ActionForm action={createChainedScenarioAction.bind(null, slug, s.id)} submit="Créer le scénario dérivé" testid="hyp-chain">
-                <FieldGroup title="Scénario dérivé">
-                  <Field id="chain-name" label="Nom" hint="120 caractères au plus."><input className="input" id="chain-name" name="name" maxLength={120} required /></Field>
-                  <Field id="chain-kind" label="Type" hint="Sans effet sur le calcul.">
-                    <select className="select" id="chain-kind" name="kind" defaultValue="">
-                      <option value="" disabled>Choisir…</option>
-                      <option value="budget">Budget</option>
-                      <option value="revise">Révisé</option>
-                      <option value="simulation">Simulation</option>
-                    </select>
-                  </Field>
-                  <Field id="chain-last" label="Dernier mois projeté" hint="24 mois au plus, à partir du mois qui suit ce scénario."><input className="input" type="month" id="chain-last" name="lastMonth" defaultValue={`${addMonths(s.lastMonth, 1).slice(0, 4)}-12`} required /></Field>
-                </FieldGroup>
-              </ActionForm>
-            </details>
-          )}
-          {canEdit && draft && <p className="tile-foot" data-testid="hyp-chain-frozen-only">Simulateur N+1 : figez ce scénario pour en dériver le budget suivant.</p>}
         </section>
         <FamilyTabs label="Entrées du scénario" testid="hyp-tabs" current={vue} tabs={VUES.map((v) => ({ key: v.key, label: v.label, href: href(v.key), soon: "soon" in v ? v.soon : false }))} />
         {vue === "postes" ? (
@@ -348,13 +357,16 @@ export default async function HypothesesPage({ params, searchParams }: { params:
         ) : vue === "globales" ? (
           <GlobalesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={editing} />
         ) : vue === "societes" ? (
-          <Prevu title="Hypothèses par société">
-            <p>Un espace Clair correspond aujourd'hui à une seule société : des hypothèses propres à chaque société n'ont de sens qu'avec plusieurs sociétés dans l'espace. Le périmètre et la priorité entre hypothèse de société et hypothèse globale restent à préciser avant toute réalisation ; rien n'est simulé ici.</p>
-          </Prevu>
+          <Prevu
+            title="Hypothèses par société"
+            lead="Non réalisé : un espace Clair correspond aujourd'hui à une seule société. Des hypothèses propres à chaque société n'ont de sens qu'avec plusieurs sociétés dans l'espace."
+            existing={[{ href: href("globales"), title: "Hypothèses globales", text: "Taux d'augmentation par mois pour toute l'entreprise, chaque service et chaque statut, et constantes de référence." }]}
+            open={["À quelle société rattacher une hypothèse lorsque l'espace en compte plusieurs.", "Priorité entre une hypothèse de société et une hypothèse globale pour un même mois.", "Périmètre des contrôles et de la projection : une société ou l'ensemble."]}
+          />
         ) : vue === "ctrl-effectifs" ? (
           <ControlesEffectifs base={full.base} hypotheses={full.hypotheses} proj={proj} />
         ) : vue === "ctrl-changements" ? (
-          <ControlesChangements slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} proj={proj} canEdit={editing} q={one(sp.q)} type={one(sp.type)} page={one(sp.page)} others={editing ? all.filter((x) => x.scenario.id !== s.id).map((x) => ({ id: x.scenario.id, name: x.scenario.name, label: `${x.scenario.name} (${KIND_LABELS[x.scenario.kind]}, ${x.scenario.status === "fige" ? "figé" : "brouillon"}, ${x.scenario.firstMonth} → ${x.scenario.lastMonth})` })) : []} />
+          <ControlesChangements slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} proj={proj} canEdit={editing} q={one(sp.q)} type={one(sp.type)} page={one(sp.page)} others={editing ? all.filter((x) => x.scenario.id !== s.id).map((x) => ({ id: x.scenario.id, name: x.scenario.name, label: `${x.scenario.name} (${KIND_LABELS[x.scenario.kind]}, ${x.scenario.status === "fige" ? "figé" : "brouillon"}, ${formatMonth(x.scenario.firstMonth).toLowerCase()} → ${formatMonth(x.scenario.lastMonth).toLowerCase()})` })) : []} />
         ) : (
           <>
             <nav className="tabs" aria-label="Résultat du scénario" data-testid="res-tabs">

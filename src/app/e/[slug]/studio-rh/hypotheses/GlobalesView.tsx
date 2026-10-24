@@ -3,10 +3,11 @@ import type { ScenarioRow } from "@/lib/budget/store";
 import { scopeKeyOf } from "@/lib/budget/grids";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 import { countByYear, gridYears } from "@/lib/viz/hyp-saisie";
+import { frDates, gridCaption } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { saveConstantsAction, saveRatesAction } from "./actions";
 import { DirtyIndicator, GridTools, RowFill } from "./GridTools";
-import { decText, detailOf, UNIT_LABEL } from "./shared";
+import { CardTitle, decText, detailOf, Rules, UNIT_LABEL } from "./shared";
 
 type Cst = Extract<Hypothesis, { kind: "constante" }>;
 const BLANK_ROWS = 3;
@@ -30,10 +31,18 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
       : unknown > 0
         ? `${unknown} contrat(s) sans statut renseigné ne reçoivent aucune augmentation par statut (seulement celles de leur service, de toute l'entreprise ou saisies sur eux).`
         : null;
-  const scopes = [
-    { key: "global", label: "Toute l'entreprise (hors embauches et entrées après la base)" },
-    ...services.map((s) => ({ key: `service:${s}`, label: `Service ${s}` })),
-    ...(showStatut ? [{ key: "statut:dirigeant", label: `Cadres dirigeants (${dirigeants} contrat${dirigeants > 1 ? "s" : ""})` }, { key: "statut:autres", label: `Hors cadres dirigeants (${autres} contrat${autres > 1 ? "s" : ""})` }] : []),
+  // `label` : intitulé complet (lecteurs d'écran, export) ; `short` et `note` : affichage sur deux lignes dans la cellule.
+  type Scope = { key: string; label: string; short: string; note: string | null };
+  const count = (n: number) => `${n} contrat${n > 1 ? "s" : ""}`;
+  const scopes: Scope[] = [
+    { key: "global", label: "Toute l'entreprise (hors embauches et entrées après la base)", short: "Toute l'entreprise", note: "hors embauches et entrées après la base" },
+    ...services.map((s) => ({ key: `service:${s}`, label: `Service ${s}`, short: `Service ${s}`, note: null })),
+    ...(showStatut
+      ? [
+          { key: "statut:dirigeant", label: `Cadres dirigeants (${count(dirigeants)})`, short: "Cadres dirigeants", note: count(dirigeants) },
+          { key: "statut:autres", label: `Hors cadres dirigeants (${count(autres)})`, short: "Hors cadres dirigeants", note: count(autres) },
+        ]
+      : []),
   ];
   const rate = new Map<string, number>();
   for (const h of hypotheses) {
@@ -50,12 +59,12 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
 
   const ratesTable = (
     <div className="table-wrap scroll" {...(canEdit ? {} : { role: "region", "aria-label": "Taux d'augmentation par mois", tabIndex: 0 })}>
-      <table className="data-table month-grid sticky sticky-first hs-rates" data-testid="glob-rates-table">
+      <table className={`data-table month-grid sticky sticky-first hs-rates${canEdit ? " hs-edit" : ""}`} data-testid="glob-rates-table">
         <thead><tr><th>Périmètre</th>{head(ratesYears)}{canEdit && <th data-no-csv><span className="sr-only">Report de la ligne</span></th>}</tr></thead>
         <tbody>
           {scopes.map((s, i) => (
             <tr key={s.key} data-scope={s.key}>
-              <td>{s.label}</td>
+              <td title={s.label}>{s.short}{s.note ? <span className="hs-scope-note">{s.note}</span> : null}</td>
               {months.map((m) => {
                 const v = rate.get(`${s.key}|${m}`);
                 return canEdit ? (
@@ -71,7 +80,7 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
   );
   const constTable = (
     <div className="table-wrap scroll" {...(canEdit ? {} : { role: "region", "aria-label": "Constantes de référence", tabIndex: 0 })}>
-      <table className="data-table month-grid sticky sticky-first hs-consts" data-testid="glob-consts-table">
+      <table className={`data-table month-grid sticky sticky-first hs-consts${canEdit ? " hs-edit" : ""}`} data-testid="glob-consts-table">
         <thead><tr><th>Constante</th><th>Unité</th><th>Source</th>{head(constYears)}{canEdit && <><th data-no-csv><span className="sr-only">Report de la ligne</span></th><th>Supprimer</th></>}</tr></thead>
         <tbody>
           {consts.map((c, i) => (
@@ -102,50 +111,49 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
       </table>
     </div>
   );
-  const frame = (gy: ReturnType<typeof gridYears>, filename: string, table: React.ReactNode) => (
+  const frame = (gy: ReturnType<typeof gridYears>, filename: string, caption: string, table: React.ReactNode) => (
     <div className="hs-grid" data-grid-root data-ys={gy.multi ? "0" : undefined}>
       <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} />
+      <p className="hs-unit">{caption}</p>
       {table}
     </div>
   );
+  const ratesCaption = gridCaption("Taux en % du salaire", months);
+  const constCaption = gridCaption("Valeurs mensuelles, dans l'unité de chaque ligne", months);
   return (
     <>
       <section className="panel" data-testid="glob-rates">
-        <div className="hs-title">
-          <h2>Taux d'augmentation par mois</h2>
-          <p className="desc">Une ligne par périmètre, une colonne par mois du scénario · <a href="#def-globales">règle</a></p>
-        </div>
-        <p className="desc">
-          Chaque cellule renseignée est une augmentation distincte, appliquée au 1er du mois en pourcentage du salaire déjà augmenté (les taux successifs se composent). Cellule vide ou 0 : aucune augmentation ce mois-là. Sur un même mois, la plus ciblée s'applique seule : l'augmentation d'un contrat prime sur celle d'un service ou d'un statut, qui prime sur celle de toute l'entreprise (celle d'un contrat se saisit dans Modifications de postes). Un service et un statut sont au même niveau : deux augmentations de ces niveaux le même mois pour un même salarié sont refusées avec leur raison.
-        </p>
+        <CardTitle title="Taux d'augmentation par mois">Une ligne par périmètre, une colonne par mois du scénario. <a href="#def-globales">Règle</a></CardTitle>
+        <Rules>
+          <p>Chaque cellule renseignée est une augmentation distincte, appliquée au 1er du mois en pourcentage du salaire déjà augmenté (les taux successifs se composent). Cellule vide ou 0 : aucune augmentation ce mois-là.</p>
+          <p>Sur un même mois, la plus ciblée s'applique seule : l'augmentation d'un contrat prime sur celle d'un service ou d'un statut, qui prime sur celle de toute l'entreprise (celle d'un contrat se saisit dans Modifications de postes). Un service et un statut sont au même niveau : deux augmentations de ces niveaux le même mois pour un même salarié sont refusées avec leur raison.</p>
+        </Rules>
         {canEdit ? (
           <ActionForm action={saveRatesAction.bind(null, slug, scenario.id)} submit="Enregistrer les taux" testid="glob-rates-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
-            {frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesTable)}
+            {frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesCaption, ratesTable)}
           </ActionForm>
-        ) : frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesTable)}
+        ) : frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesCaption, ratesTable)}
         {statutNote && <p className="tile-foot" data-testid="glob-statut-note">{statutNote}</p>}
         {targeted.length > 0 && (
           <details>
             <summary>Augmentations ciblées sur un contrat ou une embauche ({targeted.length}) — hors grille</summary>
-            <ul className="list">{targeted.map((h) => <li key={h.id} className="desc">{h.label} — {detailOf(h, base, hypotheses)}</li>)}</ul>
+            <ul className="list">{targeted.map((h) => <li key={h.id} className="desc">{frDates(h.label)} — {detailOf(h, base, hypotheses)}</li>)}</ul>
           </details>
         )}
       </section>
       <section className="panel" data-testid="glob-consts">
-        <div className="hs-title">
-          <h2>Constantes de référence</h2>
-          <p className="desc">Documentaires, sans effet sur le calcul.</p>
-        </div>
-        <p className="desc">
-          Valeurs saisies par mois avec leur source (taux légaux, plafonds, horaire théorique, taux de change…). Aucune valeur n'est fournie par Clair : chaque constante doit porter sa source. Elles sont conservées avec le scénario et rappelées dans les contrôles, mais aucune règle de calcul ne les lit : la masse salariale ne change pas.
-        </p>
+        <CardTitle title="Constantes de référence">Documentaires, sans effet sur le calcul : chaque valeur est saisie par mois avec sa source.</CardTitle>
+        <Rules summary="Règles de saisie et limites">
+          <p>Valeurs saisies par mois avec leur source (taux légaux, plafonds, horaire théorique, taux de change…). Aucune valeur n'est fournie par Clair : chaque constante doit porter sa source. Elles sont conservées avec le scénario et rappelées dans les contrôles, mais aucune règle de calcul ne les lit : la masse salariale ne change pas.</p>
+          <p>Multidevise : différé (euros seulement). Taux par statut cadre / non-cadre de la classification : PayFit ne fournit à Clair que l'indicateur « cadre dirigeant » (disponible dans les taux d'augmentation) ; le statut cadre / non-cadre demande une autre source. Taux par société : une seule société par espace.</p>
+        </Rules>
+        {canEdit && consts.every((c) => c === null) && <p className="hs-empty" data-testid="glob-consts-empty">Aucune constante saisie : renseignez une ligne ci-dessous, avec sa source.</p>}
         {canEdit ? (
           <ActionForm action={saveConstantsAction.bind(null, slug, scenario.id)} submit="Enregistrer les constantes" testid="glob-consts-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
             <input type="hidden" name="n" value={consts.length} />
-            {frame(constYears, `constantes-${scenario.firstMonth}.csv`, constTable)}
+            {frame(constYears, `constantes-${scenario.firstMonth}.csv`, constCaption, constTable)}
           </ActionForm>
-        ) : frame(constYears, `constantes-${scenario.firstMonth}.csv`, constTable)}
-        <p className="tile-foot">Multidevise : différé (euros seulement). Taux par statut cadre / non-cadre de la classification : PayFit ne fournit à Clair que l'indicateur « cadre dirigeant » (disponible ci-dessus) ; le statut cadre / non-cadre demande une autre source. Taux par société : une seule société par espace.</p>
+        ) : frame(constYears, `constantes-${scenario.firstMonth}.csv`, constCaption, constTable)}
       </section>
     </>
   );

@@ -2,7 +2,7 @@ import { FamilyTabs } from "@/components/FamilyTabs";
 import { formatEuros } from "@/lib/money";
 import type { Agg, Diff } from "@/lib/budget/versions";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
-import { periodText } from "@/lib/viz/ecart";
+import { eurosSigned, neg, periodText } from "@/lib/viz/ecart";
 import { monthShort } from "./components";
 import { NV, type Loaded } from "./ecart-data";
 import { RubInput } from "./ecart/LiveRub";
@@ -35,7 +35,7 @@ export function MsTabs({ slug, current, extra = "" }: { slug: string; current: M
 
 export type Unit = "etp" | "nombre" | "eur";
 const sign = (n: number) => (n > 0 ? "+" : "");
-const plain = (num: number, den: number, unit: Unit) => (unit === "eur" ? formatEuros(num) : unit === "etp" ? fmtFixed({ num, den }, 2) : String(num));
+const plain = (num: number, den: number, unit: Unit) => (unit === "eur" ? neg(formatEuros(num)) : unit === "etp" ? fmtFixed({ num, den }, 2) : neg(String(num)));
 
 export function aggText(a: Agg, unit: Unit): string {
   if (a.kind !== "value") return a.kind === "na" ? "—" : "n.d.";
@@ -90,33 +90,36 @@ export function VerPair({ to, from }: { to: number; from: number }) {
 
 const MONTH_NAMES = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 export const rankLabel = (mm: string) => monthShort(`2000-${mm}`);
-export { periodText };
+export { eurosSigned, neg, periodText };
 export const scopeText = (loaded: Loaded) => (loaded.filter ? `service ${loaded.filter.value ?? "non ventilé"}` : "tous les services");
 
 // Formulaire de choix des versions, de la période (rangs de mois) et du service : tout passe par l'adresse de la page.
+// Même grille pour l'écart budgétaire (3 versions) et l'analyse des écarts (2 versions) : versions sur la première ligne, puis
+// premier mois, dernier mois, service et boutons sur la seconde (voir ecart.css).
 export function PickerForm({ path, loaded, columns, hidden = {} }: { path: string; loaded: Loaded; columns: 2 | 3; hidden?: Record<string, string> }) {
   const cols = Array.from({ length: columns }, (_, i) => i);
+  const labelOf = (value: string | undefined) => loaded.options.find((o) => o.value === value)?.label;
   return (
     <form method="get" action={path} className="filters ecart-filters" data-testid="ecart-form">
       {Object.entries(hidden).map(([k, v]) => (k === "rub" ? <RubInput key={k} initial={v} /> : <input key={k} type="hidden" name={k} value={v} />))}
       {cols.map((i) => (
-        <div className="field-row" key={i}>
+        <div className="field-row ef-v" key={i}>
           <label htmlFor={`v${i + 1}`}><span className="ver-badge" aria-hidden="true">{i + 1}</span>Version {i + 1}</label>
-          <select className="select" id={`v${i + 1}`} name={`v${i + 1}`} defaultValue={loaded.selected[i] ?? ""}>
+          <select className="select" id={`v${i + 1}`} name={`v${i + 1}`} defaultValue={loaded.selected[i] ?? ""} title={labelOf(loaded.selected[i])}>
             <option value="">— aucune</option>
             {loaded.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
       ))}
-      <div className="field-row">
+      <div className="field-row ef-m ef-m1">
         <label htmlFor="de">Premier mois</label>
         <select className="select" id="de" name="de" defaultValue={loaded.from}>{MONTH_NAMES.map((n, i) => <option key={n} value={String(i + 1).padStart(2, "0")}>{n}</option>)}</select>
       </div>
-      <div className="field-row">
+      <div className="field-row ef-m">
         <label htmlFor="a">Dernier mois</label>
         <select className="select" id="a" name="a" defaultValue={loaded.to}>{MONTH_NAMES.map((n, i) => <option key={n} value={String(i + 1).padStart(2, "0")}>{n}</option>)}</select>
       </div>
-      <div className="field-row">
+      <div className="field-row ef-s">
         <label htmlFor="service">Service</label>
         <select className="select" id="service" name="service" defaultValue={loaded.filter === null ? "" : (loaded.filter.value ?? NV)}>
           <option value="">Tous les services</option>
@@ -131,3 +134,41 @@ export function PickerForm({ path, loaded, columns, hidden = {} }: { path: strin
     </form>
   );
 }
+
+// Titre d'une carte : titre, puis sous-titre sur sa propre ligne (même présentation que les autres écrans de la famille).
+export function PanelTitle({ title, children }: { title: string; children?: React.ReactNode }) {
+  return (
+    <div className="ecart-panel-title">
+      <h2>{title}</h2>
+      {children && <p className="desc">{children}</p>}
+    </div>
+  );
+}
+
+// Versions choisies en toutes lettres (nom complet et statut), dans l'ordre : « ① Réel PayFit 2025 → ② Scénario « … » (…) 2026 ».
+// Les champs de choix ne montrent pas toujours le libellé en entier ; cette ligne le répète.
+export function VersionChain({ labels, first = 1 }: { labels: string[]; first?: number }) {
+  return (
+    <span className="ecart-chain">
+      {labels.map((l, i) => (
+        <span key={`${i}-${l}`} className="ecart-ver">
+          {i > 0 && <span aria-hidden="true"> → </span>}
+          <span className="ver-badge" aria-hidden="true">{first + i}</span>
+          <span className="ecart-sr">Version {first + i} : </span>
+          <span className="ecart-ver-name">{l}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// Rôles du tableau, rappelés explicitement : en petit écran le tableau est présenté en cartes (display modifié) et certains
+// navigateurs perdent alors la sémantique native des tableaux.
+export const TBL = {
+  table: { role: "table" },
+  group: { role: "rowgroup" },
+  row: { role: "row" },
+  head: { role: "columnheader" },
+  rowhead: { role: "rowheader" },
+  cell: { role: "cell" },
+} as const;

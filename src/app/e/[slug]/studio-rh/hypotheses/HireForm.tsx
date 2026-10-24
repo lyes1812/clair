@@ -46,7 +46,7 @@ export function HireForm({ action, profiles, deps }: { action: (prev: FormState,
           <Field id="hire-label" label="Poste" hint="Intitulé du poste, repris dans les contrôles et la projection."><input className="input" id="hire-label" name="label" maxLength={200} required /></Field>
           <Field id="hire-count" label="Nombre de postes" hint="De 1 à 50 : autant d'embauches indépendantes, numérotées."><input className="input" id="hire-count" name="count" type="number" min={1} max={50} defaultValue={1} required /></Field>
           <Field id="hire-service" label="Centre de coûts (service)" hint="Existant ou nouveau ; vide : non ventilé.">
-            <input className="input" id="hire-service" name="service" list="hyp-services" placeholder="Existant ou nouveau (vide : non ventilé)" maxLength={200} defaultValue={p?.service ?? ""} />
+            <input className="input" id="hire-service" name="service" list="hyp-services" placeholder="Existant ou nouveau" maxLength={200} defaultValue={p?.service ?? ""} />
           </Field>
           <Field id="hire-category" label="Catégorie">
             <select className="select" id="hire-category" name="category" defaultValue={p?.category ?? ""}>

@@ -6,9 +6,10 @@ import type { ScenarioRow } from "@/lib/budget/store";
 import { CATEGORY_IDS, CATEGORY_LABELS, type BaseContract, type BaseSnapshot, type CategoryId, type Hypothesis, type Projection } from "@/lib/budget/types";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import { dateFr, matchesQuery, pageNumber, paginate } from "@/lib/viz/hyp-saisie";
+import { frDates } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { addHypothesisAction, bulkDeparturesAction, bulkRaisesAction, deleteHypothesisAction } from "./actions";
-import { AmountFields, Field, FieldGroup, pct } from "./shared";
+import { AmountFields, CardTitle, Field, FieldGroup, pct, Rules } from "./shared";
 
 type Row = { key: string; label: string; kind: "base" | "embauche"; service: string | null; category: CategoryId | null; etp4: number | null; monthly: number | null; entry: string | null; contract: BaseContract | null };
 type Depart = Extract<Hypothesis, { kind: "depart" }>;
@@ -17,6 +18,7 @@ const PAGE_SIZE = 20;
 const NO_SERVICE = "__nd"; // valeur du filtre « Non ventilé »
 const catText = (c: CategoryId | null) => (c ? CATEGORY_LABELS[c] : "Non classé");
 const lower = (m: string) => formatMonth(m).toLowerCase();
+const fr = (t: string | null | undefined) => (t ? frDates(t) : undefined);
 
 // Hypothèses qui concernent un salarié (contrat de la base ou embauche).
 export function eventsOf(key: string, hyps: Hypothesis[]): Hypothesis[] {
@@ -172,17 +174,14 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
     <>
       <section className="panel" data-testid="sal-list">
         <div className="panel-head">
-          <div className="hs-title">
-            <h2>Modifications de postes</h2>
-            <p className="desc">Cherchez un salarié, ouvrez sa fiche, puis créez-lui un événement daté (augmentation, départ, congé non payé, changement de service ou de quotité, prime…). Les colonnes « hypothèse » montrent ce que ce scénario change.</p>
-          </div>
-          {canEdit && <div className="panel-tools"><a className="btn" href="#sal-bulk" data-testid="sal-bulk-link">Saisie en masse</a></div>}
+          <CardTitle title="Modifications de postes">Cherchez un salarié, ouvrez sa fiche, puis créez-lui un événement daté. Les colonnes « hypothèse », sur fond bleu, montrent ce que ce scénario change.</CardTitle>
+          {canEdit && <div className="panel-tools"><a className="btn" href="#sal-bulk" data-testid="sal-bulk-link">Aller à la saisie en masse</a></div>}
         </div>
         <form method="get" action={`/e/${slug}/studio-rh/hypotheses`} className="hs-search" data-testid="sal-search" role="search" aria-label="Recherche des salariés">
           <input type="hidden" name="scenario" value={scenario.id} />
           <input type="hidden" name="vue" value="postes" />
           <div className="field-row">
-            <label htmlFor="sal-q">Rechercher</label>
+            <label htmlFor="sal-q">Recherche</label>
             <input className="input" id="sal-q" name="q" type="search" defaultValue={q} placeholder="Toutes les colonnes : nom, service, motif, date…" aria-label="Rechercher (nom, service) dans toutes les colonnes" autoComplete="off" />
           </div>
           <div className="field-row hs-narrow">
@@ -223,8 +222,8 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                   <td>{r.service ?? "Non ventilé"}</td>
                   <td>{dateFr(r.entry) ?? "n.d."}</td>
                   <td>{dateFr(end) ?? "—"}</td>
-                  <td className="num" title={etp === "n.d." ? (r.contract?.etpNd ?? (r.kind === "embauche" ? "Poste non compté dans l'effectif : pas d'ETP" : undefined)) : undefined}>{etp}</td>
-                  <td className="num" title={cost === "n.d." ? (r.contract?.baseNd ?? undefined) : undefined}>{cost}</td>
+                  <td className="num" title={etp === "n.d." ? (fr(r.contract?.etpNd) ?? (r.kind === "embauche" ? "Poste non compté dans l'effectif : pas d'ETP" : undefined)) : undefined}>{etp}</td>
+                  <td className="num" title={cost === "n.d." ? fr(r.contract?.baseNd) : undefined}>{cost}</td>
                   <td className={fx.exitDate ? "changed" : undefined} data-col="sortie">{dateFr(fx.exitDate) ?? "—"}</td>
                   <td className={fx.exitDate ? "changed wrap" : "wrap"}>{fx.exitDate ? fx.exitMotif ?? "non précisé" : "—"}</td>
                   <td className={fx.raises.length ? "changed wrap" : "wrap"}>{fx.raises.length ? fx.raises.join(" ; ") : "—"}</td>
@@ -240,12 +239,12 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
             </tbody>
           </table>
         </div>
-        <Pager page={paged.page} pageSize={PAGE_SIZE} total={shown.length} href={pageHref} testid="sal-pager" />
-        <p className="tile-foot">
-          Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée ici si besoin (ex. une apprentie codée CDD par PayFit).
-          Colonnes « hypothèse » : ce que ce scénario saisit pour le salarié ; « — » : aucune hypothèse, la projection reconduit sa base.
-          Règles : <a href="#def-augmentation">augmentation</a>, <a href="#def-absence">congé non payé</a>, <a href="#def-changement">changement de service ou de quotité</a>, <a href="#def-prorata">prorata</a>, <a href="#def-categories">catégories</a>.
-        </p>
+        {paged.pages > 1 ? <Pager page={paged.page} pageSize={PAGE_SIZE} total={shown.length} href={pageHref} testid="sal-pager" /> : shown.length > 0 ? <p className="tile-foot" data-testid="sal-pager">{paged.from}–{paged.to} sur {shown.length}</p> : null}
+        <Rules summary="Lecture du tableau et règles">
+          <p>Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée ici si besoin (ex. une apprentie codée CDD par PayFit).</p>
+          <p>Colonnes « hypothèse » : ce que ce scénario saisit pour le salarié ; « — » : aucune hypothèse, la projection reconduit sa base.</p>
+          <p>Règles : <a href="#def-augmentation">augmentation</a>, <a href="#def-absence">congé non payé</a>, <a href="#def-changement">changement de service ou de quotité</a>, <a href="#def-prorata">prorata</a>, <a href="#def-categories">catégories</a>.</p>
+        </Rules>
       </section>
 
       {sel && (
@@ -255,8 +254,8 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
               <h2>{sel.label} <span className="tag">{catText(sel.category)}</span></h2>
               <p className="desc">
                 {sel.service ?? "Non ventilé"} · entrée {dateFr(sel.entry) ?? "n.d."} · ETP {sel.etp4 === null ? "n.d." : fmtEtp4(sel.etp4)}
-                {sel.contract?.baseNote ? ` · base : ${sel.contract.baseNote}` : ""}
-                {sel.contract?.baseNd ? ` · base n.d. : ${sel.contract.baseNd}` : ""}
+                {sel.contract?.baseNote ? ` · base : ${frDates(sel.contract.baseNote)}` : ""}
+                {sel.contract?.baseNd ? ` · base n.d. : ${frDates(sel.contract.baseNd)}` : ""}
               </p>
             </div>
             <div className="panel-tools"><a className="btn" href={`${base_}${qPart}${pagePart(paged.page)}`} data-testid="sal-fiche-close">Fermer la fiche</a></div>
@@ -271,8 +270,8 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                 <tbody>
                   {eventsOf(sel.key, hyps).filter((h) => h.kind !== "embauche").map((h) => (
                     <tr key={h.id} data-hyp={h.label}>
-                      <td>{KIND_TEXT[h.kind]}</td><td>{h.label}</td><td className="wrap">{detail(h)}</td>
-                      {canEdit && <td><ActionForm action={deleteHypothesisAction.bind(null, slug, scenario.id, h.id)} submit="Supprimer" testid={`sal-del-${h.id}`} className="inline-form" danger /></td>}
+                      <td>{KIND_TEXT[h.kind]}</td><td>{frDates(h.label)}</td><td className="wrap">{detail(h)}</td>
+                      {canEdit && <td><ActionForm action={deleteHypothesisAction.bind(null, slug, scenario.id, h.id)} submit="Supprimer" testid={`sal-del-${h.id}`} className="inline-form" danger compact confirm={`Supprimer l'événement « ${frDates(h.label)} » ?`} hint={`Supprimer l'événement « ${frDates(h.label)} »`} srLabel={`l'événement « ${frDates(h.label)} »`} /></td>}
                     </tr>
                   ))}
                 </tbody>
@@ -281,7 +280,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
           )}
           <h3>Coût mensuel projeté</h3>
           {proj.kind === "error" ? (
-            <p className="nd">n.d. — projection refusée : {proj.errors.join(" ; ")}</p>
+            <p className="nd">n.d. — projection refusée : {frDates(proj.errors.join(" ; "))}</p>
           ) : (
             <div className="table-wrap scroll" role="region" aria-label="Coût mensuel projeté du salarié" tabIndex={0}>
               <table className="data-table sticky" data-testid="sal-months">
@@ -292,7 +291,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                     return (
                       <tr key={m.month} data-month={m.month}>
                         <td>{formatMonth(m.month)}</td>
-                        <td className="wrap">{m.kind === "nd" ? <span className="nd">n.d. — {m.reasons.join(" ; ")}</span> : lines.length ? lines.map((c) => `${c.label} ${formatEuros(c.cost)}`).join(" · ") : "—"}</td>
+                        <td className="wrap">{m.kind === "nd" ? <span className="nd">n.d. — {frDates(m.reasons.join(" ; "))}</span> : lines.length ? lines.map((c) => `${c.label} ${formatEuros(c.cost)}`).join(" · ") : "—"}</td>
                         <td className="num" data-col="cost">{m.kind === "nd" ? "n.d." : formatEuros(lines.reduce((s, c) => s + c.cost, 0))}</td>
                       </tr>
                     );
@@ -394,7 +393,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                 <summary>Catégorie (CDI, CDD, apprenti, stagiaire)</summary>
                 <ActionForm action={add("categorie")} submit="Enregistrer la catégorie" testid="sal-form-categorie">
                   <input type="hidden" name="contractKey" value={sel.key} />
-                  <FieldGroup title="Catégorie" hint="Corrige la catégorie proposée depuis la nature du contrat.">
+                  <FieldGroup title="Catégorie" hint="Correction de la catégorie proposée depuis la nature du contrat.">
                     <Field id="s-c-l" label="Libellé"><input className="input" id="s-c-l" name="label" defaultValue={`Catégorie ${sel.label}`} maxLength={200} required /></Field>
                     <Field id="s-c-c" label="Catégorie">
                       <select className="select" id="s-c-c" name="category" defaultValue={sel.category ?? ""}><option value="" disabled>Choisir…</option>{CATEGORY_IDS.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select>

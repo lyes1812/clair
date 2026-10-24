@@ -16,8 +16,11 @@ import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import type { Shown } from "@/lib/rh/view";
+import { absenceTypeText, typoMinus } from "@/lib/viz/kpi";
 import {
   AbsenceMonthDetail,
+  AbsenceTypeNotes,
+  AbsenceTypes,
   AbsenteeismWindowDetail,
   absenceDaysShown,
   absenteeismShown,
@@ -48,8 +51,8 @@ import {
   turnoverShown,
 } from "./components";
 import { FamilyTabs } from "@/components/FamilyTabs";
-import { Prevu } from "@/components/Prevu";
-import { EffectifsMensuels } from "./EffectifsMensuels";
+import { Prevu, type PrevuLink } from "@/components/Prevu";
+import { EffectifsDefinitions, EffectifsMensuels } from "./EffectifsMensuels";
 import { KPI_VUES, resolveKpiVue } from "./tabs";
 
 export const dynamic = "force-dynamic";
@@ -81,7 +84,7 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
     ["turnoverFormula", "Formule du turnover", v.turnoverFormula === "half_sum" ? "((entrées + sorties) ÷ 2) ÷ effectif moyen" : "sorties ÷ effectif au premier jour"],
     ["neutralizeContinuity", "Contrats continus neutralisés", yes(v.neutralizeContinuity)],
     ["excludedExitNatures", "Sorties non comptées (natures)", v.excludedExitNatures.length ? natureList(v.excludedExitNatures) : "aucune"],
-    ["absenceTypes", "Types d'absence comptés", v.absenceTypes.length ? v.absenceTypes.join(", ") : "aucun (absentéisme n.d.)"],
+    ["absenceTypes", "Types d'absence comptés", v.absenceTypes.length ? v.absenceTypes.map(absenceTypeText).join(", ") : "aucun (absentéisme n.d.)"],
     ["absenceStatuses", "Statuts d'absence retenus", v.absenceStatuses.map((s) => ABSENCE_STATUS_LABELS[s] ?? s).join(", ")],
     ["dayBasis", "Base des jours", v.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"],
   ];
@@ -104,6 +107,44 @@ function coverageShown(data: RhBuildData, month: string, establishments?: string
   if (raw && month >= raw.lowerFrom && month <= raw.lowerTo) return { text: "brut (API PayFit)", kind: "value" };
   return { text: "complet", kind: "value" };
 }
+
+// Entrées de KPI RH pas encore construites : l'état en une phrase, ce qui existe déjà (avec un lien) et ce qui reste à préciser.
+type PrevuVue = "pyramide" | "salaires" | "livre" | "publisher";
+const PREVU_VUES: PrevuVue[] = ["pyramide", "salaires", "livre", "publisher"];
+const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: PrevuLink[]; open: string[] }> = {
+  pyramide: (studio) => ({
+    lead: "Non disponible avec les données lues : la date de naissance n'est pas lue dans le référentiel Collaborateurs (PayFit et DSN lus), la pyramide des âges ne peut donc pas être construite. L'ancienneté se déduit de la date d'entrée du contrat.",
+    existing: [
+      { href: `${studio}/collaborateurs/fiche`, title: "Collaborateurs › Fiche collaborateur", text: "Contrats, dates d'entrée et de sortie de chaque collaborateur." },
+      { href: `${studio}/kpi?vue=effectifs`, title: "KPI RH › Effectifs mensuels", text: "Effectif et ETP par mois, répartis par catégorie, contrat, établissement ou statut." },
+    ],
+    open: ["Le découpage des tranches d'âge et d'ancienneté.", "La règle d'ancienneté : par contrat ou par personne.", "La source de la date de naissance, absente des lectures PayFit et DSN."],
+  }),
+  salaires: (studio) => ({
+    lead: "Non réalisé : l'analyse des salaires par collaborateur (médianes, écarts, rapports) n'existe pas encore.",
+    existing: [
+      { href: `${studio}/masse-salariale?vue=fixe-variable`, title: "Masse salariale › Fixe & variable", text: "Rémunération lue par rubrique : salaires, primes, indemnités, gratifications." },
+      { href: `${studio}/masse-salariale`, title: "Masse salariale › Synthèse", text: "Brut, charges et coût chargé par mois, par service et par rubrique." },
+    ],
+    open: ["Les règles d'anonymat et de droits d'accès pour des indicateurs individuels.", "Les statistiques à produire (médiane, écarts, rapports) et leur périmètre."],
+  }),
+  livre: (studio) => ({
+    lead: "Non disponible avec les données lues : l'API PayFit ne renvoie les bulletins qu'en PDF, sans rubrique, le livre de paie par collaborateur et par rubrique de bulletin ne peut donc pas être construit.",
+    existing: [
+      { href: `${studio}/masse-salariale?vue=paie-compta`, title: "Masse salariale › Paie & comptabilité", text: "Journal comptable de paie par compte, congés payés dus, rapprochement avec la comptabilité." },
+      { href: `${studio}/masse-salariale?vue=fixe-variable`, title: "Masse salariale › Fixe & variable", text: "Brut par libellé de paie, primes par famille et par mois." },
+    ],
+    open: ["Une source qui fournit les rubriques de bulletin reste à identifier."],
+  }),
+  publisher: (studio) => ({
+    lead: "Non réalisé : le contenu de cette entrée n'est pas encore défini.",
+    existing: [
+      { href: `${studio}/kpi`, title: "KPI RH › Suivi des effectifs", text: "Indicateurs, tableaux mensuels et définitions, consultables à l'écran." },
+      { href: `${studio}/kpi?vue=effectifs`, title: "KPI RH › Effectifs mensuels", text: "Une rubrique, un axe de répartition, une version et une année." },
+    ],
+    open: ["Ce que cette entrée doit produire, son format, ses destinataires et sa périodicité."],
+  }),
+};
 
 export default async function KpiPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
@@ -230,7 +271,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const etpParams = `temps plein = 1 : ${s.fullTimeIsOne ? "oui" : "non"} · plafond 1 : ${s.capAtOne ? "oui" : "non"}${isPayfit ? ` · forfait jours sans quotité = 1 : ${s.forfaitJoursIsOne ? "oui" : "non"}` : ""} · ${s.etpDecimals} décimales · natures ${natureList(natures)} (${changed(isPayfit ? ["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"] : ["fullTimeIsOne", "capAtOne", "etpDecimals"])})`;
   const hcParams = `natures ${natureList(natures)}${nature ? " (filtre)" : ""}`;
   const toParams = `${s.turnoverFormula === "half_sum" ? "((E + S) ÷ 2) ÷ effectif moyen" : "S ÷ effectif au premier jour"} · continus ${s.neutralizeContinuity ? "neutralisés" : "comptés"} · sorties exclues : ${s.excludedExitNatures.length ? natureList(s.excludedExitNatures) : "aucune"} (${changed(["turnoverFormula", "neutralizeContinuity", "excludedExitNatures"])})`;
-  const absParams = `types : ${s.absenceTypes.length ? s.absenceTypes.join(", ") : "aucun"} · statuts : ${s.absenceStatuses.map((x) => ABSENCE_STATUS_LABELS[x] ?? x).join(", ")} · ${s.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"} (${changed(["absenceTypes", "absenceStatuses", "dayBasis"])})`;
+  const absParams = `types : ${s.absenceTypes.length ? s.absenceTypes.map(absenceTypeText).join(", ") : "aucun"} · statuts : ${s.absenceStatuses.map((x) => ABSENCE_STATUS_LABELS[x] ?? x).join(", ")} · ${s.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"} (${changed(["absenceTypes", "absenceStatuses", "dayBasis"])})`;
 
   const t = dash.tiles;
   // Calcul de l'écart en fractions exactes (valeur − N-1 ; × 100 pour les taux) : l'écart affiché se retrace sans arrondi.
@@ -240,7 +281,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
     const b = value(c.previous);
     if (!a || !b) return undefined;
     const d = fmtFraction(c.delta.value);
-    return points ? `(${fmtFraction(a)} − ${fmtFraction(b)}) × 100 = ${d}` : `${fmtFraction(a)} − ${fmtFraction(b)} = ${d}`;
+    // Vrai signe moins dans la formule affichée (fmtFraction écrit un tiret ASCII pour une fraction négative).
+    return typoMinus(points ? `(${fmtFraction(a)} − ${fmtFraction(b)}) × 100 = ${d}` : `${fmtFraction(a)} − ${fmtFraction(b)} = ${d}`);
   };
   const n1 = <T,>(c: Compared<T>, shown: Shown) => `N-1 (${c.previousWindow.label}) : ${shown.text}`;
   const pw = dash.previousWindow;
@@ -287,17 +329,14 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const tileOn = (id: string) => vue === "suivi" || (vue === "turnover" ? id === "turnover" || id === "headcount-avg" : id === "absenteeism");
   const colOn = (c: string) => vue === "suivi" || (vue === "turnover" ? ["coverage", "headcount", "entries", "exits"].includes(c) : ["coverage", "theoretical", "absence-days", "absenteeism", "absenteeism-n1"].includes(c));
   const catKeys = [...CATEGORY_IDS, "nc"].filter((k) => catMonths.some((c) => c.kind === "value" && c.byCategory[k]));
+  // Page « Prévu » : aucun chiffre, donc ni limites de la lecture ni définitions à rappeler.
+  const prevu = (PREVU_VUES as string[]).includes(vue);
   return (
-    <KpiHeader ctx={ctx} closedMonth={last}>
-      <PayfitNotice ctx={ctx} />
+    <KpiHeader ctx={ctx} closedMonth={last} bare={prevu}>
+      {!prevu && <PayfitNotice ctx={ctx} />}
       <FamilyTabs label="Entrées KPI RH" testid="kpi-tabs" current={vue} tabs={KPI_VUES.map((v) => ({ key: v.key, label: v.label, href: v.key === "suivi" ? "?" : `?vue=${v.key}`, soon: "soon" in v ? v.soon : false }))} />
-      {vue === "pyramide" || vue === "salaires" || vue === "livre" || vue === "publisher" ? (
-        <Prevu title={KPI_VUES.find((x) => x.key === vue)!.label}>
-          {vue === "pyramide" && <p>Pyramide des âges et de l'ancienneté : la date de naissance n'est pas lue dans le référentiel Collaborateurs (PayFit et DSN lus) ; l'ancienneté se déduit de la date d'entrée du contrat. Le découpage des tranches et la règle d'ancienneté (contrat ou personne) restent à préciser avec toi avant toute réalisation ; rien n'est simulé ici.</p>}
-          {vue === "salaires" && <p>Analyse des salaires par collaborateur (médianes, écarts, rapports) : non réalisée. La lecture de la rémunération par rubrique (salaires, primes, indemnités, gratifications) existe dans <a href={`/e/${slug}/studio-rh/masse-salariale?vue=fixe-variable`}>Masse salariale › Fixe & variable</a>. Les indicateurs individuels exigent des règles d'anonymat et de droits à préciser avec toi.</p>}
-          {vue === "livre" && <p>Livre de paie par collaborateur et rubrique de bulletin : non réalisé. L'API PayFit ne renvoie les bulletins qu'en PDF, sans rubrique ; le journal comptable de paie par compte se lit dans <a href={`/e/${slug}/studio-rh/masse-salariale?vue=paie-compta`}>Masse salariale › Paie & comptabilité</a>.</p>}
-          {vue === "publisher" && <p>Entrée seulement nommée dans le menu de l'outil observé : son comportement n'est pas établi (cahier, 12.12). À préciser avec toi avant toute réalisation.</p>}
-        </Prevu>
+      {prevu ? (
+        <Prevu title={KPI_VUES.find((x) => x.key === vue)!.label} {...PREVU[vue as PrevuVue](`/e/${slug}/studio-rh`)} />
       ) : vue === "effectifs" ? (
         <EffectifsMensuels slug={slug} workspaceId={ctx.collab.workspace.id} kpi={ctx.input} search={{ mesure: one(sp.mesure), axe: one(sp.axe), version: one(sp.version), annee: one(sp.annee) }} />
       ) : (
@@ -437,21 +476,18 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             qualifiers={absCur.kind === "nd" ? [] : absCur.qualifiers}
             warning={
               input.absences.status === "read" && missingTypes.length > 0 ? (
-                <span className="tile-foot" data-testid="kpi-absence-missing">types d'absence comptés absents de la lecture : {missingTypes.map((x) => x.type).join(", ")}</span>
+                <span className="tile-foot" data-testid="kpi-absence-missing">
+                  {missingTypes.length > 1 ? "Aucune absence des types " : "Aucune absence de type "}
+                  <AbsenceTypes codes={missingTypes.map((x) => x.type)} />
+                  {missingTypes.length > 1 ? " dans la lecture PayFit : ces types ne comptent aucun jour." : " dans la lecture PayFit : ce type ne compte aucun jour."}
+                </span>
               ) : undefined
             }
             def="absenteeism"
             detail={detailHref("absenteeism", null)}
             detailN1={detailHref("absenteeism", null, true)}
           >
-            {input.absences.status === "read" && (
-              <span className="tile-foot" data-testid="kpi-absence-types">
-                types comptés : {chosenTypes.length ? chosenTypes.map((x) => `${x.type} (${x.count})`).join(", ") : "aucun"} — types présents non comptés :{" "}
-                {otherTypes.length ? otherTypes.map((x) => `${x.type} (${x.count})`).join(", ") : "aucun"}
-                {missingTypes.length > 0 && <> — absents de la lecture : {missingTypes.map((x) => x.type).join(", ")}</>} (entre parenthèses : nombre d'absences dans toute la lecture, tous mois et tous contrats) ·{" "}
-                <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
-              </span>
-            )}
+            {input.absences.status === "read" && <AbsenceTypeNotes chosen={chosenTypes} other={otherTypes} missing={missingTypes} slug={slug} />}
           </KpiTile>
         </dl>
       </section>
@@ -463,6 +499,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           <h2>Mois par mois</h2>
           <p className="desc">{w.months.length} mois, valeurs de fin de mois ; N-1 = même mois un an plus tôt.</p>
         </div>
+        <p className="kpi-scroll-hint" data-testid="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite pour voir les autres colonnes.</p>
         <div className="table-wrap scroll">
           <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-monthly-table">
             <thead>
@@ -515,7 +552,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           </table>
         </div>
         <p className="desc">
-          Ligne « Période » : valeurs des indicateurs ci-dessus (moyennes de fin de mois, mouvements comptés, somme des jours), jamais une moyenne de colonne recalculée par l'écran.
+          Ligne « Période » : valeurs des indicateurs ci-dessus (moyennes de fin de mois, mouvements comptés, somme des jours), jamais une moyenne de colonne recalculée par l'écran. Chaque valeur ouvre le détail de son calcul.
         </p>
         <NdReasons items={ndItems} />
       </section>
@@ -524,10 +561,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       <section className="panel" data-testid="kpi-categories">
         <div className="kpi-panel-title">
           <h2>Effectif et ETP par catégorie</h2>
-          <p className="desc">Fin de mois ; CDI, CDD, apprenti, stagiaire.</p>
+          <p className="desc">Fin de mois ; CDI, CDD, apprenti, stagiaire. Chaque cellule indique le nombre de personnes puis l'ETP.</p>
         </div>
         <KpiCategoryChart months={catMonths} keys={catKeys} labels={{ ...CATEGORY_LABELS, nc: "Non classé" }} />
-        <div className="table-wrap scroll">
+        <p className="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite pour voir les autres colonnes.</p>
+        <div className="table-wrap scroll kpi-fit" tabIndex={0} role="region" aria-label="Effectif et ETP par catégorie, tableau défilant">
           <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-categories-table">
             <thead>
               <tr><th>Mois</th>{catKeys.map((k) => <th key={k} className="num">{k === "nc" ? "Non classé" : CATEGORY_LABELS[k as CategoryId]}</th>)}<th className="num">Total</th></tr>
@@ -578,7 +616,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       </>
       )}
 
-      <KpiDefinitions slug={slug} params={paramList(ctx.settings, ctx.collab.natures)} />
+      {!prevu && <KpiDefinitions slug={slug} params={paramList(ctx.settings, ctx.collab.natures)} extra={vue === "effectifs" ? <EffectifsDefinitions /> : undefined} />}
     </KpiHeader>
   );
 }

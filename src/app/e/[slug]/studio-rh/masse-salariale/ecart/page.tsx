@@ -10,7 +10,7 @@ import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { loadVersions } from "../ecart-data";
 import { ecartRows } from "../ecart-rows";
-import { Gap, gapSign, gapText, GapPct, MsHeader, MsTabs, periodText, pctSign, PickerForm, scopeText, Val, VerBadge, VerPair } from "../EcartParts";
+import { eurosSigned, Gap, gapSign, gapText, GapPct, MsHeader, MsTabs, neg, PanelTitle, periodText, pctSign, PickerForm, scopeText, TBL, Val, VerBadge, VerPair, VersionChain } from "../EcartParts";
 import { peopleIndex } from "../people-index";
 import { EcartChart } from "./EcartChart";
 import { LiveLink, LiveViewSwitch, RubInput } from "./LiveRub";
@@ -96,20 +96,19 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
       const page = Math.min(pages, Math.max(1, Number(one(sp.zp)) || 1));
       const slice = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
       const shownTotal = shown.reduce((s, r) => s + r.d, 0);
-      const fmt = (n: number | null) => (n === null ? "—" : formatEuros(n));
-      const sg = (n: number) => `${n > 0 ? "+" : ""}${formatEuros(n)}`;
+      const fmt = (n: number | null) => (n === null ? "—" : neg(formatEuros(n)));
+      const sg = eurosSigned;
       const zoomQ = (extra: Record<string, string>) => q({ ...view, zoom: `${zoomRubric}:${pair + 1}`, ...(search ? { zq: one(sp.zq) } : {}), ...(nz ? {} : { nz: "0" }), ...extra });
       const exportZoom = new URLSearchParams(keep);
       exportZoom.set("zoom", `${zoomRubric}:${pair + 1}`);
       zoomBlock = (
         <section className="panel" id="zoom" data-testid="zoom">
           <div className="panel-head">
-            <div className="ecart-panel-title">
-              <h2>Détail par salarié — {ZOOM_RUBRICS[zoomRubric]} <span className="desc">— <a href="#def-zoom">règle</a></span></h2>
-              <p className="desc"><span className="ver-badge" aria-hidden="true">{pair + 1}</span>{a.label} → <span className="ver-badge" aria-hidden="true">{pair + 2}</span>{b.label} · {period} · {scope}</p>
-            </div>
+            <PanelTitle title={`Détail par salarié — ${ZOOM_RUBRICS[zoomRubric]}`}>
+              <VersionChain labels={[a.label, b.label]} first={pair + 1} /> · {period} · {scope} · <a href="#def-zoom">règle</a>
+            </PanelTitle>
             <div className="panel-tools">
-              <a className="btn primary" href={`${base}/export?${exportZoom.toString()}`} data-testid="zoom-export">Exporter le détail (CSV)</a>
+              <a className="btn" href={`${base}/export?${exportZoom.toString()}`} data-testid="zoom-export">Exporter le détail (CSV)</a>
             </div>
           </div>
           <form method="get" action={base} className="filters" data-testid="zoom-filters">
@@ -122,17 +121,17 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
             <button className="btn" type="submit">Filtrer</button>
           </form>
           <div className="table-wrap scroll">
-            <table className="data-table sticky ecart-table" data-testid="zoom-table">
+            <table className="data-table sticky ecart-table stack-sm" data-testid="zoom-table" {...TBL.table}>
               <caption className="ecart-sr">Détail par salarié de l'écart de {ZOOM_RUBRICS[zoomRubric]}, de {a.label} à {b.label}</caption>
-              <thead><tr><th scope="col" className="num">Écart</th><th scope="col" className="num">{loaded.shorts[pair]}</th><th scope="col" className="num">{loaded.shorts[pair + 1]}</th><th scope="col">Matricule</th><th scope="col">Nom</th><th scope="col">Service</th><th scope="col">Contrat</th><th scope="col">Date d'embauche</th><th scope="col">Date de sortie</th></tr></thead>
-              <tbody>
+              <thead {...TBL.group}><tr {...TBL.row}><th scope="col" className="num" {...TBL.head}>Écart</th><th scope="col" className="num" {...TBL.head}>{loaded.shorts[pair]}</th><th scope="col" className="num" {...TBL.head}>{loaded.shorts[pair + 1]}</th><th scope="col" {...TBL.head}>Matricule</th><th scope="col" {...TBL.head}>Nom</th><th scope="col" {...TBL.head}>Service</th><th scope="col" {...TBL.head}>Contrat</th><th scope="col" {...TBL.head}>Date d'embauche</th><th scope="col" {...TBL.head}>Date de sortie</th></tr></thead>
+              <tbody {...TBL.group}>
                 {slice.map((r) => (
-                  <tr key={r.k} data-person={r.info.label}>
-                    <td className="num gap" data-col="ecart" data-sign={r.d === 0 ? "zero" : r.d > 0 ? "up" : "down"}>{sg(r.d)}</td><td className="num">{fmt(r.av)}</td><td className="num">{fmt(r.bv)}</td>
-                    <td>{r.info.externalId ?? "—"}</td><td className="wrap">{r.info.label}</td><td>{r.info.service ?? "—"}</td><td>{r.info.contract ?? "—"}</td><td>{r.info.start ?? "—"}</td><td>{r.info.end ?? "—"}</td>
+                  <tr key={r.k} data-person={r.info.label} {...TBL.row}>
+                    <td className="num gap" data-col="ecart" data-sign={r.d === 0 ? "zero" : r.d > 0 ? "up" : "down"} data-label="Écart" {...TBL.cell}>{sg(r.d)}</td><td className="num" data-label={loaded.shorts[pair]} {...TBL.cell}>{fmt(r.av)}</td><td className="num" data-label={loaded.shorts[pair + 1]} {...TBL.cell}>{fmt(r.bv)}</td>
+                    <td data-label="Matricule" {...TBL.cell}>{r.info.externalId ?? "—"}</td><td className="wrap" data-card="title" {...TBL.cell}>{r.info.label}</td><td data-label="Service" {...TBL.cell}>{r.info.service ?? "—"}</td><td data-label="Contrat" {...TBL.cell}>{r.info.contract ?? "—"}</td><td data-label="Date d'embauche" {...TBL.cell}>{r.info.start ?? "—"}</td><td data-label="Date de sortie" {...TBL.cell}>{r.info.end ?? "—"}</td>
                   </tr>
                 ))}
-                {slice.length === 0 && <tr><td colSpan={9} className="desc">Aucune ligne.</td></tr>}
+                {slice.length === 0 && <tr {...TBL.row}><td colSpan={9} className="desc" {...TBL.cell}>Aucune ligne.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -159,7 +158,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
       <MsTabs slug={slug} current="ecart" />
       <section className="panel" data-testid="ecart">
         <div className="panel-head">
-          <h2>Écart budgétaire <span className="desc">— comparaison de versions de même période · <a href="#def-versions">règles</a></span></h2>
+          <PanelTitle title="Écart budgétaire">Comparaison de versions de même période · <a href="#def-versions">règles</a></PanelTitle>
           {versions.length > 0 && (
             <LiveViewSwitch
               initialRub={rub}
@@ -176,16 +175,21 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
         {versions.length === 0 ? (
           <p className="desc" data-testid="ecart-empty">Aucune version à comparer : lisez le journal de paie PayFit dans Données ou créez un scénario dans Hypothèses budgétaires.</p>
         ) : (
-          <p className="tile-foot">
-            {versions.length} version{versions.length > 1 ? "s" : ""} comparée{versions.length > 1 ? "s" : ""}, {period} (rangs de mois appliqués à l'année de chaque version), {scope}. Écart = version suivante − version précédente.
-          </p>
+          <>
+            <p className="desc" data-testid="ecart-selection">
+              <VersionChain labels={versions.map((v) => v.label)} /> · {period} · {scope}
+            </p>
+            <p className="tile-foot">
+              {versions.length} version{versions.length > 1 ? "s" : ""} comparée{versions.length > 1 ? "s" : ""} ; rangs de mois appliqués à l'année de chaque version. Écart = version suivante − version précédente.
+            </p>
+          </>
         )}
       </section>
 
       {chart && (
         <section className="panel" data-testid="ecart-graph" id="graphique">
           <div className="panel-head">
-            <h2>Évolution mensuelle par version <span className="desc">— une courbe par version · définitions : <a href="#def-rubriques">rubriques</a>, <a href="#def-effectifs">effectifs et ETP</a></span></h2>
+            <PanelTitle title="Évolution mensuelle par version">Une courbe par version · définitions : <a href="#def-rubriques">rubriques</a>, <a href="#def-effectifs">effectifs et ETP</a></PanelTitle>
           </div>
           <EcartChart testid="ecart-chart" initial={rub} groups={rubricGroups()} categories={chart.categories} categoryTitles={chart.categoryTitles} data={chart.byRubric} period={period} scope={scope} />
           {!showTable && <p className="tile-foot">Le graphique est une lecture : les valeurs exactes de chaque rubrique sont dans <a href={affHref("tableau")}>l'affichage Tableau</a>.</p>}
@@ -195,7 +199,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
       {showTable && (
         <section className="panel" data-testid="ecart-tableau" id="tableau">
           <div className="panel-head">
-            <h2>Écart par rubrique <span className="desc">— valeurs exactes</span></h2>
+            <PanelTitle title="Écart par rubrique">Valeurs exactes</PanelTitle>
             <div className="panel-tools">
               <LiveViewSwitch
                 initialRub={rub}
@@ -204,36 +208,36 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
                 current={vue}
                 options={[{ key: "synthese", label: "Synthèse", href: q({ ...view, vue: "synthese" }) }, { key: "detail", label: "Détail", href: q({ ...view, vue: "detail" }) }]}
               />
-              <a className="btn primary" href={`${base}/export?${exportQuery.toString()}`} data-testid="ecart-export">Exporter en CSV</a>
+              <a className="btn" href={`${base}/export?${exportQuery.toString()}`} data-testid="ecart-export">Exporter en CSV</a>
             </div>
           </div>
           <div className="table-wrap scroll">
-            <table className="data-table sticky sticky-first ecart-table" data-testid="ecart-table">
+            <table className="data-table sticky sticky-first ecart-table ecart-main stack-sm" data-testid="ecart-table" {...TBL.table}>
               <caption className="ecart-sr">Écart par rubrique entre les versions comparées, {period}, {scope}</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Rubrique</th>
-                  <th scope="col" className="num ver-col" title={versions[0].label}><VerBadge n={1} /><span className="ver-name">{header(0)}</span><span className="ver-kind">{KIND_LABEL[versions[0].kind]}</span></th>
+              <thead {...TBL.group}>
+                <tr {...TBL.row}>
+                  <th scope="col" {...TBL.head}>Rubrique</th>
+                  <th scope="col" className="num ver-col" title={versions[0].label} {...TBL.head}><VerBadge n={1} /><span className="ver-name">{header(0)}</span><span className="ver-kind">{KIND_LABEL[versions[0].kind]}</span></th>
                   {versions.slice(1).flatMap((v, i) => [
-                    <th key={`v${i}`} scope="col" className="num ver-col" title={v.label}><VerBadge n={i + 2} /><span className="ver-name">{header(i + 1)}</span><span className="ver-kind">{KIND_LABEL[v.kind]}</span></th>,
-                    <th key={`g${i}`} scope="col" className="num"><VerPair to={i + 2} from={i + 1} />Écart</th>,
-                    <th key={`p${i}`} scope="col" className="num"><VerPair to={i + 2} from={i + 1} />Écart (%)</th>,
+                    <th key={`v${i}`} scope="col" className="num ver-col" title={v.label} {...TBL.head}><VerBadge n={i + 2} /><span className="ver-name">{header(i + 1)}</span><span className="ver-kind">{KIND_LABEL[v.kind]}</span></th>,
+                    <th key={`g${i}`} scope="col" className="num" {...TBL.head}><VerPair to={i + 2} from={i + 1} />Écart</th>,
+                    <th key={`p${i}`} scope="col" className="num" {...TBL.head}><VerPair to={i + 2} from={i + 1} />Écart (%)</th>,
                   ])}
                 </tr>
               </thead>
-              <tbody>
+              <tbody {...TBL.group}>
                 {rows.map((r) => (
-                  <tr key={r.key} data-row={r.key} className={ROW_CLASS[r.key]}>
-                    <th scope="row">{r.label}</th>
-                    <td className="num" data-col="v1"><Val agg={r.aggs[0]} unit={r.unit} /></td>
+                  <tr key={r.key} data-row={r.key} className={ROW_CLASS[r.key]} {...TBL.row}>
+                    <th scope="row" {...TBL.rowhead}>{r.label}</th>
+                    <td className="num" data-col="v1" data-label={`Version 1 · ${header(0)}`} {...TBL.cell}><Val agg={r.aggs[0]} unit={r.unit} /></td>
                     {r.aggs.slice(1).flatMap((agg, i) => {
                       const href = zoomHref(r.key, i);
                       const g = r.gaps[i];
                       const text = gapText(g, r.unit);
                       return [
-                        <td key={`v${i}`} className="num" data-col={`v${i + 2}`}><Val agg={agg} unit={r.unit} /></td>,
-                        <td key={`g${i}`} className="num gap" data-col={`g${i + 1}`} data-sign={gapSign(g)}>{href && text !== null ? <LiveLink initialRub={rub} href={href} title="Détail par salarié de cet écart" label={`${text}, détail par salarié`}><Gap d={g} unit={r.unit} /></LiveLink> : <Gap d={g} unit={r.unit} />}</td>,
-                        <td key={`p${i}`} className="num gap" data-col={`p${i + 1}`} data-sign={pctSign(g)}><GapPct d={g} /></td>,
+                        <td key={`v${i}`} className="num" data-col={`v${i + 2}`} data-label={`Version ${i + 2} · ${header(i + 1)}`} {...TBL.cell}><Val agg={agg} unit={r.unit} /></td>,
+                        <td key={`g${i}`} className="num gap" data-col={`g${i + 1}`} data-sign={gapSign(g)} data-label={`Écart · version ${i + 2} − version ${i + 1}`} {...TBL.cell}>{href && text !== null ? <LiveLink initialRub={rub} href={href} title="Voir le détail par salarié de cet écart" label={`${text}, voir le détail par salarié`}><Gap d={g} unit={r.unit} /></LiveLink> : <Gap d={g} unit={r.unit} />}</td>,
+                        <td key={`p${i}`} className="num gap" data-col={`p${i + 1}`} data-sign={pctSign(g)} data-label={`Écart (%) · version ${i + 2} − version ${i + 1}`} {...TBL.cell}><GapPct d={g} /></td>,
                       ];
                     })}
                   </tr>
@@ -243,7 +247,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
           </div>
           <p className="tile-foot">
             Écart = version suivante − version précédente ; Écart (%) = écart ÷ valeur de la version précédente (n.d. si elle est nulle ; <a href="#def-ecart">définition</a>). La flèche indique seulement le sens de l'écart. Une valeur n.d. affiche sa raison au survol et dans « Données absentes ».
-            {canZoom ? " Un écart souligné ouvre le détail par salarié." : ""}
+            {canZoom ? " Un écart souligné en pointillés et suivi d'un chevron (›) ouvre le détail par salarié." : ""}
           </p>
           {versions.length > 1 && (
             <p className="tile-foot" data-testid="ecart-vers-analyse">
@@ -260,7 +264,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
         </section>
       )}
       {zoomBlock}
-      <details className="panel" data-testid="ecart-definitions" id="definitions">
+      <details className="panel ecart-defs" data-testid="ecart-definitions" id="definitions">
         <summary>Définitions et règles de calcul</summary>
         <dl className="defs">{ECART_DEFINITIONS.map((d) => <div key={d.id} id={`def-${d.id}`}><dt>{d.title}</dt><dd>{d.text}</dd></div>)}</dl>
       </details>

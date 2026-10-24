@@ -1,13 +1,20 @@
+import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AnalyseChart } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/AnalyseChart";
+import { STEP_COMMENTS } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/comments";
+import { TitledWaterfall } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/TitledWaterfall";
+import { Weight, weightText } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/Weight";
+import { PickerForm, VersionChain } from "@/app/e/[slug]/studio-rh/masse-salariale/EcartParts";
+import type { Loaded } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
+import { WaterfallChart } from "@/components/charts";
 import { EcartChart } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart/EcartChart";
 import { LiveLink, LiveViewSwitch } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart/LiveRub";
 import type { Cascade, StepId } from "@/lib/budget/cascade";
 import type { Bridge } from "@/lib/budget/series";
 import { nd, val, type Cell, type MonthFacts, type Version } from "@/lib/budget/versions";
-import { CHART_LABELS, ecartChartData, etpWaterfall, masseWaterfall, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, type MasseRubric } from "@/lib/viz/ecart";
+import { CHART_LABELS, ecartChartData, etpWaterfall, eurosSigned, masseWaterfall, neg, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, waterfallAxisBadge, type MasseRubric } from "@/lib/viz/ecart";
 
 // Adaptateurs de l'écart budgétaire vers les graphiques : valeurs, raisons n.d., unités, styles de courbe, cascades.
 // Cas écrits à la main (mêmes chiffres que le cas de référence de l'écran : base 66 420,00 €, variante 69 970,00 €).
@@ -165,6 +172,18 @@ describe("graphiques client rendus côté serveur", () => {
     expect(html).toContain("Version 1 · Réel 2025 : 1 mois"); // mars n.d. (courbe interrompue)
     expect(html).toContain("Axe vertical ajusté aux valeurs"); // l'axe ne part pas de zéro : dit sous le graphique
   });
+  it("lecture (au-dessus) et limites (en dessous) séparées ; l'aire d'un scénario n'est pas tracée sur un axe ajusté", () => {
+    const html = renderToStaticMarkup(h(EcartChart, { ...props, initial: "masse" }));
+    const reading = /data-testid="ecart-chart-lecture">([^<]*)</.exec(html)?.[1] ?? "";
+    expect(reading).toContain("Trait plein : version 1 · pointillés : versions suivantes.");
+    expect(reading).not.toContain("zone teintée"); // axe ajusté : pas d'aire
+    expect(reading).toContain("Chaque point est la valeur du mois");
+    expect(html).not.toContain('opacity="0.1"'); // aucune aire dans le tracé
+    expect(html.indexOf("ecart-chart-lecture")).toBeLessThan(html.indexOf('data-testid="ecart-chart"')); // lecture avant le graphique
+    const note = /<p class="chart-note">([^<]*)</.exec(html)?.[1] ?? "";
+    expect(note).toContain("Le tableau donne la valeur de la période");
+    expect(note).not.toContain("Trait plein"); // la note ne reprend pas la lecture
+  });
   it("version sans aucune valeur sur une rubrique : sa raison est écrite sous le graphique (pas seulement au survol)", () => {
     const html = renderToStaticMarkup(h(EcartChart, { ...props, initial: "autres" }));
     expect(html).toContain('data-testid="ecart-chart"');
@@ -209,5 +228,180 @@ describe("liens qui gardent la rubrique du graphique", () => {
     const v = renderToStaticMarkup(h(LiveViewSwitch, { initialRub: "etp", testid: "t", label: "Affichage", current: "tout", options: [{ key: "tout", label: "Afficher tout", href: "/p?v1=a" }, { key: "graphique", label: "Graphique", href: "/p?v1=a&affichage=graphique" }] }));
     expect(v).toContain('href="/p?v1=a&amp;rub=etp"');
     expect(v).toContain('href="/p?v1=a&amp;affichage=graphique&amp;rub=etp"');
+  });
+});
+
+// Axe d'une cascade : hauteur des totaux 61,00 → 64,30 ETP, contributions de quelques dixièmes. Calcul à la main : niveaux 61,00 ;
+// 64,30 ; 64,30 ; 63,10 ; 63,90 ; 64,30 ; bas 61,00, haut 64,30, écart 3,30 = 5,1 % du haut (< 30 %) : axe tronqué. Départ de l'axe
+// = 61,00 − 3,30 × 0,5 = 59,35, ramené par pas de 2,00 à 58,00 → « 5,8 » (dix-millièmes : 58 000 ÷ 10 000).
+const wfSteps = (...v: number[]) => v.map((value, i) => ({ label: `étape ${i + 1}`, value }));
+const etpSteps = wfSteps(3300, 0, -1200, 800, 400);
+// Pont : 66 420,00 € → 70 049,51 € → 69 970,00 € ; bas 66 420,00 €, écart 3 629,51 € = 5,2 % du haut ; départ de l'axe 64 604,25 €, ramené par
+// pas de 2 000,00 € à 64 000,00 € → « 64 k€ ».
+const pontSteps = [{ label: "Effet volume", value: 362951 }, { label: "Effet coût moyen", value: -7951 }];
+
+describe("badge d'axe tronqué des cascades", () => {
+  it("ETP : « Axe tronqué à 5,8 ETP »", () => {
+    expect(waterfallAxisBadge({ start: 61000, end: 64300, steps: etpSteps, unit: "etp" })).toBe("Axe tronqué à 5,8 ETP");
+  });
+  it("pont en euros : « Axe tronqué à 64 k€ » (l'unité est déjà dans la graduation)", () => {
+    expect(waterfallAxisBadge({ start: 6642000, end: 6997000, steps: pontSteps, unit: "eur" })).toBe("Axe tronqué à 64 k€");
+  });
+  it("axe non tronqué : pas de badge (écart de 80 % du haut, départ à zéro, valeurs négatives, seuil exactement à 30 %)", () => {
+    expect(waterfallAxisBadge({ start: 100000, end: 500000, steps: [{ label: "x", value: 400000 }], unit: "eur" })).toBeNull();
+    expect(waterfallAxisBadge({ start: 0, end: 3000, steps: [{ label: "x", value: 3000 }], unit: "eur" })).toBeNull();
+    expect(waterfallAxisBadge({ start: 5000, end: -2000, steps: [{ label: "x", value: -7000 }], unit: "eur" })).toBeNull();
+    expect(waterfallAxisBadge({ start: 700, end: 1000, steps: [{ label: "x", value: 300 }], unit: "nombre" })).toBeNull(); // (1000 − 700) ÷ 1000 = 30 % pile
+    expect(waterfallAxisBadge({ start: 701, end: 1000, steps: [{ label: "x", value: 299 }], unit: "nombre" })).toMatch(/^Axe tronqué à /); // 29,9 %
+  });
+  it("le badge dit la même valeur que la note du composant partagé (si le composant change de règle, ce test échoue)", () => {
+    const cases = [
+      { start: 61000, end: 64300, steps: etpSteps, unit: "etp" as const },
+      { start: 6642000, end: 6997000, steps: pontSteps, unit: "eur" as const },
+      { start: 100000, end: 500000, steps: [{ label: "x", value: 400000 }], unit: "eur" as const },
+    ];
+    for (const c of cases) {
+      const html = renderToStaticMarkup(h(WaterfallChart, { testid: "wf", label: "test", startLabel: "A", endLabel: "B", ...c }));
+      const fromNote = /il commence à ([^<]*?)\.(?:<| )/.exec(html)?.[1];
+      const badge = waterfallAxisBadge(c);
+      if (fromNote === undefined) expect(badge).toBeNull();
+      else expect(badge).toBe(`Axe tronqué à ${fromNote}${c.unit === "etp" ? " ETP" : ""}`);
+    }
+  });
+});
+
+describe("cascade titrée", () => {
+  const base = { label: "Cascade de test", startLabel: "A", endLabel: "B" };
+  it("axe tronqué : le badge est écrit à côté du titre, la note est hors de la zone qui défile", () => {
+    const html = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-pont", title: "Du coût de la version 1 à celui de la version 2", note: "Note de test.", start: 6642000, end: 6997000, steps: pontSteps, unit: "eur" }));
+    expect(html).toMatch(/<h3 class="chart-title" id="wf-pont-titre">Du coût de la version 1 à celui de la version 2<\/h3><span class="wf-badge" data-testid="wf-pont-axe"[^>]*>Axe tronqué à 64 k€<\/span>/);
+    expect(html).toContain('aria-labelledby="wf-pont-titre"');
+    expect(html).toContain('data-testid="wf-pont"'); // la figure du composant partagé est conservée
+    expect(html.indexOf('class="wf-scroll"')).toBeLessThan(html.indexOf('data-testid="wf-pont"'));
+    expect(html.indexOf('data-testid="wf-pont"')).toBeLessThan(html.indexOf("Note de test."));
+    expect(html.indexOf("Note de test.")).toBeGreaterThan(html.indexOf("</figure>"));
+  });
+  it("largeur minimale du tracé : 58 px par barre + 56 px de marge ; mention de défilement à partir de 5 barres", () => {
+    const pont = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-pont", title: "Pont", start: 6642000, end: 6997000, steps: pontSteps, unit: "eur" }));
+    expect(pont).toContain("--wf-min:288px"); // 4 barres : (2 + 2) × 58 + 56
+    expect(pont).not.toContain("wf-hint");
+    const etp = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-etp", title: "ETP", start: 61000, end: 64300, steps: etpSteps, unit: "etp" }));
+    expect(etp).toContain("--wf-min:462px"); // 7 barres : (5 + 2) × 58 + 56
+    expect(etp).toContain("faire défiler le graphique horizontalement");
+    expect(etp).toContain("Axe tronqué à 5,8 ETP");
+  });
+  it("axe non tronqué : pas de badge", () => {
+    const html = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-x", title: "Large", start: 100000, end: 500000, steps: [{ label: "x", value: 400000 }], unit: "eur" }));
+    expect(html).not.toContain("wf-badge");
+    expect(html).not.toContain("Axe tronqué");
+  });
+});
+
+describe("signe moins des montants affichés", () => {
+  it("« − » typographique pour les montants négatifs et les nombres, « + » écrit pour un écart positif, zéro sans signe", () => {
+    const norm = (t: string) => t.replace(/\s/g, " ");
+    expect(norm(neg("-79,51 €"))).toBe("−79,51 €");
+    expect(neg("−0,50")).toBe("−0,50"); // déjà typographique : inchangé
+    expect(neg("-1")).toBe("−1");
+    expect(neg("12 €")).toBe("12 €");
+    expect(norm(eurosSigned(-7951))).toBe("−79,51 €");
+    expect(norm(eurosSigned(355000))).toBe("+3 550,00 €");
+    expect(norm(eurosSigned(0))).toBe("0,00 €");
+  });
+});
+
+describe("barre de filtres commune à l'écart budgétaire et à l'analyse des écarts", () => {
+  const long = "Scénario « Variante T4 » (Révisé, brouillon) 2026";
+  const loaded = {
+    options: [{ value: "reel:2025", label: "Réel PayFit 2025" }, { value: "scenario:s1:2026", label: long }],
+    selected: ["reel:2025", "scenario:s1:2026"], from: "01", to: "12", services: ["A", "B"], hasNv: false, filter: null,
+  } as unknown as Loaded;
+  const count = (html: string, cls: string) => (html.match(new RegExp(`class="field-row ${cls}(?: [^"]*)?"`, "g")) ?? []).length;
+  it("même grille : versions (3 ou 2) sur la première ligne, puis premier mois, dernier mois, service et boutons", () => {
+    const three = renderToStaticMarkup(h(PickerForm, { path: "/p", loaded, columns: 3 }));
+    const two = renderToStaticMarkup(h(PickerForm, { path: "/p", loaded, columns: 2 }));
+    expect([count(three, "ef-v"), count(two, "ef-v")]).toEqual([3, 2]);
+    for (const html of [three, two]) {
+      expect([count(html, "ef-m"), count(html, "ef-s")]).toEqual([2, 1]);
+      expect(html).toContain('class="filters ecart-filters"');
+      expect(html.indexOf('id="v1"')).toBeLessThan(html.indexOf('id="de"'));
+      expect(html.indexOf('id="a"')).toBeLessThan(html.indexOf('id="service"'));
+      expect(html.indexOf('id="service"')).toBeLessThan(html.indexOf("ecart-filter-actions"));
+      expect(html).toContain(">Afficher<");
+      expect(html).toContain(">Réinitialiser<");
+    }
+    expect(three.match(/ef-m1/g)).toHaveLength(1); // le premier mois ouvre la seconde ligne de la grille, même avec 2 versions seulement
+    expect(two.match(/ef-m1/g)).toHaveLength(1);
+    expect(three).toContain('id="v3"');
+    expect(two).not.toContain('id="v3"');
+  });
+  it("le libellé complet de la version choisie est répété en infobulle du champ", () => {
+    const html = renderToStaticMarkup(h(PickerForm, { path: "/p", loaded, columns: 2 }));
+    expect(html).toContain(`title="${long}"`);
+  });
+  it("versions en toutes lettres : pastille, mot « Version n » pour la lecture à voix haute, libellé complet", () => {
+    const html = renderToStaticMarkup(h(VersionChain, { labels: ["Réel PayFit 2025", long] }));
+    expect(html).toContain("Version 1 : ");
+    expect(html).toContain("Version 2 : ");
+    expect(html).toContain(long);
+    expect(html).toContain('<span class="ver-badge" aria-hidden="true">2</span>');
+    const second = renderToStaticMarkup(h(VersionChain, { labels: ["B", "C"], first: 2 }));
+    expect(second).toContain('<span class="ver-badge" aria-hidden="true">2</span>');
+    expect(second).toContain('<span class="ver-badge" aria-hidden="true">3</span>');
+  });
+});
+
+describe("vocabulaire de l'analyse des écarts", () => {
+  it("les commentaires du tableau d'ETP parlent de « version 1 » et « version 2 », jamais de version A ou B", () => {
+    const ids = Object.keys(STEP_COMMENTS);
+    expect(ids.sort()).toEqual(["entrees-new", "entrees-report", "etp-change", "sorties", "sorties-deport"]);
+    for (const text of Object.values(STEP_COMMENTS)) {
+      expect(text).not.toMatch(/\b(version|versions) [AB]\b/);
+      expect(text).not.toMatch(/ (en|pendant|de) [AB]\b/);
+      expect(text).toMatch(/version [12]/);
+    }
+    expect(STEP_COMMENTS["entrees-new"]).toBe("Salariés présents dans la version 2 et jamais présents dans la version 1.");
+    expect(STEP_COMMENTS.sorties).toBe("Salariés présents dans la version 1 et jamais présents dans la version 2.");
+  });
+});
+
+describe("pages « Prévu » de la masse salariale", () => {
+  const src = readFileSync("src/app/e/[slug]/studio-rh/masse-salariale/[vue]/page.tsx", "utf8");
+  it("chaque phrase d'état commence par « Non réalisé : » ou « Non disponible avec les données lues : »", () => {
+    const leads = [...src.matchAll(/lead: "([^"]+)"/g)].map((m) => m[1]);
+    expect(leads).toHaveLength(4);
+    for (const l of leads) expect(l).toMatch(/^(Non réalisé|Non disponible avec les données lues) : /);
+  });
+  it("aucun terme interdit dans l'interface (outil observé, cahier, webinaire, capture, recette juridique, tutoiement, « rien n'est simulé »)", () => {
+    for (const w of ["outil observé", "cahier", "webinaire", "capture", "recette juridique", "rien n'est simulé", " toi ", "avec toi", "tu "]) expect(src.toLowerCase()).not.toContain(w);
+  });
+  it("le titre de la page écrit « Masse salariale par organisation » en toutes lettres (l'onglet garde « MS »)", () => {
+    expect(src).toContain('"Masse salariale par organisation"');
+  });
+});
+
+// Poids d'une contribution = contribution ÷ écart total. Cas de référence du tableau de masse (calcul à la main) : écart total
+// 3 550,00 € = 1 875,00 € (rémunération) + 1 000,00 € (primes) + 675,00 € (charges) ; 187 500 ÷ 355 000 = 52,8169 % ;
+// 100 000 ÷ 355 000 = 28,1690 % ; 67 500 ÷ 355 000 = 19,0141 % ; les trois arrondis font 100,00 %.
+describe("poids des écarts", () => {
+  const sp = (t: string) => t.replace(/\s/g, " "); // espaces insécables → espace
+  const cell = (n: number | null, total: number, reason?: string | null) => sp(renderToStaticMarkup(h(Weight, { n, total, reason })));
+  it("poids exact des contributions, signe écrit", () => {
+    expect(sp(weightText(187500, 355000))).toBe("+52,82 %");
+    expect(sp(weightText(100000, 355000))).toBe("+28,17 %");
+    expect(sp(weightText(67500, 355000))).toBe("+19,01 %");
+    expect(sp(weightText(-7951, 355000))).toBe("−2,24 %"); // 7 951 ÷ 355 000 = 2,2397 % : contribution en sens inverse de l'écart total
+    expect(sp(weightText(-100, -400))).toBe("+25,00 %"); // même sens que l'écart total (tous deux négatifs)
+    expect(cell(187500, 355000)).toBe("+52,82 %");
+  });
+  it("contribution nulle : « — » ; écart total nul ou contribution n.d. : « n.d. » avec sa raison, jamais un pourcentage reconstitué", () => {
+    expect(cell(0, 355000)).toBe("—");
+    const totalZero = cell(500, 0);
+    expect(totalZero).toContain(">n.d.</abbr>");
+    expect(totalZero).toContain("écart total nul");
+    expect(totalZero).not.toContain("%");
+    const nd = cell(null, 355000, "compte 64 absent de la version 2");
+    expect(nd).toContain('title="compte 64 absent de la version 2"');
+    expect(nd).toContain(">n.d.</abbr>");
   });
 });

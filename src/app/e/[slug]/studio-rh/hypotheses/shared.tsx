@@ -4,6 +4,7 @@ import { formatEuros } from "@/lib/money";
 import { hireKey } from "@/lib/budget/engine";
 import { CATEGORY_LABELS, type Amount, type BaseSnapshot, type Hypothesis, type Scope } from "@/lib/budget/types";
 import { fmtFixed } from "@/lib/rh/kpi/format";
+import { dateFr } from "@/lib/viz/hyp-saisie";
 
 // Éléments communs aux écrans de saisie du scénario : libellés, détail d'une hypothèse, champs de formulaire.
 export const UNIT_LABEL = { eur: "montant en euros", pct: "taux en %", nombre: "nombre" } as const;
@@ -28,14 +29,14 @@ export function detailOf(h: Hypothesis, base: BaseSnapshot, hyps: Hypothesis[]):
     case "embauche": {
       const rep = h.replaces ? hyps.find((x) => x.id === h.replaces) : null;
       const copied = h.copiedFrom ? (base.contracts.find((c) => c.contractKey === h.copiedFrom)?.label ?? hyps.find((x) => hireKey(x.id) === h.copiedFrom)?.label ?? h.copiedFrom) : null;
-      return `${h.service ?? "Non ventilé"}${h.category ? ` · ${CATEGORY_LABELS[h.category]}` : ""}${h.metier ? ` · ${h.metier}` : ""}${h.motif ? ` · motif : ${h.motif}` : ""} · du ${h.start}${h.end ? ` au ${h.end}` : ""} · ${formatEuros(h.grossFullTimeCents)} brut temps plein × ${pct(h.quotaBps)} · charges ${pct(h.chargesBps)} · ${h.counted ? "compté" : "non compté"} dans l'effectif${rep ? ` · remplace « ${rep.label} »` : ""}${copied ? ` · profil recopié de « ${copied} »` : ""}`;
+      return `${h.service ?? "Non ventilé"}${h.category ? ` · ${CATEGORY_LABELS[h.category]}` : ""}${h.metier ? ` · ${h.metier}` : ""}${h.motif ? ` · motif : ${h.motif}` : ""} · du ${dateFr(h.start)}${h.end ? ` au ${dateFr(h.end)}` : ""} · ${formatEuros(h.grossFullTimeCents)} brut temps plein × ${pct(h.quotaBps)} · charges ${pct(h.chargesBps)} · ${h.counted ? "compté" : "non compté"} dans l'effectif${rep ? ` · remplace « ${rep.label} »` : ""}${copied ? ` · profil recopié de « ${copied} »` : ""}`;
     }
     case "depart":
-      return `${who(h.contractKey)} · ${h.motif ? `${h.motif} · ` : ""}dernier jour payé ${h.lastPaidDate}${h.exitCost ? ` · coûts de sortie ${amountText(h.exitCost)}` : ""}`;
+      return `${who(h.contractKey)} · ${h.motif ? `${h.motif} · ` : ""}dernier jour payé ${dateFr(h.lastPaidDate)}${h.exitCost ? ` · coûts de sortie ${amountText(h.exitCost)}` : ""}`;
     case "ponctuel":
       return `${formatMonth(h.month)} · ${amountText(h.amount)} · ${h.service ?? "toute l'entreprise"}${h.nonRecurring ? " · non récurrent" : ""}`;
     case "absence":
-      return `${who(h.contractKey)} · du ${h.from} au ${h.to} · payé à ${fmtFixed({ num: h.paidBps, den: 100 }, 0)} % du salaire`;
+      return `${who(h.contractKey)} · du ${dateFr(h.from)} au ${dateFr(h.to)} · payé à ${fmtFixed({ num: h.paidBps, den: 100 }, 0)} % du salaire`;
     case "categorie":
       return `${who(h.contractKey)} · ${CATEGORY_LABELS[h.category]}`;
     case "realise":
@@ -54,6 +55,30 @@ export function detailOf(h: Hypothesis, base: BaseSnapshot, hyps: Hypothesis[]):
     }
   }
 }
+
+// Titre d'un panneau : un seul motif (titre puis phrase dessous ; les liens « règle » et « définition » vont dans la phrase).
+export const CardTitle = ({ title, children }: { title: React.ReactNode; children?: React.ReactNode }) => (
+  <div className="hs-title">
+    <h2>{title}</h2>
+    {children ? <p className="desc">{children}</p> : null}
+  </div>
+);
+
+// Règles détaillées d'un écran, repliées sous la phrase du titre.
+export const Rules = ({ summary = "Règles de saisie", children }: { summary?: string; children: React.ReactNode }) => (
+  <details className="hs-rules">
+    <summary className="hs-disclose hs-quiet">{summary}</summary>
+    <div className="hs-rules-body">{children}</div>
+  </details>
+);
+
+// État d'un contrôle : même composant pour tous les contrôles (icône, libellé, fond pâle).
+export const Verdict = ({ ok, children, testid }: { ok: boolean; children: React.ReactNode; testid?: string }) => (
+  <span className={`hs-verdict${ok ? "" : " is-gap"}`} data-testid={testid}>
+    <span aria-hidden="true">{ok ? "✓" : "!"}</span>
+    <span>{children}</span>
+  </span>
+);
 
 // Champ de formulaire : libellé, aide courte facultative (hors du libellé, reliée au champ par aria-describedby), champ.
 export const Field = ({ id, label, hint, children }: { id: string; label: string; hint?: React.ReactNode; children: React.ReactNode }) => (

@@ -16,11 +16,22 @@
 .kpi-read-details[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
 .kpi-read-details > p { padding: 10px 12px 12px; overflow-wrap: anywhere; line-height: 1.55; }
 
+/* Limites de la lecture : les deux mentions de lecture PayFit (historique, quotités) réunies dans un seul bloc repliable ;
+   le résumé (titre, nombre, une ligne par limite) reste visible bloc fermé. Texte d'encre : le gris n'atteint pas 4,5:1 sur le fond bleuté. */
+.kpi-limits { border: 1px solid #d6e3ff; border-radius: 8px; background: var(--blue-soft); }
+.kpi-limits > summary { cursor: pointer; padding: 9px 14px; font-size: var(--clair-type-form); line-height: 1.5; color: #434a5a; }
+.kpi-limits-title { font-weight: 600; color: var(--ink); }
+.kpi-limits-digest { margin-left: 10px; overflow-wrap: anywhere; }
+.kpi-limits[open] > summary { border-bottom: 1px solid #d6e3ff; }
+.kpi-limits-body { display: grid; gap: 10px; padding: 12px 14px 14px; }
+.kpi-limits-body .notice { background: none; border: 0; padding: 0; line-height: 1.55; }
+
 /* Ligne de période sous les filtres. */
 .kpi-period strong { color: var(--ink); font-weight: 600; }
 
 /* Tuiles d'indicateurs : valeur en grand, comparaison N-1 sous un filet, paramètres repliés, liens en pied. */
-.facts.kpi-tiles { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+/* Colonnes régulières (auto-fill) : une tuile isolée garde la largeur d'une colonne au lieu de s'étirer sur tout le panneau. */
+.facts.kpi-tiles { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .kpi-tiles .kpi-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 0; }
 .kpi-tiles .kpi-tile dt { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
 .kpi-tiles .kpi-tile dd { margin: 0; font-size: var(--clair-type-kpi); font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -36,6 +47,15 @@
 .kpi-tile .tile-more[open] > summary { margin-bottom: 4px; }
 .kpi-tile .tile-more .tile-foot { display: block; margin-bottom: 6px; line-height: 1.5; overflow-wrap: anywhere; }
 .kpi-tile .tile-links { margin-top: auto; padding-top: 4px; }
+/* Types d'absence (dans « Paramètres et périmètre ») : une ligne par rubrique ; un code sans libellé français reste discret. */
+.kpi-tile .tile-more .tile-foot.tile-types { display: grid; gap: 4px; margin-bottom: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.kpi-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; color: #565d6d; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+/* Les six blocs d'une tuile (titre, valeur, remarques, N-1 et écart, paramètres, liens) occupent six rangées de la grille des tuiles :
+   les rangées s'alignent d'une tuile à l'autre de la même ligne. Sans sous-grille, le pied de tuile reste au bas de la carte. */
+@supports (grid-template-rows: subgrid) {
+  .kpi-tiles .kpi-tile { display: grid; grid-row: span 6; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); row-gap: 6px; align-content: stretch; }
+  .kpi-tile .tile-links { align-self: end; margin-top: 0; }
+}
 
 /* Lecture graphique : deux colonnes, une seule sous 960 px ; un graphique « large » prend toute la ligne. */
 .kpi-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
@@ -52,6 +72,23 @@
 .data-table.kpi-table tfoot tr.total > :is(td, th) { background: #eef1f6; border-top: 1px solid #d8dce5; }
 .data-table.kpi-table.sticky-first tfoot tr.total > :first-child { background: #eef1f6; }
 .data-table.kpi-table .swatch { vertical-align: -1px; }
+/* Valeurs qui ouvrent un détail : texte courant, pointillé discret ; soulignement plein et bleu au survol et au focus. */
+.data-table.kpi-table td > a { color: var(--ink); text-decoration: none; border-bottom: 1px dotted #7a8396; }
+.data-table.kpi-table td > a:is(.nd, .lower) { color: var(--muted); }
+.data-table.kpi-table td > a:hover, .data-table.kpi-table td > a:focus-visible { color: var(--blue); border-bottom: 1px solid var(--blue); }
+.data-table.kpi-table td > a:focus-visible { outline: 3px solid #8aafff; outline-offset: 2px; border-radius: 2px; }
+/* Couverture : texte, aligné à gauche comme son en-tête. */
+.data-table.kpi-table td[data-col="coverage"] { text-align: left; }
+/* Tableau court (catégories) : le cadre épouse le tableau au lieu de répartir trois colonnes sur toute la largeur. */
+.table-wrap.kpi-fit { width: fit-content; max-width: 100%; min-width: min(100%, 460px); }
+/* Téléphone : marges de cellule réduites et en-têtes sur deux lignes, pour montrer plus de colonnes avant de défiler. */
+@media (max-width: 720px) {
+  .data-table.kpi-table th, .data-table.kpi-table td { padding: 9px 9px; }
+  .data-table.kpi-table thead th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+}
+/* Indice de défilement : seulement sur téléphone, où les tableaux dépassent presque toujours. */
+.kpi-scroll-hint { display: none; margin: 0 0 -8px; font-size: var(--clair-type-label); color: var(--muted); }
+@media (max-width: 560px) { .kpi-scroll-hint { display: block; } }
 
 /* Effectifs mensuels : volet de paramètres, panneau « Graphiques » (anneau à gauche, barres à droite). */
 .em-param-fixed { font-size: var(--clair-type-form); color: var(--muted); line-height: 1.5; }
@@ -60,7 +97,20 @@
 .em-param-note ul { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 6px; line-height: 1.45; }
 .filters.bar .field-row.em-version { flex: 2 1 280px; }
 .filters.bar.kpi-bar .btn { flex: 0 0 auto; }
+.filters.bar .kpi-actions { display: flex; gap: 10px; flex: 0 0 auto; }
+/* Téléphone : les boutons partagent une même ligne, pleine largeur, sous les champs. */
+@media (max-width: 720px) {
+  .filters.bar.kpi-bar > .btn.primary { flex: 1 1 100%; }
+  .filters.bar.kpi-bar .kpi-actions { flex: 1 1 100%; }
+  .filters.bar.kpi-bar .kpi-actions .btn { flex: 1 1 0; }
+}
 .em-charts { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px 32px; align-items: start; }
 .em-donut, .em-bars { min-width: 0; }
+/* Répartition mensuelle : douze colonnes de mois compactes, première colonne (groupe) fixe ; seuls les montants en euros défilent. */
+.data-table.em-monthly th, .data-table.em-monthly td { padding: 9px 7px; }
+.data-table.em-monthly :is(th, td):first-child { padding-left: 12px; padding-right: 10px; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.data-table.em-monthly :is(th, td).num { min-width: 44px; }
+.data-table.em-monthly th.num .tile-foot { display: block; font-size: 10px; line-height: 1.2; }
+@media (max-width: 560px) { .data-table.em-monthly :is(th, td):first-child { max-width: 7rem; } }
 /* Le volet de paramètres (250 px) et le menu laissent peu de largeur : sous 1280 px les barres passent sous l'anneau pour rester lisibles. */
 @media (max-width: 1280px) { .em-charts { grid-template-columns: minmax(0, 1fr); } }

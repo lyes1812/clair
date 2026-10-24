@@ -11,9 +11,11 @@ import {
   affichageOf,
   bridgeWaterfall,
   comparisonSeries,
+  contributionsChart,
   costSeries,
   distinctColors,
   etpSeries,
+  frDates,
   gapSeries,
   hasValues,
   headcountSeries,
@@ -32,6 +34,7 @@ import {
   showCharts,
   showTables,
   withAffichage,
+  yearSpan,
   type RowIn,
 } from "@/lib/viz/hypotheses";
 import { ComparisonView } from "@/app/e/[slug]/studio-rh/hypotheses/ComparisonView";
@@ -59,6 +62,35 @@ describe("affichage (Afficher tout / Graphique / Tableau)", () => {
   it("graphiques masqués par « tableau », tableaux masqués par « graphique »", () => {
     expect([showCharts("tout"), showCharts("graphique"), showCharts("tableau")]).toEqual([true, true, false]);
     expect([showTables("tout"), showTables("graphique"), showTables("tableau")]).toEqual([true, false, true]);
+  });
+});
+
+describe("formats de dates", () => {
+  it("jour ISO → jj/mm/aaaa, mois ISO → « novembre 2026 », plage de mois comprise", () => {
+    expect(frDates("entré le 2026-09-16 : mois de référence incomplet")).toBe("entré le 16/09/2026 : mois de référence incomplet");
+    expect(frDates("C : base n.d. (2026-01 → 2026-12)")).toBe("C : base n.d. (janvier 2026 → décembre 2026)");
+    expect(frDates("du 2026-11-16 au 2026-12-31, puis 2027-01")).toBe("du 16/11/2026 au 31/12/2026, puis janvier 2027");
+  });
+  it("« de » devant avril, août ou octobre s'élide ; devant les autres mois, il reste", () => {
+    expect(frDates("paie de 2026-04 non clôturée")).toBe("paie d'avril 2026 non clôturée");
+    expect(frDates("salaire de 2026-08 nul")).toBe("salaire d'août 2026 nul");
+    expect(frDates("De 2026-10 à 2026-11")).toBe("D'octobre 2026 à novembre 2026");
+    expect(frDates("paie de 2026-11 et de 2026-03")).toBe("paie de novembre 2026 et de mars 2026");
+    // Un jour reste un jour : « de 12/10/2026 », pas d'élision.
+    expect(frDates("départ de 2026-10-12")).toBe("départ de 12/10/2026");
+  });
+  it("ce qui ressemble à une date sans en être une reste intact (mois ou jour hors calendrier, identifiant, numéro accolé)", () => {
+    expect(frDates("2026-13")).toBe("2026-13");
+    expect(frDates("2026-11-45")).toBe("2026-11-45");
+    expect(frDates("2026-02-31")).toBe("2026-02-31");
+    expect(frDates("2028-02-29")).toBe("29/02/2028");
+    expect(frDates("contrat C-2026-11 et ref2026-11")).toBe("contrat C-2026-11 et ref2026-11");
+    expect(frDates("aucune date ici")).toBe("aucune date ici");
+  });
+  it("années couvertes : une seule, ou première–dernière", () => {
+    expect(yearSpan(["2026-10", "2026-11", "2026-12"])).toBe("2026");
+    expect(yearSpan(["2026-11", "2026-12", "2027-01"])).toBe("2026–2027");
+    expect(yearSpan([])).toBe("");
   });
 });
 
@@ -112,7 +144,8 @@ describe("projection : coût, effectif et ETP par mois", () => {
     expect(hasValues(etpSeries([rows[3]]))).toBe(false);
   });
   it("note des mois n.d. : raison suivie de ses mois", () => {
-    expect(ndMonthsNote(rows)).toBe("C : base n.d. (2026-11)");
+    // Un seul format de date à l'écran : le mois s'écrit « novembre 2026 », jamais « 2026-11 ».
+    expect(ndMonthsNote(rows)).toBe("C : base n.d. (novembre 2026)");
     expect(ndMonthsNote(rows.slice(0, 3))).toBeNull();
   });
 });
@@ -152,6 +185,58 @@ describe("projection : coût par nature de contribution", () => {
   });
   it("aucune contribution (tous les mois n.d.) : aucune série", () => {
     expect(natureChart([{ month: "2026-10", kind: "nd", reasons: ["x"] }]).series).toEqual([]);
+  });
+  it("contributing : vrai seulement quand le moteur a au moins une contribution de cette nature ce mois-là (jamais le mois n.d.)", () => {
+    // Séries : base, augmentation, embauche, sortie, départ ; mois : octobre, novembre (n.d.), décembre (base seule).
+    expect(chart.contributing).toEqual([
+      [true, false, true],
+      [true, false, false],
+      [true, false, false],
+      [true, false, false],
+      [true, false, false],
+    ]);
+  });
+  it("une date ISO dans la raison d'un mois n.d. s'écrit en français", () => {
+    const m: ProjectedMonth[] = [{ month: "2026-10", kind: "nd", reasons: ["C : entré le 2026-09-16"] }, val("2026-11", [contrib("base", 100)])];
+    expect(natureChart(m).series[0].reasons).toEqual(["C : entré le 16/09/2026", null]);
+  });
+});
+
+describe("contributions seules (sans la base)", () => {
+  const months: ProjectedMonth[] = [
+    val("2026-10", [contrib("base", 700000), contrib("base", 300000), contrib("augmentation", 30000), contrib("embauche", 250000), contrib("depart", -120000), contrib("fin-contrat", -5000), contrib("sortie", 50000)]),
+    { month: "2026-11", kind: "nd", reasons: ["C : base n.d.", "D : base n.d."] },
+    val("2026-12", [contrib("base", 1000000)]),
+  ];
+  const full = natureChart(months);
+  const only = contributionsChart(full);
+  it("seule la base est retirée : mêmes séries, mêmes teintes, mêmes valeurs du moteur (centimes)", () => {
+    expect(only.series.map((s) => s.key)).toEqual(["augmentation", "embauche", "sortie", "depart"]);
+    expect(only.series.map((s) => s.color)).toEqual(full.series.slice(1).map((s) => s.color));
+    expect(only.series.map((s) => s.values)).toEqual([[30000, null, 0], [250000, null, 0], [50000, null, 0], [-125000, null, 0]]);
+    expect(only.categories).toEqual(["oct.", "nov.", "déc."]);
+    expect(only.titles).toEqual(["octobre 2026", "novembre 2026", "décembre 2026"]);
+  });
+  it("base + contributions = coût du mois du moteur : 1 000 000 + (30 000 + 250 000 + 50 000 − 125 000) = 1 205 000", () => {
+    const at = (c: number) => full.series.find((s) => s.key === "base")!.values[c]! + only.series.reduce((t, s) => t + (s.values[c] ?? 0), 0);
+    expect([at(0), at(2)]).toEqual([1205000, 1000000]);
+  });
+  it("la raison du mois n.d., portée par la base dans le graphique complet, passe à la première série restante (la colonne reste hachurée avec sa raison)", () => {
+    expect(only.series[0].reasons).toEqual([null, "C : base n.d. ; D : base n.d.", null]);
+    expect(only.series[1].reasons).toEqual([null, null, null]);
+    expect(only.series.every((s) => s.values[1] === null)).toBe(true);
+  });
+  it("le tableau « — » reste aligné sur les séries restantes", () => {
+    expect(only.contributing).toEqual([[true, false, false], [true, false, false], [true, false, false], [true, false, false]]);
+  });
+  it("base seule : aucune série, on le dit à l'écran plutôt que de tracer une échelle vide", () => {
+    expect(contributionsChart(natureChart([val("2026-10", [contrib("base", 100)])])).series).toEqual([]);
+    expect(contributionsChart(natureChart([{ month: "2026-10", kind: "nd", reasons: ["x"] }])).series).toEqual([]);
+  });
+  it("moteur : augmentations 0 (aucune contribution), 290,50 € puis 399,91 € ; base 10 650,00 € écartée", () => {
+    const c = contributionsChart(natureChart(projOf(hyps).months));
+    expect(c.series.map((s) => [s.key, s.values])).toEqual([["augmentation", [0, 29050, 39991]]]);
+    expect(c.contributing).toEqual([[false, true, true]]);
   });
 });
 
@@ -286,7 +371,7 @@ describe("comparaison : courbes et écarts mensuels", () => {
     expect(g.reasons).toEqual([null, "Révisé T4 : paie non clôturée", "Réel courant : mois non couvert par cette lecture"]);
   });
   it("note des mois sans valeur : une phrase par lecture, raison suivie de ses mois", () => {
-    expect(ndReadings([sc, reel], M3)).toEqual(["Révisé T4 : paie non clôturée (2026-02)", "Réel courant : mois non couvert par cette lecture (2026-03)"]);
+    expect(ndReadings([sc, reel], M3)).toEqual(["Révisé T4 : paie non clôturée (février 2026)", "Réel courant : mois non couvert par cette lecture (mars 2026)"]);
   });
   it("style : N-1 en pointillés, budget et scénario comparé en pointillés de teintes distinctes, repli par rang", () => {
     expect(readingStyle("n1", "sc", 1)).toEqual({ color: "var(--chart-2)", dashed: true, area: false });
@@ -419,7 +504,10 @@ describe("ProjectionView rendue", () => {
     expect(html).toContain('data-testid="proj-nature-table"');
     const row = (k: string) => html.slice(html.indexOf(`data-nature="${k}"`), html.indexOf("</tr>", html.indexOf(`data-nature="${k}"`)));
     for (const v of [1065000, 1065000, 1065000]) expect(row("base")).toContain(formatEuros(v));
-    for (const v of [0, 29050, 39991]) expect(row("augmentation")).toContain(formatEuros(v));
+    // Octobre : aucune augmentation n'existe encore, le tableau écrit « — » (et non 0,00 €) avec sa raison au survol.
+    for (const v of [29050, 39991]) expect(row("augmentation")).toContain(formatEuros(v));
+    expect(row("augmentation")).not.toContain(formatEuros(0));
+    expect(row("augmentation")).toContain('title="aucune contribution de cette nature ce mois-là">—</td>');
     const foot = html.slice(html.indexOf('data-testid="proj-nature-total"'));
     for (const v of [1065000, 1094050, 1104991]) expect(foot.slice(0, 700)).toContain(formatEuros(v));
     // Les graphiques seuls n'ont pas ce tableau ; une projection n.d. n'a pas de nature à lister.
@@ -442,6 +530,36 @@ describe("ProjectionView rendue", () => {
     expect(html).toContain('data-testid="proj-nd"');
     expect(html).toContain("C : base n.d.");
     expect(html).toContain("n.d.");
+  });
+  it("second graphique « Contributions seules » sous celui par nature : sans la base, mêmes natures ; absent de l'affichage Tableau", () => {
+    const g = render("graphique");
+    expect(g.indexOf('data-testid="proj-chart-nature"')).toBeGreaterThan(-1);
+    expect(g.indexOf('data-testid="proj-chart-contributions"')).toBeGreaterThan(g.indexOf('data-testid="proj-chart-nature"'));
+    expect(g).toContain("Contributions seules, hors base — octobre 2026 → décembre 2026");
+    expect(render("tableau")).not.toContain('data-testid="proj-chart-contributions"');
+    // Base seule (aucune hypothèse de contribution) : pas de graphique, une phrase.
+    const none = render("graphique", projOf([fixC]));
+    expect(none).not.toContain('data-testid="proj-chart-contributions"');
+    expect(none).toContain('data-testid="proj-chart-contributions-vide"');
+  });
+  it("lignes de total identifiées (classe total) : coût du mois par nature, total d'un mois, total des lignes", () => {
+    const html = render("tout", proj, "2026-11");
+    expect(html).toContain('<tr class="total" data-testid="proj-nature-total">');
+    expect(html).toContain('<tr class="total" data-testid="proj-detail-total">');
+    expect(html).toMatch(/<tr class="total"><td colSpan="4">Total<\/td>/);
+  });
+  it("effectif écrit en personnes, jamais un nombre nu accolé à l'ETP ; une seule catégorie : pas de colonne Total en double", () => {
+    const html = render();
+    expect(html).toMatch(/\d+ personnes? · \d+,\d{2} ETP/);
+    expect(html).not.toMatch(/>\d+ · \d/);
+    expect(html).toContain('data-testid="proj-categories-table"');
+    expect(html).not.toContain('data-col="total"');
+  });
+  it("date ISO d'une raison n.d. : écrite en français, jamais « 2026-09-16 »", () => {
+    const ndProj = project(base, "2026-10", "2026-12", [], conv);
+    const html = render("graphique", ndProj);
+    expect(html).toContain("entré le 16/09/2026");
+    expect(html).not.toContain("2026-09-16");
   });
   it("mois ouvert : conservé dans l'adresse de la bascule ; valeur d'adresse invalide ignorée", () => {
     expect(render(undefined, proj, "2026-11")).toContain("mois=2026-11");
@@ -491,6 +609,9 @@ describe("ComparisonView rendue", () => {
     expect(t).not.toContain('data-testid="cmp-chart"');
     expect(t).toContain('data-testid="cmp-form"');
   });
+  it("ligne de total de l'année identifiée (classe total)", () => {
+    expect(render("tableau")).toContain('<tr class="total" data-testid="cmp-total">');
+  });
   it("le trait du scénario dit l'origine de ses mois : 9 mois réels figés puis 3 mois projetés", () => {
     expect(render("graphique")).toContain("Origine des mois du scénario (trait plein bleu) : réel janv.–sept. ; projeté oct.–déc.");
   });
@@ -529,6 +650,12 @@ describe("LandingView rendue", () => {
     expect(t).toContain('data-testid="atr-sens-table"');
     expect(t).not.toContain('data-testid="atr-wf-atterrissage"');
     expect(t).not.toContain('data-testid="atr-chart-sens"');
+  });
+  it("lignes de total identifiées ; dernier jour payé en jj/mm/aaaa (jamais ISO)", () => {
+    const t = render("tableau");
+    expect(t).toContain('<tr class="total" data-testid="atr-nonrec-total">');
+    expect(t).toContain("20/11/2026");
+    expect(t).not.toContain("2026-11-20");
   });
   it("la bascule conserve les variations choisies", () => {
     expect(render()).toMatch(/sv=dB%7Cjours&amp;sd=5/);
@@ -576,6 +703,38 @@ describe("EmbauchesView rendue", () => {
     expect(html).toContain("Embauches prévisionnelles");
     // Le stage de mars 2027 n'est pas dans les mois mais il est compté dans le total ; la note le dit.
     expect(html).toContain("commence hors des mois affichés");
+  });
+  it("graphique : titre « Postes par mois d'arrivée … — 2026 » (nom de l'axe et année), un seul titre, hauteur réduite quand le maximum est petit", () => {
+    const html = render();
+    expect(html).toContain("Postes par mois d&#x27;arrivée, par catégorie de contrat — 2026");
+    expect(html).not.toContain("Embauches par mois de début");
+    expect(html).toContain("Axe vertical : nombre de postes");
+    expect(html).toContain('height="210"');
+  });
+  it("ligne Total du tableau par mois en pied de tableau, classe total : 1 poste en octobre, 1 en novembre, 3 au total (le stage de 2027 est compté)", () => {
+    const html = render();
+    expect(html).toContain('<tfoot><tr class="total" data-testid="emb-by-month-total"><td>Total</td><td class="num">1</td><td class="num">1</td><td class="num">—</td><td class="num">3</td></tr></tfoot>');
+  });
+  it("dates de la liste en jj/mm/aaaa (une date ne se coupe pas) ; fin de poste en ligne d'appoint ; aucune date ISO", () => {
+    const html = render({ affichage: "tableau", hypotheses: [hire("a", { start: "2026-11-16", end: "2026-12-31", category: "cdd" })] });
+    expect(html).toContain('<td class="hr-date">16/11/2026<span class="hr-line">fin 31/12/2026</span></td>');
+    expect(html).not.toContain("2026-11-16");
+    expect(html).not.toContain("2026-12-31");
+  });
+  it("liste : neuf colonnes (effectif, remplacement et fin en lignes d'appoint) avec taux de charges et suppression", () => {
+    const html = render({ affichage: "tableau", canEdit: true });
+    const head = html.slice(html.indexOf("<thead>"), html.indexOf("</thead>"));
+    expect(head.match(/<th[ >]/g)).toHaveLength(9);
+    expect(head).toContain("Taux de charges");
+    expect(html).toContain("compté dans l&#x27;effectif");
+    expect(html).toContain('data-testid="hyp-delete-a"');
+  });
+  it("regroupements n.d. : une seule note avec les deux raisons (plus de lignes italiques répétées)", () => {
+    const html = render();
+    expect(html.match(/data-testid="emb-group-nd"/g)).toHaveLength(1);
+    const note = html.slice(html.indexOf('data-testid="emb-group-nd"'), html.indexOf("</p>", html.indexOf('data-testid="emb-group-nd"')));
+    expect(note).toContain("par métier (aucun poste n&#x27;a de métier renseigné)");
+    expect(note).toContain("par motif d&#x27;embauche (aucun poste n&#x27;a de motif d&#x27;embauche renseigné)");
   });
   it("regroupement : catégorie par défaut ; métier et motif n.d. avec leur raison quand aucun poste ne les renseigne", () => {
     const html = render();
