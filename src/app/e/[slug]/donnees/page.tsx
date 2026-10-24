@@ -1,4 +1,6 @@
 import "@/styles/donnees.css";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { DATA_ITEM, STUDIO_RH_ITEMS } from "@/lib/nav";
 import { dateTimeFmt, PROVIDER_LABELS } from "@/lib/connectors/labels";
 import { activeSync, getConnection, lastSync, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
@@ -84,7 +86,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
       <section className="panel source-choice dn-choice" data-testid={`source-choice-${domain}`}>
         <div className="source-head">
           <div>
-            <h3>Source retenue pour les modules</h3>
+            <h3>Source retenue pour les modules<GlossaryLink slug={slug} term={DONNEES_TERMS.sourceRetenue} /></h3>
             <p data-testid={`source-chosen-${domain}`}>
               {r.chosen ? <strong>{PROVIDER_LABELS[r.chosen]}</strong> : <strong>n.d.</strong>} <span className="desc">— {r.reason}</span>
             </p>
@@ -223,7 +225,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
     <>
       <PageHead kicker="Données" title={DATA_ITEM.label}>
         <p className="desc">
-          Toutes les sources de l'espace, en lecture seule. Rien n'est lu tant qu'une synchronisation n'est pas lancée, et chaque lecture passe par un aperçu avant d'être appliquée.
+          Sources de l'espace, en lecture seule.<GlossaryLink slug={slug} term={DONNEES_TERMS.lecture} />
         </p>
       </PageHead>
 

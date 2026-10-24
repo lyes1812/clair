@@ -1,5 +1,15 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { createElement as h } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { CollabHeader, FindingList, StatePill, Tile } from "@/app/e/[slug]/studio-rh/collaborateurs/components";
 import { unitFormat } from "@/components/charts/units";
+import { glossaryEntry } from "@/lib/glossary";
+import { GLOSSARY_RH } from "@/lib/glossary/rh";
+import { RH_DEFINITIONS } from "@/lib/rh/definitions";
+import type { FindingDraft } from "@/lib/rh/referential/types";
+import type { CollabContext } from "@/lib/rh/view";
 import {
   atLeast,
   clearMonths,
@@ -28,6 +38,7 @@ import {
   shortQualifier,
   stripCellTitle,
   stripLabel,
+  tileFoot,
   type MonthCountsIn,
   type StripCellIn,
 } from "@/lib/viz/collaborateurs";
@@ -316,5 +327,243 @@ describe("accords", () => {
     expect(plural(7, "ligne")).toBe("7 lignes");
     expect(plural(3, "mois", "mois")).toBe("3 mois");
     expect(plural(1250, "ligne").replace(/\s/g, " ")).toBe("1 250 lignes");
+  });
+});
+
+describe("pied de tuile", () => {
+  it("la borne basse reste écrite, sans le renvoi « voir la couverture du mois »", () => {
+    expect(tileFoot("borne basse (voir la couverture du mois)")).toBe("borne basse");
+    expect(tileFoot("borne basse (voir la couverture du mois) · 2 déclaré(s) après leur fin, non compté(s)")).toBe("borne basse · 2 déclaré(s) après leur fin, non compté(s)");
+  });
+  it("les données qui qualifient le chiffre restent, mois en clair", () => {
+    expect(tileFoot("1 sur les mois couverts (10/12) ; n.d. : 2026-11 → 2026-12")).toBe("1 sur les mois couverts (10/12) ; n.d. : nov. à déc. 2026");
+    expect(tileFoot("3 contrats")).toBe("3 contrats");
+  });
+  it("rien à dire : null (« au moins » seul est un marqueur interne, pas un pied)", () => {
+    expect(tileFoot(undefined)).toBeNull();
+    expect(tileFoot("")).toBeNull();
+    expect(tileFoot("au moins")).toBeNull();
+    expect(tileFoot("(voir la couverture du mois)")).toBeNull();
+  });
+});
+
+// --- Glossaire de la famille Collaborateurs et univers de couleurs de l'écran
+const ZONE = join(process.cwd(), "src/app/e/[slug]/studio-rh/collaborateurs");
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((f) => {
+    const p = join(dir, f);
+    return statSync(p).isDirectory() ? sources(p) : /\.tsx?$/.test(f) ? [p] : [];
+  });
+}
+const zoneText = sources(ZONE).map((f) => readFileSync(f, "utf8")).join("\n");
+
+describe("glossaire : famille Collaborateurs", () => {
+  it("les définitions existantes gardent leur identifiant d'ancre et leur texte (à la mise en paragraphes et à une retouche de rédaction près)", () => {
+    const flat = (t: string) => t.replace(/\s*\n\n\s*/g, " ");
+    for (const d of RH_DEFINITIONS) {
+      const e = GLOSSARY_RH.find((x) => x.id === d.id);
+      expect(e, d.id).toBeDefined();
+      expect(e!.term).toBe(d.title);
+      const source = d.text.replace("constaté sur le compte pilote le 22/10/2026 :", "constat sur un compte PayFit :");
+      expect(flat(e!.definition).startsWith(source), d.id).toBe(true);
+    }
+  });
+  it("la borne basse est dite en français de produit : pas de « compte pilote », texte en paragraphes", () => {
+    const e = GLOSSARY_RH.find((x) => x.id === "lower-bound")!;
+    expect(e.definition).not.toMatch(/compte pilote|constaté sur/);
+    expect(e.definition).toContain("constat sur un compte PayFit");
+    expect(e.definition.split("\n\n").length).toBeGreaterThanOrEqual(3);
+    // Le détail retiré de l'en-tête des écrans (contrat qui fait suite à un contrat non renvoyé, dénominateurs réduits) est ici.
+    expect(e.definition).toContain("compte comme une entrée");
+    expect(e.definition).toContain("dénominateurs sont réduits");
+  });
+  it("« Voir aussi » : des entrées qui existent, jamais l'entrée elle-même, sans doublon", () => {
+    let withSee = 0;
+    for (const e of GLOSSARY_RH) {
+      const see = e.see ?? [];
+      if (see.length) withSee++;
+      expect(new Set(see).size, e.id).toBe(see.length);
+      for (const id of see) {
+        expect(id, e.id).not.toBe(e.id);
+        expect(glossaryEntry(id), `${e.id} → ${id}`).toBeDefined();
+      }
+    }
+    expect(withSee).toBeGreaterThan(10);
+  });
+  it("identifiants uniques, kebab-case, famille Collaborateurs, définition et terme non vides", () => {
+    const ids = GLOSSARY_RH.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const e of GLOSSARY_RH) {
+      expect(e.id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+      expect(e.family).toBe("Collaborateurs");
+      expect(e.term.trim()).not.toBe("");
+      expect(e.definition.trim()).not.toBe("");
+    }
+  });
+  it("le texte déplacé des écrans est au glossaire", () => {
+    const def = (id: string) => GLOSSARY_RH.find((e) => e.id === id)!.definition;
+    // Bloc « Ce qui est n.d. et pourquoi » : les sept cas.
+    for (const cas of ["Période postérieure à la date de référence", "Période non couverte", "Mois DSN incomplet ou bloqué", "Borne basse (PayFit)", "Champ non porté par la source", "Champ non renseigné", "Droit non accordé"]) expect(def("collab-nd-raisons")).toContain(cas);
+    // Natures comptées, note du graphique des mouvements, contrats continus, fiche, attributs lus à la date de lecture.
+    expect(def("natures")).toContain("CDI et CDD");
+    expect(def("movements-chart")).toContain("Un mois n.d. ou en borne basse n'est pas tracé");
+    expect(def("movements")).toContain("ne sont pas neutralisés");
+    expect(def("fiche-collaborateur")).toContain("droits d'accès aux données individuelles");
+    expect(def("contract-read-attributes")).toContain("n'est jamais utilisé pour compter");
+  });
+  it("aucun vocabulaire interne ni tutoiement dans les définitions", () => {
+    for (const e of GLOSSARY_RH) expect(`${e.term} ${e.definition}`, e.id).not.toMatch(/outil observé|cahier|webinaire|\btu\b|\btoi\b|\bton\b/i);
+  });
+  it("chaque « ? » ou définition de tuile des écrans pointe vers une entrée existante (sinon le lien disparaît en silence)", () => {
+    const used = new Set<string>();
+    for (const re of [/term="([a-z0-9-]+)"/g, /\bdef="([a-z0-9-]+)"/g, /\bdef: "([a-z0-9-]+)"/g]) for (const m of zoneText.matchAll(re)) used.add(m[1]);
+    expect(used.size).toBeGreaterThan(10);
+    for (const id of used) expect(glossaryEntry(id), id).toBeDefined();
+  });
+  it("plus de bloc de définitions ni d'ancre locale morte dans les écrans", () => {
+    expect(zoneText).not.toContain("rh-definitions");
+    expect(zoneText).not.toMatch(/href="#def-/);
+    expect(zoneText).not.toContain("Définitions, paramètres et raisons");
+  });
+});
+
+describe("couleurs de l'écran Collaborateurs : bleu, blanc, noir, gris", () => {
+  const css = readFileSync(join(process.cwd(), "src/styles/collaborateurs.css"), "utf8");
+  const hsl = (hex: string): { h: number; s: number } => {
+    const v = hex.length === 3 ? [...hex].map((c) => parseInt(c + c, 16)) : [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const [r, g, b] = v.map((x) => x / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const d = max - min;
+    if (d === 0) return { h: 0, s: 0 };
+    const l = (max + min) / 2;
+    const s = d / (1 - Math.abs(2 * l - 1));
+    const h = max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return { h: h * 60, s };
+  };
+  it("toute couleur codée en dur est un gris ou un bleu (teinte 200° à 260°)", () => {
+    const hexes = [...css.matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)].map((m) => m[1]);
+    expect(hexes.length).toBeGreaterThan(5);
+    for (const h of hexes) {
+      const c = hsl(h);
+      expect(c.s < 0.25 || (c.h >= 200 && c.h <= 260), `#${h}`).toBe(true);
+    }
+  });
+  it("le détecteur reconnaît un vert, un rouge et un ambre", () => {
+    for (const h of ["138a55", "c4302b", "aa4051", "e8a317", "f1d6dc"]) {
+      const c = hsl(h);
+      expect(c.s < 0.25 || (c.h >= 200 && c.h <= 260), `#${h}`).toBe(false);
+    }
+  });
+  it("aucune variable rouge, verte ou de statut vert : ni tendance ni erreur sur cet écran", () => {
+    expect(css).not.toMatch(/var\(--(danger|danger-bg|bad|bad-soft|good|good-soft|ok)\)/);
+  });
+});
+
+// --- Rendu des composants partagés des écrans : le « ? » du glossaire remplace « Définition » et les notes de tuiles
+describe("rendu : tuiles, pastilles, constats", () => {
+  const tile = (shown: Parameters<typeof Tile>[0]["shown"], def = "headcount-persons", slug: string | null = "demo") =>
+    renderToStaticMarkup(h(Tile, { id: "headcount-persons", label: "Effectif fin de mois (personnes)", shown, def, slug: slug ?? undefined }));
+
+  it("une tuile porte un « ? » vers le glossaire (même identifiant d'ancre), plus de lien « Définition » ni d'ancre locale", () => {
+    const html = tile({ text: "7", kind: "value" });
+    expect(html).toContain('data-testid="headcount-persons"');
+    expect(html).toMatch(/<dt>Effectif fin de mois \(personnes\)<a class="gloss-link" href="\/e\/demo\/glossaire#def-headcount-persons"/);
+    expect(html).toContain('aria-label="Définition : Effectif fin de mois (personnes)"');
+    expect(html).toContain("<dd class=\"big\">7</dd>");
+    expect(html).not.toMatch(/Définition<\/a>|href="#def-|tile-foot/);
+  });
+  it("borne basse : « au moins n » en grand, « borne basse » en pied de tuile, sans le renvoi narratif", () => {
+    const html = tile({ text: "≥ 6", kind: "lower", foot: "borne basse (voir la couverture du mois)" });
+    expect(html).toContain("au moins 6");
+    expect(html).toContain('<span class="tile-foot">borne basse</span>');
+    expect(html).not.toContain("voir la couverture");
+  });
+  it("n.d. : « n.d. » en grand, la raison reste au survol et pour les lecteurs d'écran, jamais un zéro", () => {
+    const html = tile({ text: "n.d. — période postérieure à la date de référence", kind: "nd" });
+    expect(html).toContain('title="période postérieure à la date de référence"');
+    expect(html).toContain("n.d.<span class=\"collab-sr\"> — période postérieure à la date de référence</span>");
+    expect(html).not.toMatch(/<dd[^>]*>0</);
+  });
+  it("un identifiant inconnu ne produit aucun lien mort ; sans espace (slug), pas de lien", () => {
+    expect(tile({ text: "7", kind: "value" }, "inconnu")).not.toContain("glossaire");
+    expect(tile({ text: "7", kind: "value" }, "headcount-persons", null)).not.toContain("gloss-link");
+  });
+  it("pastilles d'état : bleu pour présent / entré, bleu nuit pour sorti, pointillé noir pour une alerte (classes de la feuille de style)", () => {
+    const cls = (code: Parameters<typeof StatePill>[0]["code"]) => renderToStaticMarkup(h(StatePill, { code, label: "x" })).match(/class="([^"]+)"/)![1];
+    expect(cls("present")).toBe("collab-pill s-present");
+    expect(cls("entered")).toBe("collab-pill s-entered");
+    expect(cls("entered_exited")).toBe("collab-pill s-entered");
+    expect(cls("exited")).toBe("collab-pill s-exited");
+    expect(cls("declared_after_end")).toBe("collab-pill s-alert");
+    expect(cls("before_start")).toBe("collab-pill s-alert");
+    expect(cls("absent")).toBe("collab-pill");
+  });
+  it("constats : le niveau est écrit (texte pour lecteur d'écran), la couleur ne le porte pas seule", () => {
+    const findings = [
+      { code: "no-start-date", severity: "check", message: "m1", month: null, personKeys: [], contractKeys: [] },
+      { code: "rehire", severity: "info", message: "m2", month: "2026-03", personKeys: [], contractKeys: [] },
+    ] as unknown as FindingDraft[];
+    const html = renderToStaticMarkup(h(FindingList, { findings, slug: "demo", persons: new Map(), contracts: new Map(), testId: "t" }));
+    expect(html).toContain('class="finding-list collab-findings"');
+    expect(html).toContain('<span class="finding check"><span class="collab-sr">À vérifier : </span>Contrat sans date de début');
+    expect(html).toContain('<span class="finding info"><span class="collab-sr">Information : </span>Réembauche');
+  });
+});
+
+describe("rendu : en-tête des écrans Collaborateurs", () => {
+  const ctxOf = (over: Record<string, unknown> = {}) =>
+    ({
+      slug: "demo",
+      source: { domain: "rh", chosen: "payfit", reason: "seule source appliquée", mode: "auto", modeSetAt: null, appliedAt: null },
+      chosen: "payfit",
+      natures: { codes: ["01", "02"], origin: "default" },
+      state: null,
+      data: {
+        build: { source: "payfit", referenceDate: "2026-09-30", presenceFrom: null, presenceTo: null, builtAt: new Date("2026-10-01T08:00:00Z"), inputsHash: "0123456789abcdef", inputs: { source: "payfit", scopeMonths: ["2024-10", "2026-09"], company: { name: "Société fictive" } } },
+        coverage: [],
+      },
+      switchedAt: null,
+      establishments: [],
+      payfitHistory: { mode: "raw", origin: "default", limit: { lowerFrom: "2025-01", lowerTo: "2025-09", exactFrom: "2025-10-01" } },
+      ...over,
+    }) as unknown as CollabContext;
+  const render = (ctx: CollabContext) => renderToStaticMarkup(h(CollabHeader, { ctx, tab: "mois" }, h("p", { id: "contenu" }, "contenu")));
+
+  it("titre et source seulement : plus de paragraphe de résumé, plus de bloc de définitions en bas", () => {
+    const html = render(ctxOf());
+    expect(html).toContain("<h1>Collaborateurs</h1>");
+    expect(html).toContain('data-testid="source-badge-rh"');
+    expect(html).not.toContain("Fiches individuelles, listes mensuelle et annuelle");
+    expect(html).not.toMatch(/rh-definitions|Définitions, paramètres|Ce qui est « n\.d\. »|href="#def-|id="def-/);
+    // Le contenu de la page est le dernier élément : rien n'est ajouté après lui.
+    expect(html.endsWith('<p id="contenu">contenu</p>')).toBe(true);
+  });
+  it("limite de l'historique PayFit : une phrase courte, les textes des specs conservés, « ? » vers la borne basse", () => {
+    const html = render(ctxOf());
+    expect(html).toContain("Limites de la lecture (1)");
+    expect(html).toContain('data-testid="payfit-history-notice"');
+    expect(html).toContain("Données telles que remontées par l&#x27;API PayFit");
+    expect(html).toContain("faussés dans un sens ou dans l&#x27;autre");
+    expect(html).toContain('href="/e/demo/glossaire#def-lower-bound"');
+    // Le détail (contrat qui fait suite à un contrat non renvoyé, dénominateurs réduits) n'est plus à l'écran.
+    expect(html).not.toMatch(/dénominateurs|compte comme une entrée/);
+  });
+  it("natures comptées : une ligne dans le bloc de lecture, avec son « ? » et le lien vers les Paramètres", () => {
+    const html = render(ctxOf());
+    expect(html).toMatch(/data-testid="rh-natures">Natures comptées dans l&#x27;effectif : [^<]+ — valeur par défaut validée · <a href="\/e\/demo\/parametres">Paramètres<\/a><a class="gloss-link" href="\/e\/demo\/glossaire#def-natures"/);
+    expect(render(ctxOf({ natures: { codes: ["01"], origin: "setting" } }))).toContain("modifiée par un administrateur");
+  });
+  it("sans mode brut : aucune limite, le bloc s'intitule « Détail de la lecture »", () => {
+    const html = render(ctxOf({ payfitHistory: null }));
+    expect(html).not.toContain("payfit-history-notice");
+    expect(html).not.toContain("Limites de la lecture");
+    expect(html).toContain("Détail de la lecture · date de référence 30/09/2026");
+  });
+  it("source non retenue : le refus est dit en une ligne, avec le lien vers Données", () => {
+    const html = render(ctxOf({ data: null, source: { domain: "rh", chosen: null, reason: "aucune source appliquée", mode: "auto", modeSetAt: null, appliedAt: null } }));
+    expect(html).toContain('data-testid="collaborateurs-nd"');
+    expect(html).toContain("n.d. — aucune source RH retenue");
+    expect(html).toContain('<a href="/e/demo/donnees">Données</a>');
   });
 });

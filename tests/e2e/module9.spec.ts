@@ -122,6 +122,47 @@ test("Menu général : toutes les entrées s'ouvrent, pas de débordement mobile
   }
   expect(overflow).toEqual([]);
 
+  // Synthèse du Studio RH : le titre du menu latéral y mène ; le menu déroulant « Fonctionnalités » ouvre les cinq familles.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`/e/${slug}/donnees`);
+  await page.getByTestId("main-menu").getByRole("link", { name: "Studio RH", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/e/${slug}/studio-rh$`));
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Synthèse du Studio RH");
+  const drop = page.getByTestId("mega-button-page");
+  await expect(drop).toHaveAttribute("aria-expanded", "false");
+  await drop.click();
+  const dropPanel = page.getByTestId("mega-panel-page");
+  await expect(dropPanel).toBeVisible();
+  for (const family of ["Collaborateurs", "KPI RH", "Masse salariale", "Hypothèses budgétaires", "Reporting social"]) await expect(dropPanel.getByRole("heading", { name: family })).toBeVisible();
+  await expect(dropPanel.getByRole("link", { name: "Écart budgétaire", exact: true })).toBeVisible();
+  await page.screenshot({ path: `${CAPTURES}/9-10-synthese-menu-deroulant.png` });
+  await page.keyboard.press("Escape");
+  await expect(dropPanel).toBeHidden();
+  await expect(page.getByTestId("sy-tiles-rh")).toBeVisible();
+  await page.screenshot({ path: `${CAPTURES}/9-11-synthese-studio-rh.png`, fullPage: true });
+
+  // Glossaire : une page, toutes les définitions, recherche sans accent ni casse, ancres.
+  await page.goto(`/e/${slug}/glossaire`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Glossaire");
+  await expect(page.getByTestId("glossaire-def-turnover")).toBeAttached();
+  const glossEntries = page.locator("[data-testid^='glossaire-def-']");
+  const allEntries = await glossEntries.count();
+  expect(allEntries).toBeGreaterThanOrEqual(40);
+  await page.getByTestId("glossaire-recherche").getByRole("searchbox").fill("EFFECTIF MOYEN");
+  await page.getByTestId("glossaire-recherche").getByRole("button").first().click();
+  await expect(page.getByTestId("glossaire-def-headcount-average")).toBeVisible();
+  expect(await glossEntries.count()).toBeLessThan(allEntries);
+  await expect(page.getByTestId("glossaire-def-etp-contract")).toHaveCount(0);
+  await page.goto(`/e/${slug}/glossaire?q=zzzzintrouvable`);
+  await expect(page.getByTestId("glossaire-vide")).toBeVisible();
+  await page.goto(`/e/${slug}/glossaire#def-etp-month-end`);
+  await expect(page.locator("#def-etp-month-end")).toBeVisible();
+  await page.screenshot({ path: `${CAPTURES}/9-12-glossaire.png`, fullPage: true });
+
+  // Tendances financières : une hausse de coût est rouge (jamais sur un ETP), avec son signe écrit.
+  await page.goto(`/e/${slug}/studio-rh/masse-salariale/ecart`);
+  await expect(page.locator("tr[data-row='etp'] td.trend-bad, tr[data-row='etp'] td.trend-good")).toHaveCount(0);
+
   // Au clavier : un seul arrêt de tabulation par graphique, flèches entre les colonnes.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`/e/${slug}/studio-rh/kpi?vue=effectifs`);

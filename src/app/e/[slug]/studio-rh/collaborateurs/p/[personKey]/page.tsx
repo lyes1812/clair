@@ -1,5 +1,6 @@
 import "@/styles/collaborateurs.css";
 import { notFound } from "next/navigation";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { dateTimeFmt, PROVIDER_LABELS } from "@/lib/connectors/labels";
 import { formatDate } from "@/lib/dates";
 import { loadAbsences } from "@/lib/rh/referential/store";
@@ -62,16 +63,16 @@ export default async function PersonPage({ params }: { params: Promise<{ slug: s
             </div>
             <dl className="person-stats">
               <div data-testid="person-stat-contracts">
-                <dt>Contrats lus</dt>
+                <dt>Contrats lus<GlossaryLink slug={slug} term="person-contracts-read" /></dt>
                 <dd>{contracts.length}</dd>
               </div>
               <div data-testid="person-stat-start">
-                <dt>Début du plus ancien contrat lu</dt>
+                <dt>Début du plus ancien contrat lu<GlossaryLink slug={slug} term="person-oldest-start" /></dt>
                 <dd className={starts.length ? undefined : "nd"}>{starts.length ? formatDate(starts[0]) : "n.d. — aucune date de début lue"}</dd>
                 {noStart > 0 && <dd className="tile-foot">{noStart} contrat{noStart > 1 ? "s" : ""} sans date de début</dd>}
               </div>
               <div data-testid="person-stat-findings">
-                <dt>Constats</dt>
+                <dt>Constats<GlossaryLink slug={slug} term="collab-findings" /></dt>
                 <dd>{findings.length}</dd>
               </div>
             </dl>
@@ -84,7 +85,7 @@ export default async function PersonPage({ params }: { params: Promise<{ slug: s
               <div><dt>Nom d'usage</dt><dd><Field row={person} field="usageName" value={person.usageName} slug={slug} /></dd></div>
               <div><dt>Matricule</dt><dd><Field row={person} field="employeeNumber" value={person.employeeNumber} slug={slug} /></dd></div>
               <div><dt>Équipe</dt><dd><Field row={person} field="teamName" value={person.teamName} slug={slug} /></dd></div>
-              <div><dt>Type d'identifiant</dt><dd>{IDENTIFIER_LABELS[person.identifierKind]} <Prov p={person.provenance.externalId} slug={slug} /></dd></div>
+              <div><dt>Type d'identifiant<GlossaryLink slug={slug} term="identity" /></dt><dd>{IDENTIFIER_LABELS[person.identifierKind]} <Prov p={person.provenance.externalId} slug={slug} /></dd></div>
               <div><dt>SIREN</dt><dd>{person.siren ?? <span className="nd">n.d.</span>}</dd></div>
               <div><dt>Établissements</dt><dd>{person.establishmentIds.map((e) => <code key={e} style={{ marginRight: 6 }}>{e}</code>)}</dd></div>
               {d.build.source === "dsn" && (

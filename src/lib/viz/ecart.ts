@@ -1,10 +1,9 @@
 import type { Cascade, masseByRubric } from "@/lib/budget/cascade";
 import type { Bridge } from "@/lib/budget/series";
-import { ROW_LABELS, ROW_UNIT, type Cell, type RowKey, type Version } from "@/lib/budget/versions";
+import { ROW_LABELS, ROW_UNIT, type Cell, type Diff, type RowKey, type Version } from "@/lib/budget/versions";
 import { formatEuros } from "@/lib/money";
+import { costTone, type TrendTone } from "@/lib/trend";
 import type { ChartSeries } from "@/components/charts/shared";
-import { niceTicks } from "@/components/charts/scale";
-import { unitFormat, type UnitName } from "@/components/charts/units";
 
 // Adaptateurs purs de l'écart budgétaire et de l'analyse des écarts vers les graphiques : ils ne calculent rien de neuf,
 // ils rangent les valeurs déjà calculées (grille de versions, cascade, pont). Une valeur absente reste null avec sa raison :
@@ -32,9 +31,20 @@ export const CHART_LABELS: Record<RowKey, string> = {
 export const rubricGroups = (): { label: string; options: { key: string; label: string }[] }[] =>
   RUBRIC_GROUPS.map((g) => ({ label: g.label, options: g.keys.map((k) => ({ key: k, label: CHART_LABELS[k] })) }));
 
-// Teintes des versions : bleu (version 1), vert, bleu nuit. Trait plein pour la version 1, pointillés ensuite ; aire sous un scénario.
+// Teintes des versions : bleu (version 1), bleu clair, bleu nuit. Trait plein pour la version 1, pointillés ensuite ; aire sous un scénario.
 // Une teinte ne porte jamais seule l'information : numéro de version dans la légende, style de trait, infobulle.
 export const VERSION_COLORS = ["var(--chart-1)", "var(--chart-3)", "var(--chart-2)"];
+
+// Tendance d'un écart : seules les rubriques qui sont des COÛTS (montants en euros du tableau d'écart) portent le rouge / vert, via
+// costTone (hausse de coût = rouge, baisse = vert, nul ou n.d. = neutre). Les effectifs, les ETP, les entrées et les sorties restent
+// neutres : ce ne sont pas des montants. Le pourcentage prend le sens de l'écart (un pourcentage n.d. n'a pas de couleur).
+export const COST_ROWS: ReadonlySet<RowKey> = new Set<RowKey>(["masse", "brut", "remun", "primes", "indemnites", "autres", "charges", "nonventile"]);
+export const isCostRow = (key: RowKey) => COST_ROWS.has(key);
+export function gapTone(key: RowKey, d: Diff, of: "ecart" | "pct" = "ecart"): TrendTone {
+  if (!isCostRow(key) || d.kind !== "value") return "flat";
+  if (of === "pct" && !d.pct) return "flat";
+  return costTone(d.num);
+}
 
 const MONTH_SHORT = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 const MONTH_LONG = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];

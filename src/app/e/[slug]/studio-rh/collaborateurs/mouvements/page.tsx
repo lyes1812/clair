@@ -1,5 +1,6 @@
 import "@/styles/collaborateurs.css";
 import { BarChart } from "@/components/charts";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { isMonth } from "@/lib/connectors/months";
 import { addMonths, formatDate, monthsBetween } from "@/lib/dates";
 import { monthlyList, movements, type Count } from "@/lib/rh/headcount";
@@ -94,8 +95,7 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
         <div className="panel-head">
           <div className="collab-title">
             <h2>Entrées et sorties par mois</h2>
-            <p className="desc">{periodLabel(from, to)} · nombre de contrats, natures comptées · <a href="#def-movements">Définition</a></p>
-            <p className="desc">Entrées : contrats dont la date de début tombe dans le mois ; sorties : date de fin. Les contrats continus d'une même personne ne sont pas neutralisés ici (le turnover du KPI RH applique la règle choisie dans Paramètres).</p>
+            <p className="desc">{periodLabel(from, to)} · nombre de contrats, natures comptées<GlossaryLink slug={slug} term="movements-chart" /></p>
           </div>
         </div>
         <div className="collab-chart-grid">
@@ -103,16 +103,20 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
             {chartNd ? (
               <p className="nd" data-testid="movements-chart-nd">n.d. — {chartNd}</p>
             ) : (
-              <BarChart
-                testid="movements-chart"
-                label={`Entrées et sorties comptées par mois, en nombre de contrats, période ${monthLongLabel(from)} → ${monthLongLabel(to)}`}
-                categories={axis.categories}
-                categoryTitles={axis.titles}
-                series={series}
-                unit="nombre"
-                height={280}
-                note="Un mois n.d. ou en borne basse n'est pas tracé : ses valeurs et sa raison sont dans le tableau et dans les notes dessous."
-              />
+              <>
+                <BarChart
+                  testid="movements-chart"
+                  label={`Entrées et sorties comptées par mois, en nombre de contrats, période ${monthLongLabel(from)} → ${monthLongLabel(to)}`}
+                  categories={axis.categories}
+                  categoryTitles={axis.titles}
+                  series={series}
+                  unit="nombre"
+                  height={280}
+                />
+                <p className="collab-legend" data-testid="movements-legend">
+                  <span><i className="sw nd" aria-hidden="true" />Mois n.d. ou borne basse : non tracé</span>
+                </p>
+              </>
             )}
           </div>
           <div className="table-wrap scroll collab-months">
@@ -133,7 +137,7 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
         </div>
         {noteGroups.length > 0 && (
           <div className="collab-ndnote" data-testid="movements-notes">
-            <p><strong>Mois non exacts sur la période</strong> (leurs valeurs sont n.d. ou en borne basse, et ne sont pas tracées dans le graphique) :</p>
+            <p><strong>Mois non exacts sur la période</strong></p>
             <ul>
               {noteGroups.map((g) => <li key={`${g.label}-${g.reason}`}><strong>{g.label}</strong> : {clearMonths(g.reason)}</li>)}
             </ul>
@@ -142,11 +146,11 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
       </section>
 
       <section className="panel collab-panel">
-        <h2>Entrées <span className="desc">— {periodLabel(from, to)} · {countedPhrase(mv.entries.filter((r) => r.inScope).length, mv.entries.length)}</span></h2>
+        <h2>Entrées<GlossaryLink slug={slug} term="movements" /> <span className="desc">— {periodLabel(from, to)} · {countedPhrase(mv.entries.filter((r) => r.inScope).length, mv.entries.length)}</span></h2>
         <EventsTable rows={mv.entries} slug={slug} kind="entry" testId="movements-entries" source={b.source} />
       </section>
       <section className="panel collab-panel">
-        <h2>Sorties <span className="desc">— {periodLabel(from, to)} · {countedPhrase(mv.exits.filter((r) => r.inScope).length, mv.exits.length)}</span></h2>
+        <h2>Sorties<GlossaryLink slug={slug} term="movements" /> <span className="desc">— {periodLabel(from, to)} · {countedPhrase(mv.exits.filter((r) => r.inScope).length, mv.exits.length)}</span></h2>
         <EventsTable rows={mv.exits} slug={slug} kind="exit" testId="movements-exits" source={b.source} />
       </section>
 

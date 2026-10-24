@@ -1,6 +1,8 @@
 import "@/styles/donnees.css";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { COLLECTION_LABELS, dateTimeFmt, PROVIDER_LABELS } from "@/lib/connectors/labels";
 import { getSync, sampleRecords, SYNC_STATUS_LABELS, type SyncStatus, type SyncSummary } from "@/lib/connectors/sync";
 import { ledgerTotals } from "@/lib/connectors/views";
@@ -65,19 +67,20 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
         </dl>
       </PageHead>
 
-      {status === "running" && <p className="notice">Lecture en cours auprès de la source… La page se met à jour automatiquement.</p>}
+      {status === "running" && <p className="notice">Lecture en cours auprès de la source… La page se met à jour seule.</p>}
       {status === "failed" && <p className="error" data-testid="sync-error">{sync.errorMessage ?? "Échec de la lecture."}</p>}
       {status === "applied" && (
         <p className="notice ok" data-testid="sync-active">
           {additive
-            ? `Appliqué le ${sync.decidedAt ? dateTimeFmt.format(sync.decidedAt) : "n.d."} : ces déclarations comptent dans la couverture DSN de l'espace.`
-            : `Source active depuis le ${sync.decidedAt ? dateTimeFmt.format(sync.decidedAt) : "n.d."} : c'est cette lecture que les modules Studio RH utiliseront.`}
+            ? `Appliqué le ${sync.decidedAt ? dateTimeFmt.format(sync.decidedAt) : "n.d."}.`
+            : `Active depuis le ${sync.decidedAt ? dateTimeFmt.format(sync.decidedAt) : "n.d."}.`}
+          <GlossaryLink slug={slug} term={DONNEES_TERMS.lecture} />
         </p>
       )}
-      {status === "superseded" && <p className="notice">Lecture remplacée par une application plus récente ; conservée dans l'historique.</p>}
+      {status === "superseded" && <p className="notice">Remplacée par une application plus récente.</p>}
       {status === "unchanged" && (
         <p className="notice" data-testid="sync-unchanged">
-          {additive ? "Fichier(s) déjà déposé(s) : reconnu(s) à leur empreinte, rien à appliquer, aucun doublon créé." : "Contenu identique à la source active : rien à appliquer, aucun doublon créé."}
+          {additive ? "Fichier(s) déjà déposé(s) : rien à appliquer, aucun doublon créé." : "Contenu identique à la source active : rien à appliquer, aucun doublon créé."}
         </p>
       )}
 
@@ -159,8 +162,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
       {summary.collections && (
         <section className="panel">
           <div className="dn-section-head">
-            <h2>{status === "preview" ? "Aperçu avant application" : "Contenu lu"}</h2>
-            {additive && <p className="desc">Déclarations lues dans ce dépôt ; elles s'ajoutent aux dépôts déjà appliqués.</p>}
+            <h2>{status === "preview" ? "Aperçu avant application" : "Contenu lu"}<GlossaryLink slug={slug} term={DONNEES_TERMS.lecture} /></h2>
             {summary.company && <p className="desc">Société : {summary.company.name}</p>}
           </div>
           <div className="table-wrap">
@@ -209,8 +211,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
       {collaborators.length > 0 && (
         <section className="panel">
           <div className="dn-section-head">
-            <h2>Collaborateurs (extrait)</h2>
-            <p className="desc">Les dix premiers enregistrements lus, à titre de contrôle.</p>
+            <h2>Collaborateurs (extrait)<GlossaryLink slug={slug} term={DONNEES_TERMS.extraits} /></h2>
           </div>
           <div className="table-wrap">
             <table className="data-table">
@@ -227,7 +228,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
 
       {contracts.length > 0 && additive && (
         <section className="panel">
-          <h2>Contrats déclarés (extrait)</h2>
+          <h2>Contrats déclarés (extrait)<GlossaryLink slug={slug} term={DONNEES_TERMS.extraits} /></h2>
           <div className="table-wrap scroll">
             <table className="data-table sticky">
               <thead><tr><th scope="col">Mois</th><th scope="col">SIRET</th><th scope="col">N° de contrat</th><th scope="col">Matricule</th><th scope="col">Début</th><th scope="col">Fin</th><th scope="col">Nature</th><th scope="col" className="num">Quotité contrat / référence</th></tr></thead>
@@ -251,7 +252,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
 
       {contracts.length > 0 && !additive && (
         <section className="panel">
-          <h2>Contrats (extrait)</h2>
+          <h2>Contrats (extrait)<GlossaryLink slug={slug} term={DONNEES_TERMS.extraits} /></h2>
           <div className="table-wrap scroll">
             <table className="data-table sticky">
               <thead><tr><th scope="col">Contrat</th><th scope="col">Collaborateur</th><th scope="col">Début</th><th scope="col">Fin</th><th scope="col">Statut</th><th scope="col">Nature DSN</th><th scope="col" className="num">Quotité (ETP contractuel)</th></tr></thead>
@@ -273,7 +274,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
         <section className="panel">
           <div className="dn-section-head">
             <h2>{fec ? "Écritures : totaux par mois et par compte (classes 6 et 7, comptes 421, 431, 437)" : "Journal comptable : totaux par mois et par compte"}</h2>
-            <p className="desc">Montants tels que lus à la source, sans retraitement. « — » : aucune ligne de ce côté du compte.{fec && " Les autres classes sont conservées mais ne sont pas affichées ici."}</p>
+            <p className="desc">« — » : aucune ligne de ce côté du compte.{fec && " Autres classes non affichées."}<GlossaryLink slug={slug} term={DONNEES_TERMS.extraits} /></p>
           </div>
           <div className="table-wrap scroll">
             <table className="data-table sticky" data-testid="ledger-totals">

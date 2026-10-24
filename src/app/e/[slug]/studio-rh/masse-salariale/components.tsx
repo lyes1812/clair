@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 import { BarChart } from "@/components/charts";
 import type { ChartSeries } from "@/components/charts/shared";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { MASSE_TERMS } from "@/lib/glossary/masse";
 import type { MonthPayroll } from "@/lib/payroll/engine";
 import { fmtFixed } from "@/lib/rh/kpi/format";
-import { COLORS, euros, hasData, masseSeries, monthShortYear, monthsAxis, ndNote, seriesReasons } from "@/lib/viz/masse";
+import { COLORS, euros, hasData, masseSeries, monthsAxis, seriesReasons } from "@/lib/viz/masse";
 
 const MONTH_SHORT = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 export const monthShort = (m: string) => MONTH_SHORT[Number(m.slice(5, 7)) - 1];
@@ -17,14 +19,15 @@ export type Affichage = "tout" | "graphique" | "tableau";
 export const AFFICHAGES: Affichage[] = ["tout", "graphique", "tableau"];
 export const isAffichage = (v: string): v is Affichage => (AFFICHAGES as string[]).includes(v);
 
-// En-tête : titre de l'entrée et une phrase, comme les autres écrans de la famille (la source et le détail de la lecture
-// viennent sous les onglets : la barre d'onglets reste au même endroit d'un écran à l'autre).
-export function MsHead({ title, summary, children }: { title: string; summary: string; children?: ReactNode }) {
+// En-tête : titre de l'entrée, sans paragraphe explicatif (les définitions sont au glossaire). La source et le détail de la lecture
+// viennent sous les onglets : la barre d'onglets reste au même endroit d'un écran à l'autre. `summary` : texte optionnel, non utilisé
+// par les écrans.
+export function MsHead({ title, summary, children }: { title: string; summary?: string; children?: ReactNode }) {
   return (
     <div className="ms-head">
       <span className="label">Studio RH</span>
       <h1>{title}</h1>
-      <p className="desc">{summary}</p>
+      {summary && <p className="desc">{summary}</p>}
       {children}
     </div>
   );
@@ -52,22 +55,47 @@ export function MsRead({ source, children }: { source?: ReactNode; children?: Re
   );
 }
 
-export function PanelTitle({ title, desc }: { title: ReactNode; desc?: ReactNode }) {
+// Titre de panneau suivi, s'il y a lieu, de son « ? » vers le glossaire (`slug` et `term` ensemble) ; `desc` : une ligne de contexte.
+export function PanelTitle({ title, desc, slug, term }: { title: ReactNode; desc?: ReactNode; slug?: string; term?: string }) {
   return (
     <div className="ms-panel-title">
-      <h2>{title}</h2>
+      <div className="ms-title-row">
+        <h2>{title}</h2>
+        {slug && term && <GlossaryLink slug={slug} term={term} />}
+      </div>
       {desc && <p className="desc">{desc}</p>}
     </div>
   );
 }
 
-// En-tête de panneau : titre, phrase de contexte dessous, actions à droite. Le même sur tous les panneaux de l'écran.
-export function PanelHead({ title, desc, tools }: { title: ReactNode; desc?: ReactNode; tools?: ReactNode }) {
+// En-tête de panneau : titre (et son « ? »), actions à droite. Le même sur tous les panneaux de l'écran.
+export function PanelHead({ title, desc, tools, slug, term }: { title: ReactNode; desc?: ReactNode; tools?: ReactNode; slug?: string; term?: string }) {
   return (
     <div className="panel-head">
-      <PanelTitle title={title} desc={desc} />
+      <PanelTitle title={title} desc={desc} slug={slug} term={term} />
       {tools && <div className="panel-tools">{tools}</div>}
     </div>
+  );
+}
+
+// Légende des tendances, une seule par écran : rouge = coût en hausse, vert = coût en baisse. Le signe et la flèche accompagnent
+// toujours la couleur ; la convention est au glossaire.
+export function TrendLegend({ slug }: { slug: string }) {
+  return (
+    <p className="trend-legend" data-testid="ms-trend-legend">
+      <span><i className="dot bad" aria-hidden="true" />Coût en hausse</span>
+      <span><i className="dot good" aria-hidden="true" />Coût en baisse</span>
+      <GlossaryLink slug={slug} term={MASSE_TERMS.tendances} />
+    </p>
+  );
+}
+
+// Légende d'un graphique mensuel qui contient un n.d. : une seule par zone de graphiques, à la place d'une phrase sous chaque graphique.
+export function NdKey({ testid = "ms-nd-key" }: { testid?: string }) {
+  return (
+    <p className="chart-legend ms-nd-key" data-testid={testid}>
+      <span className="legend-btn static"><i className="swatch hatch" aria-hidden="true" />n.d. : colonne hachurée, barre absente ou courbe interrompue (raison au survol)</span>
+    </p>
   );
 }
 
@@ -127,19 +155,20 @@ export function PeriodBar(p: {
   );
 }
 
-// Tuile d'indicateur : valeur en grand, repère de lecture, comparaison N-1 sous un filet, lien vers la définition. Une seule
-// balise <dd> par tuile : la valeur ; tout le reste est dans des <span> / <div> (tests et lecteurs d'écran lisent la valeur seule).
+// Tuile d'indicateur : libellé suivi de son « ? » vers le glossaire, valeur en grand, repère de lecture, comparaison N-1 sous un filet.
+// Une seule balise <dd> par tuile : la valeur ; tout le reste est dans des <span> / <div> (tests et lecteurs d'écran lisent la valeur seule).
 // `nd` : valeur n.d. (« n.d. » en gris italique, raison listée sous les tuiles) ; `ndLong` : la raison elle-même est la valeur (texte courant).
-// `sub` : la tuile détaille la précédente (« dont primes »), elle est en retrait.
-export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: boolean; ndLong?: boolean; main?: boolean; sub?: boolean; lead?: ReactNode; compare?: ReactNode; foot?: ReactNode; def?: string }) {
+// `sub` : la tuile détaille la précédente (« dont primes »), elle est en retrait. `def` + `slug` : « ? » vers l'entrée du glossaire.
+// `trend` : classe de tendance (trend-bad / trend-good, voir trendOf) de la valeur, quand elle est un écart de montant.
+export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: boolean; ndLong?: boolean; main?: boolean; sub?: boolean; lead?: ReactNode; compare?: ReactNode; foot?: ReactNode; def?: string; slug?: string; trend?: string }) {
+  const dd = [p.nd ? (p.ndLong ? "nd long" : "nd") : "", p.nd ? "" : (p.trend ?? "")].filter(Boolean).join(" ");
   return (
     <div data-testid={p.testid} className={["ms-tile", p.main ? "main" : "", p.sub ? "sub" : ""].filter(Boolean).join(" ")}>
-      <dt>{p.label}</dt>
-      <dd className={p.nd ? (p.ndLong ? "nd long" : "nd") : undefined}>{p.value}</dd>
+      <dt>{p.label}{p.def && p.slug && <GlossaryLink slug={p.slug} term={p.def} label={p.label} />}</dt>
+      <dd className={dd || undefined}>{p.value}</dd>
       {p.lead && <span className="tile-foot ms-tile-lead">{p.lead}</span>}
       {p.compare && <div className="ms-tile-compare">{p.compare}</div>}
       {p.foot}
-      {p.def && <span className="tile-foot ms-tile-def"><a href={`#def-${p.def}`} aria-label={`Définition : ${p.label}`}>Définition</a></span>}
     </div>
   );
 }
@@ -165,20 +194,16 @@ export function ScrollTable({ label, gap, children }: { label: string; gap?: boo
   );
 }
 
-// Pied d'une zone de graphiques : une seule mention par carte. Le graphique est une lecture, le tableau exact fait foi ; le sens
-// d'un « n.d. » (colonne hachurée, courbe interrompue) est dans les définitions.
+// Pied d'une zone de graphiques : seulement l'accès au tableau exact quand l'affichage ne montre que les graphiques (l'explication
+// de la lecture est au glossaire). Rien dans les autres affichages.
 export function GraphFoot({ aff, tableHref, testid = "ms-graph-foot" }: { aff: Affichage; tableHref: string; testid?: string }) {
+  if (aff !== "graphique") return null;
   return (
     <p className="tile-foot ms-graph-foot" data-testid={testid}>
-      Un graphique est une lecture : le tableau exact, à l'euro près, fait foi — {aff === "graphique" ? <>dans l'affichage <a href={tableHref}>Tableau</a></> : "plus bas dans cette page"}. Sens de « n.d. » : <a href="#def-nd">définitions</a>.
+      <a href={tableHref}>Afficher le tableau exact</a>
     </p>
   );
 }
-
-// Note commune sous un graphique mensuel : mois provisoires, puis la mention des n.d. seulement si le graphique en contient
-// (`series` : les séries tracées ; sans elles, aucune mention de n.d.). La raison est au survol, au clavier et sous le tableau.
-export const monthlyNote = (open: string[], series?: ChartSeries[]): string =>
-  [open.length ? `Paie non clôturée à la lecture (montants provisoires) : ${open.map(monthShortYear).join(", ")}.` : "", series ? ndNote(series) : ""].filter(Boolean).join(" ");
 
 // État vide « n.d. » : un seul composant pour tout l'écran (graphique non tracé, rapprochement sans comptabilité, services
 // absents). Titre « n.d. » (ou `title`), la raison écrite une fois, puis l'action pour y remédier.
@@ -203,11 +228,12 @@ export function ChartGuard({ testid, title, series, lines, children }: { testid:
   if (hasData(series)) return <>{children}</>;
   const reasons = lines && lines.length > 0 ? lines : seriesReasons(series);
   const shown = reasons.slice(0, 3);
-  return <NdState testid={`${testid}-vide`} heading={title} reason="Aucune valeur connue sur la période : le graphique n'est pas tracé (un axe à zéro ferait croire à des valeurs nulles)." reasons={shown} more={reasons.length - shown.length} />;
+  return <NdState testid={`${testid}-vide`} heading={title} reason="Aucune valeur connue sur la période : graphique non tracé." reasons={shown} more={reasons.length - shown.length} />;
 }
 
 // Tendance mensuelle : barres groupées, masse chargée de l'année N et du même mois un an plus tôt (N-1). Un mois n.d. est une
-// colonne hachurée avec sa raison, sans hauteur inventée.
+// colonne hachurée avec sa raison, sans hauteur inventée. Aucune note sous le graphique : la lecture est au glossaire, les mois provisoires
+// sont dans la ligne de période de l'écran et dans l'infobulle.
 export function TrendChart({ rows, previous, lines }: { rows: MonthPayroll[]; previous: MonthPayroll[]; lines?: string[] }) {
   const year = rows[0]?.month.slice(0, 4) ?? "";
   const prevYear = previous[0]?.month.slice(0, 4) ?? "";
@@ -226,7 +252,6 @@ export function TrendChart({ rows, previous, lines }: { rows: MonthPayroll[]; pr
         series={series}
         unit="eur"
         height={300}
-        note={monthlyNote(open, series)}
       />
     </ChartGuard>
   );

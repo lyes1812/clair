@@ -1,4 +1,6 @@
 import "@/styles/donnees.css";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { listSyncs, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
 import { fecCoverage, listFecFiles } from "@/lib/fec/import";
@@ -20,10 +22,7 @@ export default async function FecPage({ params }: { params: Promise<{ slug: stri
   return (
     <>
       <PageHead crumbs={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Fichiers FEC" }]} title="Fichiers FEC">
-        <p className="desc">
-          Fichier des écritures comptables (art. A47 A-1 du LPF), exporté depuis Pennylane ou tout autre logiciel comptable. Un fichier par exercice ;
-          toutes les écritures sont conservées telles quelles, en centimes exacts. Les montants ne sont ni retraités ni interprétés.
-        </p>
+        <p className="desc">Fichier des écritures comptables, un fichier par exercice.<GlossaryLink slug={slug} term={DONNEES_TERMS.depotFec} /></p>
       </PageHead>
 
       {hasAtLeast(workspace.role, "editor") ? (
@@ -32,7 +31,7 @@ export default async function FecPage({ params }: { params: Promise<{ slug: stri
           <FileUploadForm slug={slug} kind="fec" />
         </section>
       ) : (
-        <p className="notice">Le dépôt de fichiers est réservé aux éditeurs et aux administrateurs de l'espace.</p>
+        <p className="notice">Dépôt réservé aux éditeurs et aux administrateurs.</p>
       )}
 
       <section className="panel" id="exercices">

@@ -4,8 +4,8 @@ import { Feedback } from "./Feedback";
 import { savePayfitHistory } from "./actions";
 
 const CHOICES = [
-  { value: "raw", label: "Brut : chiffres tels que l'API PayFit les renvoie, avec une mention unique en tête d'écran sur la limite de conservation." },
-  { value: "flagged", label: "Signalé : mois antérieurs à la limite affichés « ≥ » (effectifs, entrées) ou n.d. (sorties, turnover, absentéisme)." },
+  { value: "raw", label: "Brut : chiffres tels que l'API PayFit les renvoie" },
+  { value: "flagged", label: "Signalé : mois antérieurs à la limite affichés « ≥ » ou n.d." },
 ] as const;
 
 export function PayfitHistoryForm({ slug, mode, disabled }: { slug: string; mode: "raw" | "flagged"; disabled: boolean }) {

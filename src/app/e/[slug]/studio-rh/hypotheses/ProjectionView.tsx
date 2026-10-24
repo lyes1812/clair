@@ -1,13 +1,16 @@
 import "@/styles/hypotheses-resultat.css";
+import type { ReactNode } from "react";
 import { BarChart, LineChart } from "@/components/charts";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
+import { HYP_TERMS } from "@/lib/glossary/hypotheses";
 import type { Landing } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { CATEGORY_IDS, CATEGORY_LABELS, type BaseSnapshot, type CategoryId, type Contribution, type ProjectedMonth, type Projection } from "@/lib/budget/types";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
-import { affichageOf, contributionsChart, costSeries, etpSeries, frDates, hasValues, headcountSeries, monthAxis, monthLongLabel, natureChart, ndMonthsNote, showCharts, showTables, withAffichage, type Affichage, type NatureChart } from "@/lib/viz/hypotheses";
+import { affichageOf, contributionsChart, costSeries, etpSeries, frDates, hasNd, hasValues, headcountSeries, monthAxis, monthLongLabel, natureChart, ndMonthsNote, showCharts, showTables, withAffichage, type NatureChart } from "@/lib/viz/hypotheses";
 import { monthShort } from "../masse-salariale/components";
 
 const KIND: Record<Contribution["kind"], string> = {
@@ -46,7 +49,7 @@ function priorBySource(base: BaseSnapshot, months: string[]) {
 }
 
 // Rien à tracer : on l'écrit, avec la raison de chaque série.
-function NdBlock({ title, reasons }: { title: string; reasons: string[] }) {
+export function NdBlock({ title, reasons }: { title: string; reasons: string[] }) {
   return (
     <div className="hr-nd">
       <p className="hr-nd-title">{title}</p>
@@ -56,10 +59,55 @@ function NdBlock({ title, reasons }: { title: string; reasons: string[] }) {
   );
 }
 
-// Lecture graphique de la projection : coût par mois (réel, projeté), effectif et ETP de fin de mois, coût projeté par nature
-// de contribution, puis les contributions seules (sans la base). Les montants viennent des mêmes lignes que le tableau « Mois par
-// mois » (aucun recalcul ici).
-function Lecture({ rows, months, nature, base, aff, tableHref }: { rows: Row[]; months: ProjectedMonth[]; nature: NatureChart; base: BaseSnapshot; aff: Affichage; tableHref: string }) {
+// Titre de panneau suivi, s'il y a lieu, de son « ? » vers le glossaire, puis d'UNE ligne de contexte (période · version · unité).
+// Les écrans de chiffres n'expliquent pas : les définitions et les règles de lecture sont au glossaire.
+export function PanelTitle({ title, desc, slug, term, label }: { title: ReactNode; desc?: ReactNode; slug: string | null; term?: string; label?: string }) {
+  return (
+    <div className="hr-title">
+      <div className="hr-title-row">
+        <h2>{title}</h2>
+        {slug && term && <GlossaryLink slug={slug} term={term} label={label} />}
+      </div>
+      {desc && <p className="desc">{desc}</p>}
+    </div>
+  );
+}
+
+// Titre d'une tuile suivi de son « ? » ; `sub` : sa précision de période ou d'unité, en une ligne.
+export function TileTitle({ title, sub, slug, term, label }: { title: ReactNode; sub?: ReactNode; slug: string | null; term?: string; label?: string }) {
+  return (
+    <dt>
+      <span className="hr-dt-title">{title}{slug && term && <GlossaryLink slug={slug} term={term} label={label} />}</span>
+      {sub && <span className="hr-sub">{sub}</span>}
+    </dt>
+  );
+}
+
+// Légende des mois n.d. : une seule par zone de graphiques, à la place d'une phrase sous chaque graphique.
+export function NdKey({ testid = "hr-nd-key" }: { testid?: string }) {
+  return (
+    <p className="chart-legend hr-nd-key" data-testid={testid}>
+      <span className="legend-btn static"><i className="swatch hatch" aria-hidden="true" />n.d. : colonne hachurée, barre absente ou courbe interrompue (raison au survol)</span>
+    </p>
+  );
+}
+
+// Légende des tendances, une seule par écran : rouge = coût en hausse, vert = coût en baisse. Le signe et la flèche accompagnent
+// toujours la couleur ; la convention est au glossaire.
+export function TrendLegend({ slug }: { slug: string | null }) {
+  return (
+    <p className="trend-legend hr-trend-legend" data-testid="hr-trend-legend">
+      <span><i className="dot bad" aria-hidden="true" />Coût en hausse</span>
+      <span><i className="dot good" aria-hidden="true" />Coût en baisse</span>
+      {slug && <GlossaryLink slug={slug} term={HYP_TERMS.tendances} label="Tendances financières" />}
+    </p>
+  );
+}
+
+// Graphiques de la projection, un panneau par notion : coût par mois (réel, projeté), effectif et ETP de fin de mois ; coût projeté par
+// nature de contribution ; contributions seules (sans la base). Les montants viennent des mêmes lignes que le tableau « Mois par mois »
+// (aucun recalcul ici). Le « ? » de chaque panneau mène à sa définition ; une seule légende n.d. ferme la zone.
+function Lecture({ slug, rows, months, nature }: { slug: string; rows: Row[]; months: ProjectedMonth[]; nature: NatureChart }) {
   const axis = monthAxis(rows.map((r) => r.month));
   const first = rows[0]?.month ?? "";
   const last = rows.at(-1)?.month ?? "";
@@ -73,111 +121,105 @@ function Lecture({ rows, months, nature, base, aff, tableHref }: { rows: Row[]; 
   const etps = etpSeries(rows);
   const contrib = contributionsChart(nature);
   const natureNd = months.filter((m) => m.kind === "nd");
-  const negative = contrib.series.some((s) => s.values.some((v) => v !== null && v < 0));
   const reasonsOf = (series: { name: string; reasons?: (string | null)[] }[]) => [...new Set(series.flatMap((s) => (s.reasons ?? []).filter((r): r is string => !!r && !r.startsWith("sans objet"))))];
-  const etpNote = base.etpNote ? `${frDates(base.etpNote).replace(/[.\s]+$/, "")}.` : null;
+  const anyNd = hasNd(cost) || hasNd(heads) || hasNd(etps) || hasNd(nature.series);
   return (
-    <section className="panel" data-testid="proj-lecture">
-      <div className="hr-title">
-        <h2>Lecture graphique</h2>
-        <p className="desc">
-          Réel figé puis projection, {range}. Montants exacts : {aff === "graphique" ? <a href={tableHref}>affichage Tableau</a> : "tableau « Mois par mois » plus bas"}. Définitions : <a href="#def-contribution">contributions d'un mois projeté</a>, <a href="#def-effectif">effectif et ETP projetés</a>.
-        </p>
-      </div>
-      <div className="hr-charts">
-        <BarChart
-          testid="proj-chart"
-          label={`Coût employeur par mois en euros, de ${monthLongLabel(first)} à ${monthLongLabel(last)} : ${rows.length} mois dont ${nProjected} projetés${nNd ? ` et ${nNd} n.d.` : ""}`}
-          title={`Coût employeur par mois — ${range}`}
-          categories={axis.categories}
-          categoryTitles={axis.titles}
-          series={cost}
-          unit="eur"
-          mode="stacked"
-          note={[
-            "Axe vertical depuis zéro ; réel (paie lue) et projeté sont nommés dans la légende et l'infobulle.",
-            nd ? `Colonne hachurée : mois n.d. (raison au survol) — ${nd}.` : null,
-          ].filter(Boolean).join(" ")}
-        />
-        <div className="hr-charts-2">
-          <div className="hr-block">
-            {hasValues(heads) ? (
-              <LineChart
-                testid="proj-chart-effectif"
-                label={`Effectif de fin de mois, en personnes, de ${monthLongLabel(first)} à ${monthLongLabel(last)}`}
-                title="Effectif de fin de mois (personnes)"
-                categories={axis.categories}
-                categoryTitles={axis.titles}
-                series={heads}
-                unit="nombre"
-                height={230}
-                note="Pointillés : mois projetés ; courbe interrompue : mois n.d. (raison au survol)."
-              />
-            ) : (
-              <NdBlock title="Effectif de fin de mois (personnes)" reasons={reasonsOf(heads)} />
-            )}
+    <div className="hr-stack" data-testid="proj-lecture">
+      <section className="panel">
+        <PanelTitle title="Coût, effectif et ETP par mois" desc={`${range} · euros, personnes et ETP`} slug={slug} term={HYP_TERMS.projectionGraphiques} />
+        <div className="hr-charts">
+          <BarChart
+            testid="proj-chart"
+            label={`Coût employeur par mois en euros, de ${monthLongLabel(first)} à ${monthLongLabel(last)} : ${rows.length} mois dont ${nProjected} projetés${nNd ? ` et ${nNd} n.d.` : ""}`}
+            title="Coût employeur par mois (euros)"
+            categories={axis.categories}
+            categoryTitles={axis.titles}
+            series={cost}
+            unit="eur"
+            mode="stacked"
+          />
+          <div className="hr-charts-2">
+            <div className="hr-block">
+              {hasValues(heads) ? (
+                <LineChart
+                  testid="proj-chart-effectif"
+                  label={`Effectif de fin de mois, en personnes, de ${monthLongLabel(first)} à ${monthLongLabel(last)}`}
+                  title="Effectif de fin de mois (personnes)"
+                  categories={axis.categories}
+                  categoryTitles={axis.titles}
+                  series={heads}
+                  unit="nombre"
+                  height={230}
+                />
+              ) : (
+                <NdBlock title="Effectif de fin de mois (personnes)" reasons={reasonsOf(heads)} />
+              )}
+            </div>
+            <div className="hr-block">
+              {hasValues(etps) ? (
+                <LineChart
+                  testid="proj-chart-etp"
+                  label={`ETP de fin de mois, de ${monthLongLabel(first)} à ${monthLongLabel(last)}`}
+                  title="ETP de fin de mois"
+                  categories={axis.categories}
+                  categoryTitles={axis.titles}
+                  series={etps}
+                  unit="etp"
+                  height={230}
+                />
+              ) : (
+                <NdBlock title="ETP de fin de mois" reasons={reasonsOf(etps)} />
+              )}
+            </div>
           </div>
-          <div className="hr-block">
-            {hasValues(etps) ? (
-              <LineChart
-                testid="proj-chart-etp"
-                label={`ETP de fin de mois, de ${monthLongLabel(first)} à ${monthLongLabel(last)}`}
-                title="ETP de fin de mois"
-                categories={axis.categories}
-                categoryTitles={axis.titles}
-                series={etps}
-                unit="etp"
-                height={230}
-                note={[etpNote, "Pointillés : mois projetés ; courbe interrompue : ETP n.d. (raison au survol)."].filter(Boolean).join(" ")}
-              />
-            ) : (
-              <NdBlock title="ETP de fin de mois" reasons={reasonsOf(etps)} />
-            )}
-          </div>
+          {(anyNd || nd !== null) && (
+            <div className="hr-nd-zone">
+              {anyNd && <NdKey />}
+              {nd !== null && <p className="tile-foot nd" data-testid="proj-chart-nd">n.d. : {nd}</p>}
+            </div>
+          )}
         </div>
-        {hasValues(nature.series) ? (
-          <>
+      </section>
+      {hasValues(nature.series) ? (
+        <>
+          <section className="panel hr-chart-panel" data-testid="proj-nature-chart">
+            <PanelTitle title="Coût projeté par nature de contribution" desc={`${natureRange} · euros`} slug={slug} term={HYP_TERMS.coutNature} />
             <BarChart
               testid="proj-chart-nature"
               label={`Coût projeté par nature de contribution, en euros, de ${monthLongLabel(months[0].month)} à ${monthLongLabel(months.at(-1)!.month)}`}
-              title={`Coût projeté par nature de contribution — ${natureRange}`}
               categories={nature.categories}
               categoryTitles={nature.titles}
               series={nature.series}
               unit="eur"
               mode="stacked"
               toggle
-              note={[
-                "Chaque barre additionne les contributions du moteur de projection : le coût du mois est leur somme (« Total affiché » dans l'infobulle).",
-                natureNd.length ? "Colonne hachurée : mois n.d. (raison au survol)." : null,
-              ].filter(Boolean).join(" ")}
             />
+          </section>
+          <section className="panel hr-chart-panel" data-testid="proj-contributions">
+            <PanelTitle title="Contributions hors base" desc={`${natureRange} · euros`} slug={slug} term={HYP_TERMS.contributionsHorsBase} />
             {contrib.series.length > 0 ? (
               <BarChart
                 testid="proj-chart-contributions"
                 label={`Contributions seules, hors base, en euros, de ${monthLongLabel(months[0].month)} à ${monthLongLabel(months.at(-1)!.month)} : ${contrib.series.map((s) => s.name).join(", ")}`}
-                title={`Contributions seules, hors base — ${natureRange}`}
                 categories={contrib.categories}
                 categoryTitles={contrib.titles}
                 series={contrib.series}
                 unit="eur"
                 mode="stacked"
                 toggle
-                note={[
-                  "Même graphique sans la base (figée ou corrigée) : on ne voit que ce que les hypothèses ajoutent ou retirent, sur leur propre échelle.",
-                  negative ? "Au-dessus de l'axe, ce qui s'ajoute ; sous l'axe, ce qui se retire (départs, congés non payés, prorata d'une entrée)." : null,
-                  `Montants exacts : ${aff === "graphique" ? "affichage Tableau" : "tableau « Coût projeté par nature » plus bas"}.`,
-                ].filter(Boolean).join(" ")}
               />
             ) : (
-              <p className="desc" data-testid="proj-chart-contributions-vide">Contributions seules : aucune contribution hors base d'un montant non nul sur ces mois ; le coût de chaque mois calculé est celui de la base.</p>
+              <p className="desc" data-testid="proj-chart-contributions-vide">Aucune contribution hors base d'un montant non nul sur ces mois : le coût de chaque mois calculé est celui de la base.</p>
             )}
-          </>
-        ) : (
-          <NdBlock title="Coût projeté par nature de contribution" reasons={[...new Set(natureNd.flatMap((m) => (m.kind === "nd" ? m.reasons.map(frDates) : [])))]} />
-        )}
-      </div>
-    </section>
+          </section>
+        </>
+      ) : (
+        <section className="panel hr-chart-panel" data-testid="proj-nature-chart">
+          <PanelTitle title="Coût projeté par nature de contribution" slug={slug} term={HYP_TERMS.coutNature} />
+          <NdBlock title={natureRange} reasons={[...new Set(natureNd.flatMap((m) => (m.kind === "nd" ? m.reasons.map(frDates) : [])))]} />
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -203,6 +245,10 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
   const last = pm.at(-1)!;
   const detail = pm.find((p) => p.month === month) ?? null;
   const headNote = [last.kind === "value" && last.etpNd ? `ETP n.d. — ${frDates(last.etpNd)}` : null, base.etpNote ? frDates(base.etpNote) : null].filter((x): x is string => !!x);
+  // Une ligne de contexte : période · origine des mois (réel figé, projeté) · unité.
+  const first = rows[0]?.month ?? scenario.firstMonth;
+  const range = `${formatMonth(first).toLowerCase()} → ${formatMonth(rows.at(-1)?.month ?? scenario.lastMonth).toLowerCase()}`;
+  const origin = (base.prior?.length ?? 0) > 0 ? "réel figé ou projeté par le scénario parent" : "réel figé";
   return (
     <>
       <div className="hr-switch">
@@ -216,7 +262,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
             { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
           ]}
         />
-        <p className="hr-hint">Mois avant {formatMonth(scenario.firstMonth).toLowerCase()} : réel figé de la base{(base.prior?.length ?? 0) > 0 ? " ou projeté par le scénario parent" : ""} ; projection du scénario à partir de ce mois, chaque euro remontant à une hypothèse visible.</p>
+        <p className="hr-context">{range} · {origin} avant {formatMonth(scenario.firstMonth).toLowerCase()}, projeté ensuite · euros</p>
       </div>
       {ndMonths.length > 0 && (
         <p className="notice" data-testid="proj-nd">
@@ -227,7 +273,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
         <h2>Vue d'ensemble</h2>
         <dl className="facts hr-tiles">
           <div className="hr-tile" data-testid="proj-tile-landing">
-            <dt>Atterrissage {landing.year}{" "}<span className="hr-sub">coût employeur, réel + projeté</span></dt>
+            <TileTitle title={`Atterrissage ${landing.year}`} sub="coût employeur · réel + projeté" slug={slug} term={HYP_TERMS.atterrissage} />
             <dd className={landing.kind === "nd" ? "nd" : undefined}>{landing.kind === "nd" ? `n.d. — ${frDates(landing.reason)}` : formatEuros(landing.total)}</dd>
             {landing.kind === "value" && (
               <span className="tile-foot" data-testid="proj-tile-landing-split">
@@ -238,28 +284,22 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
                 ].filter(Boolean).join(" + ")}
               </span>
             )}
-            <span className="tile-foot"><a href="#def-atterrissage">Définition</a></span>
           </div>
           <div className="hr-tile" data-testid="proj-tile-horizon">
-            <dt>Coût projeté{" "}<span className="hr-sub">{formatMonth(scenario.firstMonth).toLowerCase()} → {formatMonth(scenario.lastMonth).toLowerCase()} · {pm.length} mois</span></dt>
+            <TileTitle title="Coût projeté" sub={`${formatMonth(scenario.firstMonth).toLowerCase()} → ${formatMonth(scenario.lastMonth).toLowerCase()} · ${pm.length} mois`} slug={slug} term={HYP_TERMS.coutProjete} />
             <dd className={horizon === null ? "nd" : undefined}>{horizon === null ? "n.d. — un mois projeté au moins est n.d." : formatEuros(horizon)}</dd>
-            <span className="tile-foot"><a href="#def-contribution">Définition</a></span>
           </div>
           <div className="hr-tile" data-testid="proj-tile-headcount">
-            <dt>Effectif et ETP{" "}<span className="hr-sub">fin {formatMonth(last.month).toLowerCase()}</span></dt>
+            <TileTitle title="Effectif et ETP" sub={`fin ${formatMonth(last.month).toLowerCase()}`} slug={slug} term={HYP_TERMS.effectif} />
             <dd className={last.kind === "nd" ? "nd" : undefined}>{last.kind === "nd" ? "n.d." : `${persons(last.headcount)} · ${last.etp4 === null ? "ETP n.d." : `${fmtEtp4(last.etp4)} ETP`}`}</dd>
             {(headNote.length > 0) && <span className="tile-foot">{headNote.join(" · ")}</span>}
-            <span className="tile-foot"><a href="#def-effectif">Définition</a></span>
           </div>
         </dl>
       </section>
-      {showCharts(aff) && <Lecture rows={rows} months={pm} nature={nature} base={base} aff={aff} tableHref={withAffichage(here, "tableau")} />}
+      {showCharts(aff) && <Lecture slug={slug} rows={rows} months={pm} nature={nature} />}
       {showTables(aff) && (
         <section className="panel" data-testid="proj-mois">
-          <div className="hr-title">
-            <h2>Mois par mois</h2>
-            <p className="desc">Réel figé puis projection ; cliquer un mois projeté pour voir ses hypothèses.</p>
-          </div>
+          <PanelTitle title="Mois par mois" desc="Réel figé puis projeté · cliquer un mois projeté ouvre son détail" slug={slug} term={HYP_TERMS.projection} />
           <div className="table-wrap">
             <table className="data-table" data-testid="proj-table">
               <thead><tr><th>Mois</th><th>Nature</th><th className="num">Brut</th><th className="num">Charges</th><th className="num">Coût employeur</th><th className="num">Effectif fin de mois</th><th className="num">ETP</th></tr></thead>
@@ -282,13 +322,13 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
             <p className="tile-foot nd" data-testid="proj-nd-reasons">n.d. : {[...new Set(rows.flatMap((r) => [r.nd && `${formatMonth(r.month).toLowerCase()} : ${r.nd}`, r.etpNd && `${formatMonth(r.month).toLowerCase()} : ${r.etpNd}`]).filter(Boolean))].join(" ; ")}</p>
           )}
           {rows.some((r) => r.layer !== "reel" && r.cost !== null && (r.brut === null || r.charges === null)) && (
-            <p className="tile-foot">Brut ou charges n.d. sur un mois projeté : un élément saisi en coût chargé n'est pas ventilé entre brut et charges ; le coût employeur reste exact.</p>
+            <p className="tile-foot nd" data-testid="proj-brut-nd">n.d. : brut ou charges d'un mois projeté dont un élément est saisi en coût chargé, non ventilé (coût employeur exact).</p>
           )}
         </section>
       )}
-      {showTables(aff) && <NatureTable nature={nature} months={pm} />}
-      {showTables(aff) && <CategoriesTable proj={proj} base={base} />}
-      {showTables(aff) && detail && detail.kind === "value" && <Detail month={detail} />}
+      {showTables(aff) && <NatureTable slug={slug} nature={nature} months={pm} />}
+      {showTables(aff) && <CategoriesTable slug={slug} proj={proj} base={base} />}
+      {showTables(aff) && detail && detail.kind === "value" && <Detail slug={slug} month={detail} />}
     </>
   );
 }
@@ -296,15 +336,12 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
 // Tableau exact du graphique « par nature » : pour chaque mois, la somme des contributions du moteur de chaque nature ; la dernière
 // ligne reprend le coût du mois donné par le moteur (somme des lignes). Mois n.d. : « n.d. » avec la raison au survol. Nature sans
 // aucune contribution ce mois-là : « — » (aucune hypothèse de ce type), jamais un 0,00 € qui passerait pour un solde calculé.
-function NatureTable({ nature, months }: { nature: NatureChart; months: ProjectedMonth[] }) {
+function NatureTable({ slug, nature, months }: { slug: string; nature: NatureChart; months: ProjectedMonth[] }) {
   if (!hasValues(nature.series)) return null;
   const why = (m: ProjectedMonth) => (m.kind === "nd" ? frDates(m.reasons.join(" ; ")) : undefined);
   return (
     <section className="panel" data-testid="proj-nature">
-      <div className="hr-title">
-        <h2>Coût projeté par nature de contribution</h2>
-        <p className="desc">Somme des contributions du moteur de projection, mois par mois.</p>
-      </div>
+      <PanelTitle title="Coût projeté par nature de contribution" desc="Mois projetés · euros" slug={slug} term={HYP_TERMS.coutNature} />
       <div className="table-wrap">
         <table className="data-table sticky-first" data-testid="proj-nature-table">
           <thead><tr><th>Nature</th>{months.map((m, i) => <th key={m.month} className="num" title={nature.titles[i]}>{nature.categories[i]}</th>)}</tr></thead>
@@ -328,27 +365,24 @@ function NatureTable({ nature, months }: { nature: NatureChart; months: Projecte
           </tfoot>
         </table>
       </div>
-      <p className="tile-foot">Un montant négatif se retire du coût du mois (départ, congé non payé, prorata d'une entrée). « — » : aucune contribution de cette nature ce mois-là. Le détail par hypothèse d'un mois s'ouvre depuis « Mois par mois ».</p>
     </section>
   );
 }
 
 // Effectif et ETP de fin de mois par catégorie (CDI, CDD, apprenti, stagiaire) ; « non classé » : nature sans catégorie.
-function CategoriesTable({ proj, base }: { proj: Projection; base: BaseSnapshot }) {
+function CategoriesTable({ slug, proj, base }: { slug: string; proj: Projection; base: BaseSnapshot }) {
   if (proj.kind === "error") return null;
   const months = proj.months.filter((m): m is Extract<ProjectedMonth, { kind: "value" }> => m.kind === "value" && m.byCategory !== undefined);
   if (!months.length) return null;
   const keys = [...CATEGORY_IDS, "nc"].filter((k) => months.some((m) => m.byCategory![k]));
   const ref = base.contracts.filter((c) => c.counted);
+  const unclassified = ref.filter((c) => !c.category).length;
   const text = (n: number, etp4: number | null) => `${persons(n)} · ${etp4 === null ? "ETP n.d." : `${fmtEtp4(etp4)} ETP`}`;
   // Une seule catégorie : la colonne Total répéterait la même valeur.
   const withTotal = keys.length > 1;
   return (
     <section className="panel" data-testid="proj-categories">
-      <div className="hr-title">
-        <h2>Effectif et ETP par catégorie</h2>
-        <p className="desc">Fin de mois, contrats comptés dans l'effectif.</p>
-      </div>
+      <PanelTitle title="Effectif et ETP par catégorie" desc="Fin de mois · contrats comptés dans l'effectif" slug={slug} term={HYP_TERMS.categories} />
       <div className="table-wrap">
         <table className="data-table" data-testid="proj-categories-table">
           <thead>
@@ -368,13 +402,13 @@ function CategoriesTable({ proj, base }: { proj: Projection; base: BaseSnapshot 
           </tbody>
         </table>
       </div>
-      <p className="tile-foot">Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée par salarié dans l'onglet Salariés. {ref.some((c) => !c.category) ? `${ref.filter((c) => !c.category).length} contrat(s) sans catégorie (nature non reconnue).` : ""}</p>
+      {unclassified > 0 && <p className="tile-foot" data-testid="proj-categories-nd">{unclassified} contrat{unclassified > 1 ? "s" : ""} sans catégorie (nature non reconnue), compté{unclassified > 1 ? "s" : ""} « non classé ».</p>}
     </section>
   );
 }
 
 // Détail d'un mois projeté : chaque contribution et l'hypothèse qui la porte ; la somme égale le total du mois.
-function Detail({ month }: { month: Extract<ProjectedMonth, { kind: "value" }> }) {
+function Detail({ slug, month }: { slug: string; month: Extract<ProjectedMonth, { kind: "value" }> }) {
   // Libellé écrit par le moteur (« Entrée le 2026-10-12 ») : date en français ; le libellé d'une hypothèse saisie reste tel que saisi.
   const shown = (c: { hypothesisId: string | null; label: string }) => (c.hypothesisId ? c.label : frDates(c.label));
   const byHyp = new Map<string, { label: string; shown: string; kind: Contribution["kind"]; cost: number; n: number }>();
@@ -388,7 +422,7 @@ function Detail({ month }: { month: Extract<ProjectedMonth, { kind: "value" }> }
   }
   return (
     <section className="panel" id="proj-detail" data-testid="proj-detail">
-      <h2>{formatMonth(month.month)} — de quoi est fait le coût projeté</h2>
+      <PanelTitle title={`${formatMonth(month.month)} — de quoi est fait le coût projeté`} slug={slug} term={HYP_TERMS.contribution} />
       <div className="table-wrap">
         <table className="data-table" data-testid="proj-detail-hyps">
           <thead><tr><th>Hypothèse ou base</th><th>Type</th><th className="num">Lignes</th><th className="num">Coût employeur</th></tr></thead>
@@ -400,7 +434,7 @@ function Detail({ month }: { month: Extract<ProjectedMonth, { kind: "value" }> }
           <tfoot><tr className="total" data-testid="proj-detail-total"><td colSpan={3}>Total du mois</td><td className="num" data-col="cost">{formatEuros(month.cost)}</td></tr></tfoot>
         </table>
       </div>
-      <details style={{ marginTop: 12 }}>
+      <details className="hr-lines">
         <summary>Détail par contrat ({month.contributions.length} lignes)</summary>
         <div className="table-wrap">
           <table className="data-table" data-testid="proj-detail-lines">

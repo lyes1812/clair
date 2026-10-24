@@ -285,8 +285,8 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await page.screenshot({ path: `${CAPTURES}/5-09-controles-effectifs.png`, fullPage: true });
   // Contrôles des changements : coût attribué aux enveloppes.
   await tab("Contrôles des changements").click();
-  expect(await txt(page.getByTestId("hyp-hypotheses").locator("tr[data-hyp='Enveloppe TEST-SVC-A'] td[data-col='effet']"))).toBe("1 400,00 €");
-  expect(await txt(page.getByTestId("hyp-hypotheses").locator("tr[data-hyp='Enveloppe Primes variables'] td[data-col='effet']"))).toBe("500,00 €");
+  expect(await txt(page.getByTestId("hyp-hypotheses").locator("tr[data-hyp='Enveloppe TEST-SVC-A'] td[data-col='effet']"))).toBe("+1 400,00 €");
+  expect(await txt(page.getByTestId("hyp-hypotheses").locator("tr[data-hyp='Enveloppe Primes variables'] td[data-col='effet']"))).toBe("+500,00 €");
   await page.screenshot({ path: `${CAPTURES}/5-10-controles-changements.png`, fullPage: true });
   await page.goto(hyp);
 

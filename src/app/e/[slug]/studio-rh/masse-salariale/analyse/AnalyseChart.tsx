@@ -1,12 +1,13 @@
 "use client";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import type { WaterfallData } from "@/lib/viz/ecart";
 import { TitledWaterfall } from "./TitledWaterfall";
 
 // Cascade de l'analyse des écarts : une rubrique à la fois (ETP ou masse salariale chargée), choisie sans recharger la page ;
-// le choix est reporté dans l'adresse. Chaque cascade est la lecture graphique du tableau exact placé dessous.
-export type AnalyseItem = { label: string; title: string; ariaLabel: string; startLabel: string; endLabel: string; note?: string; data: WaterfallData };
-export type AnalyseChartProps = { initial: string; options: { key: string; label: string }[]; items: Record<string, AnalyseItem> };
+// le choix est reporté dans l'adresse. Chaque cascade est la lecture graphique du tableau exact placé dessous ; sa lecture est au
+// glossaire. « cost » : cascade en euros (hausse de coût rouge, baisse verte) ; « neutral » : cascade d'ETP (bleu et gris).
+export type AnalyseItem = { label: string; title: string; ariaLabel: string; startLabel: string; endLabel: string; note?: string; trend?: "cost" | "neutral"; data: WaterfallData };
+export type AnalyseChartProps = { initial: string; options: { key: string; label: string }[]; items: Record<string, AnalyseItem>; axisHelp?: ReactNode };
 
 export function AnalyseChart(p: AnalyseChartProps) {
   const uid = useId();
@@ -52,6 +53,8 @@ export function AnalyseChart(p: AnalyseChartProps) {
           steps={item.data.steps}
           unit={item.data.unit}
           note={item.note}
+          trend={item.trend}
+          axisHelp={p.axisHelp}
         />
       )}
     </div>

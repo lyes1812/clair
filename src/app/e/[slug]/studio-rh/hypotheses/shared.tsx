@@ -4,6 +4,7 @@ import { formatEuros } from "@/lib/money";
 import { hireKey } from "@/lib/budget/engine";
 import { CATEGORY_LABELS, type Amount, type BaseSnapshot, type Hypothesis, type Scope } from "@/lib/budget/types";
 import { fmtFixed } from "@/lib/rh/kpi/format";
+import { costTone, trendClass } from "@/lib/trend";
 import { dateFr } from "@/lib/viz/hyp-saisie";
 
 // Éléments communs aux écrans de saisie du scénario : libellés, détail d'une hypothèse, champs de formulaire.
@@ -56,15 +57,28 @@ export function detailOf(h: Hypothesis, base: BaseSnapshot, hyps: Hypothesis[]):
   }
 }
 
-// Titre d'un panneau : un seul motif (titre puis phrase dessous ; les liens « règle » et « définition » vont dans la phrase).
-export const CardTitle = ({ title, children }: { title: React.ReactNode; children?: React.ReactNode }) => (
+// Titre d'un panneau : un seul motif (titre, « ? » vers le glossaire, puis au plus une ligne de contexte dessous : période, unité, nombre).
+// Les explications ne s'écrivent pas ici : elles sont au glossaire.
+export const CardTitle = ({ title, help, children }: { title: React.ReactNode; help?: React.ReactNode; children?: React.ReactNode }) => (
   <div className="hs-title">
-    <h2>{title}</h2>
+    <h2>{title}{help}</h2>
     {children ? <p className="desc">{children}</p> : null}
   </div>
 );
 
-// Règles détaillées d'un écran, repliées sous la phrase du titre.
+// Tendance d'un montant de coût (convention « Tendances financières ») : classes de la cellule, dont le rouge (hausse) ou le vert (baisse),
+// et sens de la flèche dessinée par le style (data-sign) ; nulle ou n.d. : ni couleur ni flèche. À n'employer que pour un montant de coût,
+// jamais pour un effectif, un ETP, des entrées ou des sorties.
+export const trendOf = (delta: number | null | undefined): { cls: string; sign: "up" | "down" | "zero" } => ({
+  cls: ["hs-trend", trendClass(costTone(delta))].filter(Boolean).join(" "),
+  sign: delta === null || delta === undefined || delta === 0 ? "zero" : delta > 0 ? "up" : "down",
+});
+
+// Montant avec son signe écrit : « + » devant une hausse, « − » (vrai signe moins) devant une baisse, rien devant zéro. La couleur et la
+// flèche d'une tendance ne sont jamais seules.
+export const signedEuros = (cents: number): string => `${cents > 0 ? "+" : ""}${formatEuros(cents).replace(/^[-−]/, "−")}`;
+
+// Règles détaillées repliées : les écrans n'en affichent plus (leur texte est au glossaire) ; export conservé pour les écrans voisins.
 export const Rules = ({ summary = "Règles de saisie", children }: { summary?: string; children: React.ReactNode }) => (
   <details className="hs-rules">
     <summary className="hs-disclose hs-quiet">{summary}</summary>
@@ -92,7 +106,7 @@ export const Text = ({ id, name, label, hint, ...rest }: { id: string; name: str
   <Field id={id} label={label} hint={hint}><input className="input" id={id} name={name} {...rest} /></Field>
 );
 
-// Groupe de champs d'un formulaire : intitulé, phrase d'aide, champs en ligne.
+// Groupe de champs d'un formulaire : intitulé, contrainte courte facultative, champs en ligne.
 export const FieldGroup = ({ title, hint, children }: { title: string; hint?: React.ReactNode; children: React.ReactNode }) => (
   <fieldset className="hs-group">
     <legend>{title}</legend>
@@ -104,16 +118,16 @@ export const FieldGroup = ({ title, hint, children }: { title: string; hint?: Re
 export function AmountFields({ prefix, idp, optional }: { prefix: string; idp: string; optional?: boolean }) {
   return (
     <>
-      <Field id={`${idp}-mode`} label="Saisie" hint="Brut + taux : charges = brut × taux. Coût chargé : montant tel quel, non ventilé.">
+      <Field id={`${idp}-mode`} label="Saisie">
         <select className="select" id={`${idp}-mode`} name={`${prefix}Mode`} defaultValue={optional ? "aucun" : ""}>
           {optional ? <option value="aucun">Aucun</option> : <option value="" disabled>Choisir…</option>}
           <option value="brut">Brut + taux de charges</option>
           <option value="charge">Coût chargé (non ventilé)</option>
         </select>
       </Field>
-      <Text id={`${idp}-brut`} name={`${prefix}Brut`} label="Brut (€)" inputMode="decimal" hint="Si la saisie est « Brut + taux »." />
+      <Text id={`${idp}-brut`} name={`${prefix}Brut`} label="Brut (€)" inputMode="decimal" />
       <Text id={`${idp}-taux`} name={`${prefix}Taux`} label="Taux de charges (%)" inputMode="decimal" hint="Ex. 42,5." />
-      <Text id={`${idp}-cout`} name={`${prefix}Cout`} label="Coût chargé (€)" inputMode="decimal" hint="Si la saisie est « Coût chargé »." />
+      <Text id={`${idp}-cout`} name={`${prefix}Cout`} label="Coût chargé (€)" inputMode="decimal" />
     </>
   );
 }

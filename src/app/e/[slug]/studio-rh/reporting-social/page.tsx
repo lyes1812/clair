@@ -1,6 +1,8 @@
 import "@/styles/donnees.css";
 import { FamilyTabs } from "@/components/FamilyTabs";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { Prevu } from "@/components/Prevu";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { PageHead } from "../../donnees/ui";
 import { requireWorkspace } from "@/lib/workspace";
@@ -15,7 +17,8 @@ const VUES = [
 ] as const;
 
 // Chapitres du catalogue de la BDESE, listés par leur seul numéro et leur nom : ni nombre d'indicateurs, ni contenu, ni obligation
-// n'en sont déduits. Le chapitre 07 est abrégé : son intitulé complet n'est pas lisible dans la source consultée (voir la note sous la grille).
+// n'en sont déduits. Le chapitre 07 est abrégé : son intitulé complet n'est pas lisible dans la source consultée (voir la note sous la grille
+// et l'entrée « BDESE » du glossaire).
 const CHAPITRES = [
   { no: "00", name: "Documents" },
   { no: "01", name: "Investissements" },
@@ -48,9 +51,9 @@ export default async function ReportingSocialPage({ params, searchParams }: { pa
           title="Index égalité FH"
           lead="Non disponible avec les données lues : le calcul de l'index demande le sexe, la catégorie et la rémunération individuelle de chaque collaborateur, et le sexe n'est pas lu aujourd'hui dans le référentiel Collaborateurs."
           existing={[
-            { href: `${studio}/collaborateurs`, title: "Collaborateurs", text: "Personnes et contrats lus dans le référentiel, avec la provenance de chaque donnée." },
-            { href: `${studio}/masse-salariale`, title: "Masse salariale", text: "Brut, charges et coût chargé, rapprochés des comptes de paie." },
-            { href: `/e/${slug}/donnees`, title: "Données", text: "Sources lues, date et statut de la dernière synchronisation." },
+            { href: `${studio}/collaborateurs`, title: "Collaborateurs", text: "Personnes et contrats lus." },
+            { href: `${studio}/masse-salariale`, title: "Masse salariale", text: "Brut, charges et coût chargé." },
+            { href: `/e/${slug}/donnees`, title: "Données", text: "Sources, date et statut de la dernière synchronisation." },
           ]}
           open={[
             "La source qui porte le sexe de chaque collaborateur (PayFit ou DSN), et son traitement dans le référentiel Collaborateurs.",
@@ -61,10 +64,10 @@ export default async function ReportingSocialPage({ params, searchParams }: { pa
         <>
           <Prevu
             title="BDESE"
-            lead="Non réalisé : la base de données économiques, sociales et environnementales n'existe pas encore dans Clair. Cette entrée présentera un catalogue de chapitres et deux outils, la saisie et le gestionnaire de fichiers. La présence de ces cartes ne valide aucune obligation légale."
+            lead="Non réalisé : la BDESE n'existe pas encore dans Clair. La présence de ces cartes ne valide aucune obligation légale."
             existing={[
-              { href: `${studio}/kpi`, title: "KPI RH", text: "ETP, effectif moyen, turnover et absentéisme, avec leurs définitions." },
-              { href: `${studio}/masse-salariale`, title: "Masse salariale", text: "Brut, charges et coût chargé, rapprochés des comptes de paie." },
+              { href: `${studio}/kpi`, title: "KPI RH", text: "ETP, effectif moyen, turnover et absentéisme." },
+              { href: `${studio}/masse-salariale`, title: "Masse salariale", text: "Brut, charges et coût chargé." },
             ]}
             open={[
               "Le catalogue de chapitres applicable à l'entreprise et, pour chaque indicateur, sa source, sa période et son statut.",
@@ -74,8 +77,7 @@ export default async function ReportingSocialPage({ params, searchParams }: { pa
             ]}
           />
           <section className="panel rs-preview" aria-labelledby="rs-chapitres" data-testid="bdese-catalogue">
-            <h2 id="rs-chapitres">Chapitres</h2>
-            <p className="rs-banner" role="note">Aperçu du catalogue : aucun contenu n'est encore construit.</p>
+            <h2><span id="rs-chapitres">Chapitres</span><GlossaryLink slug={slug} term={DONNEES_TERMS.bdese} /></h2>
             <div className="rs-tools">
               <h3>Outils</h3>
               <ul data-testid="bdese-tools">
@@ -95,7 +97,7 @@ export default async function ReportingSocialPage({ params, searchParams }: { pa
                 </li>
               ))}
             </ol>
-            <p className="desc rs-note">L'intitulé du chapitre 07 est abrégé : il reste à confirmer d'après le texte officiel de la BDESE.</p>
+            <p className="desc rs-note">Intitulé du chapitre 07 abrégé, à confirmer.</p>
           </section>
         </>
       )}

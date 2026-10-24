@@ -9,11 +9,10 @@ function Feedback({ state }: { state: FormState }) {
   return null;
 }
 
+// Aide strictement nécessaire à créer la clé : les droits à cocher. Création, stockage et chiffrement : glossaire (« ? » de la page).
 const KEY_HELP: Record<string, string> = {
-  payfit:
-    "Créez dans PayFit (Intégrations → Accès API) une clé dédiée à Clair, en lecture seule : accounting:read, collaborators:read, contracts:read, contracts:time-information:read, time:read.",
-  pennylane:
-    "Créez dans Pennylane (Paramètres → Connectivité → Développeurs) un jeton d'API dédié à Clair, en lecture seule sur la comptabilité.",
+  payfit: "Droits requis, en lecture seule : accounting:read, collaborators:read, contracts:read, contracts:time-information:read, time:read.",
+  pennylane: "Jeton d'API en lecture seule sur la comptabilité.",
 };
 
 export function ConnectForm({ slug, source, label, connected }: { slug: string; source: string; label: string; connected: boolean }) {
@@ -34,20 +33,10 @@ export function ConnectForm({ slug, source, label, connected }: { slug: string; 
         )}
         <button className="btn primary" type="submit" disabled={pending}>{pending ? "Vérification…" : "Vérifier et enregistrer"}</button>
       </div>
-      <p className="dn-help">
-        {KEY_HELP[source]} La clé est vérifiée auprès du fournisseur, puis stockée chiffrée ; elle n'est plus jamais affichée.
-        {source === "pennylane" && " L'identifiant de société n'est utile qu'avec un jeton donnant accès à plusieurs sociétés."}
-      </p>
+      <p className="dn-help">{KEY_HELP[source]}</p>
     </form>
   );
 }
-
-const SYNC_HELP: Record<string, string> = {
-  payfit:
-    "Collaborateurs et contrats : état actuel chez PayFit (contrats archivés depuis plus d'un an non fournis). Temps, absences, statut de paie et journal : pour chaque mois de la période (24 au plus).",
-  pennylane:
-    "Plan comptable complet, puis lignes d'écritures des classes 6 et 7 et des comptes 421, 431, 437, pour chaque mois de la période (24 au plus).",
-};
 
 // Plafond de mois par lecture : celui de l'action serveur (24), rappelé ici pour prévenir avant l'envoi.
 const MAX_MONTHS = 24;
@@ -73,7 +62,6 @@ export function SyncForm({ slug, source, defaultFrom, defaultTo }: { slug: strin
       <p className="dn-range" aria-live="polite" data-ok={n !== null && n <= MAX_MONTHS ? "true" : "false"}>
         {n === null ? "Période incomplète, ou mois de début postérieur au mois de fin." : n > MAX_MONTHS ? `${n} mois demandés : ${MAX_MONTHS} au plus par lecture.` : `${n} mois seront lus.`}
       </p>
-      <p className="dn-help">{SYNC_HELP[source]} Rien n'est modifié avant validation de l'aperçu.</p>
     </form>
   );
 }
@@ -86,9 +74,7 @@ export function DecisionButtons({ slug, syncId, additive = false }: { slug: stri
       <div className="dn-decision-text">
         <strong>Valider cette lecture ?</strong>
         <span className="desc">
-          {additive
-            ? "Appliquer fait compter ces fichiers dans la couverture de l'espace (un fichier qui en remplace un autre est signalé dans l'aperçu). Abandonner jette l'aperçu : rien n'est modifié."
-            : "Appliquer rend cette lecture active pour les modules. Abandonner jette l'aperçu : rien n'est modifié."}
+          {additive ? "Appliquer ajoute ces fichiers à la couverture. Abandonner jette l'aperçu." : "Appliquer rend la lecture active. Abandonner jette l'aperçu."}
         </span>
       </div>
       <Feedback state={applyState ?? discardState} />
@@ -106,14 +92,14 @@ export function DecisionButtons({ slug, syncId, additive = false }: { slug: stri
 
 const UPLOAD_HELP = {
   dsn: {
-    label: "Fichiers DSN (norme P25V01 ou P26V01, 24 fichiers et 4 Mo par fichier au plus)",
+    label: "Fichiers DSN",
+    limits: "Norme P25V01 ou P26V01 · 24 fichiers et 4 Mo par fichier au plus.",
     accept: ".dsn,.txt,text/plain",
-    help: "Chaque fichier est lu, contrôlé et présenté en aperçu avant d'être appliqué. Un fichier déjà déposé est reconnu à son empreinte et n'est pas importé deux fois. Le fichier d'origine est conservé chiffré ; le NIR n'est jamais stocké en clair.",
   },
   fec: {
-    label: "Fichiers FEC (18 colonnes de la norme, tabulation ou « | », 6 fichiers et 32 Mo par fichier au plus)",
+    label: "Fichiers FEC",
+    limits: "18 colonnes de la norme, tabulation ou « | » · 6 fichiers et 32 Mo par fichier au plus.",
     accept: ".txt,.csv,.fec,text/plain",
-    help: "Un fichier = un exercice. Chaque fichier est lu, contrôlé (équilibre, dates, montants) et présenté en aperçu avant d'être appliqué. Un fichier déjà déposé est reconnu à son empreinte ; un FEC couvrant la même période que l'un déjà appliqué le remplace.",
   },
 } as const;
 
@@ -156,7 +142,7 @@ export function FileUploadForm({ slug, kind }: { slug: string; kind: keyof typeo
           </>
         )}
       </div>
-      <p className="dn-help">{help.help}</p>
+      <p className="dn-help">{help.limits}</p>
     </form>
   );
 }

@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 import { BarChart, LineChart, type ChartSeries } from "@/components/charts";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { SourceBadge } from "@/components/SourceBadge";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, formatMonth } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
+import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
-import { RH_DEFINITIONS } from "@/lib/rh/definitions";
 import { monthRanges, payfitExactFrom, type Count, type HeadcountResult } from "@/lib/rh/headcount";
-import { KPI_DEFINITIONS, KPI_ND_EXPLANATIONS, SOURCE_GAPS } from "@/lib/rh/kpi/definitions";
 import { fmtEtp4, fmtFixed, fmtFraction, fmtHalfDays, fmtPercent, showKpi } from "@/lib/rh/kpi/format";
 import type {
   Absenteeism,
@@ -30,10 +30,11 @@ import type { KpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
-import { absenceTypeLabel, absenteeismSeries, allZero, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, movementSeries, ndSummary, type CategoryMonthIn } from "@/lib/viz/kpi";
+import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, movementSeries, ndSummary, readingQualifiers, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
-// Composants de l'écran KPI RH : en-tête, tuiles (valeur, N-1, écart, paramètres), tableau mensuel, détail d'un chiffre.
+// Composants de l'écran KPI RH : en-tête, tuiles (valeur, N-1, écart, « ? » vers le glossaire), tableau mensuel, détail d'un chiffre.
+// Aucune explication de calcul sur l'écran : les définitions sont au glossaire (src/lib/glossary/kpi.ts), reliées par un « ? ».
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/kpi")!;
 
 export type Maps = { persons: Map<string, PersonDraft>; contracts: Map<string, ContractDraft> };
@@ -64,9 +65,11 @@ export function KpiHeader({ ctx, closedMonth, children, bare = false }: { ctx: K
       <div className="kpi-head">
         <span className="label">Studio RH</span>
         <h1>{ITEM.label}</h1>
-        <p className="desc">{ITEM.summary}</p>
         <div className="kpi-read-strip">
-          <SourceBadge resolution={source} slug={slug} />
+          <div className="kpi-source">
+            <SourceBadge resolution={source} slug={slug} />
+            {source.chosen && <GlossaryLink slug={slug} term={KPI_TERMS.sourceGaps} label="Écarts entre PayFit et DSN" />}
+          </div>
           {ctx.collab.data && !bare && (
             <p className="desc" data-testid="kpi-closed-month">
               Dernier mois clos : {closedMonth ? <strong>{closedMonth}</strong> : <span className="nd">n.d. — aucun mois clos à la date de référence</span>}
@@ -78,7 +81,7 @@ export function KpiHeader({ ctx, closedMonth, children, bare = false }: { ctx: K
         </div>
         {switchedAt && (
           <p className="notice" data-testid="source-switch-notice">
-            Source RH changée le {dateTimeFmt.format(switchedAt)} par un administrateur ({source.reason}). Les identifiants PayFit et DSN sont distincts : aucune comparaison n'est faite entre les deux sources.
+            Source RH changée le {dateTimeFmt.format(switchedAt)} par un administrateur ({source.reason}) : aucune comparaison entre PayFit et DSN.
           </p>
         )}
         {ctx.collab.data && !bare && (
@@ -104,6 +107,16 @@ export function KpiHeader({ ctx, closedMonth, children, bare = false }: { ctx: K
       )}
       {children}
     </>
+  );
+}
+
+// Titre de panneau suivi de son « ? » vers le glossaire (le titre reste court : les explications sont au glossaire).
+export function PanelTitle({ slug, term, label, children }: { slug: string; term: string; label?: string; children: ReactNode }) {
+  return (
+    <div className="kpi-title">
+      <h2>{children}</h2>
+      <GlossaryLink slug={slug} term={term} label={label} />
+    </div>
   );
 }
 
@@ -133,13 +146,12 @@ export function PayfitNotice({ ctx }: { ctx: KpiContext }) {
       <div className="kpi-limits-body">
         {raw && <PayfitHistoryNotice ctx={ctx.collab} />}
         <p className="notice" data-testid="kpi-payfit-notice">
-          Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.{" "}
-          {raw || archive ? null : <>Aucun mois de la lecture n'est en borne basse.</>}
+          Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.
+          <GlossaryLink slug={ctx.collab.slug} term={KPI_TERMS.limits} />
         </p>
         {archive && (
           <p className="notice" data-testid="kpi-payfit-archive-notice">
-            PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois (constaté sur le compte pilote, à vérifier pour chaque espace) : l'effectif et l'ETP sont exacts à partir du {formatDate(exactFrom!)} ; les entrées, sorties et
-            absences des mois {monthRanges(lower)} sont incomplètes, et tout turnover ou absentéisme d'une période qui contient l'un de ces mois est n.d.
+            Contrats archivés non renvoyés par PayFit (constat sur un compte PayFit, à vérifier pour chaque espace) : effectif et ETP exacts à partir du {formatDate(exactFrom!)} ; entrées, sorties et absences des mois {monthRanges(lower)} incomplètes ; turnover et absentéisme n.d. sur toute période qui en contient un.
           </p>
         )}
       </div>
@@ -160,18 +172,23 @@ export function AbsenceTypes({ codes }: { codes: string[] }) {
 }
 
 // Tuile Absentéisme : types d'absence comptés, présents non comptés, comptés mais sans aucune absence dans la lecture.
+// Le nombre entre parenthèses (absences de toute la lecture) est expliqué au glossaire.
 export function AbsenceTypeNotes({ chosen, other, missing, slug }: { chosen: { type: string; count: number }[]; other: { type: string; count: number }[]; missing: { type: string }[]; slug: string }) {
   const list = (xs: { type: string; count: number }[]) =>
     xs.length ? xs.map((x, i) => <span key={x.type}>{i > 0 ? ", " : ""}<AbsenceType code={x.type} /> ({x.count})</span>) : "aucun";
   return (
-    <span className="tile-foot tile-types" data-testid="kpi-absence-types">
-      <span><strong>Types comptés</strong> : {list(chosen)}</span>
-      <span><strong>Autres types présents dans la lecture, non comptés</strong> : {list(other)}</span>
-      {missing.length > 0 && <span><strong>Types comptés absents de la lecture</strong> : <AbsenceTypes codes={missing.map((x) => x.type)} /></span>}
-      <span>
-        Entre parenthèses : nombre d'absences dans toute la lecture, tous mois et tous contrats. Un type sans libellé français est affiché tel que reçu de PayFit. <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
+    <details className="tile-more">
+      <summary>Types d'absence</summary>
+      <span className="tile-foot tile-types" data-testid="kpi-absence-types">
+        <span><strong>Types comptés</strong> : {list(chosen)}</span>
+        <span><strong>Autres types présents dans la lecture, non comptés</strong> : {list(other)}</span>
+        {missing.length > 0 && <span><strong>Types comptés absents de la lecture</strong> : <AbsenceTypes codes={missing.map((x) => x.type)} /></span>}
+        <span>
+          <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
+          <GlossaryLink slug={slug} term={KPI_TERMS.absenceTypes} />
+        </span>
       </span>
-    </span>
+    </details>
   );
 }
 
@@ -179,48 +196,42 @@ export function AbsenceTypeNotes({ chosen, other, missing, slug }: { chosen: { t
 
 export function KpiTile(props: {
   id: string;
+  slug: string;
   label: string;
   shown: Shown;
   title?: string;
   n1: string;
+  n1Title?: string; // période N-1 complète, au survol de la ligne N-1
   delta: string;
-  deltaCalc?: string;
-  params: string;
+  deltaTitle?: string; // écart exact en fractions (au survol de la ligne Écart) : rien de visible, la traçabilité reste entière
   qualifiers?: string[];
-  // Avertissement qui conditionne la lecture de la valeur : reste visible sous la valeur (le reste est replié).
+  // Avertissement qui conditionne la lecture de la valeur : reste visible sous la valeur.
   warning?: ReactNode;
-  def: string;
+  term: string; // identifiant de l'entrée du glossaire (« ? » à côté du libellé)
   detail: string;
   detailN1: string;
   children?: ReactNode;
   visible?: boolean;
 }) {
-  const { id, label, shown, title, n1, delta, deltaCalc, params, qualifiers = [], warning, def, detail, detailN1, children, visible = true } = props;
+  const { id, slug, label, shown, title, n1, n1Title, delta, deltaTitle, qualifiers = [], warning, term, detail, detailN1, children, visible = true } = props;
   if (!visible) return null;
-  const notes = [...new Set(qualifiers)];
+  const notes = readingQualifiers(qualifiers);
   return (
     <div className="kpi-tile" data-testid={`kpi-tile-${id}`}>
-      <dt>{label}</dt>
+      <dt>{label}<GlossaryLink slug={slug} term={term} /></dt>
       <dd className={cls(shown)} title={title}>{shown.text}</dd>
-      {/* Toujours présent, même vide : la rangée des remarques garde la grille des tuiles alignée (N-1, écart, paramètres, liens). */}
-      <span className="tile-notes">
+      {/* Toujours présent, même vide : la rangée des remarques garde la grille des tuiles alignée (N-1 et écart, liens). */}
+      <div className="tile-notes">
         {notes.map((q) => <span key={q} className="tile-foot">{q}</span>)}
         {warning}
-      </span>
-      <span className="tile-compare">
-        <span className="tile-foot" data-testid={`kpi-tile-${id}-n1`}>{n1}</span>
-        <span className="tile-foot" data-testid={`kpi-tile-${id}-delta`}>
-          écart : {delta}
-          {deltaCalc ? <span className="tile-calc" data-testid={`kpi-tile-${id}-delta-calc`}> ({deltaCalc})</span> : null}
-        </span>
-      </span>
-      <details className="tile-more">
-        <summary>Paramètres et périmètre</summary>
-        <span className="tile-foot" data-testid={`kpi-tile-${id}-params`}>{params}</span>
         {children}
-      </details>
+      </div>
+      <span className="tile-compare">
+        <span className="tile-foot" title={n1Title} data-testid={`kpi-tile-${id}-n1`}>N-1 : {n1}</span>
+        <span className="tile-foot" title={deltaTitle} data-testid={`kpi-tile-${id}-delta`}>Écart : {delta}</span>
+      </span>
       <span className="tile-foot tile-links">
-        <a href={`#def-${def}`}>Définition</a> · <a href={detail}>Détail</a> · <a href={detailN1} data-testid={`kpi-tile-${id}-detail-n1`}>Détail N-1</a>
+        <a href={detail}>Détail</a> · <a href={detailN1} data-testid={`kpi-tile-${id}-detail-n1`}>Détail N-1</a>
       </span>
     </div>
   );
@@ -243,7 +254,7 @@ function Slot({ id, title, list, wide, children }: { id: string; title: string; 
   );
 }
 
-export function KpiCharts({ vue, rows, turnover, absenteeism, isPayfit }: { vue: "suivi" | "turnover" | "absenteisme"; rows: KpiRow[]; turnover: Compared<Turnover>; absenteeism: Compared<Absenteeism>; isPayfit: boolean }) {
+export function KpiCharts({ slug, vue, rows, turnover, absenteeism }: { slug: string; vue: "suivi" | "turnover" | "absenteisme"; rows: KpiRow[]; turnover: Compared<Turnover>; absenteeism: Compared<Absenteeism> }) {
   const months = rows.map((r) => r.month);
   const axis = monthAxis(months); // séries du mois seul
   const axisN1 = monthAxis(months, rows.map((r) => r.previous.month)); // séries avec leur N-1 : l'infobulle nomme les deux mois
@@ -255,20 +266,11 @@ export function KpiCharts({ vue, rows, turnover, absenteeism, isPayfit }: { vue:
   const absPeriod = comparedRate("Absentéisme", { label: absenteeism.previousWindow.label, value: absenteeism.previous }, { label: absenteeism.window.label, value: absenteeism.current });
   const H = 250;
   // Un emplacement par graphique, dans l'ordre de lecture de chaque écran ; le seul graphique « large » est celui des mouvements du turnover.
+  // Aucune note sous les graphiques : les règles de lecture sont au glossaire (« ? » du panneau).
   const slots: Record<string, ReactNode> = {
     etp: (
       <Slot key="etp" id="etp" title="ETP contractuel de fin de mois" list={etp}>
-        <LineChart
-          testid="kpi-chart-etp"
-          label="ETP contractuel de fin de mois, par mois, période affichée et N-1"
-          title="ETP contractuel de fin de mois"
-          categories={axisN1.categories}
-          categoryTitles={axisN1.titles}
-          series={etp}
-          unit="etp"
-          height={H}
-          note={isPayfit ? "Quotités à la date de lecture, non historisées : la même quotité sert à tous les mois, N-1 compris." : undefined}
-        />
+        <LineChart testid="kpi-chart-etp" label="ETP contractuel de fin de mois, par mois, période affichée et N-1" title="ETP contractuel de fin de mois" categories={axisN1.categories} categoryTitles={axisN1.titles} series={etp} unit="etp" height={H} />
       </Slot>
     ),
     effectif: (
@@ -278,22 +280,22 @@ export function KpiCharts({ vue, rows, turnover, absenteeism, isPayfit }: { vue:
     ),
     mouvements: (
       <Slot key="mouvements" id="mouvements" title="Entrées et sorties comptées par mois" list={moves} wide={vue === "turnover"}>
-        <BarChart testid="kpi-chart-mouvements" label="Entrées et sorties comptées, par mois" title="Entrées et sorties comptées par mois" categories={axis.categories} categoryTitles={axis.titles} series={moves} unit="nombre" mode="grouped" height={H} note="Mouvements comptés selon les règles du turnover (natures, contrats continus, sorties exclues) : les mêmes chiffres que les colonnes Entrées et Sorties du tableau." />
+        <BarChart testid="kpi-chart-mouvements" label="Entrées et sorties comptées, par mois" title="Entrées et sorties comptées par mois" categories={axis.categories} categoryTitles={axis.titles} series={moves} unit="nombre" mode="grouped" height={H} />
       </Slot>
     ),
     absenteisme: (
       <Slot key="absenteisme" id="absenteisme" title="Absentéisme par mois" list={abs}>
-        <LineChart testid="kpi-chart-absenteisme" label="Absentéisme de chaque mois, période affichée et N-1" title="Absentéisme par mois, période affichée et N-1" categories={axisN1.categories} categoryTitles={axisN1.titles} series={abs} unit="bps" zero height={H} note={`Taux du mois seul (jours d'absence ÷ jours théoriques du mois) ; le taux de la période est la somme des jours sur la somme des jours théoriques, jamais une moyenne de ces taux.${allZero(abs) ? " Tous les taux tracés valent 0,00 % : la courbe reste sur zéro (un mois n.d. n'est pas tracé)." : ""}`} />
+        <LineChart testid="kpi-chart-absenteisme" label="Absentéisme de chaque mois, période affichée et N-1" title="Absentéisme par mois, période affichée et N-1" categories={axisN1.categories} categoryTitles={axisN1.titles} series={abs} unit="bps" zero height={H} note={zeroRateNote(abs)} />
       </Slot>
     ),
     turnover: (
       <Slot key="turnover" id="turnover-periode" title="Turnover par période" list={turn.series}>
-        <BarChart testid="kpi-chart-turnover-periode" label="Taux de turnover, période précédente et période affichée" title="Turnover par période" categories={turn.categories} categoryTitles={turn.titles} series={turn.series} unit="bps" mode="grouped" height={H} note="Taux de chaque période (formule des Paramètres) ; il n'existe pas de taux mensuel." />
+        <BarChart testid="kpi-chart-turnover-periode" label="Taux de turnover, période précédente et période affichée" title="Turnover par période" categories={turn.categories} categoryTitles={turn.titles} series={turn.series} unit="bps" mode="grouped" height={H} />
       </Slot>
     ),
     absenteismePeriode: (
       <Slot key="absenteisme-periode" id="absenteisme-periode" title="Absentéisme par période" list={absPeriod.series}>
-        <BarChart testid="kpi-chart-absenteisme-periode" label="Taux d'absentéisme, période précédente et période affichée" title="Absentéisme par période" categories={absPeriod.categories} categoryTitles={absPeriod.titles} series={absPeriod.series} unit="bps" mode="grouped" height={H} note={`Taux de chaque période : somme des jours d'absence ÷ somme des jours théoriques.${allZero(absPeriod.series) ? " Tous les taux tracés valent 0,00 % : aucune barre n'est visible (une période n.d. n'est pas tracée)." : ""}`} />
+        <BarChart testid="kpi-chart-absenteisme-periode" label="Taux d'absentéisme, période précédente et période affichée" title="Absentéisme par période" categories={absPeriod.categories} categoryTitles={absPeriod.titles} series={absPeriod.series} unit="bps" mode="grouped" height={H} note={zeroRateNote(absPeriod.series)} />
       </Slot>
     ),
   };
@@ -301,10 +303,7 @@ export function KpiCharts({ vue, rows, turnover, absenteeism, isPayfit }: { vue:
   return (
     <section className="panel" data-testid="kpi-graphs">
       <div className="panel-head">
-        <div className="kpi-panel-title">
-          <h2>Lecture graphique</h2>
-          <p className="desc">Lecture visuelle du tableau « Mois par mois » ci-dessous, qui reste la référence. Un mois n.d. ou en borne basse n'est pas tracé (colonne hachurée ou ligne interrompue) : sa raison est dans l'infobulle ; le tableau donne la valeur « ≥ » d'une borne basse et, dessous, la raison de chaque n.d. <a href="#def-lecture-graphique">Règles de lecture</a></p>
-        </div>
+        <PanelTitle slug={slug} term={KPI_TERMS.graphs} label="Lecture des graphiques KPI RH">Lecture graphique</PanelTitle>
       </div>
       <div className="kpi-charts">{order.map((id) => slots[id])}</div>
     </section>
@@ -328,7 +327,6 @@ export function KpiCategoryChart({ months, keys, labels }: { months: CategoryMon
         mode="stacked"
         toggle
         height={260}
-        note="Une catégorie sans contrat un mois connu vaut 0 ; un ETP n.d. (contrat sans quotité) et un mois en borne basse ne sont pas tracés."
       />
     </Slot>
   );
@@ -348,7 +346,7 @@ export function Cell({ col, shown, href }: { col: string; shown: Shown; href: st
 }
 
 // Raisons des « n.d. » du tableau, dédoublonnées, avec les mois concernés.
-export function NdReasons({ items }: { items: { month: string; shown: Shown }[] }) {
+export function NdReasons({ items, slug }: { items: { month: string; shown: Shown }[]; slug?: string }) {
   const byReason = new Map<string, string[]>();
   for (const { month, shown } of items) {
     if (shown.kind !== "nd") continue;
@@ -358,7 +356,10 @@ export function NdReasons({ items }: { items: { month: string; shown: Shown }[] 
   if (!byReason.size) return null;
   return (
     <div data-testid="kpi-nd-reasons">
-      <h3>Raisons des « n.d. » du tableau</h3>
+      <h3>
+        Raisons des « n.d. » du tableau
+        {slug && <GlossaryLink slug={slug} term={KPI_TERMS.ndReasons} />}
+      </h3>
       <ul className="desc">
         {[...byReason].map(([reason, months]) => (
           <li key={reason}>{monthRanges(months)} — {reason}</li>
@@ -488,7 +489,7 @@ export function HeadcountDetail({ v, maps, slug, month, natureAt }: { v: Headcou
       </div>
       {v.declaredAfterEndKeys.length > 0 && (
         <p className="desc" data-testid="kpi-detail-after-end">
-          Déclarés ce mois après leur fin, non comptés (versement après départ, rupture déclarée acquise) :{" "}
+          Déclarés ce mois après leur fin, non comptés :{" "}
           {v.declaredAfterEndKeys.map((k, i) => (
             <span key={k}>
               {i > 0 ? ", " : ""}
@@ -794,7 +795,7 @@ export function AbsenteeismWindowDetail({ v, theoretical, detailHref }: { v: Abs
       ) : (
         <Total>
           {v.kind === "lower_bound" ? "≥ " : ""}
-          {v.ratio.num} demi-journées = {fmtHalfDays(v.ratio.num)} ÷ {fmtHalfDays(v.ratio.den)} = {fmtPercent(v.ratio)} (somme des jours ÷ somme des jours théoriques, jamais une moyenne de taux)
+          {v.ratio.num} demi-journées = {fmtHalfDays(v.ratio.num)} ÷ {fmtHalfDays(v.ratio.den)} = {fmtPercent(v.ratio)}
           {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
         </Total>
       )}
@@ -802,40 +803,13 @@ export function AbsenteeismWindowDetail({ v, theoretical, detailHref }: { v: Abs
   );
 }
 
-// --- Définitions, paramètres en vigueur, n.d., écarts entre sources
+// --- Paramètres en vigueur (les définitions, les raisons des n.d. et les écarts entre sources sont au glossaire)
 
-const RH_REUSED = new Set(["presence", "headcount-persons", "movements", "reference-date", "lower-bound"]);
-
-// extra : définitions propres à l'entrée affichée (Effectifs mensuels), réunies avec les définitions des KPI dans un seul bloc.
-export function KpiDefinitions({ slug, params, extra }: { slug: string; params: { label: string; value: string; origin: string; testId: string }[]; extra?: ReactNode }) {
+// Règles de l'espace qui commandent les calculs, avec leur origine : un bloc replié, un « ? » vers l'explication de l'origine.
+export function KpiParams({ slug, params }: { slug: string; params: { label: string; value: string; origin: string; testId: string }[] }) {
   return (
-    <details className="panel" data-testid="kpi-definitions" id="definitions">
-      <summary>Définitions, paramètres et raisons des « n.d. »</summary>
-      {extra}
-      <dl className="defs">
-        {KPI_DEFINITIONS.map((d) => (
-          <div key={d.id} id={`def-${d.id}`}>
-            <dt>{d.title}</dt>
-            <dd>{d.text}</dd>
-          </div>
-        ))}
-        {RH_DEFINITIONS.filter((d) => RH_REUSED.has(d.id)).map((d) => (
-          <div key={d.id} id={`def-${d.id}`}>
-            <dt>{d.title}</dt>
-            <dd>{d.text}</dd>
-          </div>
-        ))}
-        <div id="def-lecture-graphique" data-testid="kpi-def-graphiques">
-          <dt>Lecture graphique</dt>
-          <dd>
-            Les graphiques ne montrent que des valeurs déjà calculées : celles du tableau « Mois par mois » (effectif, ETP, entrées, sorties, absentéisme de chaque mois) et les taux de période des tuiles (turnover, absentéisme). Le
-            turnover est un taux de période : il n'existe pas de taux mensuel de turnover. Les courbes en pointillés sont celles de N-1 (même mois un an plus tôt). Un mois n.d. ou en borne basse n'est pas tracé : colonne hachurée pour
-            les barres, ligne interrompue pour les courbes, jamais un point à zéro ; sa raison est dans l'infobulle. Les barres partent de zéro. L'axe vertical des courbes d'effectif et d'ETP est ajusté aux valeurs (il ne part pas de
-            zéro) et la graduation le dit sous le graphique ; celui des taux part de zéro. Les taux sont arrondis au centième de point, comme dans le tableau. Le tableau reste la référence.
-          </dd>
-        </div>
-      </dl>
-      <h3>Paramètres en vigueur</h3>
+    <details className="panel" data-testid="kpi-params-block" id="parametres-en-vigueur">
+      <summary>Paramètres en vigueur</summary>
       <dl className="defs" data-testid="kpi-params">
         {params.map((p) => (
           <div key={p.testId} data-testid={`kpi-param-${p.testId}`}>
@@ -845,30 +819,9 @@ export function KpiDefinitions({ slug, params, extra }: { slug: string; params: 
         ))}
       </dl>
       <p className="desc">
-        Modifiables par un administrateur dans <a href={`/e/${slug}/parametres#kpi`}>Paramètres › Définitions des KPI</a>.
+        <a href={`/e/${slug}/parametres#kpi`}>Paramètres › Définitions des KPI</a>
+        <GlossaryLink slug={slug} term={KPI_TERMS.settings} />
       </p>
-      <h3>Ce qui est « n.d. » et pourquoi</h3>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead><tr><th>Cas</th><th className="wrap">Règle</th></tr></thead>
-          <tbody>
-            {KPI_ND_EXPLANATIONS.map(([k, v]) => (
-              <tr key={k}><td>{k}</td><td className="wrap">{v}</td></tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <h3>Écarts entre PayFit et DSN</h3>
-      <div className="table-wrap">
-        <table className="data-table" data-testid="kpi-source-gaps">
-          <thead><tr><th>Sujet</th><th className="wrap">PayFit</th><th className="wrap">DSN</th></tr></thead>
-          <tbody>
-            {SOURCE_GAPS.map(([k, p, d]) => (
-              <tr key={k}><td>{k}</td><td className="wrap">{p}</td><td className="wrap">{d}</td></tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </details>
   );
 }

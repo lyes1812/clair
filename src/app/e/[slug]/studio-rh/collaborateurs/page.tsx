@@ -1,4 +1,5 @@
 import "@/styles/collaborateurs.css";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { isMonth } from "@/lib/connectors/months";
 import { formatDate, formatMonth, monthsBetween } from "@/lib/dates";
@@ -200,14 +201,14 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
         {ml.gate ? (
           <NdNote reasons={tileNd} testid="month-nd">
             <p className="muted">
-              La liste du mois n'est pas affichée : aucune valeur n'est reconstituée. Voir <a href={`/e/${slug}/donnees/${isPayfit ? "payfit" : "dsn"}`}>Données › {isPayfit ? "PayFit" : "DSN"}</a>.
+              Liste du mois non affichée. Voir <a href={`/e/${slug}/donnees/${isPayfit ? "payfit" : "dsn"}`}>Données › {isPayfit ? "PayFit" : "DSN"}</a>.
             </p>
           </NdNote>
         ) : (
           <NdNote reasons={tileNd} testid="month-tiles-nd" />
         )}
         <dl className="facts collab-tiles">
-          {tiles.map((t) => <Tile key={t.id} id={t.id} label={t.label} shown={t.shown} def={t.def} />)}
+          {tiles.map((t) => <Tile key={t.id} id={t.id} label={t.label} shown={t.shown} def={t.def} slug={slug} />)}
         </dl>
         {ml.headcountEnd.kind !== "nd" && Object.keys(ml.headcountEnd.bySiret).length > 1 && (
           <p className="desc">
@@ -240,8 +241,8 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
               <caption className="collab-sr">Contrats du mois — {formatMonth(month)} : une ligne par contrat et par établissement</caption>
               <thead>
                 <tr>
-                  <th scope="col">Personne</th><th scope="col">Matricule</th><th scope="col">Contrat</th><th scope="col">Établissement</th><th scope="col">Nature</th><th scope="col">Début</th><th scope="col" className="col-wide">Fin</th><th scope="col" className="col-state">État fin de mois</th>
-                  <th scope="col" className="col-qty">Quotité</th><th scope="col" className="col-qty">Temps payé / travaillé</th>
+                  <th scope="col">Personne</th><th scope="col">Matricule</th><th scope="col">Contrat</th><th scope="col">Établissement</th><th scope="col">Nature</th><th scope="col">Début</th><th scope="col" className="col-wide">Fin</th><th scope="col" className="col-state">État fin de mois<GlossaryLink slug={slug} term="month-states" /></th>
+                  <th scope="col" className="col-qty">Quotité<GlossaryLink slug={slug} term="quota-and-time" /></th><th scope="col" className="col-qty">Temps payé / travaillé</th>
                   {isPayfit ? <th scope="col">Statut source</th> : <th scope="col" className="num">Versements</th>}
                   <th scope="col">Drapeaux</th><th scope="col">Provenance</th>
                 </tr>
@@ -252,14 +253,13 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
           <NdTableNote notes={collectNotes(ndLog)} testid="collab-monthly-notes" />
           {rows.length === 0 && <p className="muted">Aucune ligne pour ces filtres.</p>}
           <Pager page={pg.page} pageSize={size} total={pg.total} href={(p) => pageHref(listParams, p)} testid="collab-monthly-pager" />
-          <p className="collab-note">Les états de fin de mois suivent <a href="#def-presence">la définition de la présence</a> ; les natures comptées sont un paramètre de l'espace.</p>
         </section>
       )}
 
       {!ml.gate && (
         <>
           <section className="panel collab-panel">
-            <h2>Entrées et sorties — {formatMonth(month)}</h2>
+            <h2>Entrées et sorties — {formatMonth(month)}<GlossaryLink slug={slug} term="movements" /></h2>
             <h3>Entrées</h3>
             <EventsTable rows={ml.entries} slug={slug} kind="entry" testId="month-entries" source={b.source} />
             <h3>Sorties</h3>

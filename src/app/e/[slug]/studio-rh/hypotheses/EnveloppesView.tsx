@@ -1,13 +1,15 @@
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { monthRange } from "@/lib/connectors/months";
 import { formatMonth } from "@/lib/dates";
 import type { ScenarioRow } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
+import { BUDGET_TERMS } from "@/lib/glossary/budget";
 import { countByYear, gridYears } from "@/lib/viz/hyp-saisie";
 import { gridCaption } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { addHypothesisAction, saveEnvelopesAction } from "./actions";
 import { DirtyIndicator, GridTools, RowFill } from "./GridTools";
-import { AmountFields, CardTitle, decText, Field, FieldGroup, Rules, Text } from "./shared";
+import { AmountFields, CardTitle, decText, Field, FieldGroup, Text } from "./shared";
 
 type Env = Extract<Hypothesis, { kind: "enveloppe" }>;
 const BLANK_ROWS = 3;
@@ -73,8 +75,8 @@ export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit
   );
   const frame = (
     <div className="hs-grid" data-grid-root data-ys={gy.multi ? "0" : undefined}>
-      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} />
-      <p className="hs-unit">{gridCaption("Montants en € par mois (coût chargé, ou brut selon la saisie de la ligne)", months)}</p>
+      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} />
+      <p className="hs-unit">{gridCaption("Montants en € par mois (chargés ou bruts selon la ligne)", months)}</p>
       {grid}
     </div>
   );
@@ -82,17 +84,8 @@ export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit
   return (
     <>
       <section className="panel" data-testid={`env-${axis}`}>
-        <CardTitle title={`Enveloppes par ${axis === "service" ? "service" : "rubrique"}`}>
-          {axis === "service"
-            ? "Une ligne par centre de coûts (existant ou nouveau) : le montant de chaque mois est ajouté à la projection et rattaché à ce centre de coûts."
-            : "Une ligne par rubrique de votre choix (primes, heures supplémentaires, indemnités…) : le montant de chaque mois est ajouté à la projection sous le nom de la rubrique."}
-          {" "}<a href="#def-enveloppe">Règle</a>
-        </CardTitle>
-        <Rules>
-          <p>Un mois vide n'a pas d'enveloppe (jamais compté pour 0).</p>
-          <p>En « Brut + charges », les charges sont le brut × le taux saisi ; en « Coût chargé », brut et charges de ce mois restent non ventilés.</p>
-        </Rules>
-        {canEdit && none && <p className="hs-empty" data-testid={`env-${axis}-empty`}>{axis === "service" ? "Aucune enveloppe saisie : renseignez une ligne ci-dessous (un centre de coûts et ses montants par mois)." : "Aucune enveloppe saisie : renseignez une ligne ci-dessous (une rubrique et ses montants par mois)."}</p>}
+        <CardTitle title={`Enveloppes par ${axis === "service" ? "service" : "rubrique"}`} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.enveloppe} />} />
+        {canEdit && none && <p className="hs-empty" data-testid={`env-${axis}-empty`}>Aucune enveloppe saisie.</p>}
         {canEdit ? (
           <ActionForm action={saveEnvelopesAction.bind(null, slug, scenario.id, axis)} submit="Enregistrer les enveloppes" testid={`env-${axis}-form`} className="form hs-grid-form" footer={<DirtyIndicator />}>
             <input type="hidden" name="n" value={rows.length} />
@@ -103,31 +96,30 @@ export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit
       </section>
       {canEdit && axis === "rubrique" && (
         <section className="panel" data-testid="env-ponctuels">
-          <CardTitle title="Autres éléments">Un montant à un mois précis, hors grille.</CardTitle>
+          <CardTitle title="Autres éléments" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.ponctuels} />} />
           <datalist id="hyp-services">{services.map((x) => <option key={x} value={x} />)}</datalist>
           <details>
             <summary>Élément ponctuel (prime, régularisation…)</summary>
             <ActionForm action={add("ponctuel")} submit="Ajouter l'élément" testid="hyp-form-ponctuel">
-              <FieldGroup title="Élément" hint="Ajouté à la projection au mois choisi.">
+              <FieldGroup title="Élément">
                 <Text id="pon-label" name="label" label="Libellé" maxLength={200} required />
                 <Text id="pon-month" name="month" label="Mois" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required hint={`Entre ${formatMonth(scenario.firstMonth).toLowerCase()} et ${formatMonth(scenario.lastMonth).toLowerCase()}.`} />
-                <Field id="pon-service" label="Centre de coûts (vide : toute l'entreprise)" hint="Existant ou nouveau.">
+                <Field id="pon-service" label="Centre de coûts (vide : toute l'entreprise)">
                   <input className="input" id="pon-service" name="service" list="hyp-services" maxLength={200} />
                 </Field>
               </FieldGroup>
               <FieldGroup title="Montant"><AmountFields prefix="amount" idp="pon-amount" /></FieldGroup>
-              <label className="check"><input type="checkbox" name="nonRecurring" value="oui" /><span>Non récurrent (retiré de l'atterrissage retraité)</span></label>
+              <label className="check"><input type="checkbox" name="nonRecurring" value="oui" /><span>Non récurrent</span></label>
             </ActionForm>
           </details>
           <details>
             <summary>Non récurrent réalisé, déjà passé en comptabilité (rupture, solde de congés…)</summary>
-            <p className="desc">Le journal PayFit ne distingue pas ces éléments (ils sont dans le brut). Saisissez-les ici avec leur montant chargé : ils servent uniquement à l'atterrissage retraité et ne changent pas la projection.</p>
             <ActionForm action={add("realise")} submit="Ajouter l'élément réalisé" testid="hyp-form-realise">
               <FieldGroup title="Élément réalisé">
                 <Text id="rea-label" name="label" label="Libellé" maxLength={200} required />
-                <Text id="rea-cat" name="category" label="Catégorie (libre)" maxLength={100} required hint="Ex. rupture, solde de congés." />
+                <Text id="rea-cat" name="category" label="Catégorie (libre)" maxLength={100} required />
                 <Text id="rea-month" name="month" label="Mois réalisé" type="month" max={base.refMonth} required hint={`Au plus ${formatMonth(base.refMonth).toLowerCase()} (mois de la base).`} />
-                <Text id="rea-cost" name="cost" label="Montant chargé (€)" inputMode="decimal" required hint="Montant chargé, positif ou nul." />
+                <Text id="rea-cost" name="cost" label="Montant chargé (€)" inputMode="decimal" required hint="Positif ou nul." />
               </FieldGroup>
             </ActionForm>
           </details>

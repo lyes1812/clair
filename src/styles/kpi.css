@@ -1,15 +1,19 @@
-/* KPI RH (charte « 101 ») : en-tête de lecture, tuiles d'indicateurs, lecture graphique, effectifs mensuels.
-   Variables et échelle typographique de globals.css / typography.css ; teintes de série de charts.css. */
+/* KPI RH (charte « 101 », univers bleu / blanc / noir) : en-tête de lecture, tuiles d'indicateurs, lecture graphique, effectifs mensuels.
+   Variables et échelle typographique de globals.css / typography.css ; teintes de série de charts.css. Aucune couleur hors de
+   l'univers bleu / blanc / noir : un effectif, un ETP ou un taux n'est pas un montant, donc ni rouge ni vert sur cet écran. */
 
-/* Titre d'un panneau avec sa phrase de contexte dessous (le titre reste court pour les lecteurs d'écran). */
-.kpi-panel-title { display: grid; gap: 4px; min-width: 0; }
-.kpi-panel-title .desc { max-width: 78ch; }
-.panel-head .kpi-panel-title { flex: 1 1 320px; }
+/* Titre d'un panneau suivi de son « ? » vers le glossaire ; une ligne de contexte peut le suivre (pile). */
+.kpi-title { display: flex; align-items: center; min-width: 0; }
+.kpi-title h2 { min-width: 0; }
+.kpi-title-stack { display: grid; gap: 4px; min-width: 0; }
 
 /* En-tête : titre, source et dernier mois clos visibles ; le détail technique de la lecture est replié. */
 .kpi-head { display: grid; gap: 10px; }
 .kpi-read-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 22px; }
 .kpi-read-strip .source-badge { flex-wrap: wrap; }
+/* Source suivie de son « ? » (écarts entre PayFit et DSN) : le renvoi reste collé au badge, même sur deux lignes. */
+.kpi-source { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.kpi-source .gloss-link { flex: none; margin-left: 0; }
 .kpi-read-details { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
 .kpi-read-details[open] { justify-self: stretch; }
 .kpi-read-details > summary { cursor: pointer; padding: 7px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
@@ -32,7 +36,8 @@
 /* Tuiles d'indicateurs : valeur en grand, comparaison N-1 sous un filet, paramètres repliés, liens en pied. */
 /* Colonnes régulières (auto-fill) : une tuile isolée garde la largeur d'une colonne au lieu de s'étirer sur tout le panneau. */
 .facts.kpi-tiles { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.kpi-tiles .kpi-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 0; }
+/* Filet de tête en dégradé de bleu (marine → bleu → bleu clair) : décor sans texte, la valeur reste en encre sur blanc. */
+.kpi-tiles .kpi-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(90deg, var(--chart-2), var(--chart-1) 55%, var(--chart-3)) top / 100% 3px no-repeat, #fff; min-width: 0; }
 .kpi-tiles .kpi-tile dt { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
 .kpi-tiles .kpi-tile dd { margin: 0; font-size: var(--clair-type-kpi); font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi-tiles .kpi-tile dd.lower { color: var(--muted); }
@@ -42,18 +47,17 @@
 .kpi-tile .tile-notes .tile-foot { font-style: italic; line-height: 1.45; }
 .kpi-tile .tile-compare { display: grid; gap: 2px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
 .kpi-tile .tile-compare .tile-foot { font-size: var(--clair-type-description); line-height: 1.45; }
-.kpi-tile .tile-calc { display: block; font-size: var(--clair-type-label); }
 .kpi-tile .tile-more > summary { cursor: pointer; padding: 2px 0; font-size: var(--clair-type-label); color: var(--muted); }
 .kpi-tile .tile-more[open] > summary { margin-bottom: 4px; }
-.kpi-tile .tile-more .tile-foot { display: block; margin-bottom: 6px; line-height: 1.5; overflow-wrap: anywhere; }
+.kpi-tile .tile-more .tile-foot { display: block; margin-bottom: 6px; font-style: normal; line-height: 1.5; overflow-wrap: anywhere; }
 .kpi-tile .tile-links { margin-top: auto; padding-top: 4px; }
-/* Types d'absence (dans « Paramètres et périmètre ») : une ligne par rubrique ; un code sans libellé français reste discret. */
+/* Types d'absence (repliés sous la valeur) : une ligne par rubrique ; un code sans libellé français reste discret. */
 .kpi-tile .tile-more .tile-foot.tile-types { display: grid; gap: 4px; margin-bottom: 0; line-height: 1.5; overflow-wrap: anywhere; }
 .kpi-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; color: #565d6d; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
-/* Les six blocs d'une tuile (titre, valeur, remarques, N-1 et écart, paramètres, liens) occupent six rangées de la grille des tuiles :
+/* Les cinq blocs d'une tuile (titre, valeur, remarques, N-1 et écart, liens) occupent cinq rangées de la grille des tuiles :
    les rangées s'alignent d'une tuile à l'autre de la même ligne. Sans sous-grille, le pied de tuile reste au bas de la carte. */
 @supports (grid-template-rows: subgrid) {
-  .kpi-tiles .kpi-tile { display: grid; grid-row: span 6; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); row-gap: 6px; align-content: stretch; }
+  .kpi-tiles .kpi-tile { display: grid; grid-row: span 5; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); row-gap: 6px; align-content: stretch; }
   .kpi-tile .tile-links { align-self: end; margin-top: 0; }
 }
 
@@ -93,6 +97,8 @@
 /* Effectifs mensuels : volet de paramètres, panneau « Graphiques » (anneau à gauche, barres à droite). */
 .em-param-fixed { font-size: var(--clair-type-form); color: var(--muted); line-height: 1.5; }
 .em-param-note { font-size: var(--clair-type-label); color: var(--muted); }
+.em-param-link { margin: 0; }
+.em-param-link .gloss-link { margin-left: 0; }
 .em-param-note summary { cursor: pointer; padding: 2px 0; }
 .em-param-note ul { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 6px; line-height: 1.45; }
 .filters.bar .field-row.em-version { flex: 2 1 280px; }

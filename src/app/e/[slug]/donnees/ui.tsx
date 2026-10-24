@@ -27,8 +27,11 @@ export function PageHead({ kicker, title, crumbs, children }: { kicker?: string;
   );
 }
 
-// Pastille d'état (le libellé porte l'information, la teinte la renforce).
+// Pastille d'état (le libellé porte l'information, la teinte la renforce). Univers bleu / blanc / noir : appliqué = bleu plein,
+// à valider = bleu cerné, en cours = bleu clair, gris = sans effet ; le rouge ne sert qu'aux échecs et aux refus.
 export type Tone = "applied" | "preview" | "running" | "failed" | "neutral";
+
+export const pillClass = (tone: Tone) => `status-pill dn-pill ${tone}`;
 
 export function syncTone(status: string): Tone {
   return status === "applied" ? "applied" : status === "preview" ? "preview" : status === "running" ? "running" : status === "failed" ? "failed" : "neutral";
@@ -36,7 +39,7 @@ export function syncTone(status: string): Tone {
 
 export function Pill({ tone = "neutral", testid, children }: { tone?: Tone; testid?: string; children: ReactNode }) {
   return (
-    <span className={`status-pill ${tone}`} data-testid={testid}>
+    <span className={pillClass(tone)} data-testid={testid}>
       {children}
     </span>
   );

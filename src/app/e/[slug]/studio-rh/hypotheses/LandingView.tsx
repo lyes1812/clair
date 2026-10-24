@@ -1,15 +1,22 @@
 import "@/styles/hypotheses-resultat.css";
 import { BarChart, WaterfallChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { formatDate } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
+import { HYP_TERMS } from "@/lib/glossary/hypotheses";
 import type { Measures, Retraite, SensitivityRow, VariantKind } from "@/lib/budget/lot3";
 import { VARIANT_LABELS } from "@/lib/budget/lot3";
 import type { Landing } from "@/lib/budget/engine";
 import type { Hypothesis } from "@/lib/budget/types";
-import { affichageOf, frDates, landingParts, landingWaterfall, measuresBars, retraiteWaterfall, sensitivityBars, showCharts, showTables, withAffichage, type WaterfallIn } from "@/lib/viz/hypotheses";
+import { costTone, trendClass, type TrendTone } from "@/lib/trend";
+import { affichageOf, frDates, hasNd, landingParts, landingWaterfall, measuresBars, retraiteWaterfall, savingTone, sensitivityBars, showCharts, showTables, slugOf, withAffichage, type WaterfallIn } from "@/lib/viz/hypotheses";
+import { NdKey, PanelTitle, TileTitle, TrendLegend } from "./ProjectionView";
 
 const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
+// Classe d'une cellule ou d'une valeur dont la couleur dit la tendance du coût (rouge : coût en hausse, vert : coût en baisse) ; la classe
+// hr-gap ajoute la flèche, le signe reste écrit. Neutre : aucune classe.
+const toneClass = (base: string, tone: TrendTone): string => (tone === "flat" ? base : [base, "hr-gap", trendClass(tone)].filter(Boolean).join(" "));
 
 // Variations proposées pour chaque hypothèse (unité écrite dans le libellé ; aucune valeur par défaut).
 export function variantOptions(hyps: Hypothesis[]): { value: string; label: string }[] {
@@ -27,10 +34,12 @@ export function variantOptions(hyps: Hypothesis[]): { value: string; label: stri
   return out;
 }
 
-// Cascade ou, à défaut, la raison pour laquelle il n'y a rien à tracer (n.d. avec sa raison, ou cascade sans intérêt).
-function Wf({ w, testid, title, label, note }: { w: WaterfallIn; testid: string; title: string; label: string; note?: string }) {
+// Cascade ou, à défaut, la raison pour laquelle il n'y a rien à tracer (n.d. avec sa raison, ou cascade sans intérêt). Ces cascades
+// décomposent un total (mois réels puis projetés, éléments non récurrents retirés) : elles restent bleues et grises, le rouge et le vert
+// étant réservés aux écarts de coût.
+function Wf({ w, testid, title, label }: { w: WaterfallIn; testid: string; title: string; label: string }) {
   if (w.kind === "value") {
-    return <WaterfallChart testid={testid} label={label} title={title} startLabel={w.startLabel} start={w.start} steps={w.steps} endLabel={w.endLabel} end={w.end} unit="eur" note={note} />;
+    return <WaterfallChart testid={testid} label={label} title={title} startLabel={w.startLabel} start={w.start} steps={w.steps} endLabel={w.endLabel} end={w.end} unit="eur" />;
   }
   return (
     <div className="hr-nd" data-testid={`${testid}-nd`}>
@@ -46,13 +55,16 @@ export function LandingView({
   hrefBase: string; scenarioId: string; year: string; landing: Landing; retraite: Retraite; measures: Measures;
   sens: SensitivityRow[]; options: { value: string; label: string }[]; chosen: { value: string; delta: string }[]; affichage?: string;
 }) {
+  const slug = slugOf(hrefBase);
   const rows = chosen.length ? chosen : [{ value: "", delta: "" }];
   const aff = affichageOf(affichage);
   // Adresse de l'écran : variations choisies conservées ; l'affichage « tout » n'est pas écrit dans l'adresse.
   const here = `${hrefBase}?${[`scenario=${encodeURIComponent(scenarioId)}`, "vue=resultat", "sous=atterrissage", ...chosen.flatMap((c) => [`sv=${encodeURIComponent(c.value)}`, `sd=${encodeURIComponent(c.delta)}`])].join("&")}`;
-  const tableHref = withAffichage(here, "tableau");
   const bars = measuresBars(measures);
   const sensBars = sensitivityBars(sens);
+  // Légende des tendances : seulement s'il y a un montant d'économie ou d'effet à lire en rouge ou en vert.
+  const trended = (measures.kind === "value" && measures.rows.length > 0) || sens.some((x) => x.effect.kind === "value");
+  const barsNd = (bars.kind === "value" && hasNd(bars.series)) || (sensBars.kind === "value" && hasNd(sensBars.series));
   return (
     <>
       <div className="hr-switch">
@@ -66,50 +78,54 @@ export function LandingView({
             { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
           ]}
         />
-        <p className="hr-hint">Atterrissage {year} : mois réels puis mois projetés, avant et après les éléments non récurrents. Les tableaux donnent les montants exacts.</p>
+        <div className="hr-line-bar">
+          <p className="hr-context">Année {year} · mois réels puis mois projetés · euros</p>
+          {trended && <TrendLegend slug={slug} />}
+        </div>
       </div>
       <section className="panel" data-testid="atr-retraite">
-        <div className="hr-title">
-          <h2>Atterrissage {year} retraité</h2>
-          <p className="desc">Hors éléments non récurrents. <a href="#def-retraite">Définition</a></p>
-        </div>
+        <PanelTitle title={`Atterrissage ${year} retraité`} desc="Hors éléments non récurrents · euros" slug={slug} term={HYP_TERMS.retraite} />
         <dl className="facts hr-tiles">
           <div className="hr-tile" data-testid="atr-tile-landing">
-            <dt>Atterrissage {year}{" "}<span className="hr-sub">coût employeur, réel + projeté</span></dt>
+            <TileTitle title={`Atterrissage ${year}`} sub="coût employeur · réel + projeté" slug={slug} term={HYP_TERMS.atterrissage} />
             <dd className={landing.kind === "nd" ? "nd" : undefined}>{landing.kind === "nd" ? `n.d. — ${frDates(landing.reason)}` : formatEuros(landing.total)}</dd>
             {landing.kind === "value" && (
               <span className="tile-foot" data-testid="atr-tile-landing-split">{landingParts(landing).map((x) => `${x.label.charAt(0).toLowerCase()}${x.label.slice(1)} ${formatEuros(x.value)}`).join(" + ")}</span>
             )}
           </div>
           <div className="hr-tile" data-testid="atr-tile-retire">
-            <dt>Éléments non récurrents retirés{" "}<span className="hr-sub">déjà en comptabilité + prévus</span></dt>
+            <TileTitle title="Éléments non récurrents retirés" sub="déjà en comptabilité + prévus" slug={null} />
             <dd className={retraite.kind === "nd" ? "nd" : undefined}>{retraite.kind === "nd" ? "n.d." : formatEuros(retraite.total)}</dd>
             {retraite.kind === "value" && <span className="tile-foot">déjà en comptabilité {formatEuros(retraite.realised)} + prévus {formatEuros(retraite.projected)}</span>}
           </div>
           <div className="hr-tile" data-testid="atr-tile-retraite">
-            <dt>Atterrissage {year} retraité{" "}<span className="hr-sub">hors éléments non récurrents</span></dt>
+            <TileTitle title={`Atterrissage ${year} retraité`} sub="hors éléments non récurrents" slug={null} />
             <dd className={retraite.kind === "nd" ? "nd" : undefined}>{retraite.kind === "nd" ? `n.d. — ${frDates(retraite.reason)}` : formatEuros(retraite.retraite)}</dd>
           </div>
         </dl>
         {showCharts(aff) && (
-          <div className="hr-charts-2" data-testid="atr-charts">
-            <div className="hr-block">
-              <Wf
-                w={landingWaterfall(landing)}
-                testid="atr-wf-atterrissage"
-                title={`Atterrissage ${year} : réel + projeté`}
-                label={`Atterrissage ${year} en euros : mois réels, puis mois projetés, jusqu'au total de l'année`}
-                note="Chaque barre ajoute un ensemble de mois à la précédente : réel, puis mois projetés (par le scénario parent le cas échéant, puis par ce scénario). Montants exacts : tuile ci-dessus."
-              />
+          <div className="hr-subblock">
+            <div className="hr-subhead">
+              <h3>Cascades</h3>
+              {slug && <GlossaryLink slug={slug} term={HYP_TERMS.cascades} label="Cascades de l'atterrissage" />}
             </div>
-            <div className="hr-block">
-              <Wf
-                w={retraiteWaterfall(retraite)}
-                testid="atr-wf-retraite"
-                title={`Atterrissage ${year} retraité`}
-                label={`De l'atterrissage ${year} à l'atterrissage retraité, en euros : éléments non récurrents déjà comptabilisés, puis prévus`}
-                note="Éléments non récurrents retirés de l'atterrissage : déjà dans les comptes, puis prévus par les hypothèses."
-              />
+            <div className="hr-charts-2" data-testid="atr-charts">
+              <div className="hr-block">
+                <Wf
+                  w={landingWaterfall(landing)}
+                  testid="atr-wf-atterrissage"
+                  title={`Atterrissage ${year} : réel + projeté`}
+                  label={`Atterrissage ${year} en euros : mois réels, puis mois projetés, jusqu'au total de l'année`}
+                />
+              </div>
+              <div className="hr-block">
+                <Wf
+                  w={retraiteWaterfall(retraite)}
+                  testid="atr-wf-retraite"
+                  title={`Atterrissage ${year} retraité`}
+                  label={`De l'atterrissage ${year} à l'atterrissage retraité, en euros : éléments non récurrents déjà comptabilisés, puis prévus`}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -127,14 +143,10 @@ export function LandingView({
             </table>
           </div>
         )}
-        <p className="tile-foot">Éléments déjà en comptabilité : saisis à la main dans Hypothèses (le journal PayFit ne les distingue pas). Prévus : coûts de sortie des départs, éléments ponctuels marqués « non récurrent », tuilages (coût de l'entrant du recouvrement avec le remplacé).{aff === "graphique" ? <> Détail par élément : <a href={tableHref}>affichage Tableau</a>.</> : null}</p>
       </section>
 
       <section className="panel" data-testid="atr-measures">
-        <div className="hr-title">
-          <h2>Mesures de management — {year}</h2>
-          <p className="desc">Un départ à la fois. <a href="#def-mesures">Définition</a></p>
-        </div>
+        <PanelTitle title={`Mesures de management — ${year}`} desc="Chaque départ est évalué seul · euros" slug={slug} term={HYP_TERMS.mesures} />
         {measures.kind === "nd" ? (
           <p className="nd">n.d. — {frDates(measures.reason)}</p>
         ) : measures.rows.length === 0 ? (
@@ -151,13 +163,12 @@ export function LandingView({
                 series={bars.series}
                 unit="eur"
                 mode="grouped"
-                note={["Économie nette : définition ci-dessous.", bars.series.some((x) => x.key === "replacement") ? "Départ sans remplaçant lié : pas de barre « Coût du remplaçant » (raison au survol)." : null].filter(Boolean).join(" ")}
               />
             )}
             {showTables(aff) && (
               <div className="table-wrap">
                 <table className="data-table" data-testid="atr-measures-table">
-                  <thead><tr><th>Mesure</th><th>Dernier jour payé</th><th className="num">Paie évitée {year}</th><th className="num">Coûts de sortie</th><th className="num">Remplaçant</th><th className="num">Économie nette {year}</th><th className="num">Économie année pleine</th></tr></thead>
+                  <thead><tr><th>Mesure</th><th>Dernier jour payé</th><th className="num">Paie évitée {year}</th><th className="num">Coûts de sortie</th><th className="num">Remplaçant</th><th className="num">Économie nette {year}{slug && <GlossaryLink slug={slug} term={HYP_TERMS.mesuresLecture} label="Lecture des mesures de management" />}</th><th className="num">Économie année pleine</th></tr></thead>
                   <tbody>
                     {measures.rows.map((m) => (
                       <tr key={m.id} data-measure={m.label}>
@@ -166,8 +177,8 @@ export function LandingView({
                         <td className="num" data-col="avoided">{formatEuros(m.avoided)}</td>
                         <td className="num" data-col="exit">{formatEuros(m.exit)}</td>
                         <td className="num" data-col="replacement">{m.replacement === null ? "sans remplacement" : `${formatEuros(m.replacement)} (${m.replacementLabel})`}</td>
-                        <td className="num" data-col="net">{formatEuros(m.net)}</td>
-                        <td className="num" data-col="full" title={m.fullYear.kind === "nd" ? frDates(m.fullYear.reason) : undefined}>{m.fullYear.kind === "nd" ? "n.d." : formatEuros(m.fullYear.cents)}</td>
+                        <td className={toneClass("num", savingTone(m.net))} data-col="net">{formatEuros(m.net)}</td>
+                        <td className={toneClass("num", m.fullYear.kind === "nd" ? "flat" : savingTone(m.fullYear.cents))} data-col="full" title={m.fullYear.kind === "nd" ? frDates(m.fullYear.reason) : undefined}>{m.fullYear.kind === "nd" ? "n.d." : formatEuros(m.fullYear.cents)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -180,14 +191,10 @@ export function LandingView({
             )}
           </>
         )}
-        <p className="tile-foot">Économie nette = paie évitée − coûts de sortie − coût du remplaçant lié ; positif = économie. Année pleine = 12 × (paie évitée − coût du remplaçant) du mois complet de décembre.</p>
       </section>
 
       <section className="panel" data-testid="atr-sens">
-        <div className="hr-title">
-          <h2>Sensibilités</h2>
-          <p className="desc">Effet d'une variation d'une hypothèse sur l'atterrissage {year}. <a href="#def-sensibilites">Définition</a></p>
-        </div>
+        <PanelTitle title="Sensibilités" desc={`Effet sur l'atterrissage ${year} · chaque variation est calculée seule · euros`} slug={slug} term={HYP_TERMS.sensibilites} />
         <form method="get" action={hrefBase} data-testid="atr-sens-form">
           <input type="hidden" name="scenario" value={scenarioId} />
           <input type="hidden" name="vue" value="atterrissage" />
@@ -202,7 +209,10 @@ export function LandingView({
                 </select>
               </div>
               <div className="field-row">
-                <label htmlFor={`sd-${i}`}>Valeur</label>
+                <div className="hr-label-row">
+                  <label htmlFor={`sd-${i}`}>Valeur</label>
+                  {i === 0 && slug && <GlossaryLink slug={slug} term={HYP_TERMS.sensibilitesLecture} label="Saisie et lecture des sensibilités" />}
+                </div>
                 <input className="input" id={`sd-${i}`} name="sd" inputMode="decimal" defaultValue={r.delta} />
               </div>
             </div>
@@ -219,9 +229,9 @@ export function LandingView({
             series={sensBars.series}
             unit="eur"
             mode="grouped"
-            note="Les numéros sont ceux des variations, dans l'ordre du formulaire et du tableau. Effet = atterrissage avec la variation − atterrissage retenu ; chaque variation est calculée seule. Pas de barre : variation n.d. (raison au survol)."
           />
         )}
+        {showCharts(aff) && barsNd && <NdKey />}
         {showTables(aff) && sens.length > 0 && (
           <div className="table-wrap">
             <table className="data-table" data-testid="atr-sens-table">
@@ -232,8 +242,8 @@ export function LandingView({
                     <td className="wrap"><span className="ver-badge">{i + 1}</span>{s.label}</td>
                     {s.effect.kind === "nd" ? <td colSpan={3} className="nd wrap">n.d. — {frDates(s.effect.reason)}</td> : (
                       <>
-                        <td className="num" data-col="effect">{signed(s.effect.atterrissage)}</td>
-                        <td className="num" data-col="retraite">{s.effect.retraite === null ? "n.d." : signed(s.effect.retraite)}</td>
+                        <td className={toneClass("num", costTone(s.effect.atterrissage))} data-col="effect">{signed(s.effect.atterrissage)}</td>
+                        <td className={toneClass("num", s.effect.retraite === null ? "flat" : costTone(s.effect.retraite))} data-col="retraite">{s.effect.retraite === null ? "n.d." : signed(s.effect.retraite)}</td>
                         <td className="num" data-col="total">{formatEuros(s.effect.total)}</td>
                       </>
                     )}
@@ -243,7 +253,6 @@ export function LandingView({
             </table>
           </div>
         )}
-        <p className="tile-foot">Valeur : jours (décalage de date), % pour un montant ou des coûts de sortie, points de % pour un taux d'augmentation (ex. 0,5). Chaque variation est calculée seule, sans être enregistrée.</p>
       </section>
     </>
   );

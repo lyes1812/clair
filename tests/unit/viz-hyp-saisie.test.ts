@@ -356,7 +356,8 @@ describe("grilles de saisie rendues", () => {
     expect(fill).not.toBe("");
     expect(fill).not.toMatch(/\bvalue=/);
     expect(fill).not.toMatch(/placeholder="[^"]*\d/);
-    expect(html).toContain("Cliquez dans une cellule pour l&#x27;utiliser comme point de départ des copies. Entrée ou flèche bas");
+    expect(html).toContain("Cliquez dans une cellule pour la choisir comme point de départ.");
+    expect(html).not.toContain("Maj+Entrée"); // le clavier est expliqué au glossaire
   });
   it("lecture seule : tableau exact, export CSV, ni saisie ni outils de modification", () => {
     const html = globales("2026-11", "2027-02", false, [rateHyp]);

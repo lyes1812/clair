@@ -1,15 +1,17 @@
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { enteredAfter, hireKey } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis, PresentPerson, Projection } from "@/lib/budget/types";
+import { BUDGET_TERMS } from "@/lib/glossary/budget";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import { matchesQuery, pageNumber, paginate } from "@/lib/viz/hyp-saisie";
 import { frDates } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { deleteHypothesisAction, importHypothesesAction } from "./actions";
-import { CardTitle, detailOf, Field, KIND, Rules, Verdict } from "./shared";
+import { CardTitle, detailOf, Field, KIND, signedEuros, trendOf, Verdict } from "./shared";
 
 export type OtherScenario = { id: string; name: string; label: string };
 const IMPORT_KINDS: { kind: Hypothesis["kind"]; label: string }[] = [
@@ -23,9 +25,10 @@ const nameOf = (base: BaseSnapshot, hyps: Hypothesis[], key: string) => base.con
 
 // Contrôles effectifs : à chaque mois, effectif de début + entrées − sorties = effectif de fin, les entrées et sorties
 // étant les salariés comptés présents en fin de mois et non présents (ou l'inverse) le mois précédent ; contrôle de la
-// base contre le réel du mois de référence.
-export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnapshot; hypotheses: Hypothesis[]; proj: Projection }) {
-  if (proj.kind === "error") return <section className="panel"><CardTitle title="Contrôles effectifs" /><ul className="list">{proj.errors.map((e) => <li key={e} className="nd">{frDates(e)}</li>)}</ul></section>;
+// base contre le réel du mois de référence. `slug` : adresse du glossaire pour les « ? » (sans lui, pas de lien).
+export function ControlesEffectifs({ base, hypotheses, proj, slug }: { base: BaseSnapshot; hypotheses: Hypothesis[]; proj: Projection; slug?: string }) {
+  const help = (term: string) => (slug ? <GlossaryLink slug={slug} term={term} /> : undefined);
+  if (proj.kind === "error") return <section className="panel"><CardTitle title="Contrôles effectifs" help={help(BUDGET_TERMS.controlesEffectifs)} /><ul className="list">{proj.errors.map((e) => <li key={e} className="nd">{frDates(e)}</li>)}</ul></section>;
   const start: Record<string, PresentPerson> = Object.fromEntries(base.contracts.filter((c) => c.counted && !enteredAfter(base, c)).map((c) => [c.contractKey, { etp4: c.etp4, category: c.category ?? null, service: c.service }]));
   const refReal = base.actuals.find((a) => a.month === base.refMonth);
   const refHeadcount = refReal?.kind === "value" ? refReal.headcount : null;
@@ -43,15 +46,14 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
   return (
     <>
       <section className="panel" data-testid="ctrl-base">
-        <CardTitle title="Contrôle de la base">Effectif de la base figée comparé au réel du mois de référence. <a href="#def-controles">Règle</a></CardTitle>
+        <CardTitle title="Contrôle de la base" help={help(BUDGET_TERMS.controleBase)} />
         <p data-testid="ctrl-base-line">
           Effectif compté fin {formatMonth(base.refMonth).toLowerCase()} : {refHeadcount === null ? <span className="nd">n.d. — réel du mois de référence non disponible</span> : <strong>{refHeadcount} (réel)</strong>} · contrats comptés de la base : <strong>{baseCount}</strong>
           {refHeadcount !== null && <> · {refHeadcount === baseCount ? <Verdict ok testid="ctrl-base-ok">Conforme</Verdict> : <Verdict ok={false} testid="ctrl-base-gap">Écart de {baseCount - refHeadcount}</Verdict>}</>}
         </p>
-        {refHeadcount !== null && refHeadcount !== baseCount && <p className="tile-foot">Un écart vient d'un contrat présent à la date de lecture mais pas fin {formatMonth(base.refMonth).toLowerCase()} (ou l'inverse), ou d'une nature non comptée dans l'effectif (Paramètres › KPI).</p>}
       </section>
       <section className="panel" data-testid="ctrl-effectifs">
-        <CardTitle title="Contrôles effectifs">Chaque mois : effectif de début + entrées − sorties = effectif de fin. <a href="#def-controles">Règle</a></CardTitle>
+        <CardTitle title="Contrôles effectifs" help={help(BUDGET_TERMS.controlesEffectifs)} />
         <div className="table-wrap scroll" role="region" aria-label="Contrôle de l'effectif par mois" tabIndex={0}>
           <table className="data-table sticky sticky-first" data-testid="ctrl-eff-table">
             <thead><tr><th>Mois</th><th className="num">Effectif début</th><th className="num">Entrées</th><th className="num">Sorties</th><th className="num">Effectif fin</th><th className="num">ETP fin</th><th>Contrôle</th></tr></thead>
@@ -81,9 +83,6 @@ export function ControlesEffectifs({ base, hypotheses, proj }: { base: BaseSnaps
             ]))}
           </ul>
         </details>
-        <Rules summary="Lecture du tableau">
-          <p>Compté présent en fin de mois : contrat dont la nature est comptée dans l'effectif (ou embauche déclarée « comptée »), commencé et non terminé le dernier jour du mois. Un salarié en congé non payé reste dans l'effectif. Un contrat dont l'ETP est n.d. rend l'ETP du mois n.d.</p>
-        </Rules>
       </section>
     </>
   );
@@ -111,7 +110,7 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
   return (
     <>
       <section className="panel" data-testid="hyp-list-hyps">
-        <CardTitle title="Contrôles des changements">{hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} du scénario, chacune avec son effet sur le coût projeté : de quoi vérifier d'un coup d'œil ce que le scénario change. <a href="#def-controles">Règle</a></CardTitle>
+        <CardTitle title="Contrôles des changements" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.controlesChangements} />}>{hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} · coût attribué sur l'horizon, en euros</CardTitle>
         {proj.kind === "error" && <ul className="list" data-testid="hyp-errors">{proj.errors.map((e) => <li key={e} className="nd">{frDates(e)}</li>)}</ul>}
         {ndMonths > 0 && <p className="notice">{ndMonths} mois projeté(s) n.d. : leurs contributions ne sont pas comptées dans la colonne « Coût attribué sur l'horizon ».</p>}
         {hypotheses.length > CHANGES_PAGE / 2 && (
@@ -134,7 +133,7 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
           </form>
         )}
         {hypotheses.length === 0 ? (
-          <p className="desc">Aucune hypothèse : la projection reconduit la base figée (avec les fins de contrat connues).</p>
+          <p className="desc">Aucune hypothèse dans ce scénario.</p>
         ) : rows.length === 0 ? (
           <p className="desc">Aucune hypothèse ne correspond à ce filtre.</p>
         ) : (
@@ -151,7 +150,11 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
                         <td>{KIND[h.kind]}</td>
                         <td>{frDates(h.label)}</td>
                         <td className="wrap">{detail}</td>
-                        <td className="num" data-col="effet">{h.kind === "realise" || h.kind === "constante" ? "—" : e === null ? "n.d." : formatEuros(e)}</td>
+                        {h.kind === "realise" || h.kind === "constante" || e === null || h.kind === "base" ? (
+                          <td className="num" data-col="effet">{h.kind === "realise" || h.kind === "constante" ? "—" : e === null ? "n.d." : formatEuros(e)}</td>
+                        ) : (
+                          <td className={`num ${trendOf(e).cls}`} data-col="effet" data-sign={trendOf(e).sign}>{signedEuros(e)}</td>
+                        )}
                         {canEdit && <td><ActionForm action={deleteHypothesisAction.bind(null, slug, scenario.id, h.id)} submit="Supprimer" testid={`hyp-delete-${h.id}`} className="inline-form" danger compact confirm={`Supprimer l'hypothèse « ${frDates(h.label)} » du scénario ?`} hint={`Supprimer l'hypothèse « ${frDates(h.label)} »`} srLabel={`l'hypothèse « ${frDates(h.label)} »`} /></td>}
                       </tr>
                     );
@@ -162,13 +165,10 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
             {paged.pages > 1 ? <Pager page={paged.page} pageSize={CHANGES_PAGE} total={rows.length} href={pageHref} testid="hyp-pager" /> : <p className="tile-foot" data-testid="hyp-pager">{paged.from}–{paged.to} sur {rows.length}</p>}
           </>
         )}
-        <Rules summary="Lecture de la colonne « Coût attribué »">
-          <p>Coût attribué : somme, sur les mois projetés, des lignes de la projection rattachées à l'hypothèse (pour une correction de base : le coût du contrat qu'elle porte ; pour un départ : la réduction de paie et les coûts de sortie). Les éléments « réalisés » et les constantes n'entrent pas dans la projection.</p>
-        </Rules>
       </section>
       {canEdit && others.length > 0 && (
         <section className="panel" data-testid="hyp-import">
-          <CardTitle title="Reprendre des hypothèses d'un autre scénario">Copie, dans ce scénario, les hypothèses du type choisi d'un autre scénario. Chacune est contrôlée contre la base et l'horizon de ce scénario : celles qui ne sont plus calculables (date hors horizon, contrat absent de la base…) ne sont pas reprises et sont listées avec leur raison. <a href="#def-recopie">Règle</a></CardTitle>
+          <CardTitle title="Reprendre des hypothèses d'un autre scénario" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.recopie} />} />
           <ActionForm action={importHypothesesAction.bind(null, slug, scenario.id)} submit="Reprendre ces hypothèses" testid="hyp-import-form">
             <div className="filters">
               <Field id="imp-source" label="Scénario source">

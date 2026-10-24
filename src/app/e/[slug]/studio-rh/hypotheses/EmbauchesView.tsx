@@ -3,6 +3,7 @@ import { BarChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { monthRange } from "@/lib/connectors/months";
 import { formatDate } from "@/lib/dates";
+import { HYP_TERMS } from "@/lib/glossary/hypotheses";
 import { formatEuros } from "@/lib/money";
 import { hireKey } from "@/lib/budget/engine";
 import { hireProfiles } from "@/lib/budget/bulk";
@@ -12,6 +13,7 @@ import { affichageOf, groupColor, hiresByMonth, monthAxis, showCharts, showTable
 import { ActionForm } from "./ActionForm";
 import { addHypothesisAction, deleteHypothesisAction } from "./actions";
 import { HireForm } from "./HireForm";
+import { PanelTitle } from "./ProjectionView";
 import { pct } from "./shared";
 
 type Hire = Extract<Hypothesis, { kind: "embauche" }>;
@@ -58,15 +60,12 @@ export function EmbauchesView({ slug, scenario, base, hypotheses, canEdit, par, 
             { key: "tableau", label: "Embauches prévisionnelles", href: withAffichage(here(by), "tableau") },
           ]}
         />
-        <p className="hr-hint">Postes futurs du scénario : ils ne sont jamais confondus avec des collaborateurs réels.</p>
+        <p className="hr-context">Postes futurs du scénario, distincts des collaborateurs réels · {years}</p>
       </div>
       {showCharts(aff) && (
         <section className="panel" data-testid="emb-chart">
           <div className="panel-head">
-            <div className="hr-title">
-              <h2>Embauches par mois</h2>
-              <p className="desc">Un poste est compté le mois de son premier jour payé. <a href="#def-embauche-postes">Définition</a></p>
-            </div>
+            <PanelTitle title="Embauches par mois" slug={slug} term={HYP_TERMS.embauchesCalendrier} />
             <div className="panel-tools">
               <nav className="hr-seg" aria-label="Regrouper les embauches par" data-testid="emb-group">
                 {GROUP_ORDER.map((g) => {
@@ -93,10 +92,9 @@ export function EmbauchesView({ slug, scenario, base, hypotheses, canEdit, par, 
                 toggle
                 height={maxPerMonth <= 5 ? 210 : undefined}
                 note={[
-                  "Axe vertical : nombre de postes, en entiers depuis zéro.",
                   data.outside > 0 ? `${data.outside} poste${data.outside > 1 ? "s" : ""} commence${data.outside > 1 ? "nt" : ""} hors des mois affichés : non tracé${data.outside > 1 ? "s" : ""}, compté${data.outside > 1 ? "s" : ""} dans la colonne Total du tableau.` : null,
-                  data.groups.length > 8 ? "Plus de huit groupes : certaines teintes se répètent ; l'infobulle et le tableau nomment chaque groupe." : null,
-                ].filter(Boolean).join(" ")}
+                  data.groups.length > 8 ? "Plus de huit groupes : teintes répétées (l'infobulle et le tableau nomment chaque groupe)." : null,
+                ].filter(Boolean).join(" ") || undefined}
               />
               {missing.length > 0 && (
                 <p className="tile-foot nd" data-testid="emb-group-nd">Regroupements n.d. : {missing.map((g) => `par ${GROUPS[g].toLowerCase()} (${MISSING[g]})`).join(" ; ")}.</p>
@@ -129,10 +127,7 @@ export function EmbauchesView({ slug, scenario, base, hypotheses, canEdit, par, 
 
       {showTables(aff) && (
         <section className="panel" data-testid="emb-list">
-          <div className="hr-title">
-            <h2>Embauches prévisionnelles ({hires.length})</h2>
-            {hires.length > 1 && <p className="desc">Classées par date d'arrivée.</p>}
-          </div>
+          <PanelTitle title={`Embauches prévisionnelles (${hires.length})`} slug={slug} term={HYP_TERMS.embauchePostes} />
           {hires.length > 0 && (
             <div className="table-wrap scroll">
               <table className="data-table sticky sticky-first hr-hires" data-testid="emb-table">
@@ -166,7 +161,6 @@ export function EmbauchesView({ slug, scenario, base, hypotheses, canEdit, par, 
           {canEdit && (
             <details open>
               <summary>Ajouter une embauche (un ou plusieurs postes, par centre de coûts)</summary>
-              <p className="desc">Chaque poste devient une hypothèse distincte, supprimable seule. Le profil d'un salarié peut être recopié ; les valeurs restent modifiables et rien n'est supposé quand l'ETP ou la base est n.d. · <a href="#def-embauche-postes">règle</a></p>
               <datalist id="hyp-services">{services.map((x) => <option key={x} value={x} />)}</datalist>
               <HireForm action={add("embauche")} profiles={hireProfiles(base, hires)} deps={deps.map((d) => ({ id: d.id, label: d.label }))} />
             </details>

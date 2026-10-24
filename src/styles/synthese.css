@@ -1,0 +1,97 @@
+/* Synthèse du Studio RH (charte « 101 » : blanc, noir, bleu et leurs dégradés ; le rouge et le vert ne servent qu'à la tendance
+   d'un coût). Variables de globals.css, échelle typographique de typography.css (--clair-type-kpi, --clair-type-secondary), teintes de
+   série de charts.css ; classes partagées réutilisées : .panel, .panel-head, .panel-tools, .filters.bar, .btn, .table-wrap.scroll,
+   .data-table, .trend-bad / .trend-good / .trend-legend, .gloss-link, .tile-foot, .nd. */
+
+.sy-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* En-tête : titre et source à gauche, menu déroulant « Fonctionnalités » à droite. Le panneau du menu s'ancre à l'en-tête (et non au
+   bouton) : il s'ouvre sous l'en-tête, aligné à droite, sans jamais dépasser de la page. */
+.sy-head { position: relative; display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px 24px; }
+.sy-head-main { display: grid; gap: 10px; flex: 1 1 320px; min-width: 0; }
+.sy-read { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 22px; }
+.sy-read .source-badge { flex-wrap: wrap; }
+.sy-head .mega-page { position: static; flex: none; }
+.sy-head .mega-panel-page { position: absolute; left: 0; right: 0; top: calc(100% + 8px); width: auto; max-height: 75vh; overflow-y: auto; }
+@media (min-width: 861px) { .sy-head { flex-wrap: nowrap; } }
+@media (min-width: 1101px) { .sy-head .mega-panel-page { left: auto; width: min(1040px, 100%); } }
+
+/* Barre de période : année, premier et dernier mois ; périodes rapides sous un filet. */
+.filters.bar.sy-bar .field-row { flex: 1 1 150px; min-width: 130px; }
+.sy-bar .sy-bar-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.sy-bar .sy-presets { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sy-presets-label { margin-right: 2px; font-size: var(--clair-type-label); font-weight: 600; color: var(--muted); }
+:root .sy-presets .btn { min-height: 30px; padding: 4px 12px; font-size: var(--clair-type-form); }
+:root .sy-presets .btn[aria-current] { background: var(--blue-soft); border-color: var(--blue); color: var(--blue); }
+
+/* Une seule ligne de contexte : période, N-1, légende des tendances. */
+.sy-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 20px; }
+.sy-period { flex: 1 1 360px; min-width: 0; line-height: 1.5; }
+.sy-period strong { color: var(--ink); font-weight: 600; }
+.sy-toolbar .trend-legend { flex: none; align-items: center; }
+.sy-toolbar .trend-legend span { display: inline-flex; align-items: center; }
+.sy-panel-link { font-size: var(--clair-type-form); font-weight: 600; text-decoration: none; }
+.sy-panel-link:hover { text-decoration: underline; }
+.sy-limits { line-height: 1.5; }
+.sy-sub { font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); letter-spacing: 0; }
+
+/* Tuiles : valeur en grand (--clair-type-kpi pour un effectif, un ETP ou un taux ; --clair-type-secondary pour un montant),
+   comparaison N-1 sous un filet, liens en pied. Filet de tête en dégradé de bleu : décor sans texte. */
+.sy-tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.sy-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(90deg, var(--chart-2), var(--chart-1) 55%, var(--chart-3)) top / 100% 3px no-repeat, #fff; }
+.sy-tile-label { font-size: var(--clair-type-form); font-weight: 600; line-height: 1.35; color: var(--ink); letter-spacing: 0; }
+.sy-tile-label .gloss-link { margin-left: 8px; }
+.sy-tile-sub { margin: 0; font-size: var(--clair-type-label); line-height: 1.4; color: var(--muted); }
+.sy-tile-value { margin: 0; font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.sy-tile.kpi .sy-tile-value { font-size: var(--clair-type-kpi); }
+.sy-tile.money .sy-tile-value { font-size: var(--clair-type-secondary); }
+.sy-tile-value.lower { color: var(--muted); }
+.sy-tile-value.nd { font-size: var(--clair-type-secondary); font-weight: 500; letter-spacing: 0; color: #5b6270; }
+.sy-tile-compare { display: grid; gap: 2px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.sy-tile-compare .tile-foot { font-size: var(--clair-type-description); line-height: 1.45; overflow-wrap: anywhere; }
+.sy-reason { line-height: 1.45; overflow-wrap: anywhere; }
+.sy-reason > summary, .sy-more > summary { cursor: pointer; }
+.sy-reason > p { margin: 4px 0 0; }
+.sy-more ul { margin-top: 3px; }
+.sy-tile-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: auto; padding-top: 4px; }
+.sy-tile-links a { color: var(--blue); }
+
+/* Tendance d'un coût : couleur (rouge = hausse, vert = baisse) et flèche décorative ; le signe + / − reste écrit dans la valeur,
+   la couleur n'est jamais seule. Jamais sur un effectif, un ETP ou un taux. */
+.sy-delta.trend-bad::before { content: "▲ "; content: "▲ " / ""; font-size: .7em; vertical-align: .12em; }
+.sy-delta.trend-good::before { content: "▼ "; content: "▼ " / ""; font-size: .7em; vertical-align: .12em; }
+
+/* État « n.d. » : titre, raison une fois, action. */
+.sy-nd-state { display: grid; gap: 6px; padding: 16px 18px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); min-width: 0; }
+.sy-nd-title { margin: 0; font-size: var(--clair-type-secondary); font-style: italic; font-weight: 500; color: #5b6270; line-height: 1.2; }
+.sy-nd-reason { margin: 0; max-width: 78ch; font-size: var(--clair-type-form); line-height: 1.55; color: var(--ink); overflow-wrap: anywhere; }
+.sy-nd-action { justify-self: start; margin-top: 2px; font-size: var(--clair-type-form); font-weight: 600; color: var(--blue); text-decoration: none; }
+.sy-nd-action:hover { text-decoration: underline; }
+
+/* Graphiques : deux colonnes, une seule sous 960 px. */
+.sy-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 32px; }
+.sy-chart { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.sy-chart .chart-head { min-height: 34px; }
+.sy-chart-link { margin: 0; }
+.sy-nd-key { margin: 0; }
+.sy-nd-key .swatch.hatch { background: repeating-linear-gradient(135deg, var(--surface) 0 2px, var(--chart-8) 2px 4px); border: 1px solid var(--chart-8); }
+.sy-nd-lines { display: grid; gap: 4px; }
+.sy-nd-lines ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; line-height: 1.45; overflow-wrap: anywhere; }
+
+/* Tableau exact, replié sous le graphique : première colonne fixe, ligne de période en total. */
+.sy-exact > summary { cursor: pointer; padding: 2px 0; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
+.sy-exact[open] > summary { margin-bottom: 8px; color: var(--ink); }
+.sy-scroll:focus-visible { outline: 3px solid var(--blue); outline-offset: 1px; }
+.data-table.sy-table :is(th, td) { padding: 7px 10px; }
+.sy-table thead th { white-space: normal; vertical-align: bottom; line-height: 1.3; }
+.sy-table tbody th[scope="row"], .sy-table tfoot th[scope="row"] { text-align: left; font-size: var(--clair-type-table-cell); font-weight: 400; color: var(--ink); white-space: nowrap; background: #fff; }
+.sy-table tr.total > :is(td, th), .sy-table tfoot tr.total > th[scope="row"] { background: #eef1f6; font-weight: 650; border-top: 1px solid #d8dce5; }
+.sy-table tr.total .nd { color: #5b6270; }
+.sy-table tbody tr:last-child > :is(th, td), .sy-table tfoot tr > :is(td, th) { border-bottom: 0; }
+
+@media (max-width: 960px) { .sy-charts { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) {
+  .sy-tiles { grid-template-columns: minmax(0, 1fr); }
+  .data-table.sy-table :is(th, td) { padding: 6px 8px; }
+  .data-table.sy-table tbody th[scope="row"], .data-table.sy-table tfoot th[scope="row"] { white-space: normal; max-width: 132px; overflow-wrap: anywhere; }
+}

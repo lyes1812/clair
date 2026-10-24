@@ -5,10 +5,11 @@ import { formatDate, monthEnd } from "@/lib/dates";
 import { categoryMonth, getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
 import { CATEGORY_IDS, CATEGORY_LABELS, type CategoryId } from "@/lib/budget/types";
 import { contractNatureLabel } from "@/lib/dsn/labels";
+import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
 import { coverageAt, gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
 import { KPI_DETAIL_IDS, kpiDashboard, kpiDetail } from "@/lib/rh/kpi/dashboard";
-import { fmtDelta, fmtEtp4, fmtFraction, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
+import { fmtDelta, fmtEtp4, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { civilWindow, closedMonths, defaultYear, lastClosedMonth, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
 import type { Compared, KpiDetailId, KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
 import { loadKpiContext } from "@/lib/rh/kpi-context";
@@ -16,7 +17,7 @@ import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import type { Shown } from "@/lib/rh/view";
-import { absenceTypeText, typoMinus } from "@/lib/viz/kpi";
+import { absenceTypeText, deltaExact } from "@/lib/viz/kpi";
 import {
   AbsenceMonthDetail,
   AbsenceTypeNotes,
@@ -33,14 +34,15 @@ import {
   HeadcountDetail,
   KpiCategoryChart,
   KpiCharts,
-  KpiDefinitions,
   KpiHeader,
+  KpiParams,
   KpiTile,
   type Maps,
   monthLabel,
   MovementsDetail,
   natureList,
   NdReasons,
+  PanelTitle,
   PayfitNotice,
   ratioTitle,
   show,
@@ -51,8 +53,9 @@ import {
   turnoverShown,
 } from "./components";
 import { FamilyTabs } from "@/components/FamilyTabs";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { Prevu, type PrevuLink } from "@/components/Prevu";
-import { EffectifsDefinitions, EffectifsMensuels } from "./EffectifsMensuels";
+import { EffectifsMensuels } from "./EffectifsMensuels";
 import { KPI_VUES, resolveKpiVue } from "./tabs";
 
 export const dynamic = "force-dynamic";
@@ -81,7 +84,7 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
     ["capAtOne", "Quotité plafonnée à 1", yes(v.capAtOne)],
     ["forfaitJoursIsOne", "Forfait jours sans quotité PayFit = 1 ETP", yes(v.forfaitJoursIsOne)],
     ["etpDecimals", "Décimales de la quotité avant la somme", String(v.etpDecimals)],
-    ["turnoverFormula", "Formule du turnover", v.turnoverFormula === "half_sum" ? "((entrées + sorties) ÷ 2) ÷ effectif moyen" : "sorties ÷ effectif au premier jour"],
+    ["turnoverFormula", "Formule du turnover", v.turnoverFormula === "half_sum" ? "moyenne des entrées et des sorties ÷ effectif moyen" : "sorties ÷ effectif du premier jour"],
     ["neutralizeContinuity", "Contrats continus neutralisés", yes(v.neutralizeContinuity)],
     ["excludedExitNatures", "Sorties non comptées (natures)", v.excludedExitNatures.length ? natureList(v.excludedExitNatures) : "aucune"],
     ["absenceTypes", "Types d'absence comptés", v.absenceTypes.length ? v.absenceTypes.map(absenceTypeText).join(", ") : "aucun (absentéisme n.d.)"],
@@ -139,7 +142,7 @@ const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: Prev
   publisher: (studio) => ({
     lead: "Non réalisé : le contenu de cette entrée n'est pas encore défini.",
     existing: [
-      { href: `${studio}/kpi`, title: "KPI RH › Suivi des effectifs", text: "Indicateurs, tableaux mensuels et définitions, consultables à l'écran." },
+      { href: `${studio}/kpi`, title: "KPI RH › Suivi des effectifs", text: "Indicateurs, tableaux mensuels et détail de chaque chiffre, consultables à l'écran." },
       { href: `${studio}/kpi?vue=effectifs`, title: "KPI RH › Effectifs mensuels", text: "Une rubrique, un axe de répartition, une version et une année." },
     ],
     open: ["Ce que cette entrée doit produire, son format, ses destinataires et sa périodicité."],
@@ -153,7 +156,6 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   if (!ctx.input) return <KpiHeader ctx={ctx} closedMonth={null} />;
   const data = ctx.input.data;
   const open = ctx.input.openMonths ?? [];
-  const isPayfit = data.build.source === "payfit";
   const rawLimit = ctx.collab.payfitHistory?.mode === "raw" ? ctx.collab.payfitHistory.limit : null;
   const closed = closedMonths(data, open);
   const last = lastClosedMonth(data, open);
@@ -176,7 +178,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       <KpiHeader ctx={ctx} closedMonth={null}>
         <section className="placeholder" data-testid="kpi-no-closed-month">
           <h3>n.d. — aucun mois clos à la date de référence</h3>
-          <p className="muted">Un mois est clos quand son dernier jour est antérieur ou égal à la date de référence ({formatDate(data.build.referenceDate)}).</p>
+          <p className="muted">
+            Date de référence : {formatDate(data.build.referenceDate)}.
+            <GlossaryLink slug={slug} term={KPI_TERMS.closedPeriod} />
+          </p>
         </section>
       </KpiHeader>
     );
@@ -261,30 +266,18 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const inDetail = (id: string, month: string | null) => detailHref(id, month, onPrevious && month === null);
   const maps: Maps = { persons: new Map(data.persons.map((p) => [p.personKey, p])), contracts: new Map(data.contracts.map((c) => [c.contractKey, c])) };
   const s = ctx.settings.values;
-  const natures = nature ? [nature] : ctx.collab.natures.codes;
-  const changed = (keys: KpiSettingKey[]) => {
-    const dates = keys.map((k) => ctx.settings.origins[k]).filter((o) => o.origin === "setting").map((o) => (o.origin === "setting" ? o.updatedAt : null)!);
-    if (!dates.length) return "défauts";
-    const lastChange = dates.sort((a, b) => b.getTime() - a.getTime())[0];
-    return `modifié le ${dateTimeFmt.format(lastChange)}`;
-  };
-  const etpParams = `temps plein = 1 : ${s.fullTimeIsOne ? "oui" : "non"} · plafond 1 : ${s.capAtOne ? "oui" : "non"}${isPayfit ? ` · forfait jours sans quotité = 1 : ${s.forfaitJoursIsOne ? "oui" : "non"}` : ""} · ${s.etpDecimals} décimales · natures ${natureList(natures)} (${changed(isPayfit ? ["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"] : ["fullTimeIsOne", "capAtOne", "etpDecimals"])})`;
-  const hcParams = `natures ${natureList(natures)}${nature ? " (filtre)" : ""}`;
-  const toParams = `${s.turnoverFormula === "half_sum" ? "((E + S) ÷ 2) ÷ effectif moyen" : "S ÷ effectif au premier jour"} · continus ${s.neutralizeContinuity ? "neutralisés" : "comptés"} · sorties exclues : ${s.excludedExitNatures.length ? natureList(s.excludedExitNatures) : "aucune"} (${changed(["turnoverFormula", "neutralizeContinuity", "excludedExitNatures"])})`;
-  const absParams = `types : ${s.absenceTypes.length ? s.absenceTypes.map(absenceTypeText).join(", ") : "aucun"} · statuts : ${s.absenceStatuses.map((x) => ABSENCE_STATUS_LABELS[x] ?? x).join(", ")} · ${s.dayBasis === "calendar" ? "jours calendaires" : "du lundi au vendredi"} (${changed(["absenceTypes", "absenceStatuses", "dayBasis"])})`;
 
   const t = dash.tiles;
-  // Calcul de l'écart en fractions exactes (valeur − N-1 ; × 100 pour les taux) : l'écart affiché se retrace sans arrondi.
-  const deltaCalc = <T,>(c: Compared<T>, value: (x: T) => Ratio | null, points = false): string | undefined => {
+  // N-1 d'une tuile : la valeur seule ; la période N-1 est dans la ligne de contexte et au survol.
+  const n1 = (shown: Shown) => shown.text;
+  // Écart exact en fractions (valeur − N-1 ; × 100 pour les taux), au survol de la ligne « Écart » : rien de visible sur la tuile,
+  // mais l'écart affiché se retrace sans arrondi.
+  const deltaTitle = <T,>(c: Compared<T>, value: (x: T) => Ratio | null, points = false): string | undefined => {
     if (c.delta.kind !== "exact") return undefined;
     const a = value(c.current);
     const b = value(c.previous);
-    if (!a || !b) return undefined;
-    const d = fmtFraction(c.delta.value);
-    // Vrai signe moins dans la formule affichée (fmtFraction écrit un tiret ASCII pour une fraction négative).
-    return typoMinus(points ? `(${fmtFraction(a)} − ${fmtFraction(b)}) × 100 = ${d}` : `${fmtFraction(a)} − ${fmtFraction(b)} = ${d}`);
+    return a && b ? deltaExact(a, b, c.delta.value, points) : undefined;
   };
-  const n1 = <T,>(c: Compared<T>, shown: Shown) => `N-1 (${c.previousWindow.label}) : ${shown.text}`;
   const pw = dash.previousWindow;
   const lowerMonths = new Set(data.coverage.filter((c) => c.presenceStatus === "lower_bound").map((c) => c.month));
 
@@ -329,7 +322,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const tileOn = (id: string) => vue === "suivi" || (vue === "turnover" ? id === "turnover" || id === "headcount-avg" : id === "absenteeism");
   const colOn = (c: string) => vue === "suivi" || (vue === "turnover" ? ["coverage", "headcount", "entries", "exits"].includes(c) : ["coverage", "theoretical", "absence-days", "absenteeism", "absenteeism-n1"].includes(c));
   const catKeys = [...CATEGORY_IDS, "nc"].filter((k) => catMonths.some((c) => c.kind === "value" && c.byCategory[k]));
-  // Page « Prévu » : aucun chiffre, donc ni limites de la lecture ni définitions à rappeler.
+  // Page « Prévu » : aucun chiffre, donc ni limites de la lecture ni paramètres en vigueur à rappeler.
   const prevu = (PREVU_VUES as string[]).includes(vue);
   return (
     <KpiHeader ctx={ctx} closedMonth={last} bare={prevu}>
@@ -393,97 +386,100 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <strong>{w.label}</strong> · N-1 : {pw.label} · date de référence {formatDate(data.build.referenceDate)}
         {etab ? ` · établissement ${etab}` : ""}
         {nature ? ` · nature ${contractNatureLabel(nature)}` : ""}
+        <GlossaryLink slug={slug} term={KPI_TERMS.closedPeriod} />
       </p>
       {[...covNotices].map(([reason, months]) => (
         <p key={reason} className="notice" data-testid="coverage-notice">{monthRanges(months)} : {reason}</p>
       ))}
 
       <section className="panel">
-        <div className="kpi-panel-title">
-          <h2>Indicateurs</h2>
-          <p className="desc">{w.label} · comparés à la période précédente (N-1) ; chaque chiffre se retrace dans « Détail ».</p>
-        </div>
+        <PanelTitle slug={slug} term={KPI_TERMS.previousPeriod} label="Comparaison N-1 et écart">Indicateurs</PanelTitle>
         <dl className="facts kpi-tiles" data-testid="kpi-tiles">
           <KpiTile
             id="etp-end"
+            slug={slug}
             visible={tileOn("etp-end")}
             label={`ETP contractuel fin ${monthLabel(w.to)}`}
             shown={etpShown(t.etpEnd.current)}
             title={etpTitle(t.etpEnd.current)}
-            n1={n1(t.etpEnd, etpShown(t.etpEnd.previous))}
+            n1={n1(etpShown(t.etpEnd.previous))}
+            n1Title={t.etpEnd.previousWindow.label}
             delta={fmtDelta(t.etpEnd.delta)}
-            deltaCalc={deltaCalc(t.etpEnd, (e) => (e.kind === "nd" ? null : { num: e.etp4, den: 10000 }))}
-            params={etpParams}
+            deltaTitle={deltaTitle(t.etpEnd, (e) => (e.kind === "nd" ? null : { num: e.etp4, den: 10000 }))}
             qualifiers={t.etpEnd.current.kind === "nd" ? [] : t.etpEnd.current.qualifiers}
-            def="etp-month-end"
+            term={KPI_TERMS.etpMonthEnd}
             detail={detailHref("etp-end", w.to)}
             detailN1={detailHref("etp-end", dash.previousWindow.to)}
           />
           <KpiTile
             id="etp-avg"
+            slug={slug}
             visible={tileOn("etp-avg")}
             label="ETP moyen"
             shown={averageShown(t.etpAverage.current)}
             title={ratioTitle(t.etpAverage.current)}
-            n1={n1(t.etpAverage, averageShown(t.etpAverage.previous))}
+            n1={n1(averageShown(t.etpAverage.previous))}
+            n1Title={t.etpAverage.previousWindow.label}
             delta={fmtDelta(t.etpAverage.delta)}
-            deltaCalc={deltaCalc(t.etpAverage, (a) => (a.kind === "exact" ? a.ratio : null))}
-            params={etpParams}
+            deltaTitle={deltaTitle(t.etpAverage, (a) => (a.kind === "exact" ? a.ratio : null))}
             qualifiers={t.etpAverage.current.kind === "nd" ? [] : t.etpAverage.current.qualifiers}
-            def="etp-average"
+            term={KPI_TERMS.etpAverage}
             detail={detailHref("etp-avg", null)}
             detailN1={detailHref("etp-avg", null, true)}
           />
           <KpiTile
             id="headcount-avg"
+            slug={slug}
             visible={tileOn("headcount-avg")}
             label="Effectif moyen (personnes)"
             shown={averageShown(t.headcountAverage.current)}
             title={ratioTitle(t.headcountAverage.current)}
-            n1={n1(t.headcountAverage, averageShown(t.headcountAverage.previous))}
+            n1={n1(averageShown(t.headcountAverage.previous))}
+            n1Title={t.headcountAverage.previousWindow.label}
             delta={fmtDelta(t.headcountAverage.delta)}
-            deltaCalc={deltaCalc(t.headcountAverage, (a) => (a.kind === "exact" ? a.ratio : null))}
-            params={hcParams}
-            def="headcount-average"
+            deltaTitle={deltaTitle(t.headcountAverage, (a) => (a.kind === "exact" ? a.ratio : null))}
+            term={KPI_TERMS.headcountAverage}
             detail={detailHref("headcount-avg", null)}
             detailN1={detailHref("headcount-avg", null, true)}
           />
           <KpiTile
             id="turnover"
+            slug={slug}
             visible={tileOn("turnover")}
             label="Turnover"
             shown={turnoverShown(toCur)}
             title={ratioTitle(toCur)}
-            n1={n1(t.turnover, turnoverShown(t.turnover.previous))}
+            n1={n1(turnoverShown(t.turnover.previous))}
+            n1Title={t.turnover.previousWindow.label}
             delta={fmtDelta(t.turnover.delta)}
-            deltaCalc={deltaCalc(t.turnover, (x) => (x.kind === "exact" ? x.ratio : null), true)}
-            params={toParams}
+            deltaTitle={deltaTitle(t.turnover, (x) => (x.kind === "exact" ? x.ratio : null), true)}
             qualifiers={toCur.kind === "exact" ? toCur.qualifiers : []}
-            def="turnover"
+            term={KPI_TERMS.turnover}
             detail={detailHref("turnover", null)}
             detailN1={detailHref("turnover", null, true)}
           />
           <KpiTile
             id="absenteeism"
+            slug={slug}
             visible={tileOn("absenteeism")}
             label="Absentéisme"
             shown={absenteeismShown(absCur)}
             title={ratioTitle(absCur)}
-            n1={n1(t.absenteeism, absenteeismShown(t.absenteeism.previous))}
+            n1={n1(absenteeismShown(t.absenteeism.previous))}
+            n1Title={t.absenteeism.previousWindow.label}
             delta={fmtDelta(t.absenteeism.delta)}
-            deltaCalc={deltaCalc(t.absenteeism, (x) => (x.kind === "nd" ? null : x.ratio), true)}
-            params={absParams}
+            deltaTitle={deltaTitle(t.absenteeism, (x) => (x.kind === "nd" ? null : x.ratio), true)}
             qualifiers={absCur.kind === "nd" ? [] : absCur.qualifiers}
             warning={
               input.absences.status === "read" && missingTypes.length > 0 ? (
                 <span className="tile-foot" data-testid="kpi-absence-missing">
                   {missingTypes.length > 1 ? "Aucune absence des types " : "Aucune absence de type "}
                   <AbsenceTypes codes={missingTypes.map((x) => x.type)} />
-                  {missingTypes.length > 1 ? " dans la lecture PayFit : ces types ne comptent aucun jour." : " dans la lecture PayFit : ce type ne compte aucun jour."}
+                  {" dans la lecture PayFit."}
                 </span>
               ) : undefined
             }
-            def="absenteeism"
+            term={KPI_TERMS.absenteeism}
             detail={detailHref("absenteeism", null)}
             detailN1={detailHref("absenteeism", null, true)}
           >
@@ -492,14 +488,11 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         </dl>
       </section>
 
-      <KpiCharts vue={vue === "turnover" ? "turnover" : vue === "absenteisme" ? "absenteisme" : "suivi"} rows={dash.rows} turnover={t.turnover} absenteeism={t.absenteeism} isPayfit={isPayfit} />
+      <KpiCharts slug={slug} vue={vue === "turnover" ? "turnover" : vue === "absenteisme" ? "absenteisme" : "suivi"} rows={dash.rows} turnover={t.turnover} absenteeism={t.absenteeism} />
 
       <section className="panel">
-        <div className="kpi-panel-title">
-          <h2>Mois par mois</h2>
-          <p className="desc">{w.months.length} mois, valeurs de fin de mois ; N-1 = même mois un an plus tôt.</p>
-        </div>
-        <p className="kpi-scroll-hint" data-testid="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite pour voir les autres colonnes.</p>
+        <PanelTitle slug={slug} term={KPI_TERMS.monthly} label="Tableau mois par mois et ligne Période">Mois par mois</PanelTitle>
+        <p className="kpi-scroll-hint" data-testid="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite.</p>
         <div className="table-wrap scroll">
           <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-monthly-table">
             <thead>
@@ -551,20 +544,17 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             </tfoot>
           </table>
         </div>
-        <p className="desc">
-          Ligne « Période » : valeurs des indicateurs ci-dessus (moyennes de fin de mois, mouvements comptés, somme des jours), jamais une moyenne de colonne recalculée par l'écran. Chaque valeur ouvre le détail de son calcul.
-        </p>
-        <NdReasons items={ndItems} />
+        <NdReasons items={ndItems} slug={slug} />
       </section>
 
       {vue === "suivi" && (
       <section className="panel" data-testid="kpi-categories">
-        <div className="kpi-panel-title">
-          <h2>Effectif et ETP par catégorie</h2>
-          <p className="desc">Fin de mois ; CDI, CDD, apprenti, stagiaire. Chaque cellule indique le nombre de personnes puis l'ETP.</p>
+        <div className="kpi-title-stack">
+          <PanelTitle slug={slug} term={KPI_TERMS.categories} label="Effectif et ETP par catégorie">Effectif et ETP par catégorie</PanelTitle>
+          <p className="desc">Fin de mois · personnes puis ETP</p>
         </div>
         <KpiCategoryChart months={catMonths} keys={catKeys} labels={{ ...CATEGORY_LABELS, nc: "Non classé" }} />
-        <p className="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite pour voir les autres colonnes.</p>
+        <p className="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite.</p>
         <div className="table-wrap scroll kpi-fit" tabIndex={0} role="region" aria-label="Effectif et ETP par catégorie, tableau défilant">
           <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-categories-table">
             <thead>
@@ -590,19 +580,17 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             </tbody>
           </table>
         </div>
-        <p className="desc">
-          Catégorie proposée depuis la nature du contrat, corrigée contrat par contrat dans <a href={`/e/${slug}/parametres#projection`}>Paramètres › Catégories de contrat</a> (PayFit code certains apprentis en CDD). La somme des catégories est l'ETP contractuel de fin de mois ci-dessus ; « non classé » : nature sans catégorie.
-        </p>
+        <p className="desc"><a href={`/e/${slug}/parametres#projection`}>Paramètres › Catégories de contrat</a></p>
       </section>
       )}
 
       {detail && detailId && (
         <section className="panel" id="kpi-detail" data-testid="kpi-detail">
-          <h2>
+          <PanelTitle slug={slug} term={KPI_TERMS.detail} label="Détail d'un chiffre">
             Détail — {DETAIL_TITLES[detailId]}
             {onPrevious ? " (N-1)" : ""}
             {"month" in detail && detail.month ? ` · ${detail.month}` : ` · ${"window" in detail ? detail.window.label : w.label}`}
-          </h2>
+          </PanelTitle>
           <p className="desc"><a href={query({})}>Fermer le détail</a></p>
           {detail.id === "etp-end" && <EtpEndDetail v={detail.value} maps={maps} slug={slug} decimals={s.etpDecimals} refDate={data.build.referenceDate} />}
           {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} natureAt={natureAt} />}
@@ -616,7 +604,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       </>
       )}
 
-      {!prevu && <KpiDefinitions slug={slug} params={paramList(ctx.settings, ctx.collab.natures)} extra={vue === "effectifs" ? <EffectifsDefinitions /> : undefined} />}
+      {!prevu && <KpiParams slug={slug} params={paramList(ctx.settings, ctx.collab.natures)} />}
     </KpiHeader>
   );
 }

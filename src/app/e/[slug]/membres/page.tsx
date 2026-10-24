@@ -2,8 +2,10 @@ import "@/styles/donnees.css";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { invitation, member, user } from "@/db/schema";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { listEvents, type EventKind } from "@/lib/events";
-import { isRole, ROLES, ROLE_LABELS, type Role } from "@/lib/roles";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
+import { isRole, ROLES, ROLE_LABELS } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { Empty, PageHead } from "../donnees/ui";
 import { cancelInvitation, changeRole, removeMember } from "./actions";
@@ -40,13 +42,6 @@ const EVENT_LABELS = {
   "budget.reference_deleted": "Budget de référence supprimé",
 } satisfies Partial<Record<EventKind, string>>;
 
-// Ce que chaque rôle peut faire, d'après les contrôles côté serveur.
-const ROLE_NOTES: Record<Role, string> = {
-  admin: "Gère l'espace, ses membres, les sources connectées et les règles de l'espace (Paramètres).",
-  editor: "Lance les lectures des sources, dépose les fichiers et saisit les hypothèses.",
-  reader: "Consulte les écrans de l'espace, sans rien modifier.",
-};
-
 const EVENT_LIMIT = 30;
 const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });
 
@@ -81,22 +76,13 @@ export default async function MembresPage({ params }: { params: Promise<{ slug: 
 
   return (
     <>
+      {/* Ce que peut chaque profil (administrateur, éditeur, lecteur) est au glossaire : l'écran ne dit que le profil de la personne. */}
       <PageHead kicker="Espace" title="Membres et accès">
-        <p className="desc">Trois rôles par espace : chaque action est contrôlée côté serveur, quel que soit l'écran.</p>
+        <p className="desc" data-testid="mb-role">
+          Votre rôle : <span className="tag mb-role-tag">{ROLE_LABELS[workspace.role]}</span>
+          <GlossaryLink slug={slug} term={DONNEES_TERMS.profils} />
+        </p>
       </PageHead>
-
-      {/* Définitions des trois rôles : de l'information, pas des choix. Seul « Votre rôle » est mis en évidence, par un badge. */}
-      <dl className="mb-roles" data-testid="mb-roles">
-        {ROLES.map((r) => (
-          <div key={r} data-current={workspace.role === r ? "true" : undefined}>
-            <dt>
-              {ROLE_LABELS[r]}
-              {workspace.role === r && <span className="tag">Votre rôle</span>}
-            </dt>
-            <dd>{ROLE_NOTES[r]}</dd>
-          </div>
-        ))}
-      </dl>
 
       <section className="panel" aria-labelledby="members-title" id="membres">
         <div className="dn-section-head">
@@ -138,8 +124,8 @@ export default async function MembresPage({ params }: { params: Promise<{ slug: 
       {isAdmin && (
         <section className="panel" id="inviter">
           <div className="dn-section-head">
-            <h2>Inviter</h2>
-            <p className="desc">Pas d'envoi d'e-mail en V1 : le lien d'invitation est à transmettre à la personne. Il expire au bout de 7 jours.</p>
+            <h2>Inviter<GlossaryLink slug={slug} term={DONNEES_TERMS.invitation} /></h2>
+            <p className="desc">Aucun e-mail n'est envoyé : le lien est à transmettre (valable 7 jours).</p>
           </div>
           <InviteForm slug={slug} />
           {invitations.length > 0 && (
@@ -169,8 +155,8 @@ export default async function MembresPage({ params }: { params: Promise<{ slug: 
       {isAdmin && (
         <section className="panel" id="journal">
           <div className="dn-section-head">
-            <h2>Journal de l'espace</h2>
-            <p className="desc">Les {EVENT_LIMIT} derniers événements, du plus récent au plus ancien.</p>
+            <h2>Journal de l'espace<GlossaryLink slug={slug} term={DONNEES_TERMS.journal} /></h2>
+            <p className="desc">{EVENT_LIMIT} derniers événements, du plus récent au plus ancien.</p>
           </div>
           {events.length === 0 ? (
             <Empty>Aucun événement.</Empty>
@@ -195,10 +181,7 @@ export default async function MembresPage({ params }: { params: Promise<{ slug: 
 
       {isAdmin && (
         <section className="panel" id="espace">
-          <div className="dn-section-head">
-            <h2>Renommer l'espace</h2>
-            <p className="desc">Le nom est affiché dans le menu et en tête de chaque écran.</p>
-          </div>
+          <h2>Renommer l'espace</h2>
           <RenameForm slug={slug} name={workspace.name} />
         </section>
       )}

@@ -1,6 +1,7 @@
 import type { Part } from "@/components/charts/DonutChart";
 import type { ChartSeries } from "@/components/charts/shared";
 import { formatEuros } from "@/lib/money";
+import { costTone, trendClass } from "@/lib/trend";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 
 // Adaptateurs purs « résultat du moteur de masse salariale → séries de graphique » de l'écran Masse salariale (Synthèse,
@@ -18,23 +19,26 @@ export type WindowIn = { kind: "value"; masse: number } | ({ kind: "nd" } & Nd);
 export type ProvisionIn = { kind: "value"; conges: number | null; charges: number | null; total: number | null; missing: string[] } | { kind: "nd"; reason: string };
 export type DsnIn = { status: "complete" | "incomplete" | "blocked"; byType: Record<string, number> };
 
-// --- Teintes : celles de la charte (charts.css). Une teinte = une notion métier sur un écran : aucune teinte n'est reprise
-// pour une autre notion voisine (N en bleu, N-1 en gris ; brut en bleu nuit, cotisations en orange ; fixe en bleu nuit, variable
-// en bleu, gratifications en vert ; primes, services et familles prennent les teintes restantes). La teinte ne porte jamais
-// seule l'information : légende nommée, étiquettes et infobulle donnent le nom et la valeur. Le montant écrit dans une colonne
-// empilée prend la couleur de texte lisible sur sa teinte (blanc ou encre, 4,5:1 au moins : voir onColor des graphiques).
+// --- Teintes : celles de la charte (charts.css), un bleu mesuré étendu au bleu nuit, au gris-bleu et au noir ; le rouge et le vert
+// n'en font pas partie (réservés aux tendances d'un coût). Une notion = une teinte d'un écran à l'autre (N en bleu, N-1 en gris-bleu ;
+// brut en bleu nuit, cotisations en bleu moyen ; fixe en bleu nuit, variable en bleu, gratifications en bleu moyen) ; dans un même
+// graphique, toutes les séries ont des teintes différentes. Les deux notions comparées dans un même graphique (N et N-1, brut et
+// cotisations, journal et comptabilité, congés payés et charges) prennent des teintes à 3:1 au moins sur fond blanc : ni 6 ni 8,
+// trop pâles pour un objet graphique isolé. La teinte ne porte jamais seule l'information : légende nommée, étiquettes et infobulle
+// donnent le nom et la valeur. Le montant écrit dans une colonne empilée prend la couleur de texte lisible sur sa teinte (blanc sur
+// 1, 2, 4 et 5, encre sur 3, 6, 7 et 8, 4,5:1 au moins : voir onColor des graphiques).
 export const COLORS = {
   now: "var(--chart-1)", // l'année N (masse chargée, coût par ETP, provision, brut DSN)
-  before: "var(--muted)", // le même mois un an plus tôt (N-1)
+  before: "var(--chart-7)", // le même mois un an plus tôt (N-1)
   brut: "var(--chart-2)",
-  cotisations: "var(--chart-6)",
+  cotisations: "var(--chart-3)",
   fixe: "var(--chart-2)",
   variable: "var(--chart-1)",
   stages: "var(--chart-3)",
   conges: "var(--chart-3)",
-  charges: "var(--chart-6)",
+  charges: "var(--chart-4)",
   journal: "var(--chart-2)",
-  compta: "var(--chart-8)",
+  compta: "var(--chart-5)",
 } as const;
 
 // --- Montants : un seul formateur signé pour tout l'écran. Le moins est le vrai signe moins (U+2212), comme pour les
@@ -43,6 +47,17 @@ const minus = (s: string) => s.replace(/^[-\u2212]/, "\u2212");
 export const euros = (cents: number): string => minus(formatEuros(cents));
 export const eurosSigned = (cents: number): string => `${cents > 0 ? "+" : ""}${euros(cents)}`;
 export const pluriel = (n: number, mot: string): string => `${n} ${mot}${n > 1 ? "s" : ""}`;
+
+// Tendance d'un écart de montant (coût) : « trend-bad » (rouge) pour une hausse, « trend-good » (vert) pour une baisse, rien pour un
+// écart nul ou n.d. Le signe + / − reste écrit dans la valeur ; la flèche est ajoutée par la feuille de style.
+export const trendOf = (deltaCents: number | null | undefined): string => trendClass(costTone(deltaCents));
+// Classes d'une cellule numérique de tableau : « num » et, quand l'écart est connu et non nul, sa tendance.
+export const numTrend = (deltaCents: number | null | undefined): string => ["num", trendOf(deltaCents)].filter(Boolean).join(" ");
+// Écart d'une évolution N / N-1 (type Evolution du moteur) : en euros dès qu'il est connu ; en % seulement si le pourcentage est défini
+// (un N-1 nul laisse l'écart en euros, le % est n.d. et reste neutre). null si l'évolution est n.d.
+type EvolutionIn = { kind: "value"; deltaCents: number; ratio: unknown } | { kind: "nd" };
+export const evoDelta = (e: EvolutionIn): number | null => (e.kind === "value" ? e.deltaCents : null);
+export const evoPctDelta = (e: EvolutionIn): number | null => (e.kind === "value" && e.ratio !== null ? e.deltaCents : null);
 
 // --- Axe des mois
 const SHORT = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
@@ -111,22 +126,17 @@ export function costSeries(cur: MonthIn[], etpCur: EtpIn[], prev: MonthIn[], etp
 
 // Teinte d'un service : son rang dans le tableau Services (classé par coût décroissant, non ventilé en dernier). L'anneau et les
 // colonnes empilées par mois donnent ainsi la même teinte au même service, même quand un service sans coût positif n'a pas de secteur.
-// Les teintes prises par brut / cotisations / masse chargée (1, 2, 6) viennent en dernier : tant qu'il y a au plus cinq services,
-// aucun ne reprend la teinte d'une autre notion de l'écran.
-export const SERVICE_HUES = [3, 8, 4, 7, 5, 6, 1, 2] as const;
+// Les quatre premières teintes (4, 6, 5, 8) ne servent à aucune autre notion de la Synthèse (N, N-1, brut, cotisations : 1, 7, 2, 3) ;
+// elles alternent foncé et clair. Au-delà de quatre services, les suivantes reprennent celles de ces notions, en dernier.
+export const SERVICE_HUES = [4, 6, 5, 8, 7, 3, 2, 1] as const;
 export const serviceColor = (rank: number): string => `var(--chart-${SERVICE_HUES[rank % SERVICE_HUES.length]})`;
 
-// Teinte d'une famille de prime : ni le bleu nuit du fixe, ni le bleu du variable, ni le vert des gratifications de stage pour les
-// cinq premières familles, et les teintes proches du bleu (4) et du vert (7) ne viennent qu'en quatrième et cinquième. Les trois
-// suivantes (jusqu'à huit familles, limite du graphique) reprennent celles du fixe, du variable et des gratifications : chaque
-// série du graphique garde ainsi une teinte différente de ses voisines.
-export const FAMILY_HUES = [8, 6, 5, 4, 7, 3, 1, 2] as const;
+// Teinte d'une famille de prime : ni le bleu nuit du fixe, ni le bleu du variable, ni le bleu moyen des gratifications de stage
+// pour les cinq premières familles (4, 6, 5, 8, 7, qui alternent foncé et clair). Les trois suivantes (jusqu'à huit familles,
+// limite du graphique) reprennent celles des gratifications, du variable et du fixe : chaque série du graphique garde ainsi une
+// teinte différente de ses voisines.
+export const FAMILY_HUES = [4, 6, 5, 8, 7, 3, 1, 2] as const;
 export const familyColor = (rank: number): string => `var(--chart-${FAMILY_HUES[rank % FAMILY_HUES.length]})`;
-
-// Au-delà de cinq services (ou familles), une teinte est reprise d'une autre notion de l'écran : la légende de chaque graphique le dit.
-export const HUES_DISTINCT = 5;
-export const hueReuseNote = (count: number, noun: string, others: string): string =>
-  count > HUES_DISTINCT ? `Au-delà de ${HUES_DISTINCT} ${noun}, une teinte est reprise d'une autre notion de l'écran (${others}) : la légende de chaque graphique fait foi.` : "";
 
 // Répartition par service : une part par service (masse chargée de la période). Un service n.d. est listé avec sa raison ;
 // un service sans masse positive n'a pas de secteur : il est nommé dans `omitted` (son montant est dans le tableau).
@@ -255,8 +265,8 @@ export const hasData = (list: ChartSeries[]): boolean => list.some((s) => s.valu
 // Raisons distinctes des valeurs absentes, dans l'ordre d'apparition (séries puis mois).
 export const seriesReasons = (list: ChartSeries[]): string[] => [...new Set(list.flatMap((s) => (s.reasons ?? []).filter((r): r is string => Boolean(r))))];
 
-// --- Mention « n.d. » d'un graphique : écrite seulement quand le graphique contient réellement un n.d. Une colonne hachurée est
-// une catégorie (un mois) où aucune série n'a de valeur ; une valeur absente d'une seule série n'est pas tracée, sans hachure.
+// --- Forme des n.d. d'un graphique. Une colonne hachurée est une catégorie (un mois) où aucune série n'a de valeur ; une valeur
+// absente d'une seule série n'est pas tracée, sans hachure.
 export function ndShape(list: ChartSeries[]): { columns: number; values: number } {
   const n = Math.max(0, ...list.map((s) => s.values.length));
   let columns = 0;
@@ -269,13 +279,12 @@ export function ndShape(list: ChartSeries[]): { columns: number; values: number 
   }
   return { columns, values };
 }
-export function ndNote(list: ChartSeries[], kind: "barres" | "courbe" = "barres"): string {
+// Le graphique contient-il un n.d. (colonne hachurée, valeur non tracée, courbe interrompue) ? La clé de lecture « n.d. » n'est
+// écrite que dans ce cas.
+export const hasNd = (list: ChartSeries[]): boolean => {
   const { columns, values } = ndShape(list);
-  if (kind === "courbe") return columns + values > 0 ? "Un mois n.d. interrompt la courbe : sa raison est dans l'infobulle." : "";
-  if (columns > 0) return "Une colonne hachurée est un mois n.d. : sa raison est dans l'infobulle et dans la liste des raisons de la page.";
-  if (values > 0) return "Une valeur n.d. n'est pas tracée, jamais dessinée comme zéro : sa raison est dans l'infobulle.";
-  return "";
-}
+  return columns + values > 0;
+};
 
 // Première lettre en capitale (la raison d'un n.d. est écrite en minuscule dans les sources, elle ouvre une phrase à l'écran).
 export const capital = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}`;

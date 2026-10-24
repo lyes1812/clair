@@ -1,11 +1,12 @@
 "use client";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { LineChart } from "@/components/charts";
 import type { RubricChart } from "@/lib/viz/ecart";
 
 // Courbes de l'écart budgétaire : une courbe par version, mois par mois, pour la rubrique choisie. Le choix de rubrique se fait
 // sans recharger la page (toutes les rubriques sont déjà calculées côté serveur) ; il est reporté dans l'adresse pour pouvoir être
-// partagé ou rechargé. Le tableau exact correspondant reste la référence : le graphique n'en est qu'une lecture.
+// partagé ou rechargé. Le tableau exact correspondant reste la référence : le graphique n'en est qu'une lecture. La lecture des
+// courbes (traits, aire, axe ajusté) est au glossaire ; seules les limites de lecture restent écrites sous le graphique.
 export type EcartChartProps = {
   testid: string;
   initial: string;
@@ -15,6 +16,7 @@ export type EcartChartProps = {
   data: Record<string, RubricChart>;
   period: string; // « de janvier à décembre »
   scope: string; // « tous les services » / « service X »
+  axisHelp?: ReactNode; // « ? » vers le glossaire (axe ajusté), rendu par le serveur à côté de la case d'axe
 };
 
 export function EcartChart(p: EcartChartProps) {
@@ -44,16 +46,15 @@ export function EcartChart(p: EcartChartProps) {
   };
   // Une version sans aucune valeur n'a pas de courbe : sa raison est écrite ici (l'infobulle ne la montre que pour un mois survolé).
   const empty = d ? d.series.filter((s) => s.values.every((v) => v === null)) : [];
-  const partial = d ? d.series.map((s) => ({ name: s.name, n: s.values.filter((v) => v === null).length, all: s.values.length })).filter((x) => x.n > 0 && x.n < x.all) : [];
+  const partial = d ? d.series.map((s) => ({ name: s.name, n: s.values.filter((v) => v === null).length, all: s.values.length, reason: reasonsOf(s) })).filter((x) => x.n > 0 && x.n < x.all) : [];
   // L'aire teintée sous un scénario n'est tracée que depuis zéro : sur un axe ajusté elle partirait du bas de l'axe et agrandirait
   // l'écart à l'œil.
   const series = d ? d.series.map((s) => (zero ? s : { ...s, area: false })) : [];
-  const shaded = zero && series.some((s) => s.area);
-  // Deux messages distincts : la lecture du graphique (au-dessus) et ses limites (en dessous, avec la mention d'axe du composant).
-  const reading = `Trait plein : version 1 · pointillés : versions suivantes${shaded ? " · zone teintée : scénario" : ""}. Chaque point est la valeur du mois, chaque version étant lue sur sa propre année à rang de mois égal.`;
+  // Sous le graphique, trois limites de lecture et rien d'autre : un point est la valeur du mois (le tableau donne celle de la
+  // période), les mois sans valeur avec leur raison, puis la mention d'axe ajusté écrite par le composant. Le reste est au glossaire.
   const note = [
-    "Le tableau donne la valeur de la période (moyenne des ETP de fin de mois, inscrits en fin de période, somme pour les entrées, les sorties et les montants), pas celle du mois.",
-    partial.length ? `Mois sans valeur (n.d. ou rubrique sans objet ; courbe interrompue, raison au survol) : ${partial.map((x) => `${x.name} : ${x.n} mois`).join(" ; ")}.` : null,
+    "Chaque point est la valeur du mois ; le tableau donne celle de la période.",
+    partial.length ? `Mois sans valeur : ${partial.map((x) => `${x.name} : ${x.n} mois (${x.reason})`).join(" ; ")}.` : null,
     empty.length ? `Aucune valeur à tracer : ${empty.map((s) => `${s.name} (${reasonsOf(s)})`).join(" ; ")}.` : null,
   ].filter(Boolean).join(" ");
 
@@ -74,8 +75,8 @@ export function EcartChart(p: EcartChartProps) {
           <input type="checkbox" checked={zero} onChange={(e) => setZero(e.target.checked)} />
           <span>Axe vertical à partir de zéro</span>
         </label>
+        {p.axisHelp}
       </div>
-      {d && drawn && <p className="ecart-reading" data-testid={`${p.testid}-lecture`}>{reading}</p>}
       {d && drawn ? (
         <LineChart
           testid={p.testid}
@@ -90,7 +91,7 @@ export function EcartChart(p: EcartChartProps) {
         />
       ) : (
         <div className="ecart-nd-block" data-testid={`${p.testid}-nd`}>
-          <p className="nd">n.d. — aucune valeur à tracer pour « {label} » : chaque version est n.d. ou sans objet sur la période.</p>
+          <p className="nd">n.d. — aucune valeur à tracer pour « {label} ».</p>
           <ul className="list">
             {(d?.series ?? []).map((s) => <li key={s.key} className="desc">{s.name} : {reasonsOf(s)}</li>)}
           </ul>

@@ -1,5 +1,5 @@
 import type { ChartSeries } from "@/components/charts/shared";
-import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
+import { fmtEtp4, fmtFraction, fmtPercent } from "@/lib/rh/kpi/format";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 
 // Adaptateurs purs « résultat du moteur → séries de graphique » de l'écran KPI RH et des effectifs mensuels.
@@ -140,6 +140,33 @@ export function repartition(g: GridIn, stock: boolean): { known: string[]; used:
 
 // --- Libellés et typographie d'affichage (aucun calcul)
 
+// Remarques de tuile qui changent la lecture d'un chiffre (borne basse, mouvements neutralisés ou exclus, absences incertaines).
+// Les deux phrases d'explication du moteur (quotités à la date de lecture : bloc « Limites de la lecture » ; entrées et sorties en
+// contrats : glossaire) ne s'affichent plus sur la tuile.
+const EXPLANATORY_QUALIFIERS = [/^quotités à la date de lecture/, /^entrées et sorties en contrats, effectif en personnes/];
+export const readingQualifiers = (qualifiers: string[]): string[] => [...new Set(qualifiers)].filter((q) => !EXPLANATORY_QUALIFIERS.some((re) => re.test(q)));
+
+// Unité de la rubrique, dite dans la ligne de contexte des effectifs mensuels (« nombre » : entrées, sorties, inscrits).
+export const unitLabel = (unit: "etp" | "nombre" | "eur"): string => (unit === "eur" ? "euros" : unit === "etp" ? "ETP" : "nombre");
+
+// Légende d'une ligne sous les barres des effectifs mensuels : mois projetés, absence de groupe, teintes répétées.
+export function barNote(projected: string[], nGroups: number): string | undefined {
+  const list = projected.map(monthShortLabel).join(", ");
+  const parts = [
+    // Les mois abrégés finissent souvent par un point (« oct. ») : pas de second point.
+    projected.length ? `Mois projetés (scénario) : ${list}${list.endsWith(".") ? "" : "."}` : null,
+    nGroups === 0 ? "Aucune valeur sur les mois connus : total à 0." : null,
+    nGroups > 8 ? "Plus de huit groupes : les teintes se répètent." : null,
+  ].filter((x): x is string => x !== null);
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+// Groupes à valeur nulle ou négative : présents dans le tableau, absents de l'anneau.
+export const donutNote = (omitted: string[]): string | undefined => (omitted.length ? `Valeur nulle, absents de l'anneau : ${omitted.join(", ")}.` : undefined);
+
+// Taux tous à zéro (tracés) : l'écran le dit en une phrase, sinon la courbe plate ou l'absence de barre se lirait comme une donnée manquante.
+export const zeroRateNote = (list: ChartSeries[]): string | undefined => (allZero(list) ? "Tous les taux tracés valent 0,00 %." : undefined);
+
 // Libellé français d'un type d'absence PayFit déjà nommé par l'application (défaut validé des définitions des KPI : « maladie
 // ordinaire »). Un autre code n'a pas de libellé connu : null, et l'écran le montre tel que reçu, sans le deviner.
 const ABSENCE_TYPE_LABELS: Record<string, string> = { fr_maladie_ordinaire: "Maladie ordinaire" };
@@ -153,6 +180,13 @@ export const absenceTypeText = (code: string): string => {
 // Vrai signe moins (U+2212) dans une formule affichée : « = -42500/1079 » → « = −42500/1079 ». Un tiret d'un nom (« N-1 »)
 // ou d'une date (« 2025-10 ») n'est pas touché : seul un tiret qui précède un chiffre en début de terme est remplacé.
 export const typoMinus = (s: string): string => s.replace(/(^|[\s(=×÷])-(?=\d)/g, "$1\u2212");
+
+// Écart exact en fractions, au survol de la ligne « Écart » d'une tuile : valeur − N-1 (× 100 pour un taux, écart en points).
+// « delta » est l'écart déjà calculé par le moteur (en points pour un taux) : aucune opération n'est refaite ici.
+export const deltaExact = (a: Ratio, b: Ratio, delta: Ratio, points = false): string => {
+  const d = fmtFraction(delta);
+  return typoMinus(points ? `(${fmtFraction(a)} − ${fmtFraction(b)}) × 100 = ${d}` : `${fmtFraction(a)} − ${fmtFraction(b)} = ${d}`);
+};
 
 // Libellé d'un axe de répartition « Catégorie (CDI, CDD, apprenti, stagiaire) » → nom court et précision (null sans parenthèse finale).
 export function splitAxisLabel(label: string): { name: string; detail: string | null } {

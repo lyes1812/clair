@@ -1,15 +1,16 @@
 /* Collaborateurs (charte « 101 ») : en-tête de lecture, barre d'outils des listes, tableaux à en-tête et première colonne fixes,
    pastilles d'état, frise de présence, graphique des mouvements, fiche repliable.
    Variables et échelle typographique de globals.css / typography.css ; teintes de série de charts.css.
+   Univers bleu / blanc / noir / gris : aucun vert, aucun rouge ici (les effectifs, entrées et sorties ne sont pas des montants ;
+   le rouge et le vert sont réservés aux tendances financières d'un coût, sur d'autres écrans).
    Tout est préfixé « collab- » (ou propre à la fiche) : rien ne déborde sur les autres écrans. */
 
 /* Texte réservé aux lecteurs d'écran (légende d'un tableau). */
 .collab-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .collab-panel { min-width: 0; }
 
-/* Titre d'un panneau avec sa phrase de contexte dessous. */
+/* Titre d'un panneau avec sa ligne de contexte dessous. */
 .collab-title { display: grid; gap: 4px; min-width: 0; }
-.collab-title .desc { max-width: 78ch; }
 .panel-head .collab-title { flex: 1 1 320px; }
 
 /* En-tête : titre, source visible ; les limites de la lecture tiennent dans un seul bloc repliable (résumé visible). */
@@ -111,26 +112,30 @@ a.collab-quiet:hover, a.collab-quiet:focus-visible { color: var(--blue); text-de
 .collab-fiche-table td.fiche-name a { font-weight: 550; }
 .collab-fiche-table td.fiche-open .btn { min-height: 32px; padding-block: 4px; }
 
-/* Pastilles d'état : le libellé porte l'information, la couleur la renforce. */
+/* Pastilles d'état : le libellé porte l'information, la nuance de bleu ou de noir la renforce (jamais rouge ni vert). */
 .collab-pill { display: inline-flex; align-items: flex-start; gap: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font-size: var(--clair-type-label); font-weight: 600; line-height: 1.4; text-align: left; }
 .collab-pill::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 0.5em; border-radius: 50%; background: currentColor; }
 .collab-pill.s-present { color: var(--blue); background: var(--blue-soft); border-color: #d6e3ff; }
-.collab-pill.s-entered { color: var(--blue); background: var(--blue-soft); border-color: #d6e3ff; }
-.collab-pill.s-exited { color: var(--danger); background: var(--danger-bg); border-color: #f1d6dc; }
-.collab-pill.s-alert { color: var(--danger); background: #fff; border-color: #f1d6dc; border-style: dashed; }
+.collab-pill.s-entered { color: #fff; background: var(--blue); border-color: var(--blue); }
+.collab-pill.s-exited { color: #fff; background: var(--chart-2); border-color: var(--chart-2); }
+.collab-pill.s-alert { color: var(--ink); background: #fff; border-color: var(--ink); border-style: dashed; }
 .collab-pill.s-counted { color: var(--ink); background: var(--surface); }
+
+/* Constats : « à vérifier » en bleu, « information » en gris (le libellé et le texte caché disent le niveau) ; le rouge reste aux erreurs. */
+.collab-findings .finding { color: var(--blue); background: var(--blue-soft); border-color: #d6e3ff; }
+.collab-findings .finding.info { color: var(--muted); background: var(--surface); border-color: var(--line); }
 
 /* Frise de présence en fin de mois : douze cases, lues par trimestre. */
 .collab-strip { display: inline-flex; gap: 6px; vertical-align: middle; }
 .collab-strip .q { display: inline-grid; grid-template-columns: repeat(3, 11px); gap: 2px; }
 .collab-strip i { display: block; width: 11px; height: 16px; border: 1px solid #d8dce5; border-radius: 2px; background: #fff; }
-.collab-strip i.present { background: var(--ok); border-color: var(--ok); }
+.collab-strip i.present { background: var(--blue); border-color: var(--blue); }
 .collab-strip i.nd { background: repeating-linear-gradient(45deg, #fff, #fff 2px, #dfe3ea 2px, #dfe3ea 4px); border-color: #c7cedd; }
 .collab-strip-scale { display: flex; margin-top: 4px; }
 .collab-strip-scale .q span { display: block; width: 11px; text-align: center; font-size: var(--clair-type-note); font-weight: 500; line-height: 1; color: var(--muted); }
 .collab-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; font-size: var(--clair-type-label); color: var(--muted); }
 .collab-legend .sw { display: inline-block; width: 11px; height: 14px; margin-right: 6px; border: 1px solid #d8dce5; border-radius: 2px; background: #fff; vertical-align: -3px; }
-.collab-legend .sw.present { background: var(--ok); border-color: var(--ok); }
+.collab-legend .sw.present { background: var(--blue); border-color: var(--blue); }
 .collab-legend .sw.nd { background: repeating-linear-gradient(45deg, #fff, #fff 2px, #dfe3ea 2px, #dfe3ea 4px); border-color: #c7cedd; }
 
 /* Mouvements : graphique à gauche, tableau exact compact à droite (une colonne sous 1100 px) ; les 12 mois sont visibles. */

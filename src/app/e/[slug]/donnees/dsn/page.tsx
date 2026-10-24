@@ -1,4 +1,6 @@
 import "@/styles/donnees.css";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { listSyncs, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
 import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
@@ -20,10 +22,7 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
   return (
     <>
       <PageHead crumbs={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Fichiers DSN" }]} title="Fichiers DSN">
-        <p className="desc">
-          Déclarations sociales nominatives mensuelles, déposées fichier par fichier. Les lectures appliquées s'additionnent ; pour chaque
-          établissement et chaque mois, la déclaration qui fait foi est déterminée par les règles de la norme (numéro d'ordre, annule et remplace, fractions).
-        </p>
+        <p className="desc">Déclarations mensuelles, déposées fichier par fichier.<GlossaryLink slug={slug} term={DONNEES_TERMS.depotDsn} /></p>
       </PageHead>
 
       {hasAtLeast(workspace.role, "editor") ? (
@@ -32,13 +31,13 @@ export default async function DsnPage({ params }: { params: Promise<{ slug: stri
           <FileUploadForm slug={slug} kind="dsn" />
         </section>
       ) : (
-        <p className="notice">Le dépôt de fichiers est réservé aux éditeurs et aux administrateurs de l'espace.</p>
+        <p className="notice">Dépôt réservé aux éditeurs et aux administrateurs.</p>
       )}
 
       <section className="panel" id="couverture">
         <div className="dn-section-head">
-          <h2>Couverture</h2>
-          <p className="desc">Lecture partielle : individus, contrats, rémunérations et activités. Cotisations et arrêts de travail ne sont pas extraits.</p>
+          <h2>Couverture<GlossaryLink slug={slug} term={DONNEES_TERMS.couvertureDsn} /></h2>
+          <p className="desc">Lecture partielle : cotisations et arrêts de travail non extraits.</p>
         </div>
         <CoverageTable rows={coverage} />
       </section>

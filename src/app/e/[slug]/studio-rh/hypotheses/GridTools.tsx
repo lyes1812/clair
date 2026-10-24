@@ -84,7 +84,8 @@ function exportCsv(scope: HTMLElement, filename: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-export function GridTools({ filename, years, tools = ["right", "down", "fill"], readOnly = false }: { filename: string; years?: YearTab[]; tools?: Tool[]; readOnly?: boolean }) {
+// `help` : lien « ? » vers le glossaire (élément rendu côté serveur : ce composant client n'importe pas le glossaire).
+export function GridTools({ filename, years, tools = ["right", "down", "fill"], readOnly = false, help }: { filename: string; years?: YearTab[]; tools?: Tool[]; readOnly?: boolean; help?: React.ReactNode }) {
   const root = useRef<HTMLDivElement>(null);
   const valueRef = useRef<HTMLInputElement>(null);
   const active = useRef<HTMLInputElement | null>(null);
@@ -250,10 +251,11 @@ export function GridTools({ filename, years, tools = ["right", "down", "fill"], 
         >
           Télécharger (CSV)
         </button>
+        {help}
       </div>
       {!readOnly && (
         <p className="hs-active" data-testid="grid-active">
-          {activeLabel ? <>Cellule active : <strong>{activeLabel}</strong></> : "Cliquez dans une cellule pour l'utiliser comme point de départ des copies. Entrée ou flèche bas : cellule du dessous ; Maj+Entrée ou flèche haut : cellule du dessus."}
+          {activeLabel ? <>Cellule active : <strong>{activeLabel}</strong></> : "Cliquez dans une cellule pour la choisir comme point de départ."}
         </p>
       )}
       <span className="hs-note" data-fill-note aria-live="polite" />

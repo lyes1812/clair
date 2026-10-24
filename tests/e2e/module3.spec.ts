@@ -88,7 +88,7 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   // Historique PayFit brut (défaut validé le 22/10/2026) : une seule mention en tête d'écran, pas de « ≥ » ni de n.d. de conservation.
   await expect(page.getByTestId("payfit-history-notice")).toContainText("Données telles que remontées par l'API PayFit");
   await expect(page.getByTestId("kpi-tile-etp-end").locator("dd")).toHaveText("6,10");
-  await expect(page.getByTestId("kpi-tile-etp-end")).toContainText("quotités à la date de lecture");
+  await expect(page.getByTestId("kpi-read-limits")).toContainText("Quotités à la date de lecture");
   // ETP moyen exact : somme des ETP fin de mois ÷ 12 (effectif exact au jour près depuis R − 12 mois).
   await expect(page.getByTestId("kpi-tile-etp-avg").locator("dd")).toHaveText(fr2(window.reduce((s, m) => s + etp4(m), 0), 12 * 10000));
   // Septembre 2026 clos : turnover brut 12/83 = 14,46 % (comme la DSN, le transport fictif renvoie tous les contrats), N-1 7/13 ;
@@ -100,9 +100,12 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(page.getByTestId("kpi-absence-types")).toContainText("absents de la lecture : Maladie ordinaire");
   await page.goto(kpi);
   await expect(page.getByTestId("kpi-monthly-table").locator("tbody tr")).toHaveCount(12);
-  await expect(page.getByTestId("kpi-definitions")).toBeAttached();
-  await expect(page.locator("#def-etp-month-end")).toBeAttached();
-  await expect(page.getByTestId("kpi-source-gaps")).toBeAttached();
+  // Les définitions ne sont plus sur l'écran : chaque tuile renvoie au glossaire, qui les porte (ancre #def-<id>).
+  await expect(page.getByTestId("kpi-tile-etp-end").locator("a.gloss-link")).toHaveAttribute("href", `/e/${slug}/glossaire#def-etp-month-end`);
+  await page.goto(`/e/${slug}/glossaire#def-etp-month-end`);
+  await expect(page.locator("#def-etp-month-end")).toBeVisible();
+  await expect(page.locator("#def-kpi-ecarts-sources")).toBeAttached();
+  await page.goto(kpi);
 
   // Paramètre GET invalide : remplacé par le défaut et signalé.
   await page.goto(`${kpi}?fin=2027-01`);

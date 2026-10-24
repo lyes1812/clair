@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { landing as landingOf, project } from "@/lib/budget/engine";
+import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
+import { GLOSSARY_HYPOTHESES, HYP_TERMS } from "@/lib/glossary/hypotheses";
 import { formatEuros } from "@/lib/money";
 import { measures as measuresOf, sensitivities, type Retraite, type SensitivityRow } from "@/lib/budget/lot3";
 import { bridge, budgetSeries, scenarioSeries, shifted, type Bridge, type Layer as SeriesLayer, type Point, type Series } from "@/lib/budget/series";
@@ -17,6 +20,8 @@ import {
   etpSeries,
   frDates,
   gapSeries,
+  groupColor,
+  hasNd,
   hasValues,
   headcountSeries,
   hiresByMonth,
@@ -29,10 +34,14 @@ import {
   ndMonthsNote,
   ndReadings,
   readingStyle,
+  NATURES,
   retraiteWaterfall,
+  savingTone,
   sensitivityBars,
   showCharts,
   showTables,
+  slugOf,
+  TONE_ORDER,
   withAffichage,
   yearSpan,
   type RowIn,
@@ -240,10 +249,27 @@ describe("contributions seules (sans la base)", () => {
   });
 });
 
+// Clarté relative des huit teintes, relue dans charts.css (la source de la palette) : cas de référence des tests de teintes.
+const CSS = readFileSync("src/styles/charts.css", "utf8");
+const hexOf = (n: number | string) => new RegExp(`--chart-${n}:\\s*#([0-9a-fA-F]{6})`).exec(CSS)?.[1] ?? "";
+const luminance = (hex: string) => {
+  const lin = (v: number) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+const tintNo = (c: string) => Number(/--chart-(\d)/.exec(c)![1]);
+const contrast = (a: string, b: string) => {
+  const [x, y] = [luminance(hexOf(tintNo(a))), luminance(hexOf(tintNo(b)))];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+};
+
 describe("teintes des natures de contribution", () => {
-  it("une teinte déjà prise par une autre série présente est remplacée par la première teinte libre", () => {
-    // Préférences : base 2, quotité 4, congé non payé 4 (déjà pris) → la première teinte libre est la 1.
-    expect(distinctColors(["var(--chart-2)", "var(--chart-4)", "var(--chart-4)"])).toEqual(["var(--chart-2)", "var(--chart-4)", "var(--chart-1)"]);
+  it("une teinte déjà prise est remplacée par la teinte libre la plus éloignée en clarté de ses voisines (la plus claire si la voisine est foncée)", () => {
+    // Rangs de clarté (du plus sombre au plus clair) : 2, 4, 5, 1, 7, 3, 6, 8. La 4 (bleu foncé) est prise deux fois : voisine = la 4,
+    // la teinte libre la plus éloignée est la 8 (la plus claire).
+    expect(distinctColors(["var(--chart-2)", "var(--chart-4)", "var(--chart-4)"])).toEqual(["var(--chart-2)", "var(--chart-4)", "var(--chart-8)"]);
+    // Voisines des deux côtés (2 devant, 8 derrière) : écarts de rang 1→(3, 4), 7→(4, 3) : les teintes 1 et 7 sont à égalité (min 3), la première gagne.
+    expect(distinctColors(["var(--chart-2)", "var(--chart-2)", "var(--chart-8)"])).toEqual(["var(--chart-2)", "var(--chart-1)", "var(--chart-8)"]);
     // Rien ne change quand les préférences sont distinctes.
     expect(distinctColors(["var(--chart-2)", "var(--chart-1)"])).toEqual(["var(--chart-2)", "var(--chart-1)"]);
     expect(distinctColors([])).toEqual([]);
@@ -258,8 +284,36 @@ describe("teintes des natures de contribution", () => {
     expect(c.series.map((s) => s.key)).toEqual(["base", "quotite", "sortie", "entree", "absence"]);
     const colors = c.series.map((s) => s.color);
     expect(new Set(colors).size).toBe(colors.length);
-    // Les natures qui gardent leur teinte préférée : base 2, quotité 4, coûts de sortie 8.
-    expect(colors.slice(0, 3)).toEqual(["var(--chart-2)", "var(--chart-4)", "var(--chart-8)"]);
+    // Base 2, quotité 8, coûts de sortie 5 et congé non payé 7 gardent leur teinte préférée ; l'entrée (8 déjà pris par la quotité) passe
+    // à la 6 : entre ses voisines (5 devant, 7 derrière), c'est la teinte libre la plus éloignée en clarté.
+    expect(colors).toEqual(["var(--chart-2)", "var(--chart-8)", "var(--chart-5)", "var(--chart-6)", "var(--chart-7)"]);
+  });
+  it("toutes les teintes sont des var(--chart-N) de la charte : jamais une couleur écrite en dur", () => {
+    for (const n of NATURES) expect(n.color).toMatch(/^var\(--chart-[1-8]\)$/);
+    for (let i = 0; i < 20; i++) expect(groupColor(i)).toMatch(/^var\(--chart-[1-8]\)$/);
+  });
+  it("la palette de charts.css : huit teintes, rangées de la plus sombre à la plus claire dans cet ordre (garde TONE_ORDER exact)", () => {
+    const byLight = [1, 2, 3, 4, 5, 6, 7, 8].sort((a, b) => luminance(hexOf(a)) - luminance(hexOf(b)));
+    expect(byLight).toEqual(TONE_ORDER);
+    // Cas écrits à la main : le noir pur est à 0, le blanc pur à 1 ; la 2 (navy) est la plus sombre, la 8 la plus claire.
+    expect(luminance("000000")).toBe(0);
+    expect(luminance("ffffff")).toBeCloseTo(1, 10);
+    expect(TONE_ORDER[0]).toBe(2);
+    expect(TONE_ORDER.at(-1)).toBe(8);
+  });
+  it("natures les plus fréquentes (base, augmentations, embauches, éléments ponctuels, coûts de sortie) : deux voisines de la pile ont au moins 2,9:1 de clarté", () => {
+    const color = (k: string) => NATURES.find((n) => n.key === k)!.color;
+    const chain = ["base", "augmentation", "embauche", "ponctuel", "sortie"];
+    for (let i = 1; i < chain.length; i++) expect(contrast(color(chain[i - 1]), color(chain[i])), `${chain[i - 1]} / ${chain[i]}`).toBeGreaterThanOrEqual(2.9);
+    // Les natures positives sont toutes distinctes (la pile ne répète une teinte qu'entre natures rares, de part et d'autre de l'axe).
+    const positives = ["base", "augmentation", "quotite", "embauche", "ponctuel", "enveloppe", "sortie"].map(color);
+    expect(new Set(positives).size).toBe(positives.length);
+  });
+  it("groupes d'embauches : les six premiers groupes voisins ont au moins 2,9:1 de clarté, la suite recommence après huit", () => {
+    for (let i = 1; i < 6; i++) expect(contrast(groupColor(i - 1), groupColor(i)), `groupes ${i - 1} / ${i}`).toBeGreaterThanOrEqual(2.9);
+    expect(groupColor(0)).toBe("var(--chart-1)");
+    expect(groupColor(8)).toBe(groupColor(0));
+    expect(new Set(Array.from({ length: 8 }, (_, i) => groupColor(i))).size).toBe(8);
   });
 });
 
@@ -362,7 +416,7 @@ describe("comparaison : courbes et écarts mensuels", () => {
   it("courbes : valeur par mois, n.d. avec sa raison, mois non couvert nommé ; style par lecture", () => {
     const [p, r] = comparisonSeries(sc, [reel], M3);
     expect(p).toEqual({ key: "sc-1", name: "Révisé T4", values: [100000, null, 120000], reasons: [null, "paie non clôturée", null], color: "var(--chart-1)", dashed: false, area: true });
-    expect(r).toEqual({ key: "reel", name: "Réel courant", values: [90000, 95000, null], reasons: [null, null, "mois non couvert par cette lecture"], color: "var(--chart-ink)", dashed: false, area: false });
+    expect(r).toEqual({ key: "reel", name: "Réel courant", values: [90000, 95000, null], reasons: [null, null, "mois non couvert par cette lecture"], color: "var(--chart-2)", dashed: false, area: false });
   });
   it("écart = scénario − lecture comparée, seulement quand les deux mois ont une valeur ; la raison nomme la lecture absente", () => {
     const [g] = gapSeries(sc, [reel], M3);
@@ -373,11 +427,26 @@ describe("comparaison : courbes et écarts mensuels", () => {
   it("note des mois sans valeur : une phrase par lecture, raison suivie de ses mois", () => {
     expect(ndReadings([sc, reel], M3)).toEqual(["Révisé T4 : paie non clôturée (février 2026)", "Réel courant : mois non couvert par cette lecture (mars 2026)"]);
   });
-  it("style : N-1 en pointillés, budget et scénario comparé en pointillés de teintes distinctes, repli par rang", () => {
-    expect(readingStyle("n1", "sc", 1)).toEqual({ color: "var(--chart-2)", dashed: true, area: false });
+  it("style : N-1 gris-bleu, budget saisi bleu clair, scénario comparé bleu foncé, tous en pointillés ; repli par rang parmi les teintes lisibles en trait fin", () => {
+    expect(readingStyle("n1", "sc", 1)).toEqual({ color: "var(--chart-7)", dashed: true, area: false });
     expect(readingStyle("budget-ab12cd34", "sc", 2)).toMatchObject({ color: "var(--chart-3)", dashed: true });
-    expect(readingStyle("scenario-ab12cd34", "sc", 3)).toMatchObject({ color: "var(--chart-6)", dashed: true });
-    expect(readingStyle("autre", "sc", 9)).toMatchObject({ color: "var(--chart-2)", dashed: true });
+    expect(readingStyle("scenario-ab12cd34", "sc", 3)).toMatchObject({ color: "var(--chart-4)", dashed: true });
+    // Repli : rang 9 → quatrième teinte de repli par modulo (9 mod 4 = 1) → la 7.
+    expect(readingStyle("autre", "sc", 9)).toMatchObject({ color: "var(--chart-7)", dashed: true });
+  });
+  it("deux budgets comparés ne partagent pas leur teinte (la courbe et la barre d'écart d'une même lecture gardent la même)", () => {
+    const b1 = series("budget-aa", "Budget A", [pt("2026-01", 90000)]);
+    const b2 = series("budget-bb", "Budget B", [pt("2026-01", 95000)]);
+    expect(comparisonSeries(sc, [b1, b2], M3).map((x) => x.color)).toEqual(["var(--chart-1)", "var(--chart-3)", "var(--chart-4)"]);
+    expect(gapSeries(sc, [b1, b2], M3).map((x) => x.color)).toEqual(["var(--chart-3)", "var(--chart-4)"]);
+  });
+  it("une courbe fine reste lisible : toute teinte de lecture a au moins 3:1 sur fond blanc (ni la 6 ni la 8, trop pâles)", () => {
+    const onWhite = (c: string) => 1.05 / (luminance(hexOf(tintNo(c))) + 0.05);
+    const all = [sc, reel, series("n1", "N-1", []), series("budget-a", "B", []), series("scenario-a", "S", []), ...Array.from({ length: 8 }, (_, i) => series(`x${i}`, "X", []))];
+    for (const [i, r] of all.entries()) {
+      const color = readingStyle(r.key, "sc-1", i).color;
+      expect(onWhite(color), `${r.key} ${color}`).toBeGreaterThanOrEqual(3);
+    }
   });
   it("origine des mois d'un scénario : réel, puis projeté ; un mois sans valeur coupe la plage", () => {
     const at = (month: string, layer: SeriesLayer): Point => ({ month, kind: "value", cost: 100000, etp4: null, etpNd: null, layer });
@@ -535,7 +604,8 @@ describe("ProjectionView rendue", () => {
     const g = render("graphique");
     expect(g.indexOf('data-testid="proj-chart-nature"')).toBeGreaterThan(-1);
     expect(g.indexOf('data-testid="proj-chart-contributions"')).toBeGreaterThan(g.indexOf('data-testid="proj-chart-nature"'));
-    expect(g).toContain("Contributions seules, hors base — octobre 2026 → décembre 2026");
+    expect(g).toContain("<h2>Contributions hors base</h2>");
+    expect(g).toContain("octobre 2026 → décembre 2026 · euros");
     expect(render("tableau")).not.toContain('data-testid="proj-chart-contributions"');
     // Base seule (aucune hypothèse de contribution) : pas de graphique, une phrase.
     const none = render("graphique", projOf([fixC]));
@@ -573,10 +643,10 @@ describe("ProjectionView rendue", () => {
     expect(html).toContain("Projeté par le scénario parent");
     // Les 3 mois du parent (3 × 6 500,00 €) + 6 mois réels + 3 mois projetés = 12 colonnes de coût.
     expect(html).toContain("12 mois dont 6 projetés");
-    expect(html).toContain("réel figé de la base ou projeté par le scénario parent");
-    // Base non dérivée : la phrase ne parle pas d'un scénario parent.
-    expect(render()).not.toContain("réel figé de la base ou projeté");
-    expect(render()).toContain("réel figé de la base ;");
+    expect(html).toContain("réel figé ou projeté par le scénario parent avant octobre 2026, projeté ensuite");
+    // Base non dérivée : la ligne de contexte ne parle pas d'un scénario parent.
+    expect(render()).not.toContain("projeté par le scénario parent avant");
+    expect(render()).toContain("réel figé avant octobre 2026, projeté ensuite · euros");
   });
   it("projection refusée : message d'erreur seul", () => {
     const html = render("graphique", { kind: "error", errors: ["« X » : refusé"] });
@@ -612,8 +682,10 @@ describe("ComparisonView rendue", () => {
   it("ligne de total de l'année identifiée (classe total)", () => {
     expect(render("tableau")).toContain('<tr class="total" data-testid="cmp-total">');
   });
-  it("le trait du scénario dit l'origine de ses mois : 9 mois réels figés puis 3 mois projetés", () => {
-    expect(render("graphique")).toContain("Origine des mois du scénario (trait plein bleu) : réel janv.–sept. ; projeté oct.–déc.");
+  it("l'origine des mois du scénario (9 mois réels figés puis 3 mois projetés) est lue par les lecteurs d'écran, plus écrite sous la courbe", () => {
+    const html = render("graphique");
+    expect(html).toContain("Origine des mois de Révisé T4 : réel janv.–sept. ; projeté oct.–déc.");
+    expect(html).not.toContain("Origine des mois du scénario (trait plein bleu)");
   });
   it("la bascule conserve l'année et les lectures choisies (valeurs encodées)", () => {
     expect(render()).toContain("annee=2026&amp;cmp=n1&amp;cmp=budget%3Aaaaaaaaa-0000");
@@ -675,11 +747,12 @@ describe("LandingView rendue", () => {
     expect(render()).toContain(`réel janv.–sept. ${formatEuros(6300000)} + projeté oct.–déc. ${formatEuros(2908333)}`);
     expect(retraiteWaterfall(retraite)).toMatchObject({ kind: "value", start: 9208333, steps: [{ label: "Prévu", value: -100000 }], end: 9108333 });
   });
-  it("mesures : la note sur le coût du remplaçant n'apparaît que s'il existe un départ avec remplaçant lié", () => {
+  it("mesures : plus de note sous le graphique ; un départ sans remplaçant lié est écrit « sans remplacement » dans le tableau", () => {
     const m = (replacement: number | null) => ({ id: "d", label: "Départ", who: "B", lastPaidDate: "2026-11-20", avoided: 800000, exit: 100000, replacement, replacementLabel: replacement === null ? null : "Rempl", net: 700000 - (replacement ?? 0), fullYear: { kind: "value" as const, cents: 1 } });
-    const withRows = (rows: ReturnType<typeof m>[]) => clean(renderToStaticMarkup(h(LandingView, { ...props("graphique"), measures: { kind: "value" as const, year: "2026", rows } })));
-    expect(withRows([m(300000), m(null)])).toContain("Départ sans remplaçant lié : pas de barre");
-    expect(withRows([m(null)])).not.toContain("Départ sans remplaçant lié");
+    const withRows = (rows: ReturnType<typeof m>[], affichage = "tout") => clean(renderToStaticMarkup(h(LandingView, { ...props(affichage), measures: { kind: "value" as const, year: "2026", rows } })));
+    expect(withRows([m(300000), m(null)])).not.toContain("Départ sans remplaçant lié : pas de barre");
+    expect(withRows([m(null)])).toContain("sans remplacement");
+    expect(withRows([m(300000)])).toContain("Rempl");
   });
   it("moteur : paie évitée de B 3 866,67 € (8 700,00 − 4 833,33), coûts de sortie 1 000,00 €, économie nette 2 866,67 €", () => {
     const bars = measuresBars(props().measures);
@@ -708,7 +781,7 @@ describe("EmbauchesView rendue", () => {
     const html = render();
     expect(html).toContain("Postes par mois d&#x27;arrivée, par catégorie de contrat — 2026");
     expect(html).not.toContain("Embauches par mois de début");
-    expect(html).toContain("Axe vertical : nombre de postes");
+    expect(html).not.toContain("Axe vertical : nombre de postes");
     expect(html).toContain('height="210"');
   });
   it("ligne Total du tableau par mois en pied de tableau, classe total : 1 poste en octobre, 1 en novembre, 3 au total (le stage de 2027 est compté)", () => {
@@ -761,7 +834,7 @@ describe("EmbauchesView rendue", () => {
     expect(t).not.toContain('data-testid="emb-bars"');
     expect(t).not.toContain('data-testid="emb-by-month"');
   });
-  it("plus de huit groupes : la répétition des teintes est dite sous le graphique ; huit au plus : rien", () => {
+  it("plus de huit groupes : la répétition des teintes est dite en une ligne sous le graphique ; huit au plus : rien", () => {
     const many = Array.from({ length: 9 }, (_, i) => hire(`s${i}`, { service: `Service ${i}` }));
     expect(render({ par: "service", hypotheses: many })).toContain("Plus de huit groupes");
     expect(render({ par: "service", hypotheses: many.slice(0, 8) })).not.toContain("Plus de huit groupes");
@@ -772,5 +845,282 @@ describe("EmbauchesView rendue", () => {
     expect(none).not.toContain('data-testid="emb-bars"');
     const sorted = render({ affichage: "tableau", hypotheses: [hire("z", { start: "2026-12-01" }), hire("a", { start: "2026-10-01" })] });
     expect(sorted.indexOf('data-hyp="Poste a"')).toBeLessThan(sorted.indexOf('data-hyp="Poste z"'));
+  });
+});
+
+// --- Lot 10 : univers bleu / blanc / noir, tendances de coût en rouge / vert, moins de narratif, définitions au glossaire.
+const HYP_DIR = "src/app/e/[slug]/studio-rh/hypotheses";
+const ZONE_FILES = [`${HYP_DIR}/ProjectionView.tsx`, `${HYP_DIR}/ComparisonView.tsx`, `${HYP_DIR}/LandingView.tsx`, `${HYP_DIR}/EmbauchesView.tsx`, "src/styles/hypotheses-resultat.css", "src/lib/viz/hypotheses.ts", "src/lib/glossary/hypotheses.ts"];
+const countOf = (html: string, needle: string) => html.split(needle).length - 1;
+const linkTo = (id: string) => `href="/e/demo/glossaire#def-${id}"`;
+const tdOf = (html: string, month: string, col: string) => {
+  const row = html.slice(html.indexOf(`data-month="${month}"`), html.indexOf("</tr>", html.indexOf(`data-month="${month}"`)));
+  const at = row.indexOf(`data-col="${col}"`);
+  return row.slice(row.lastIndexOf("<td", at), row.indexOf("</td>", at) + 5);
+};
+
+describe("lot 10 : renvois vers le glossaire", () => {
+  it("slugOf : l'espace client d'une adresse d'écran ; null si l'adresse n'a pas cette forme", () => {
+    expect(slugOf("/e/demo/studio-rh/hypotheses")).toBe("demo");
+    expect(slugOf("/e/mon-espace/studio-rh/hypotheses?scenario=1")).toBe("mon-espace");
+    expect(slugOf("/studio-rh/hypotheses")).toBeNull();
+    expect(slugOf("")).toBeNull();
+  });
+  it("chaque identifiant cité par les écrans existe au glossaire, et les identifiants du glossaire sont uniques", () => {
+    for (const [name, id] of Object.entries(HYP_TERMS)) expect(glossaryEntry(id), `${name} → ${id}`).toBeDefined();
+    const ids = GLOSSARY.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+  it("les entrées de la famille sont complètes : terme, définition en français de produit, une seule ligne de formule", () => {
+    expect(GLOSSARY_HYPOTHESES.length).toBeGreaterThanOrEqual(12);
+    for (const e of GLOSSARY_HYPOTHESES) {
+      expect(e.id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+      expect(e.family).toBe("Hypothèses budgétaires");
+      expect(e.term.length).toBeGreaterThan(3);
+      expect(e.definition.length, e.id).toBeGreaterThan(80);
+      expect(e.definition + e.term, e.id).not.toMatch(/outil observé|cahier|webinaire|\btu\b|\btoi\b|Lecture graphique/i);
+      if (e.formula) expect(e.formula).not.toContain("\n");
+    }
+  });
+  it("le texte retiré des écrans existe au glossaire (déplacé, pas supprimé)", () => {
+    const text = (id: string) => glossaryEntry(id)!.definition;
+    expect(text("cout-nature")).toContain("« — » signifie qu'aucune contribution de cette nature");
+    expect(text("cout-nature")).toContain("se retire du coût du mois");
+    expect(text("contributions-hors-base")).toContain("sans la base");
+    expect(text("contributions-hors-base")).toContain("sur leur propre échelle");
+    expect(text("projection")).toContain("coût chargé");
+    expect(text("projection-graphiques")).toContain("trait plein pour les mois réels, pointillés pour les mois projetés");
+    expect(text("origine-mois")).toContain("réel janv.–sept. ; projeté oct.–déc.");
+    expect(text("comparaison")).toContain("Un total est n.d. dès qu'un de ses mois l'est");
+    expect(text("origine-mois")).toContain("projeté — scénario « X »");
+    expect(text("comparaison-graphiques")).toContain("pas de barre quand l'une des deux lectures est n.d. ce mois-là");
+    expect(text("pont")).toContain("effet de structure");
+    expect(text("atterrissage-cascades")).toContain("chaque barre ajoute un ensemble de mois");
+    expect(text("retraite")).toContain("Déjà en comptabilité");
+    expect(text("mesures")).toContain("Économie nette = paie évitée − coûts de sortie − coût du remplaçant lié");
+    expect(text("mesures-lecture")).toContain("sans remplaçant");
+    expect(text("sensibilites-lecture")).toContain("points de %");
+    expect(text("sensibilites-lecture")).toContain("calculée seule, sans être enregistrée");
+    expect(text("embauches-calendrier")).toContain("Un poste est compté le mois de son premier jour payé");
+    expect(text("embauches-calendrier")).toContain("Au-delà de huit groupes, les teintes se répètent");
+    expect(text("categories")).toContain("corrigée salarié par salarié");
+  });
+});
+
+describe("lot 10 : projection sans narratif", () => {
+  const proj = projOf(hyps);
+  const render = (affichage?: string, month = "") => clean(renderToStaticMarkup(h(ProjectionView, { slug: "demo", scenario, base, proj, landing: landingOf(base, proj, "2026"), month, affichage })));
+  it("aucune phrase de lecture ni de méthode : ni « Lecture graphique », ni note d'axe, d'origine ou de hachure, ni pied de tableau explicatif", () => {
+    const html = render("tout", "2026-11");
+    for (const gone of ["Lecture graphique", "Axe vertical depuis zéro", "Colonne hachurée : mois n.d.", "Pointillés : mois projetés", "Chaque barre additionne", "Même graphique sans la base", "Montants exacts :", "Un montant négatif se retire", "Somme des contributions du moteur", "Catégorie proposée depuis la nature du contrat", "chaque euro remontant à une hypothèse visible", "Définition</a>", 'href="#def-']) expect(html, gone).not.toContain(gone);
+  });
+  it("un « ? » par panneau et par tuile, vers la bonne définition", () => {
+    const html = render("tout", "2026-11");
+    for (const id of [HYP_TERMS.projectionGraphiques, HYP_TERMS.coutNature, HYP_TERMS.contributionsHorsBase, HYP_TERMS.atterrissage, HYP_TERMS.coutProjete, HYP_TERMS.effectif, HYP_TERMS.projection, HYP_TERMS.categories, HYP_TERMS.contribution]) expect(html, id).toContain(linkTo(id));
+    // Nature : un « ? » sur le panneau du graphique, un autre sur celui du tableau.
+    expect(countOf(html, linkTo(HYP_TERMS.coutNature))).toBe(2);
+  });
+  it("une seule ligne de contexte sous le contrôle d'affichage ; aucune tendance rouge / vert (rien n'est un écart de coût ici)", () => {
+    const html = render();
+    expect(countOf(html, 'class="hr-context"')).toBe(1);
+    expect(html).toContain("janvier 2026 → décembre 2026 · réel figé avant octobre 2026, projeté ensuite · euros");
+    expect(html).not.toMatch(/trend-(bad|good)|hr-trend-legend|tile-trend/);
+  });
+  it("mois n.d. : la légende n.d. (une seule) et les raisons restent écrites ; sans mois n.d., aucune légende", () => {
+    const nd = clean(renderToStaticMarkup(h(ProjectionView, { slug: "demo", scenario, base, proj: project(base, "2026-10", "2026-12", [], conv), landing: landingOf(base, project(base, "2026-10", "2026-12", [], conv), "2026"), month: "", affichage: "graphique" })));
+    expect(countOf(nd, 'data-testid="hr-nd-key"')).toBe(1);
+    expect(nd).toContain('data-testid="proj-chart-nd"');
+    expect(nd).toContain("n.d. : C : base n.d.");
+    expect(render("graphique")).not.toContain('data-testid="hr-nd-key"');
+  });
+  it("brut ou charges n.d. d'un mois projeté : une seule ligne courte (la règle complète est au glossaire)", () => {
+    // Prime ponctuelle saisie en coût chargé (1 000,00 €) : non ventilée entre brut et charges.
+    const prime: Hypothesis = { id: "e1", kind: "ponctuel", label: "Prime", month: "2026-11", amount: { mode: "charge", costCents: 100000 }, service: null };
+    const p = projOf([fixC, prime]);
+    const html = clean(renderToStaticMarkup(h(ProjectionView, { slug: "demo", scenario, base, proj: p, landing: landingOf(base, p, "2026"), month: "", affichage: "tableau" })));
+    expect(html).toContain('data-testid="proj-brut-nd"');
+    expect(html).not.toContain("un élément saisi en coût chargé n'est pas ventilé entre brut et charges ; le coût employeur reste exact");
+  });
+});
+
+describe("lot 10 : comparaison, écarts de coût en rouge et vert", () => {
+  const ptE = (month: string, cost: number, etp4: number): Point => ({ month, kind: "value", cost, etp4, etpNd: null, layer: "projete" });
+  const YEAR = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`);
+  // Scénario : 1 000,00 € par mois, sauf février 1 200,00 € (total 12 200,00 €, 2,5 ETP). Budget : 1 000,00 € par mois, sauf janvier 900,00 €,
+  // février 1 300,00 € et mars 950,00 € (total 12 150,00 €, 2,0 ETP). Écart de l'année : +50,00 € ; janv.–mars : 3 200,00 − 3 150,00 = +50,00 €.
+  const principal12 = series("sc-1", "Scénario", YEAR.map((m) => ptE(m, m === "2026-02" ? 120000 : 100000, 25000)));
+  const budget12 = series("budget-aa", "Budget", YEAR.map((m) => ptE(m, m === "2026-01" ? 90000 : m === "2026-02" ? 130000 : m === "2026-03" ? 95000 : 100000, 20000)));
+  const render = (over: Partial<Parameters<typeof ComparisonView>[0]> = {}) =>
+    clean(renderToStaticMarkup(h(ComparisonView, { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: scenario.id, years: ["2026"], year: "2026", principal: principal12, compared: [budget12], options: [], selected: ["budget:aa"], refMonth: "2026-03", ...over })));
+  it("mois par mois : écart positif = coût en hausse (rouge, flèche ▲), négatif = baisse (vert), nul = neutre ; le signe reste écrit", () => {
+    const html = render({ affichage: "tableau" });
+    expect(tdOf(html, "2026-01", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${formatEuros(10000)}</td>`);
+    expect(tdOf(html, "2026-02", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-good" data-col="budget-aa-ecart">${formatEuros(-10000)}</td>`);
+    expect(tdOf(html, "2026-03", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${formatEuros(5000)}</td>`);
+    expect(tdOf(html, "2026-04", "budget-aa-ecart")).toBe(`<td class="num" data-col="budget-aa-ecart">${formatEuros(0)}</td>`);
+    // Le total de l'année : 12 200,00 € contre 12 150,00 €, +50,00 €.
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${formatEuros(5000)}</td></tr></tfoot>`);
+  });
+  it("tuile d'écart : fond et valeur rouges pour +50,00 €, le texte garde le signe ; les « mêmes mois » portent aussi la tendance", () => {
+    const html = render();
+    const tile = html.slice(html.indexOf('data-testid="cmp-tile-budget-aa"') - 60, html.indexOf("</dl>"));
+    expect(tile).toContain('class="hr-tile tile-trend-bad"');
+    expect(tile).toContain(`<dd class="hr-gap trend-bad">+${formatEuros(5000)} · +`);
+    expect(tile).toContain(`<span class="hr-gap trend-bad">+${formatEuros(5000)} · +`);
+    // Un écart négatif donne le vert : le budget passe au-dessus du scénario.
+    const low = render({ compared: [series("budget-aa", "Budget", YEAR.map((m) => ptE(m, 110000, 20000)))] });
+    expect(low).toContain('class="hr-tile tile-trend-good"');
+    // Scénario 12 200,00 € contre 13 200,00 € : −1 000,00 €.
+    expect(low).toContain(`<dd class="hr-gap trend-good">${formatEuros(-100000)} · `);
+  });
+  it("pont d'écart : la raison n.d. de l'effet de structure reste écrite, dans la colonne du tableau, ou sous les cascades quand le tableau n'est pas affiché", () => {
+    const graph = render({ affichage: "graphique" });
+    expect(graph).toContain('data-testid="cmp-bridge-nd"');
+    expect(graph).toContain("n.d. : effet de structure, non calculé (données individuelles datées des deux lectures requises).");
+    expect(render()).not.toContain('data-testid="cmp-bridge-nd"');
+    const table = render({ affichage: "tableau" });
+    expect(table).not.toContain('data-testid="cmp-bridge-nd"');
+    expect(table).toContain("n.d. — non calculé : données individuelles datées des deux lectures requises");
+  });
+  it("pont d'écart : volume +3 037,50 € (rouge), coût moyen −2 987,50 € (vert), cascade en euros avec hausse / baisse de coût", () => {
+    const html = render();
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="delta">+${formatEuros(5000)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="volume">+${formatEuros(303750)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-good" data-col="cout-moyen">${formatEuros(-298750)}</td>`);
+    expect(html).toContain("Hausse de coût");
+    expect(html).toContain("Baisse de coût");
+  });
+  it("une seule légende rouge / vert, seulement quand une lecture est comparée ; elle renvoie aux tendances financières", () => {
+    const html = render();
+    expect(countOf(html, 'data-testid="hr-trend-legend"')).toBe(1);
+    expect(html).toContain("Coût en hausse");
+    expect(html).toContain("Coût en baisse");
+    expect(html).toContain(linkTo(HYP_TERMS.tendances));
+    expect(render({ compared: [], selected: [] })).not.toContain("hr-trend-legend");
+  });
+  it("sans phrase de lecture : ni note de courbe ni note d'écart, ni définition en ligne ; un « ? » par panneau", () => {
+    const html = render();
+    for (const gone of ["Origine des mois du scénario", "Courbe interrompue : mois sans valeur", "Écart = coût du scénario", "positif = au-dessus", "Un total est n.d. dès qu'un de ses mois l'est", "L'effet de structure n'est pas calculé : il demande", "Montants exacts :", "Volume et coût moyen.", 'href="#def-']) expect(html, gone).not.toContain(gone);
+    for (const id of [HYP_TERMS.comparaison, HYP_TERMS.comparaisonGraphiques, HYP_TERMS.origineMois, HYP_TERMS.pont]) expect(html, id).toContain(linkTo(id));
+    expect(html).toContain("2026 · coût employeur mensuel · Scénario face à Budget · euros");
+  });
+  it("n.d. : légende et raison écrites sous les graphiques quand une lecture n'a pas tous ses mois ; sinon rien", () => {
+    const partial = series("budget-aa", "Budget", [ptE("2026-01", 90000, 20000)]);
+    const html = render({ compared: [partial], affichage: "graphique" });
+    expect(countOf(html, 'data-testid="hr-nd-key"')).toBe(1);
+    expect(html).toContain('data-testid="cmp-chart-nd"');
+    expect(html).toContain("n.d. : Budget : mois non couvert par cette lecture");
+    expect(render({ affichage: "graphique" })).not.toContain('data-testid="hr-nd-key"');
+  });
+});
+
+describe("lot 10 : atterrissage, mesures et sensibilités", () => {
+  const dep: Hypothesis = { id: "dB", kind: "depart", label: "Départ de B", contractKey: "B", lastPaidDate: "2026-11-20", exitCost: { mode: "charge", costCents: 100000 }, motif: "Rupture conventionnelle" };
+  const hs: Hypothesis[] = [fixC, dep];
+  const props = (affichage?: string) => {
+    const options = variantOptions(hs);
+    const chosen = [{ value: options[0].value, delta: "5" }];
+    const { reference, landing, rows } = sensitivities(base, "2026-10", "2026-12", hs, conv, "2026", [{ hypothesisId: "dB", kind: "jours" as const, delta: 5 }]);
+    return { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: scenario.id, year: "2026", landing, retraite: reference, measures: measuresOf(base, "2026-10", "2026-12", hs, conv, "2026"), sens: rows, options, chosen, affichage };
+  };
+  const render = (affichage?: string) => clean(renderToStaticMarkup(h(LandingView, props(affichage))));
+  it("savingTone : une économie positive est une baisse de coût (vert), négative une hausse (rouge), nulle ou n.d. neutre", () => {
+    expect([savingTone(286667), savingTone(-1), savingTone(0), savingTone(null), savingTone(undefined)]).toEqual(["good", "bad", "flat", "flat", "flat"]);
+  });
+  it("sensibilité : décaler le départ de B de 5 jours (novembre payé 25/30 au lieu de 20/30 de 2 900,00 € : 2 416,67 − 1 933,33 = +483,34 €) hausse le coût : effet en rouge, avec son signe", () => {
+    const html = render("tableau");
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="effect">+${formatEuros(48334)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="retraite">+${formatEuros(48334)}</td>`);
+    // L'atterrissage après variation est un montant, pas un écart : neutre.
+    expect(html).toContain('<td class="num" data-col="total">');
+  });
+  it("mesures : économie nette de B 2 866,67 € = économie, en vert ; le montant de paie évitée et les coûts de sortie restent neutres", () => {
+    const html = render("tableau");
+    expect(html).toContain(`<td class="num hr-gap trend-good" data-col="net">${formatEuros(286667)}</td>`);
+    expect(html).toContain('<td class="num" data-col="avoided">');
+    expect(html).toContain('<td class="num" data-col="exit">');
+  });
+  it("une seule légende rouge / vert, présente seulement s'il y a un effet ou une économie à lire", () => {
+    expect(countOf(render(), 'data-testid="hr-trend-legend"')).toBe(1);
+    const empty = clean(renderToStaticMarkup(h(LandingView, { ...props(), measures: { kind: "value" as const, year: "2026", rows: [] }, sens: [] })));
+    expect(empty).not.toContain("hr-trend-legend");
+  });
+  it("les cascades de composition (réel + projeté, retraité) restent bleues et grises : ni « Hausse de coût » ni « Baisse de coût »", () => {
+    const html = render("graphique");
+    expect(html).toContain('data-testid="atr-wf-atterrissage"');
+    expect(html).not.toContain("Hausse de coût");
+    expect(html).not.toContain("Baisse de coût");
+    expect(html).not.toMatch(/var\(--(bad|good)\)/);
+  });
+  it("sans phrase de lecture ni formule ; un « ? » par panneau, sur la colonne Économie nette, sur la cascade et sur le champ Valeur", () => {
+    const html = render();
+    for (const gone of ["Éléments déjà en comptabilité : saisis à la main", "Économie nette = paie évitée", "Valeur : jours (décalage de date)", "Chaque barre ajoute un ensemble de mois", "Éléments non récurrents retirés de l'atterrissage", "Les numéros sont ceux des variations", "Départ sans remplaçant lié : pas de barre", "Économie nette : définition ci-dessous", 'href="#def-', "Définition</a>"]) expect(html, gone).not.toContain(gone);
+    for (const id of [HYP_TERMS.retraite, HYP_TERMS.atterrissage, HYP_TERMS.cascades, HYP_TERMS.mesures, HYP_TERMS.mesuresLecture, HYP_TERMS.sensibilites, HYP_TERMS.sensibilitesLecture, HYP_TERMS.tendances]) expect(html, id).toContain(linkTo(id));
+    expect(html).toContain("Chaque départ est évalué seul · euros");
+    expect(countOf(html, 'class="hr-context"')).toBe(1);
+  });
+  it("le rouge de la légende vient des classes de tendance : aucun rouge ni vert écrit dans les graphiques de cet écran", () => {
+    expect(render("graphique")).not.toMatch(/#c4302b|#138a55|rgb\(/i);
+  });
+});
+
+describe("lot 10 : embauches prévisionnelles sans narratif", () => {
+  const hire = (id: string, over: Partial<Extract<Hypothesis, { kind: "embauche" }>>): Hypothesis => ({
+    id, kind: "embauche", label: `Poste ${id}`, service: "TECH", start: "2026-10-01", end: null, grossFullTimeCents: 300000, quotaBps: 10000, chargesBps: 4200, counted: true, category: "cdi", replaces: null, ...over,
+  });
+  const hs = [hire("a", {}), hire("b", { start: "2026-11-01", category: "cdd" })];
+  const render = (affichage?: string, canEdit = true) => clean(renderToStaticMarkup(h(EmbauchesView, { slug: "demo", scenario, base, hypotheses: hs, canEdit, par: "", affichage })));
+  it("ni note d'axe, ni explication sous le titre, ni règle du formulaire : un « ? » sur le panneau du graphique et un sur la liste", () => {
+    const html = render();
+    for (const gone of ["Un poste est compté le mois de son premier jour payé", "Axe vertical : nombre de postes", "Classées par date d'arrivée", "Chaque poste devient une hypothèse distincte", "ils ne sont jamais confondus avec des collaborateurs réels.", 'href="#def-', "règle</a>"]) expect(html, gone).not.toContain(gone);
+    expect(html).toContain(linkTo(HYP_TERMS.embauchesCalendrier));
+    expect(html).toContain(linkTo(HYP_TERMS.embauchePostes));
+    expect(html).toContain("Postes futurs du scénario, distincts des collaborateurs réels · 2026");
+  });
+  it("le formulaire d'ajout reste ouvert avec son intitulé (les tests de parcours le cherchent) ; aucune tendance rouge / vert", () => {
+    const html = render();
+    expect(html).toContain("<summary>Ajouter une embauche (un ou plusieurs postes, par centre de coûts)</summary>");
+    expect(html).not.toMatch(/trend-(bad|good)|hr-trend-legend/);
+  });
+});
+
+describe("lot 10 : couleurs de la zone", () => {
+  const hsl = (hex: string) => {
+    const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return { h: 0, s: 0 };
+    const d = max - min;
+    const s = d / (1 - Math.abs(2 * l - 1));
+    const hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return { h: (hue * 60 + 360) % 360, s };
+  };
+  it("le calcul de teinte reconnaît le bleu, le gris, le rouge et le vert (cas écrits à la main)", () => {
+    expect(hsl("155cff").h).toBeCloseTo(222, 0);
+    expect(hsl("6c7280").s).toBeLessThan(0.1);
+    expect(hsl("c4302b").h).toBeLessThan(10);
+    expect(hsl("138a55").h).toBeCloseTo(153, 0);
+  });
+  it("aucune couleur écrite en dur hors du blanc, du gris et du bleu : ni rouge, vert, ambre, violet ni notation rgb / hsl", () => {
+    let seen = 0;
+    for (const f of ZONE_FILES) {
+      const src = readFileSync(f, "utf8");
+      for (const m of src.matchAll(/#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g)) {
+        seen += 1;
+        const { h: hue, s: sat } = hsl(m[1]);
+        expect(sat < 0.2 || (hue >= 200 && hue <= 250), `${f} : #${m[1]}`).toBe(true);
+      }
+      expect(src, f).not.toMatch(/\brgba?\(|\bhsla?\(/);
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+  it("le rouge et le vert ne viennent que des tendances de coût : jamais sur la projection ni sur les embauches", () => {
+    for (const f of [`${HYP_DIR}/ProjectionView.tsx`, `${HYP_DIR}/EmbauchesView.tsx`, "src/styles/hypotheses-resultat.css"].slice(0, 2)) {
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/costTone|trendClass|--bad\b|--good\b|trend-(good|bad)/);
+    }
+    // Les écrans qui lisent des écarts de coût passent par costTone / trendClass (jamais une classe de couleur écrite à la main).
+    for (const f of [`${HYP_DIR}/ComparisonView.tsx`, `${HYP_DIR}/LandingView.tsx`]) expect(readFileSync(f, "utf8"), f).toMatch(/costTone|savingTone/);
   });
 });

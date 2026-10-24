@@ -40,6 +40,8 @@ describe("titres de carte : un seul motif", () => {
     const html = render(h(CardTitle, { title: "Contrôle de la base" }, "Effectif comparé au réel. ", h("a", { href: "#def-controles" }, "Règle")));
     expect(html).toBe('<div class="hs-title"><h2>Contrôle de la base</h2><p class="desc">Effectif comparé au réel. <a href="#def-controles">Règle</a></p></div>');
     expect(render(h(CardTitle, { title: "Seul" }))).toBe('<div class="hs-title"><h2>Seul</h2></div>');
+    // Avec un « ? » : il suit le texte du titre, dans le h2.
+    expect(render(h(CardTitle, { title: "Seul", help: h("a", { className: "gloss-link", href: "#x" }, "?") }))).toBe('<div class="hs-title"><h2>Seul<a class="gloss-link" href="#x">?</a></h2></div>');
   });
   it("aucun écran de saisie ne met de sous-titre ou de lien dans le h2", () => {
     const base2 = { ...base, origin: undefined };
@@ -50,10 +52,12 @@ describe("titres de carte : un seul motif", () => {
       render(h(GlobalesView, { slug: "d", scenario: sc, base, hypotheses: noHyps, canEdit: true })),
       render(h(EnveloppesView, { slug: "d", scenario: sc, base, hypotheses: noHyps, axis: "rubrique", canEdit: true })),
     ];
+    // Seul le « ? » vers le glossaire peut suivre le titre dans le h2.
     for (const html of screens) for (const h2 of html.match(/<h2>.*?<\/h2>/g) ?? []) {
-      expect(h2).not.toContain("<span");
-      expect(h2).not.toContain("<a ");
-      expect(h2).not.toContain(" — ");
+      const bare = h2.replace(/<a class="gloss-link"[^>]*>\?<\/a>/g, "");
+      expect(bare).not.toContain("<span");
+      expect(bare).not.toContain("<a ");
+      expect(bare).not.toContain(" — ");
     }
   });
 });
@@ -72,7 +76,7 @@ describe("grilles : unité et année au-dessus, états vides, en-têtes alignés
   it("deux années : la légende nomme les deux", () => {
     const html = render(h(GlobalesView, { slug: "d", scenario: scenarioOf("2026-12", "2027-02"), base, hypotheses: noHyps, canEdit: true }));
     expect(html).toContain("Taux en % du salaire · 2026 et 2027");
-    expect(html).toContain("Valeurs mensuelles, dans l&#x27;unité de chaque ligne · 2026 et 2027");
+    expect(html).toContain("Valeurs mensuelles, sans effet sur le calcul · 2026 et 2027");
   });
   it("constantes : sans constante saisie, l'état vide le dit ; avec une constante, il disparaît", () => {
     const empty = render(h(GlobalesView, { slug: "d", scenario: sc, base, hypotheses: noHyps, canEdit: true }));
@@ -84,11 +88,11 @@ describe("grilles : unité et année au-dessus, états vides, en-têtes alignés
   });
   it("enveloppes : légende d'unité, état vide, « centre de coûts » partout, un mode de saisie lisible", () => {
     const html = render(h(EnveloppesView, { slug: "d", scenario: sc, base, hypotheses: noHyps, axis: "service", canEdit: true }));
-    expect(html).toContain("Montants en € par mois (coût chargé, ou brut selon la saisie de la ligne) · 2026");
+    expect(html).toContain("Montants en € par mois (chargés ou bruts selon la ligne) · 2026");
     expect(html).toContain('data-testid="env-service-empty"');
     expect(html).toContain('placeholder="Nouveau centre de coûts"');
     expect(html).not.toContain("Nouveau centre de coût\"");
-    expect(html).toContain("rattaché à ce centre de coûts");
+    expect(html).not.toContain("rattaché à ce centre de coûts"); // la règle est au glossaire
     expect(html).toMatch(/hs-env hs-edit/);
     const env = { id: "e1", kind: "enveloppe", label: "Enveloppe TECH", axis: "service", target: "TECH", monthly: { "2026-11": 100000 }, chargesBps: null } as unknown as Hypothesis;
     expect(render(h(EnveloppesView, { slug: "d", scenario: sc, base, hypotheses: [env], axis: "service", canEdit: true }))).not.toContain('data-testid="env-service-empty"');

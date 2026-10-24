@@ -1,5 +1,8 @@
 import { FamilyTabs } from "@/components/FamilyTabs";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { ECART_TERMS } from "@/lib/glossary/ecart";
 import { formatEuros } from "@/lib/money";
+import { trendClass, type TrendTone } from "@/lib/trend";
 import type { Agg, Diff } from "@/lib/budget/versions";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { eurosSigned, neg, periodText } from "@/lib/viz/ecart";
@@ -10,12 +13,12 @@ import { RubInput } from "./ecart/LiveRub";
 import { MS_PREVU, type MsTab } from "./tabs";
 export { MS_PREVU, type MsTab };
 
-export function MsHeader({ title, summary }: { title: string; summary: string }) {
+// En-tête : le titre seul, comme les autres entrées du Studio RH (le résumé du module n'est plus répété sous chaque écran).
+export function MsHeader({ title }: { title: string; summary?: string }) {
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <span className="label">Studio RH</span>
       <h1>{title}</h1>
-      <p className="desc">{summary}</p>
     </div>
   );
 }
@@ -62,8 +65,9 @@ export function GapPct({ d }: { d: Diff }) {
   return <>{sign(d.pct.num)}{fmtPercent({ num: d.pct.num, den: d.pct.den })}</>;
 }
 
-// Sens d'un écart, porté par une flèche neutre (gris) ajoutée en CSS : aucune règle métier ne dit quel sens est favorable,
-// donc aucun code couleur « favorable / défavorable ». Le signe reste écrit dans le texte.
+// Sens d'un écart, porté par une flèche ajoutée en CSS (grise ; de la couleur de la tendance pour un coût) ; le signe reste écrit
+// dans le texte. La couleur d'un écart de coût vient de gapTone (src/lib/viz/ecart.ts) : la classe est posée sur la cellule.
+export const toneClass = (base: string, tone: TrendTone) => [base, trendClass(tone)].filter(Boolean).join(" ");
 export type Sign = "up" | "down" | "zero";
 export const signOf = (n: number): Sign => (n > 0 ? "up" : n < 0 ? "down" : "zero");
 export const gapSign = (d: Diff): Sign | undefined => (d.kind === "value" ? signOf(d.num) : undefined);
@@ -96,7 +100,9 @@ export const scopeText = (loaded: Loaded) => (loaded.filter ? `service ${loaded.
 // Formulaire de choix des versions, de la période (rangs de mois) et du service : tout passe par l'adresse de la page.
 // Même grille pour l'écart budgétaire (3 versions) et l'analyse des écarts (2 versions) : versions sur la première ligne, puis
 // premier mois, dernier mois, service et boutons sur la seconde (voir ecart.css).
-export function PickerForm({ path, loaded, columns, hidden = {} }: { path: string; loaded: Loaded; columns: 2 | 3; hidden?: Record<string, string> }) {
+// Avec `slug`, le premier mois porte son « ? » vers « Rangs de mois » : la ligne qui répétait versions, période et service sous le
+// formulaire n'existe plus, le formulaire dit déjà tout cela.
+export function PickerForm({ path, loaded, columns, hidden = {}, slug }: { path: string; loaded: Loaded; columns: 2 | 3; hidden?: Record<string, string>; slug?: string }) {
   const cols = Array.from({ length: columns }, (_, i) => i);
   const labelOf = (value: string | undefined) => loaded.options.find((o) => o.value === value)?.label;
   return (
@@ -112,7 +118,7 @@ export function PickerForm({ path, loaded, columns, hidden = {} }: { path: strin
         </div>
       ))}
       <div className="field-row ef-m ef-m1">
-        <label htmlFor="de">Premier mois</label>
+        <label htmlFor="de">Premier mois{slug && <GlossaryLink slug={slug} term={ECART_TERMS.rangsDeMois} label="Rangs de mois" />}</label>
         <select className="select" id="de" name="de" defaultValue={loaded.from}>{MONTH_NAMES.map((n, i) => <option key={n} value={String(i + 1).padStart(2, "0")}>{n}</option>)}</select>
       </div>
       <div className="field-row ef-m">
@@ -135,18 +141,33 @@ export function PickerForm({ path, loaded, columns, hidden = {} }: { path: strin
   );
 }
 
-// Titre d'une carte : titre, puis sous-titre sur sa propre ligne (même présentation que les autres écrans de la famille).
-export function PanelTitle({ title, children }: { title: string; children?: React.ReactNode }) {
+// Titre d'une carte suivi de son « ? » vers le glossaire (le titre reste court : les explications sont au glossaire). Le
+// sous-titre optionnel est réservé à la ligne de contexte (versions · période · service).
+export function PanelTitle({ title, children, slug, term, label }: { title: string; children?: React.ReactNode; slug?: string; term?: string; label?: string }) {
   return (
     <div className="ecart-panel-title">
-      <h2>{title}</h2>
+      <div className="ecart-title-row">
+        <h2>{title}</h2>
+        {slug && term && <GlossaryLink slug={slug} term={term} label={label} />}
+      </div>
       {children && <p className="desc">{children}</p>}
     </div>
   );
 }
 
-// Versions choisies en toutes lettres (nom complet et statut), dans l'ordre : « ① Réel PayFit 2025 → ② Scénario « … » (…) 2026 ».
-// Les champs de choix ne montrent pas toujours le libellé en entier ; cette ligne le répète.
+// Légende des couleurs d'écart, une seule par tableau : le rouge et le vert ne marquent que les écarts de coût.
+export function TrendLegend({ slug }: { slug: string }) {
+  return (
+    <p className="trend-legend ecart-legend" data-testid="trend-legend">
+      <span><i className="dot bad" aria-hidden="true" />Coût en hausse</span>
+      <span><i className="dot good" aria-hidden="true" />Coût en baisse</span>
+      <GlossaryLink slug={slug} term={ECART_TERMS.couleurs} label="Couleurs des écarts" />
+    </p>
+  );
+}
+
+// Versions comparées en toutes lettres (nom complet et statut), dans l'ordre : « ① Réel PayFit 2025 → ② Scénario « … » (…) 2026 ».
+// Utilisée dans le détail par salarié, dont la paire de versions peut être ② → ③ ; les champs de choix portent le libellé en infobulle.
 export function VersionChain({ labels, first = 1 }: { labels: string[]; first?: number }) {
   return (
     <span className="ecart-chain">

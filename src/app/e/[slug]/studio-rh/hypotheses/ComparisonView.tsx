@@ -3,25 +3,36 @@ import { BarChart, LineChart, WaterfallChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
+import { HYP_TERMS } from "@/lib/glossary/hypotheses";
 import { roundDiv } from "@/lib/budget/engine";
 import { bridge, gap, type Layer, type Point, type Series } from "@/lib/budget/series";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
-import { affichageOf, bridgeWaterfall, comparisonSeries, frDates, gapSeries, hasValues, layerSpans, monthAxis, ndReadings, showCharts, showTables, withAffichage } from "@/lib/viz/hypotheses";
+import { costTone, trendClass } from "@/lib/trend";
+import { affichageOf, bridgeWaterfall, comparisonSeries, frDates, gapSeries, hasNd, hasValues, layerSpans, monthAxis, ndReadings, showCharts, showTables, slugOf, withAffichage } from "@/lib/viz/hypotheses";
 import { monthShort } from "../masse-salariale/components";
+import { NdBlock, NdKey, PanelTitle, TileTitle, TrendLegend } from "./ProjectionView";
 
 const LAYER: Record<Layer, string> = { reel: "réel", "projete-parent": "projeté (parent)", projete: "projeté", budget: "budget" };
 const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
 const cell = (p: Point | undefined) => (!p ? "n.d." : p.kind === "nd" ? "n.d." : formatEuros(p.cost));
 const why = (p: Point | undefined) => (!p ? "mois non couvert par cette lecture" : p.kind === "nd" ? frDates(p.reason) : undefined);
 const pctText = (pct: { num: number; den: number } | null) => (pct ? `${pct.num > 0 ? "+" : ""}${fmtPercent(pct)}` : "n.d. (référence nulle)");
+// Tendance d'un écart de coût (scénario − lecture) : positif = coût en hausse (rouge), négatif = baisse (vert), nul ou n.d. = neutre. La classe
+// hr-gap ajoute la flèche ; le signe reste écrit dans le texte.
+const gapClass = (base: string, delta: number | null | undefined): string => {
+  const tone = costTone(delta);
+  return tone === "flat" ? base : [base, "hr-gap", trendClass(tone)].filter(Boolean).join(" ");
+};
 
 export type Option = { value: string; label: string };
 
 // Onglet « Comparaison » : ce scénario face à d'autres lectures (réel courant, N-1, budgets saisis, autres scénarios),
-// mois par mois sur une année, écarts (ce scénario − lecture comparée) et pont volume / coût moyen.
+// mois par mois sur une année, écarts (ce scénario − lecture comparée) et pont volume / coût moyen. Les écarts de coût sont rouges
+// (hausse) ou verts (baisse), avec leur signe ; les définitions sont au glossaire.
 export function ComparisonView({
   hrefBase, scenarioId, years, year, principal, compared, options, selected, refMonth, affichage,
 }: { hrefBase: string; scenarioId: string; years: string[]; year: string; principal: Series; compared: Series[]; options: Option[]; selected: string[]; refMonth: string; affichage?: string }) {
+  const slug = slugOf(hrefBase);
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
   const done = months.filter((m) => m <= refMonth);
   const pv = (m: string) => principal.points.get(m);
@@ -47,7 +58,10 @@ export function ComparisonView({
             { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
           ]}
         />
-        <p className="hr-hint">Coût employeur mensuel de {year} : ce scénario face aux lectures choisies. Les tableaux donnent les montants exacts.</p>
+        <div className="hr-line-bar">
+          <p className="hr-context">{year} · coût employeur mensuel · {principal.label}{compared.length ? ` face à ${compared.map((c) => c.label).join(", ")}` : ""} · euros</p>
+          {compared.length > 0 && <TrendLegend slug={slug} />}
+        </div>
       </div>
       <form method="get" action={hrefBase} className="panel" data-testid="cmp-form">
         <input type="hidden" name="scenario" value={scenarioId} />
@@ -72,23 +86,21 @@ export function ComparisonView({
       </form>
 
       {compared.length > 0 && (
-        <section className="panel">
-          <div className="hr-title">
-            <h2>Écarts {year}</h2>
-            <p className="desc">{principal.label} − lecture comparée ; positif = au-dessus.</p>
-          </div>
+        <section className="panel" data-testid="cmp-ecarts">
+          <PanelTitle title={`Écarts ${year}`} desc={`${principal.label} − lecture comparée · euros`} slug={slug} term={HYP_TERMS.comparaison} />
           <dl className="facts hr-tiles hr-tiles-sm">
             {compared.map((c) => {
               const y = gap(principal, c, months);
               const ytd = done.length ? gap(principal, c, done) : null;
+              const tone = y.kind === "value" ? costTone(y.delta) : "flat";
               return (
-                <div key={c.key} className="hr-tile" data-testid={`cmp-tile-${c.key}`}>
-                  <dt>vs {c.label}{" "}<span className="hr-sub">écart sur l'année {year}</span></dt>
-                  <dd className={y.kind === "nd" ? "nd" : undefined}>{y.kind === "nd" ? `n.d. — ${frDates(y.reason)}` : `${signed(y.delta)} · ${pctText(y.pct)}`}</dd>
+                <div key={c.key} className={`hr-tile${tone === "flat" ? "" : ` tile-trend-${tone}`}`} data-testid={`cmp-tile-${c.key}`}>
+                  <TileTitle title={`vs ${c.label}`} sub={`écart sur l'année ${year}`} slug={null} />
+                  <dd className={y.kind === "nd" ? "nd" : gapClass("", y.delta)}>{y.kind === "nd" ? `n.d. — ${frDates(y.reason)}` : `${signed(y.delta)} · ${pctText(y.pct)}`}</dd>
                   {y.kind === "value" && <span className="tile-foot">{formatEuros(y.a)} contre {formatEuros(y.b)} sur l'année</span>}
                   {ytd && (
                     <span className="tile-foot" data-testid={`cmp-ytd-${c.key}`}>
-                      {monthShort(done[0])}–{monthShort(done.at(-1)!)} (mêmes mois) : {ytd.kind === "nd" ? `n.d. — ${frDates(ytd.reason)}` : `${signed(ytd.delta)} · ${pctText(ytd.pct)}`}
+                      {monthShort(done[0])}–{monthShort(done.at(-1)!)} (mêmes mois) : {ytd.kind === "nd" ? `n.d. — ${frDates(ytd.reason)}` : <span className={gapClass("", ytd.delta)}>{signed(ytd.delta)} · {pctText(ytd.pct)}</span>}
                     </span>
                   )}
                 </div>
@@ -100,26 +112,17 @@ export function ComparisonView({
 
       {showCharts(aff) && (
         <section className="panel" data-testid="cmp-lecture">
-          <div className="hr-title">
-            <h2>Courbes mensuelles — {year}</h2>
-            <p className="desc">
-              Coût employeur de chaque mois : {principal.label} (trait plein bleu) {compared.length ? "face aux lectures choisies" : "seul : choisir des lectures à comparer dans le formulaire ci-dessus"}. Montants exacts : {aff === "graphique" ? <a href={withAffichage(here, "tableau")}>affichage Tableau</a> : "tableau « Mois par mois » plus bas"}. Définitions : <a href="#def-budget-saisi">budget saisi</a>, <a href="#def-pont">pont d'écart</a>.
-            </p>
-          </div>
+          <PanelTitle title={`Courbes mensuelles — ${year}`} slug={slug} term={HYP_TERMS.comparaisonGraphiques} />
           <div className="hr-charts">
             {hasValues(lines) ? (
               <LineChart
                 testid="cmp-chart"
-                label={`Coût employeur mensuel en euros, ${year} : ${lines.map((s) => s.name).join(", ")}`}
+                label={`Coût employeur mensuel en euros, ${year} : ${lines.map((s) => s.name).join(", ")}${origin ? `. Origine des mois de ${principal.label} : ${origin}` : ""}`}
                 title={`Coût employeur par mois — ${year}`}
                 categories={axis.categories}
                 categoryTitles={axis.titles}
                 series={lines}
                 unit="eur"
-                note={[
-                  origin ? `Origine des mois du scénario (trait plein bleu) : ${origin}.` : null,
-                  ndNotes.length ? `Courbe interrompue : mois sans valeur (raison au survol) — ${ndNotes.join(" ; ")}.` : null,
-                ].filter(Boolean).join(" ") || undefined}
               />
             ) : (
               <NdBlock title={`Coût employeur par mois — ${year}`} reasons={ndNotes} />
@@ -135,19 +138,24 @@ export function ComparisonView({
                   series={gaps}
                   unit="eur"
                   mode="grouped"
-                  note="Écart = coût du scénario − coût de la lecture comparée, mois par mois ; positif = au-dessus. Pas de barre : l'une des deux lectures est n.d. ce mois-là (raison au survol)."
                 />
               ) : (
                 <NdBlock title={`Écart par mois — ${year}`} reasons={ndNotes} />
               )
             )}
           </div>
+          {(hasNd(lines) || hasNd(gaps) || ndNotes.length > 0) && (
+            <div className="hr-nd-zone">
+              {(hasNd(lines) || hasNd(gaps)) && <NdKey />}
+              {ndNotes.length > 0 && <p className="tile-foot nd" data-testid="cmp-chart-nd">n.d. : {ndNotes.join(" ; ")}</p>}
+            </div>
+          )}
         </section>
       )}
 
       {showTables(aff) && (
         <section className="panel" data-testid="cmp-mois">
-          <h2>Mois par mois — {year}</h2>
+          <PanelTitle title={`Mois par mois — ${year}`} slug={slug} term={HYP_TERMS.origineMois} />
           <div className="table-wrap">
             <table className="data-table" data-testid="cmp-table">
               <thead>
@@ -166,10 +174,10 @@ export function ComparisonView({
                       <td className="num" data-col="principal" title={why(a)}>{cell(a)}{a?.kind === "value" ? <span className="tile-foot"> {a.source ?? LAYER[a.layer]}</span> : null}</td>
                       {compared.map((c) => {
                         const b = c.points.get(m);
-                        const e = a?.kind === "value" && b?.kind === "value" ? signed(a.cost - b.cost) : "n.d.";
+                        const delta = a?.kind === "value" && b?.kind === "value" ? a.cost - b.cost : null;
                         return [
                           <td key={c.key} className="num" data-col={c.key} title={why(b)}>{cell(b)}{b?.kind === "value" && b.layer !== "budget" ? <span className="tile-foot"> {b.source ?? LAYER[b.layer]}</span> : null}</td>,
-                          <td key={`${c.key}-e`} className="num" data-col={`${c.key}-ecart`} title={why(a) ?? why(b)}>{e}</td>,
+                          <td key={`${c.key}-e`} className={gapClass("num", delta)} data-col={`${c.key}-ecart`} title={why(a) ?? why(b)}>{delta === null ? "n.d." : signed(delta)}</td>,
                         ];
                       })}
                     </tr>
@@ -185,23 +193,19 @@ export function ComparisonView({
                     const tb = gap(c, c, months);
                     return [
                       <td key={c.key} className="num" data-col={c.key}>{tb.kind === "nd" ? "n.d." : formatEuros(tb.a)}</td>,
-                      <td key={`${c.key}-e`} className="num" data-col={`${c.key}-ecart`}>{g.kind === "nd" ? "n.d." : signed(g.delta)}</td>,
+                      <td key={`${c.key}-e`} className={gapClass("num", g.kind === "nd" ? null : g.delta)} data-col={`${c.key}-ecart`}>{g.kind === "nd" ? "n.d." : signed(g.delta)}</td>,
                     ];
                   })}
                 </tr>
               </tfoot>
             </table>
           </div>
-          <p className="tile-foot">Un total est n.d. dès qu'un de ses mois l'est (raison au survol de la cellule). « projeté — scénario « X » » : mois projeté par le scénario X dont ce budget est dérivé (directement ou par une dérivation antérieure).</p>
         </section>
       )}
 
       {compared.length > 0 && (
         <section className="panel" data-testid="cmp-bridge">
-          <div className="hr-title">
-            <h2>Pont d'écart {year}</h2>
-            <p className="desc">Volume et coût moyen. <a href="#def-pont">Définition</a></p>
-          </div>
+          <PanelTitle title={`Pont d'écart ${year}`} slug={slug} term={HYP_TERMS.pont} />
           {showCharts(aff) && (
             <div className="hr-charts-2" data-testid="cmp-bridge-charts">
               {bridges.map(({ c, b }) => {
@@ -219,7 +223,7 @@ export function ComparisonView({
                         end={w.end}
                         steps={w.steps}
                         unit="eur"
-                        note="L'effet de structure n'est pas calculé : il demande les données individuelles datées des deux lectures."
+                        trend="cost"
                       />
                     ) : (
                       <div className="hr-nd">
@@ -232,6 +236,10 @@ export function ComparisonView({
               })}
             </div>
           )}
+          {/* Affichage Graphique seul : le tableau (colonne « Effet de structure ») n'est pas là, la raison n.d. s'écrit donc ici. */}
+          {showCharts(aff) && !showTables(aff) && bridges.some(({ b }) => b.kind === "value") && (
+            <p className="tile-foot nd" data-testid="cmp-bridge-nd">n.d. : effet de structure, non calculé (données individuelles datées des deux lectures requises).</p>
+          )}
           {showTables(aff) && (
             <div className="table-wrap">
               <table className="data-table">
@@ -243,9 +251,9 @@ export function ComparisonView({
                     return (
                       <tr key={c.key} data-bridge={c.key}>
                         <td>{c.label}</td>
-                        <td className="num" data-col="delta">{signed(b.delta)}</td>
-                        <td className="num" data-col="volume">{signed(b.volume)}</td>
-                        <td className="num" data-col="cout-moyen">{signed(b.averageCost)}</td>
+                        <td className={gapClass("num", b.delta)} data-col="delta">{signed(b.delta)}</td>
+                        <td className={gapClass("num", b.volume)} data-col="volume">{signed(b.volume)}</td>
+                        <td className={gapClass("num", b.averageCost)} data-col="cout-moyen">{signed(b.averageCost)}</td>
                         <td className="nd wrap">n.d. — non calculé : données individuelles datées des deux lectures requises</td>
                         <td className="num">{fmtEtp4(b.a.etpMonths4)} / {fmtEtp4(b.b.etpMonths4)}</td>
                         <td className="num">{cpe(b.a)} / {cpe(b.b)}</td>
@@ -259,16 +267,5 @@ export function ComparisonView({
         </section>
       )}
     </>
-  );
-}
-
-// Rien à tracer : on l'écrit, avec les raisons.
-function NdBlock({ title, reasons }: { title: string; reasons: string[] }) {
-  return (
-    <div className="hr-nd">
-      <p className="hr-nd-title">{title}</p>
-      <p className="nd">n.d. — aucune valeur à tracer.</p>
-      {reasons.length > 0 && <ul className="list">{reasons.map((r, i) => <li key={`${i}-${r}`} className="desc">{r}</li>)}</ul>}
-    </div>
   );
 }

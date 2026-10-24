@@ -1,21 +1,49 @@
 /* Hypothèses budgétaires › écrans de résultat (projection, comparaison, atterrissage, embauches prévisionnelles), charte « 101 ».
-   Classes de ergonomie.css et charts.css réutilisées : .view-switch, .panel-head, .panel-tools, .swatch, .ver-badge. Préfixe hr-. */
+   Univers bleu, blanc, noir : les séries sont les teintes --chart-1…8 ; seuls le rouge et le vert des tendances de coût (--bad, --good,
+   classes .trend-bad / .trend-good de ergonomie.css) sortent de cet univers. Classes de ergonomie.css et charts.css réutilisées :
+   .view-switch, .panel-head, .panel-tools, .swatch, .ver-badge, .trend-legend, .gloss-link. Préfixe hr-. */
 
-/* Barre d'affichage : le contrôle « Afficher tout / Graphique / Tableau », puis sa phrase de lecture dessous (jamais à côté). */
+/* Barre d'affichage : le contrôle « Afficher tout / Graphique / Tableau », puis une seule ligne de contexte dessous (jamais à côté),
+   suivie, quand l'écran lit des tendances de coût, de la légende rouge / vert. */
 .hr-switch { display: grid; justify-items: start; gap: 8px; }
 .hr-switch .view-switch { flex: none; }
-.hr-switch .hr-hint { margin: 0; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.5; max-width: 72ch; }
+.hr-context { margin: 0; font-size: var(--clair-type-label); color: var(--muted); line-height: 1.5; max-width: 80ch; }
+.hr-line-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; }
+.hr-line-bar .trend-legend { align-items: center; margin: 0; }
+.hr-line-bar .trend-legend span { display: inline-flex; align-items: center; }
 
-/* Titre d'un panneau avec sa phrase de contexte dessous. */
+/* Titre d'un panneau (suivi de son « ? ») avec sa ligne de contexte dessous. */
 .hr-title { display: grid; gap: 4px; min-width: 0; }
 .hr-title .desc { line-height: 1.5; max-width: 80ch; }
+.hr-title-row { display: flex; align-items: center; min-width: 0; }
+.hr-title-row h2 { margin: 0; }
 .panel-head .hr-title { flex: 1 1 320px; }
 
-/* Tuiles : en-tête (titre et période), valeur en grand, pieds de tuile. */
+/* Panneaux de graphiques empilés d'un même écran : même écart que les autres panneaux de la page. */
+.hr-stack { display: grid; gap: 28px; min-width: 0; }
+/* Un seul graphique sous un titre de panneau : son en-tête ne porte que le bouton Empiler / Désempiler, à droite. */
+.hr-chart-panel .chart-head { justify-content: flex-end; }
+
+/* Légende « n.d. » et raisons, une fois par zone de graphiques. */
+.hr-nd-zone { display: grid; gap: 4px; }
+.hr-nd-key { margin: 0; }
+.hr-nd-key .swatch.hatch { background: repeating-linear-gradient(45deg, var(--surface) 0 2px, #c7cedd 2px 4px); border: 1px solid #c7cedd; }
+
+/* Sous-titre d'un groupe de graphiques (cascades) avec son « ? ». */
+.hr-subblock { display: grid; gap: 12px; min-width: 0; }
+.hr-subhead { display: flex; align-items: center; }
+.hr-subhead h3 { margin: 0; }
+/* Libellé d'un champ suivi de son « ? ». */
+.hr-label-row { display: flex; align-items: center; }
+/* Détail par contrat d'un mois : à distance du tableau qui précède. */
+.hr-lines { margin-top: 12px; }
+
+/* Tuiles : en-tête (titre, « ? » et période), valeur en grand, pieds de tuile. */
 .facts.hr-tiles { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
 .hr-tiles .hr-tile { display: flex; flex-direction: column; align-content: normal; gap: 6px; min-width: 0; padding: 16px 18px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .hr-tiles .hr-tile dt { display: grid; gap: 1px; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); line-height: 1.35; }
 .hr-tiles .hr-tile dt .hr-sub { font-size: var(--clair-type-label); font-weight: 400; color: var(--muted); }
+.hr-dt-title { display: inline-flex; align-items: center; }
 .hr-tiles .hr-tile dd { margin: 0; font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 /* Valeur n.d. : la raison s'écrit en texte courant, pas en gros chiffre. */
 .hr-tiles .hr-tile dd.nd { font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; line-height: 1.5; }
@@ -23,8 +51,15 @@
 .hr-tiles-sm .hr-tile dd.nd { font-size: var(--clair-type-form); }
 .hr-tiles .hr-tile .tile-foot { line-height: 1.5; overflow-wrap: anywhere; }
 .hr-tiles .hr-tile .tile-foot:last-child { margin-top: auto; padding-top: 2px; }
+/* Tuile d'écart de coût : fond rouge ou vert très pâle (la valeur porte son signe et sa flèche, la couleur n'est jamais seule). */
+.hr-tiles .hr-tile.tile-trend-bad { background: var(--bad-soft); }
+.hr-tiles .hr-tile.tile-trend-good { background: var(--good-soft); }
 
-/* Lecture graphique : une colonne, ou deux colonnes pour deux petits graphiques côte à côte. */
+/* Tendance d'un coût : couleur de .trend-bad / .trend-good, plus une flèche (hausse ▲, baisse ▼) ; le signe + ou − reste dans le texte. */
+.hr-gap.trend-bad::before { content: "▲ "; content: "▲ " / ""; font-size: .62em; vertical-align: .12em; }
+.hr-gap.trend-good::before { content: "▼ "; content: "▼ " / ""; font-size: .62em; vertical-align: .12em; }
+
+/* Graphiques : une colonne, ou deux colonnes pour deux petits graphiques côte à côte. */
 .hr-charts { display: grid; gap: 30px; min-width: 0; }
 .hr-charts-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 32px; min-width: 0; }
 .hr-block { display: grid; gap: 8px; min-width: 0; align-content: start; }
@@ -40,7 +75,7 @@
 .hr-seg a, .hr-seg span { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 13px; margin-left: -1px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-weight: 500; text-decoration: none; }
 .hr-seg > :first-child { margin-left: 0; border-radius: 6px 0 0 6px; }
 .hr-seg > :last-child { border-radius: 0 6px 6px 0; }
-.hr-seg a:hover { background: #f7f8fb; border-color: #d8dce5; position: relative; }
+.hr-seg a:hover { background: var(--surface); border-color: #d8dce5; position: relative; }
 .hr-seg a[aria-current="true"] { background: var(--blue-soft); border-color: #d6e3ff; color: var(--blue); font-weight: 600; position: relative; }
 .hr-seg a:focus-visible { outline: 3px solid #8aafff; outline-offset: 2px; position: relative; z-index: 1; }
 /* Regroupement n.d. : la hachure ne veut dire que « n.d. » (comme dans les graphiques), jamais un bouton actif. */
@@ -78,11 +113,7 @@ form[data-testid="hyp-form-embauche"] .hs-group .filters { display: grid; grid-t
 form[data-testid="hyp-form-embauche"] .hs-group .filters .field-row { flex: none; min-width: 0; max-width: none; }
 form[data-testid="hyp-form-embauche"] .input, form[data-testid="hyp-form-embauche"] .select { width: 100%; min-width: 0; text-overflow: ellipsis; }
 
-/* Notes sous un graphique ou un tableau. */
-.hr-notes { display: grid; gap: 4px; margin: 0; }
-.hr-notes .tile-foot { line-height: 1.5; }
-
 @media (max-width: 720px) {
-  .hr-switch .hr-hint { max-width: none; }
+  .hr-context { max-width: none; }
   .facts.hr-tiles { grid-template-columns: minmax(0, 1fr); }
 }

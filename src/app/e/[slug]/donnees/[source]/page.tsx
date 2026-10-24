@@ -1,5 +1,7 @@
 import "@/styles/donnees.css";
 import { notFound } from "next/navigation";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { dateTimeFmt, PROVIDER_LABELS } from "@/lib/connectors/labels";
 import { isProviderId } from "@/lib/connectors/providers";
 import { getConnection, listSyncs, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
@@ -18,8 +20,8 @@ function monthsAgo(n: number): string {
 }
 
 const INTRO = {
-  payfit: "Lecture seule de l'API PayFit. Clair ne modifie jamais rien dans PayFit.",
-  pennylane: "Lecture seule de l'API Pennylane. Clair ne modifie jamais rien dans Pennylane.",
+  payfit: "API PayFit, en lecture seule.",
+  pennylane: "API Pennylane, en lecture seule.",
 };
 
 type StepState = "done" | "current" | "todo";
@@ -48,13 +50,14 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
   return (
     <>
       <PageHead crumbs={[{ label: "Données", href: `/e/${slug}/donnees` }, { label }]} title={label}>
-        <p className="desc">{INTRO[source]}</p>
+        <p className="desc">{INTRO[source]}<GlossaryLink slug={slug} term={DONNEES_TERMS.lecture} /></p>
       </PageHead>
 
+      <p className="dn-steps-head"><span className="label">Avancement</span><GlossaryLink slug={slug} term={DONNEES_TERMS.etapes} /></p>
       <ol className="dn-steps" aria-label="Avancement de la source" data-testid="dn-steps">
         {steps.map((s, i) => (
           <li key={s.label} data-state={s.state} aria-current={s.state === "current" ? "step" : undefined}>
-            <span className="dn-step-no" aria-hidden="true">{i + 1}</span>
+            <span className="dn-step-no" aria-hidden="true">{s.state === "done" ? "✓" : i + 1}</span>
             <span className="dn-step-text">
               <strong>{s.label}</strong>
               <span className="desc">{s.note}</span>
@@ -71,7 +74,7 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
 
       <div className="dn-split">
         <section className="panel" id="connexion">
-          <h2>Connexion</h2>
+          <h2>Connexion<GlossaryLink slug={slug} term={DONNEES_TERMS.cleApi} /></h2>
           {conn ? (
             <dl className="facts dn-facts" data-testid="connection-detail">
               <div><dt>Société</dt><dd>{conn.companyName ?? "n.d."}</dd></div>
@@ -95,13 +98,13 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
               )}
             </>
           ) : (
-            <p className="desc">Seul un administrateur de l'espace peut connecter ou déconnecter la source.</p>
+            <p className="desc">Connexion réservée aux administrateurs.</p>
           )}
         </section>
 
         {conn && canSync && (
           <section className="panel" id="synchroniser">
-            <h2>Synchroniser</h2>
+            <h2>Synchroniser<GlossaryLink slug={slug} term={DONNEES_TERMS.periode} /></h2>
             <SyncForm slug={slug} source={source} defaultFrom={monthsAgo(12)} defaultTo={monthsAgo(1)} />
           </section>
         )}

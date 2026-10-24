@@ -8,4 +8,5 @@ export type GlossaryEntry = {
   family: GlossaryFamily;
   definition: string; // paragraphes séparés par une ligne vide
   formula?: string; // formule de calcul, une ligne
+  see?: string[]; // identifiants d'entrées voisines, rappelées sous la définition (« Voir aussi »)
 };

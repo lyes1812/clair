@@ -1,3 +1,4 @@
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate } from "@/lib/dates";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
@@ -27,8 +28,8 @@ export function ContractPanel({ c, data, slug, person, months, events, absences,
           <div><dt>Fin</dt><dd><EndCell c={c} slug={slug} /></dd></div>
           {isPayfit && (
             <>
-              <div><dt>Statut PayFit</dt><dd><Field row={c} field="statusSource" value={c.statusSource} slug={slug} /> <span className="desc">(à la date de lecture, non utilisé pour compter)</span></dd></div>
-              <div><dt>ETP contractuel</dt><dd><Field row={c} field="fteAtRead" value={c.fteAtRead} slug={slug} format={fmtNumber} /> <span className="desc">à la date de lecture du {ref}</span></dd></div>
+              <div><dt>Statut PayFit<GlossaryLink slug={slug} term="contract-read-attributes" /></dt><dd><Field row={c} field="statusSource" value={c.statusSource} slug={slug} /></dd></div>
+              <div><dt>ETP contractuel<GlossaryLink slug={slug} term="contract-read-attributes" /></dt><dd><Field row={c} field="fteAtRead" value={c.fteAtRead} slug={slug} format={fmtNumber} /> <span className="desc">lecture du {ref}</span></dd></div>
               <div><dt>Heures hebdomadaires</dt><dd><Field row={c} field="weeklyHoursAtRead" value={c.weeklyHoursAtRead} slug={slug} format={fmtNumber} /></dd></div>
               <div><dt>Temps plein</dt><dd><Field row={c} field="isFullTimeAtRead" value={c.isFullTimeAtRead} slug={slug} format={(v) => (v ? "oui" : "non")} /></dd></div>
               <div><dt>Modalité</dt><dd><Field row={c} field="modalityAtRead" value={c.modalityAtRead} slug={slug} /></dd></div>
@@ -49,7 +50,7 @@ export function ContractPanel({ c, data, slug, person, months, events, absences,
               <caption className="collab-sr">Contrat {c.externalId}, une ligne par mois</caption>
               <thead>
                 <tr>
-                  <th scope="col">Mois</th><th scope="col" className="wrap">{isPayfit ? "Périmètre" : "Déclaré"}</th><th scope="col">Présent fin de mois</th><th scope="col">Nature</th><th scope="col" className="col-qty">Quotités</th><th scope="col" className="col-qty">Temps payé / travaillé</th>{!isPayfit && <th scope="col" className="num">Versements</th>}<th scope="col">Drapeaux</th><th scope="col">Provenance</th>
+                  <th scope="col">Mois</th><th scope="col" className="wrap">{isPayfit ? "Périmètre" : "Déclaré"}</th><th scope="col">Présent fin de mois</th><th scope="col">Nature</th><th scope="col" className="col-qty">Quotités<GlossaryLink slug={slug} term="quota-and-time" /></th><th scope="col" className="col-qty">Temps payé / travaillé</th>{!isPayfit && <th scope="col" className="num">Versements</th>}<th scope="col">Drapeaux</th><th scope="col">Provenance</th>
                 </tr>
               </thead>
               <tbody>
@@ -96,7 +97,7 @@ export function ContractPanel({ c, data, slug, person, months, events, absences,
           {absences === null ? (
             <p className="nd" data-testid="contract-absences-nd">n.d. — arrêts non extraits de la DSN</p>
           ) : absences.length === 0 ? (
-            <p className="muted" data-testid="contract-absences-empty">Aucune absence dans la lecture appliquée (mois lus seulement ; mois hors périmètre : n.d.).</p>
+            <p className="muted" data-testid="contract-absences-empty">Aucune absence sur les mois lus ; mois hors périmètre : n.d.</p>
           ) : (
             <div className="table-wrap">
               <table className="data-table" data-testid="contract-absences">

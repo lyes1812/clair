@@ -30,7 +30,7 @@ export function HireForm({ action, profiles, deps }: { action: (prev: FormState,
   const p = profiles.find((x) => x.key === key) ?? null;
   return (
     <ActionForm action={action} submit="Ajouter l'embauche" testid="hyp-form-embauche">
-      <Group title="Profil de départ" hint="Facultatif : reprend le service, la catégorie, le brut, la quotité, les charges et le compte dans l'effectif d'un salarié ou d'une embauche. Chaque valeur reste modifiable ; une valeur indisponible reste à saisir.">
+      <Group title="Profil de départ">
         <Field id="hire-copy" label="Recopier le profil d'un salarié (facultatif)">
           <select className="select" id="hire-copy" value={key} onChange={(e) => setKey(e.target.value)} data-testid="hire-copy">
             <option value="">— saisie libre</option>
@@ -43,9 +43,9 @@ export function HireForm({ action, profiles, deps }: { action: (prev: FormState,
       {/* Les champs sont remontés à chaque changement de profil pour reprendre ses valeurs. */}
       <div className="hs-hire" key={key}>
         <Group title="Poste">
-          <Field id="hire-label" label="Poste" hint="Intitulé du poste, repris dans les contrôles et la projection."><input className="input" id="hire-label" name="label" maxLength={200} required /></Field>
-          <Field id="hire-count" label="Nombre de postes" hint="De 1 à 50 : autant d'embauches indépendantes, numérotées."><input className="input" id="hire-count" name="count" type="number" min={1} max={50} defaultValue={1} required /></Field>
-          <Field id="hire-service" label="Centre de coûts (service)" hint="Existant ou nouveau ; vide : non ventilé.">
+          <Field id="hire-label" label="Poste"><input className="input" id="hire-label" name="label" maxLength={200} required /></Field>
+          <Field id="hire-count" label="Nombre de postes" hint="De 1 à 50."><input className="input" id="hire-count" name="count" type="number" min={1} max={50} defaultValue={1} required /></Field>
+          <Field id="hire-service" label="Centre de coûts (service)" hint="Vide : non ventilé.">
             <input className="input" id="hire-service" name="service" list="hyp-services" placeholder="Existant ou nouveau" maxLength={200} defaultValue={p?.service ?? ""} />
           </Field>
           <Field id="hire-category" label="Catégorie">
@@ -57,24 +57,24 @@ export function HireForm({ action, profiles, deps }: { action: (prev: FormState,
           <Field id="hire-motif" label="Motif d'embauche (facultatif)"><input className="input" id="hire-motif" name="motif" list="hire-motifs" maxLength={100} /></Field>
           <Field id="hire-metier" label="Métier (facultatif)"><input className="input" id="hire-metier" name="metier" maxLength={100} /></Field>
         </Group>
-        <Group title="Dates" hint="Le prorata du premier et du dernier mois suit la règle du scénario.">
+        <Group title="Dates">
           <Field id="hire-start" label="Premier jour payé"><input className="input" id="hire-start" name="start" type="date" required /></Field>
-          <Field id="hire-end" label="Dernier jour payé (CDD, facultatif)" hint="Vide : poste sans fin prévue."><input className="input" id="hire-end" name="end" type="date" /></Field>
+          <Field id="hire-end" label="Dernier jour payé (CDD, facultatif)" hint="Vide : sans fin prévue."><input className="input" id="hire-end" name="end" type="date" /></Field>
         </Group>
         <Group title="Rémunération">
-          <Field id="hire-gross" label="Brut mensuel temps plein (€)" hint="Brut d'un temps plein ; la quotité s'applique ensuite."><input className="input" id="hire-gross" name="gross" inputMode="decimal" required defaultValue={p?.grossFullTime ?? ""} /></Field>
+          <Field id="hire-gross" label="Brut mensuel temps plein (€)"><input className="input" id="hire-gross" name="gross" inputMode="decimal" required defaultValue={p?.grossFullTime ?? ""} /></Field>
           <Field id="hire-quota" label="Quotité (%)" hint="Entre 0 et 100 %."><input className="input" id="hire-quota" name="quota" inputMode="decimal" required defaultValue={p?.quotaPct ?? ""} /></Field>
           <Field id="hire-charges" label="Taux de charges (%)" hint="Ex. 42,5."><input className="input" id="hire-charges" name="charges" inputMode="decimal" required defaultValue={p?.chargesPct ?? ""} /></Field>
         </Group>
         <Group title="Effectif et remplacement">
-          <Field id="hire-counted" label="Effectif" hint="Un poste non compté n'entre pas dans l'effectif.">
+          <Field id="hire-counted" label="Effectif">
             <select className="select" id="hire-counted" name="counted" defaultValue={p?.counted === null || p === null ? "" : p.counted ? "oui" : "non"}>
               <option value="" disabled>Choisir…</option>
               <option value="oui">Compté dans l'effectif</option>
               <option value="non">Non compté (ex. stagiaire)</option>
             </select>
           </Field>
-          <Field id="hire-replaces" label="Remplace (un seul poste)" hint="Un départ saisi dans ce scénario ; sinon création de poste.">
+          <Field id="hire-replaces" label="Remplace (un seul poste)">
             <select className="select" id="hire-replaces" name="replaces" defaultValue="">
               <option value="">— (création de poste)</option>
               {deps.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}

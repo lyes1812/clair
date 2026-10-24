@@ -1,4 +1,5 @@
 import "@/styles/collaborateurs.css";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { formatDate } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
@@ -53,10 +54,7 @@ export default async function FichePage({ params, searchParams }: { params: Prom
   return (
     <CollabHeader ctx={ctx} tab="fiche">
       <section className="panel collab-panel" data-testid="fiche-search">
-        <div className="collab-title">
-          <h2>Fiche collaborateur</h2>
-          <p className="desc">Cherchez un collaborateur, puis ouvrez sa fiche.</p>
-        </div>
+        <h2>Fiche collaborateur<GlossaryLink slug={slug} term="fiche-collaborateur" /></h2>
         <ListToolbar testid="fiche-toolbar" label="Filtres de la liste des collaborateurs" hidden={{}} q={q} size={size} resetHref={q ? pageHref({ taille: sizeParam }) : null} submitLabel="Rechercher" />
         <div className={pg.items.length > 12 ? "table-wrap scroll collab-scroll" : "table-wrap scroll collab-flat"}>
           <table className="data-table sticky collab-table collab-fiche-table" data-testid="fiche-table">
@@ -86,7 +84,6 @@ export default async function FichePage({ params, searchParams }: { params: Prom
         </div>
         {ficheNd.length > 0 && <p className="collab-note">Matricule n.d. : {ficheNd.join(" ; ")}.</p>}
         <Pager page={pg.page} pageSize={size} total={pg.total} href={(p) => pageHref(listParams, p)} testid="fiche-pager" />
-        <p className="tile-foot">Une fiche regroupe les contrats d'une même personne ; les droits d'accès aux données individuelles restent ceux de l'espace.</p>
       </section>
     </CollabHeader>
   );

@@ -66,6 +66,14 @@ export function defaultMonth(months: readonly string[], referenceDate: string | 
 // « ≥ 6 » écrit en toutes lettres (« au moins 6 ») : en grand, « ≥ 0 » se lirait comme un zéro.
 export const atLeast = (text: string): string => (text.startsWith("≥ ") ? `au moins ${text.slice(2)}` : text);
 
+// Pied de tuile : la donnée qui qualifie le chiffre (borne basse, mois couverts, déclarés après leur fin), mois en clair, sans le renvoi
+// narratif « (voir la couverture du mois) » ; « au moins » seul (marqueur interne du moteur) n'est pas un pied. null s'il ne reste rien.
+export function tileFoot(foot: string | undefined): string | null {
+  if (!foot || foot === "au moins") return null;
+  const t = clearMonths(foot.replace(/\s*\((?:voir|cf\.)[^)]*\)/gi, "")).trim();
+  return t || null;
+}
+
 // Raisons n.d. identiques regroupées : une ligne par raison, avec les mois concernés en plage (« oct. à déc. 2026 »).
 export type MonthReason = { month: string; reason: string };
 export function groupMonthReasons(items: readonly MonthReason[]): { months: string[]; label: string; reason: string }[] {

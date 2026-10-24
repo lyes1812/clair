@@ -1,13 +1,15 @@
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { monthRange } from "@/lib/connectors/months";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { scopeKeyOf } from "@/lib/budget/grids";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
+import { BUDGET_TERMS } from "@/lib/glossary/budget";
 import { countByYear, gridYears } from "@/lib/viz/hyp-saisie";
 import { frDates, gridCaption } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { saveConstantsAction, saveRatesAction } from "./actions";
 import { DirtyIndicator, GridTools, RowFill } from "./GridTools";
-import { CardTitle, decText, detailOf, Rules, UNIT_LABEL } from "./shared";
+import { CardTitle, decText, detailOf, UNIT_LABEL } from "./shared";
 
 type Cst = Extract<Hypothesis, { kind: "constante" }>;
 const BLANK_ROWS = 3;
@@ -113,21 +115,17 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
   );
   const frame = (gy: ReturnType<typeof gridYears>, filename: string, caption: string, table: React.ReactNode) => (
     <div className="hs-grid" data-grid-root data-ys={gy.multi ? "0" : undefined}>
-      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} />
+      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} />
       <p className="hs-unit">{caption}</p>
       {table}
     </div>
   );
   const ratesCaption = gridCaption("Taux en % du salaire", months);
-  const constCaption = gridCaption("Valeurs mensuelles, dans l'unité de chaque ligne", months);
+  const constCaption = gridCaption("Valeurs mensuelles, sans effet sur le calcul", months);
   return (
     <>
       <section className="panel" data-testid="glob-rates">
-        <CardTitle title="Taux d'augmentation par mois">Une ligne par périmètre, une colonne par mois du scénario. <a href="#def-globales">Règle</a></CardTitle>
-        <Rules>
-          <p>Chaque cellule renseignée est une augmentation distincte, appliquée au 1er du mois en pourcentage du salaire déjà augmenté (les taux successifs se composent). Cellule vide ou 0 : aucune augmentation ce mois-là.</p>
-          <p>Sur un même mois, la plus ciblée s'applique seule : l'augmentation d'un contrat prime sur celle d'un service ou d'un statut, qui prime sur celle de toute l'entreprise (celle d'un contrat se saisit dans Modifications de postes). Un service et un statut sont au même niveau : deux augmentations de ces niveaux le même mois pour un même salarié sont refusées avec leur raison.</p>
-        </Rules>
+        <CardTitle title="Taux d'augmentation par mois" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.globales} />} />
         {canEdit ? (
           <ActionForm action={saveRatesAction.bind(null, slug, scenario.id)} submit="Enregistrer les taux" testid="glob-rates-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
             {frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesCaption, ratesTable)}
@@ -142,12 +140,8 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
         )}
       </section>
       <section className="panel" data-testid="glob-consts">
-        <CardTitle title="Constantes de référence">Documentaires, sans effet sur le calcul : chaque valeur est saisie par mois avec sa source.</CardTitle>
-        <Rules summary="Règles de saisie et limites">
-          <p>Valeurs saisies par mois avec leur source (taux légaux, plafonds, horaire théorique, taux de change…). Aucune valeur n'est fournie par Clair : chaque constante doit porter sa source. Elles sont conservées avec le scénario et rappelées dans les contrôles, mais aucune règle de calcul ne les lit : la masse salariale ne change pas.</p>
-          <p>Multidevise : différé (euros seulement). Taux par statut cadre / non-cadre de la classification : PayFit ne fournit à Clair que l'indicateur « cadre dirigeant » (disponible dans les taux d'augmentation) ; le statut cadre / non-cadre demande une autre source. Taux par société : une seule société par espace.</p>
-        </Rules>
-        {canEdit && consts.every((c) => c === null) && <p className="hs-empty" data-testid="glob-consts-empty">Aucune constante saisie : renseignez une ligne ci-dessous, avec sa source.</p>}
+        <CardTitle title="Constantes de référence" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.constantes} />} />
+        {canEdit && consts.every((c) => c === null) && <p className="hs-empty" data-testid="glob-consts-empty">Aucune constante saisie.</p>}
         {canEdit ? (
           <ActionForm action={saveConstantsAction.bind(null, slug, scenario.id)} submit="Enregistrer les constantes" testid="glob-consts-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
             <input type="hidden" name="n" value={consts.length} />

@@ -1,9 +1,11 @@
-/* Masse salariale › Écart budgétaire, Analyse des écarts et entrées « Prévu » (charte « 101 »).
+/* Masse salariale › Écart budgétaire, Analyse des écarts et entrées « Prévu » (charte « 101 » : bleu, blanc, noir, gris).
    Classes de ergonomie.css réutilisées : .view-switch, .panel-head, .table-wrap.scroll, .data-table.sticky, tr.subtotal / tr.total /
-   tr.child, .ver-badge, .pager. Aucune couleur « favorable / défavorable » : le sens d'un écart est une flèche grise, le signe est écrit. */
+   tr.child, .ver-badge, .pager, .trend-bad / .trend-good / .trend-legend. Le rouge et le vert ne marquent que les écarts de coût
+   (hausse : rouge, baisse : verte) ; les effectifs et les ETP restent neutres. Le signe est toujours écrit, la flèche aussi. */
 
 .ecart-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ecart-panel-title { display: grid; gap: 4px; min-width: 0; }
+.ecart-title-row { display: flex; align-items: center; flex-wrap: wrap; }
 .ecart-panel-title .desc { line-height: 1.5; max-width: 78ch; }
 .panel-head .ecart-panel-title { flex: 1 1 320px; }
 .panel-head .view-switch { flex: none; }
@@ -44,18 +46,21 @@
 .ecart-chart-controls { display: flex; gap: 12px 20px; align-items: flex-end; flex-wrap: wrap; }
 .ecart-chart-controls .field-row { flex: 0 1 380px; min-width: 220px; }
 .ecart-chart-controls .check { padding-bottom: 9px; }
-.ecart-reading { margin: 0; max-width: 90ch; font-size: var(--clair-type-description); line-height: 1.5; color: var(--muted); }
+.ecart-chart-controls .gloss-link { margin: 0 0 11px -14px; }
 .ecart-nd-block { display: grid; gap: 8px; padding: 16px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); }
+.ecart-legend { margin: 0 0 10px; }
 
-/* Cascades : titre et badge d'axe tronqué sur une ligne ; sous 720 px, le tracé garde une largeur minimale par barre et défile
-   horizontalement (le titre, la légende et la note restent fixes). Même indice de défilement que les tableaux. */
+/* Cascades : titre, badge d'axe tronqué et « ? » sur une ligne ; sous 720 px, le tracé (avec sa légende) garde une largeur minimale
+   par barre et défile horizontalement, le titre reste fixe ; des ombres de bord indiquent qu'il y a de quoi défiler. */
 .wf-card { display: grid; gap: 10px; min-width: 0; }
 .wf-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
 .wf-head .chart-title { margin: 0; min-width: 0; }
-.wf-badge { display: inline-block; padding: 2px 9px; border: 1px solid #c7cedd; border-radius: 999px; background: var(--surface); color: var(--ink); font-size: var(--clair-type-label); font-weight: 600; white-space: nowrap; cursor: help; }
+.wf-head .gloss-link { margin-left: 0; }
+.wf-badge { display: inline-block; padding: 2px 9px; border: 1px solid #c7cedd; border-radius: 999px; background: var(--surface); color: var(--ink); font-size: var(--clair-type-label); font-weight: 600; white-space: nowrap; }
 .wf-scroll { min-width: 0; }
 .wf-inner { min-width: 0; }
-.wf-hint { display: none; margin: 0; font-size: var(--clair-type-label); color: var(--muted); }
+/* La phrase d'axe tronqué du composant répète le badge du titre : lue par les lecteurs d'écran seulement. */
+.wf-scroll .chart-note { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 @media (max-width: 720px) {
   .wf-scroll {
     overflow-x: auto;
@@ -68,7 +73,6 @@
     background-color: #fff;
   }
   .wf-inner { min-width: var(--wf-min, 0); }
-  .wf-hint { display: block; }
 }
 
 /* Tableau d'écart : en-tête fixe, première colonne fixe, sous-totaux grisés. */
@@ -83,27 +87,33 @@
 .ecart-table tbody tr.subtotal > th[scope="row"] { font-weight: 600; }
 .ecart-table tbody tr.total > th[scope="row"] { font-weight: 650; }
 .ecart-table tbody tr:not(.subtotal, .total) > th[scope="row"] { background: #fff; }
-.ecart-table tbody tr:not(.subtotal, .total):hover > th[scope="row"] { background: #f7f8fb; }
+.ecart-table tbody tr:not(.subtotal, .total):hover > th[scope="row"] { background: var(--surface); }
 .ecart-table.sticky-first tr.subtotal > :first-child { background: var(--surface); }
 .ecart-table.sticky-first tr.total > :first-child { background: #eef1f6; }
 .ecart-table tbody tr.subtotal:hover > :is(td, th) { background: var(--surface); }
 .ecart-table tbody tr.total:hover > :is(td, th) { background: #eef1f6; }
-.analyse-table td.wrap { min-width: 280px; }
 .ecart-table td abbr.nd { cursor: help; }
 
-/* Un écart qui ouvre le détail par salarié : lien bleu, souligné en pointillés, avec un chevron. */
+/* Un écart qui ouvre le détail par salarié : lien bleu (de la couleur de la tendance pour un coût), souligné en pointillés, avec un chevron. */
 .ecart-table td.gap a { color: var(--blue); text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.ecart-table td.trend-bad a, .ecart-table td.trend-good a { color: inherit; }
 .ecart-table td.gap a::after { content: "›"; content: "›" / ""; margin-left: 4px; font-weight: 600; }
 .ecart-table td.gap a:hover { text-decoration-style: solid; }
 
 /* Contraste : le gris des « n.d. » (4,26:1) passe sous 4,5:1 sur le fond des lignes de total ; teinte un peu plus foncée à cet endroit. */
 .ecart-table tr.total .nd, .ecart-table tr.subtotal .nd { color: #626877; }
 
-/* Sens d'un écart : flèche neutre (grise), jamais rouge ni verte ; un écart nul n'a pas de flèche. */
+/* Contraste : le vert des tendances (4,38:1 sur blanc, 3,87:1 sur une ligne de total) passe sous 4,5:1 pour du texte ; teinte du même
+   vert, assombrie, à cet endroit (6,3:1 sur blanc). Le rouge est à 4,87:1 au plus bas. */
+.ecart-table .trend-good, .pont-tiles dd.trend-good { color: color-mix(in srgb, var(--good) 80%, #000); }
+
+/* Sens d'un écart : flèche grise pour un effectif ou un ETP, de la couleur de la tendance pour un coût ; un écart nul n'a pas de flèche. */
 .ecart-table [data-sign]::before, .pont-tiles dd[data-sign]::before { content: ""; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border: 0 solid transparent; opacity: .8; }
 .ecart-table [data-sign="up"]::before, .pont-tiles dd[data-sign="up"]::before { border-width: 0 3.5px 6px; border-bottom-color: var(--muted); }
 .ecart-table [data-sign="down"]::before, .pont-tiles dd[data-sign="down"]::before { border-width: 6px 3.5px 0; border-top-color: var(--muted); }
 .ecart-table [data-sign="zero"]::before, .pont-tiles dd[data-sign="zero"]::before { display: none; }
+.ecart-table :is(.trend-bad, .trend-good)[data-sign="up"]::before, .pont-tiles dd:is(.trend-bad, .trend-good)[data-sign="up"]::before { border-bottom-color: currentColor; }
+.ecart-table :is(.trend-bad, .trend-good)[data-sign="down"]::before, .pont-tiles dd:is(.trend-bad, .trend-good)[data-sign="down"]::before { border-top-color: currentColor; }
 .pont-tiles dd[data-sign]::before { margin-right: 9px; vertical-align: 4px; }
 .pont-tiles dd[data-sign="up"]::before { border-width: 0 5px 9px; }
 .pont-tiles dd[data-sign="down"]::before { border-width: 9px 5px 0; }
@@ -117,17 +127,12 @@
 .pont-tiles dd { margin: 0; font-size: var(--clair-type-secondary); font-weight: 550; letter-spacing: -.5px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .pont-chart { min-width: 0; max-width: 620px; }
 
-/* Bloc replié « Définitions et règles de calcul » : même titre que les autres écrans de la famille. */
-.ecart-defs > summary { cursor: pointer; font-size: var(--clair-type-subheading); font-weight: 550; }
-.ecart-defs[open] > summary { margin-bottom: 14px; }
-
 @media (max-width: 960px) {
   .pont { grid-template-columns: minmax(0, 1fr); }
   .pont-chart { max-width: none; }
 }
 @media (max-width: 720px) {
   .ecart-table tbody th[scope="row"] { min-width: 120px; max-width: 160px; }
-  .analyse-table td.wrap { min-width: 220px; }
 }
 
 /* Sous 520 px, les tableaux d'écart deviennent une liste de cartes : une carte par ligne, le nom de la rubrique en titre, puis les
@@ -153,8 +158,6 @@
   /* Écart budgétaire : les écarts d'abord, puis les valeurs des versions. */
   .ecart-main.stack-sm tbody tr > td.gap { order: 1; }
   .ecart-main.stack-sm tbody tr > td[data-col^="v"] { order: 2; }
-  /* Commentaire : toute la largeur de la carte. */
-  .analyse-table.stack-sm tbody tr > td.wrap { grid-column: 1 / -1; min-width: 0; }
   /* Détail par salarié : le nom en titre, puis l'écart. */
   .data-table.ecart-table.stack-sm tbody tr > td[data-card="title"] { grid-column: 1 / -1; order: -2; font-size: var(--clair-type-body); font-weight: 600; }
   .data-table.ecart-table.stack-sm tbody tr > td[data-col="ecart"] { grid-column: 1 / -1; order: -1; }

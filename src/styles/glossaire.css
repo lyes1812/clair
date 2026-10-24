@@ -1,0 +1,80 @@
+/* Glossaire (charte « 101 » : blanc, noir, bleu et leurs dégradés ; aucune couleur hors de cet univers). Variables de globals.css,
+   échelle typographique de typography.css, teintes de charts.css ; classes partagées réutilisées : .label, .desc, .filters.bar,
+   .field-row, .input, .btn. Tout est préfixé « gl- ». Le texte de petite taille est en --chart-5 (≥ 4,5:1 sur blanc, sur --surface
+   et sur --blue-soft, fond d'une définition ciblée). */
+
+.gl-page { display: grid; gap: 20px; min-width: 0; }
+.gl-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* En-tête : sur-titre, titre, une ligne. */
+.gl-head { display: grid; gap: 10px; min-width: 0; }
+.gl-head > .desc { max-width: 78ch; }
+
+/* Recherche : champ à gauche, boutons à droite ; le filtre est appliqué par le serveur (paramètre d'adresse q). */
+.filters.bar.gl-search .field-row { flex: 1 1 280px; min-width: 0; }
+.gl-count-line { line-height: 1.5; }
+
+/* Sommaire : une pastille par famille avec son nombre de définitions. */
+.gl-toc { scroll-margin-top: 72px; }
+.gl-toc ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.gl-toc a { display: inline-flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink); font-size: var(--clair-type-form); font-weight: 550; text-decoration: none; transition: background .15s, border-color .15s, color .15s; }
+.gl-toc a:hover, .gl-toc a:focus-visible { border-color: var(--blue); background: var(--blue-soft); color: var(--blue); }
+.gl-count { display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--chart-5); font-size: var(--clair-type-label); font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1; }
+
+/* Une famille : titre souligné d'un filet en dégradé de bleu (décor sans texte), puis ses définitions. */
+.gl-family { display: grid; gap: 0; min-width: 0; scroll-margin-top: 72px; }
+.gl-family + .gl-family { margin-top: 12px; }
+.gl-family-head { display: flex; align-items: center; gap: 10px; padding: 0 0 12px; background: linear-gradient(90deg, var(--chart-2), var(--chart-1) 45%, var(--line) 100%) bottom / 100% 2px no-repeat; }
+.gl-family-head h2 { min-width: 0; }
+.gl-top { margin-left: auto; font-size: var(--clair-type-form); font-weight: 600; text-decoration: none; }
+.gl-top:hover { text-decoration: underline; }
+
+/* Ancres : sous 860 px la barre du haut est collante (56 px) ; 72 px de marge de défilement gardent le terme visible quand un lien « ? »
+   ou le sommaire mène à une ancre (comme #connexion dans donnees.css). */
+/* Une définition : terme à gauche, formule et texte à droite (une colonne sous 900 px). Cible d'un lien « ? » : fond bleu clair et
+   barre bleue (la mise en valeur ne repose pas sur la seule couleur : la barre est un trait épais). */
+.gl-entries { display: grid; }
+.gl-entry { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 32px; align-content: start; min-width: 0; padding: 18px 12px 18px 14px; border-bottom: 1px solid var(--line); border-left: 3px solid transparent; scroll-margin-top: 72px; }
+@media (min-width: 900px) { .gl-entry { grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); } }
+.gl-entry:target { background: var(--blue-soft); border-left-color: var(--blue); }
+.gl-entry-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.gl-entry-head h3 { min-width: 0; line-height: 1.35; overflow-wrap: anywhere; }
+.gl-perma { flex: none; padding: 0 4px; color: var(--chart-5); font-size: var(--clair-type-form); font-weight: 650; line-height: 1.6; text-decoration: none; }
+.gl-perma:hover, .gl-perma:focus-visible { color: var(--blue); }
+.gl-entry-body { display: grid; gap: 12px; min-width: 0; }
+
+.gl-formula { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; max-width: 78ch; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: var(--clair-type-form); line-height: 1.5; }
+.gl-entry:target .gl-formula { background: #fff; }
+.gl-formula-label, .gl-see-label { color: var(--chart-5); font-size: var(--clair-type-note); font-weight: 650; letter-spacing: 1.2px; text-transform: uppercase; }
+.gl-formula-text { min-width: 0; color: var(--ink); font-weight: 550; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.gl-def { display: grid; gap: 10px; max-width: 78ch; color: var(--ink); font-size: var(--clair-type-body); line-height: 1.6; overflow-wrap: anywhere; }
+.gl-see { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: var(--clair-type-form); line-height: 1.5; }
+.gl-see a { overflow-wrap: anywhere; }
+
+/* Aucun résultat. */
+.gl-empty { display: grid; justify-items: start; gap: 8px; padding: 28px 22px; border: 1px dashed #d8dce5; border-radius: 8px; background: var(--surface); }
+.gl-empty-title { margin: 0; font-size: var(--clair-type-panel); font-weight: 550; letter-spacing: -.4px; color: var(--ink); }
+
+@media (max-width: 600px) {
+  .gl-entry { padding: 16px 0 16px 12px; }
+  .gl-toc a { min-height: 40px; }
+}
+
+/* Impression : sans menu, recherche ni sommaire ; une définition ne se coupe pas entre deux pages ; texte noir sur blanc, filets
+   (les arrière-plans ne sont pas imprimés par défaut). */
+@media print {
+  body:has(.gl-page) .sidebar, body:has(.gl-page) .ws-topbar { display: none; }
+  body:has(.gl-page) .shell { display: block; background: #fff; }
+  body:has(.gl-page) .main { display: block; max-width: none; padding: 0; }
+  .gl-search, .gl-toc, .gl-top, .gl-perma { display: none; }
+  .gl-page { gap: 12pt; }
+  .gl-family-head { break-after: avoid; background: none; border-bottom: 1.5pt solid #000; }
+  .gl-family + .gl-family { margin-top: 10pt; }
+  .gl-entry { grid-template-columns: 40mm minmax(0, 1fr); gap: 4pt 16pt; padding: 8pt 0; border-left: 0; border-bottom: .5pt solid #999; break-inside: avoid; }
+  .gl-entry:target { background: none; }
+  .gl-formula { background: none; border-color: #999; }
+  .gl-def { max-width: none; font-size: 10pt; line-height: 1.45; color: #000; }
+  .gl-see a, .gl-top { color: #000; text-decoration: none; }
+  .gl-formula-label, .gl-see-label { color: #000; }
+}

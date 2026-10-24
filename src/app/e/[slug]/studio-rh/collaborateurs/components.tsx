@@ -1,18 +1,18 @@
 import { FamilyTabs } from "@/components/FamilyTabs";
 import type { ReactNode } from "react";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { SourceBadge } from "@/components/SourceBadge";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, formatMonth, monthsBetween } from "@/lib/dates";
 import { contractNatureLabel, endReasonLabel } from "@/lib/dsn/labels";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
-import { RH_DEFINITIONS } from "@/lib/rh/definitions";
 import { findingLabel } from "@/lib/rh/findings";
 import type { EventRow, RowState } from "@/lib/rh/headcount";
 import { fieldView, type ContractDraft, type FieldView, type FindingDraft, type PersonDraft, type Provenance, type Traced as TracedRow } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, personLabel, type CollabContext, type Shown } from "@/lib/rh/view";
-import { atLeast, clearMonths, monthRangeLabel, PAGE_SIZES } from "@/lib/viz/collaborateurs";
+import { atLeast, clearMonths, monthRangeLabel, PAGE_SIZES, tileFoot } from "@/lib/viz/collaborateurs";
 
-// Composants partagés des écrans Collaborateurs : en-tête (source, base de calcul, définitions), valeurs tracées, constats.
+// Composants partagés des écrans Collaborateurs : en-tête (source, limites de la lecture), valeurs tracées, constats. Les définitions sont au glossaire.
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/collaborateurs")!;
 import { TABS, type TabId } from "./tabs";
 export { TABS, type TabId };
@@ -20,16 +20,6 @@ export { TABS, type TabId };
 export const base = (slug: string) => `/e/${slug}/studio-rh/collaborateurs`;
 export const personHref = (slug: string, key: string) => `${base(slug)}/p/${encodeURIComponent(key)}`;
 export const contractHref = (slug: string, key: string) => `${base(slug)}/c/${encodeURIComponent(key)}`;
-
-const ND_EXPLANATIONS: [string, string][] = [
-  ["Période postérieure à la date de référence", "l'effectif n'est jamais projeté ; les entrées et sorties futures connues sont listées dans Mouvements › À venir."],
-  ["Période non couverte", "aucune lecture ni déclaration appliquée pour ce mois : rien n'est reconstitué entre deux mois."],
-  ["Mois DSN incomplet ou bloqué", "fractions manquantes ou conflit de numéro d'ordre : les faits sont lus, l'effectif du mois est n.d."],
-  ["Borne basse (PayFit)", "historique PayFit en mode « signalé » (Paramètres) : pour les mois antérieurs à la fenêtre de conservation des contrats archivés, les effectifs et les entrées s'affichent « au moins n » et les sorties sont n.d. En mode « brut » (défaut), ces mois sont calculés sur ce que l'API renvoie et la limite est dite une fois en tête d'écran."],
-  ["Champ non porté par la source", "motif de fin et temps travaillé (DSN), nom d'usage, équipe ou versements (PayFit) : n.d. et non devinés."],
-  ["Champ non renseigné", "valeur nulle dans la source (temps, matricule, nature) : n.d., jamais zéro."],
-  ["Droit non accordé", "collection ou champ refusé par la clé API : n.d. avec le droit manquant."],
-];
 
 // Mode « brut » de l'historique PayFit : une seule mention en tête d'écran à la place des « ≥ » et « n.d. » par mois.
 const rawHistory = (ctx: CollabContext) => (ctx.payfitHistory && ctx.payfitHistory.mode === "raw" && ctx.data ? { h: ctx.payfitHistory, d: ctx.data } : null);
@@ -43,13 +33,13 @@ function PayfitHistoryText({ ctx }: { ctx: CollabContext }) {
       Données telles que remontées par l'API PayFit (lecture du {formatDate(d.build.referenceDate)}).{" "}
       {h.limit ? (
         <>
-          PayFit ne renvoie plus les contrats archivés depuis plus de 12 mois : pour les mois {(h.limit.lowerFrom === h.limit.lowerTo ? formatMonth(h.limit.lowerFrom) : `${formatMonth(h.limit.lowerFrom)} à ${formatMonth(h.limit.lowerTo)}`).toLowerCase()}
-          {h.limit.exactFrom ? ` (avant le ${formatDate(h.limit.exactFrom)})` : ""}, les chiffres ne comptent pas les salariés sortis avant cette
-          limite : les effectifs, l'ETP et les sorties peuvent être sous-estimés ; les entrées, le turnover et l'absentéisme peuvent être faussés dans un sens ou dans l'autre (un contrat qui fait suite à un contrat non renvoyé compte comme une entrée, et les dénominateurs sont réduits).
+          Pour les mois {(h.limit.lowerFrom === h.limit.lowerTo ? formatMonth(h.limit.lowerFrom) : `${formatMonth(h.limit.lowerFrom)} à ${formatMonth(h.limit.lowerTo)}`).toLowerCase()}
+          {h.limit.exactFrom ? ` (avant le ${formatDate(h.limit.exactFrom)})` : ""}, les contrats archivés depuis plus de 12 mois ne sont pas renvoyés : effectifs, ETP et sorties peuvent être sous-estimés ; entrées, turnover et absentéisme faussés dans un sens ou dans l'autre.
         </>
       ) : (
         <>Aucun mois de la lecture n'est antérieur à la limite de conservation des contrats archivés.</>
-      )}{" "}
+      )}
+      <GlossaryLink slug={ctx.slug} term="lower-bound" />{" "}
       <a href={`/e/${ctx.slug}/parametres#payfit-historique`}>Paramètre : historique PayFit brut</a>
     </>
   );
@@ -115,7 +105,6 @@ export function CollabHeader({ ctx, tab, prevu = false, children }: { ctx: Colla
       <div className="collab-head">
         <span className="label">Studio RH</span>
         <h1>{ITEM.label}</h1>
-        <p className="desc">{ITEM.summary}</p>
         <SourceBadge resolution={source} slug={slug} />
         {ctx.data && !prevu && (
           <details className={n ? "collab-read-details collab-limits" : "collab-read-details"} data-testid="collab-read-details" open={!!ctx.switchedAt}>
@@ -142,6 +131,10 @@ export function CollabHeader({ ctx, tab, prevu = false, children }: { ctx: Colla
               )}
               {n > 0 && <strong className="collab-limits-sub">Détail de la lecture{ctx.data.build.referenceDate ? ` · date de référence ${formatDate(ctx.data.build.referenceDate)}` : ""}</strong>}
               <BuildInfo ctx={ctx} />
+              <p className="desc" data-testid="rh-natures">
+                Natures comptées dans l'effectif : {ctx.natures.codes.map((c) => contractNatureLabel(c)).join(", ")} — {ctx.natures.origin === "default" ? "valeur par défaut validée" : "modifiée par un administrateur"} · <a href={`/e/${ctx.slug}/parametres`}>Paramètres</a>
+                <GlossaryLink slug={ctx.slug} term="natures" />
+              </p>
             </div>
           </details>
         )}
@@ -150,7 +143,7 @@ export function CollabHeader({ ctx, tab, prevu = false, children }: { ctx: Colla
         <section className="placeholder" data-testid="collaborateurs-nd">
           <h3>n.d. — aucune source RH retenue</h3>
           <p className="muted">
-            Connectez PayFit ou déposez des DSN dans <a href={`/e/${slug}/donnees`}>Données</a>, appliquez une lecture, puis revenez ici.
+            Connectez PayFit ou déposez des DSN dans <a href={`/e/${slug}/donnees`}>Données</a>, puis appliquez une lecture.
           </p>
         </section>
       )}
@@ -164,42 +157,7 @@ export function CollabHeader({ ctx, tab, prevu = false, children }: { ctx: Colla
         <FamilyTabs label="Entrées Collaborateurs" testid="collab-tabs" current={tab} tabs={TABS.map((t) => ({ key: t.id, label: t.label, href: `${base(slug)}${t.path}`, soon: "soon" in t ? t.soon : false }))} />
       )}
       {children}
-      {ctx.data && !prevu && <Definitions ctx={ctx} />}
     </>
-  );
-}
-
-export function Definitions({ ctx }: { ctx: CollabContext }) {
-  return (
-    <details className="panel" data-testid="rh-definitions" id="definitions">
-      <summary>Définitions, paramètres et raisons des « n.d. »</summary>
-      <dl className="defs">
-        {RH_DEFINITIONS.map((d) => (
-          <div key={d.id} id={`def-${d.id}`}>
-            <dt>{d.title}</dt>
-            <dd>{d.text}</dd>
-          </div>
-        ))}
-        <div id="def-natures">
-          <dt>Natures comptées dans l'effectif (paramètre de l'espace)</dt>
-          <dd data-testid="rh-natures">
-            {ctx.natures.codes.map((c) => contractNatureLabel(c)).join(", ")} — {ctx.natures.origin === "default" ? "valeur par défaut validée" : "modifié par un administrateur"} ·{" "}
-            <a href={`/e/${ctx.slug}/parametres`}>Paramètres</a>
-          </dd>
-        </div>
-      </dl>
-      <h3>Ce qui est « n.d. » et pourquoi</h3>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead><tr><th>Cas</th><th className="wrap">Règle</th></tr></thead>
-          <tbody>
-            {ND_EXPLANATIONS.map(([k, v]) => (
-              <tr key={k}><td>{k}</td><td className="wrap">{v}</td></tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </details>
   );
 }
 
@@ -277,23 +235,24 @@ export function NdTableNote({ notes, testid }: { notes: { reason: string; column
 }
 
 // Tuile d'indicateur : la valeur courte est écrite en grand ; un n.d. s'écrit « n.d. » (la raison est dite une fois en tête de
-// panneau, et reste au survol) ; « ≥ n » s'écrit « au moins n ».
-export function Tile({ id, label, shown, def }: { id: string; label: string; shown: Shown; def: string }) {
+// panneau, et reste au survol) ; « ≥ n » s'écrit « au moins n ». Le « ? » du libellé renvoie à la définition (glossaire) ; le pied
+// ne garde que la donnée qui qualifie le chiffre (borne basse, mois couverts…).
+export function Tile({ id, label, shown, def, slug }: { id: string; label: string; shown: Shown; def: string; slug?: string }) {
   const text = shown.kind === "nd" ? "n.d." : atLeast(shown.text);
   const big = shown.kind !== "nd" && text.length <= 14;
   const cls = [shown.kind === "nd" ? "nd" : shown.kind === "lower" ? "lower" : "", big ? "big" : ""].filter(Boolean).join(" ");
-  const foot = shown.foot && shown.foot !== "au moins" ? clearMonths(shown.foot) : null;
+  const foot = tileFoot(shown.foot);
   return (
     <div data-testid={id} className="collab-tile">
-      <dt>{label}</dt>
+      <dt>
+        {label}
+        {slug && <GlossaryLink slug={slug} term={def} label={label} />}
+      </dt>
       <dd className={cls || undefined} title={shown.kind === "nd" ? ndReason(shown) : undefined}>
         {text}
         {shown.kind === "nd" && <span className="collab-sr"> — {ndReason(shown)}</span>}
       </dd>
-      <span className="tile-foot">
-        {foot ? <>{foot} · </> : null}
-        <a href={`#def-${def}`}>Définition</a>
-      </span>
+      {foot && <span className="tile-foot">{foot}</span>}
     </div>
   );
 }
@@ -457,10 +416,10 @@ export function ProvenanceDetails({ row, slug }: { row: TracedRow; slug: string 
 export function FindingList({ findings, slug, persons, contracts, testId }: { findings: FindingDraft[]; slug: string; persons: Map<string, PersonDraft>; contracts: Map<string, ContractDraft>; testId?: string }) {
   if (!findings.length) return <p className="muted">Aucun constat.</p>;
   return (
-    <ul className="finding-list" data-testid={testId}>
+    <ul className="finding-list collab-findings" data-testid={testId}>
       {findings.map((f, i) => (
         <li key={`${f.code}-${i}`}>
-          <span className={`finding ${f.severity}`}>{findingLabel(f.code)}</span>
+          <span className={`finding ${f.severity}`}><span className="collab-sr">{f.severity === "check" ? "À vérifier : " : "Information : "}</span>{findingLabel(f.code)}</span>
           <span>{f.message}</span>
           {f.month && <span className="tag">{f.month}</span>}
           {f.personKeys.map((k) => (

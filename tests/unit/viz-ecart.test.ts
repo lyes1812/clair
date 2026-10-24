@@ -3,18 +3,20 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AnalyseChart } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/AnalyseChart";
-import { STEP_COMMENTS } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/comments";
 import { TitledWaterfall } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/TitledWaterfall";
 import { Weight, weightText } from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/Weight";
-import { PickerForm, VersionChain } from "@/app/e/[slug]/studio-rh/masse-salariale/EcartParts";
+import { MsHeader, PanelTitle, PickerForm, toneClass, TrendLegend, VersionChain } from "@/app/e/[slug]/studio-rh/masse-salariale/EcartParts";
 import type { Loaded } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
 import { WaterfallChart } from "@/components/charts";
 import { EcartChart } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart/EcartChart";
 import { LiveLink, LiveViewSwitch } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart/LiveRub";
-import type { Cascade, StepId } from "@/lib/budget/cascade";
+import { ECART_DEFINITIONS } from "@/lib/budget/ecart-definitions";
+import { STEP_LABELS, type Cascade, type StepId } from "@/lib/budget/cascade";
 import type { Bridge } from "@/lib/budget/series";
-import { nd, val, type Cell, type MonthFacts, type Version } from "@/lib/budget/versions";
-import { CHART_LABELS, ecartChartData, etpWaterfall, eurosSigned, masseWaterfall, neg, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, waterfallAxisBadge, type MasseRubric } from "@/lib/viz/ecart";
+import { diff, nd, ROW_UNIT, val, type Agg, type Cell, type MonthFacts, type RowKey, type Version } from "@/lib/budget/versions";
+import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
+import { ECART_TERMS, GLOSSARY_ECART, STEP_TERMS } from "@/lib/glossary/ecart";
+import { CHART_LABELS, COST_ROWS, ecartChartData, etpWaterfall, eurosSigned, gapTone, isCostRow, masseWaterfall, neg, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, waterfallAxisBadge, type MasseRubric } from "@/lib/viz/ecart";
 
 // Adaptateurs de l'écart budgétaire vers les graphiques : valeurs, raisons n.d., unités, styles de courbe, cascades.
 // Cas écrits à la main (mêmes chiffres que le cas de référence de l'écran : base 66 420,00 €, variante 69 970,00 €).
@@ -169,20 +171,24 @@ describe("graphiques client rendus côté serveur", () => {
     expect(html).toContain("Version 1 · Réel 2025");
     expect(html).toContain("Version 2 · Révisé 2026");
     expect(html).toContain("Axe vertical à partir de zéro");
-    expect(html).toContain("Version 1 · Réel 2025 : 1 mois"); // mars n.d. (courbe interrompue)
-    expect(html).toContain("Axe vertical ajusté aux valeurs"); // l'axe ne part pas de zéro : dit sous le graphique
+    expect(html).toContain("Mois sans valeur : Version 1 · Réel 2025 : 1 mois (paie non clôturée à la lecture)"); // mars n.d. : courbe interrompue, raison écrite
+    expect(html).toContain("Axe vertical ajusté aux valeurs"); // mention d'axe du composant partagé : une seule ligne sous le graphique
   });
-  it("lecture (au-dessus) et limites (en dessous) séparées ; l'aire d'un scénario n'est pas tracée sur un axe ajusté", () => {
+  it("sous le graphique : une seule limite de lecture (valeur du mois, pas de la période), les mois sans valeur et l'axe ; aucune phrase de lecture", () => {
     const html = renderToStaticMarkup(h(EcartChart, { ...props, initial: "masse" }));
-    const reading = /data-testid="ecart-chart-lecture">([^<]*)</.exec(html)?.[1] ?? "";
-    expect(reading).toContain("Trait plein : version 1 · pointillés : versions suivantes.");
-    expect(reading).not.toContain("zone teintée"); // axe ajusté : pas d'aire
-    expect(reading).toContain("Chaque point est la valeur du mois");
-    expect(html).not.toContain('opacity="0.1"'); // aucune aire dans le tracé
-    expect(html.indexOf("ecart-chart-lecture")).toBeLessThan(html.indexOf('data-testid="ecart-chart"')); // lecture avant le graphique
-    const note = /<p class="chart-note">([^<]*)</.exec(html)?.[1] ?? "";
-    expect(note).toContain("Le tableau donne la valeur de la période");
-    expect(note).not.toContain("Trait plein"); // la note ne reprend pas la lecture
+    expect(html).not.toContain("ecart-chart-lecture");
+    expect(html).not.toContain("ecart-reading");
+    for (const phrase of ["Trait plein", "pointillés : versions suivantes", "zone teintée", "propre année", "moyenne des ETP"]) expect(html).not.toContain(phrase);
+    expect(html).not.toContain('opacity="0.1"'); // axe ajusté : aucune aire dans le tracé
+    const notes = [...html.matchAll(/<p class="chart-note">([^<]*)</g)].map((m) => m[1]);
+    expect(notes).toHaveLength(1); // une seule note : limite de lecture, mois sans valeur, mention d'axe du composant
+    expect(notes[0]).toMatch(/^Chaque point est la valeur du mois ; le tableau donne celle de la période\. Mois sans valeur : /);
+  });
+  it("le « ? » de l'axe est rendu à côté de la case d'axe quand le serveur le fournit", () => {
+    const help = h("a", { className: "gloss-link", href: "/e/demo/glossaire#def-axe-ajuste" }, "?");
+    const html = renderToStaticMarkup(h(EcartChart, { ...props, initial: "masse", axisHelp: help }));
+    expect(html.indexOf("Axe vertical à partir de zéro")).toBeLessThan(html.indexOf("glossaire#def-axe-ajuste"));
+    expect(renderToStaticMarkup(h(EcartChart, { ...props, initial: "masse" }))).not.toContain("gloss-link");
   });
   it("version sans aucune valeur sur une rubrique : sa raison est écrite sous le graphique (pas seulement au survol)", () => {
     const html = renderToStaticMarkup(h(EcartChart, { ...props, initial: "autres" }));
@@ -190,17 +196,18 @@ describe("graphiques client rendus côté serveur", () => {
     expect(html).toContain("Aucune valeur à tracer : Version 1 · Réel 2025 (rubrique sans objet pour cette version)");
     expect(html).not.toContain("Version 2 · Révisé 2026 (");
   });
-  it("note : valeur du mois (et non de la période), chaque version lue sur son année", () => {
+  it("ETP : l'option du sélecteur dit « de fin de mois » ; la limite « valeur du mois » est écrite une seule fois sous le graphique", () => {
     const html = renderToStaticMarkup(h(EcartChart, { ...props, initial: "etp" }));
-    expect(html).toContain("Chaque point est la valeur du mois");
-    expect(html).toContain("sur sa propre année à rang de mois égal");
     expect(html).toContain("ETP de fin de mois");
+    expect(html).toContain("Chaque point est la valeur du mois ; le tableau donne celle de la période.");
+    expect(html).not.toContain("moyenne des ETP");
   });
   it("rubrique sans aucune valeur : pas de courbe, un bloc n.d. avec la raison de chaque version", () => {
     const html = renderToStaticMarkup(h(EcartChart, { ...props, initial: "nonventile" }));
     expect(html).not.toContain('data-testid="ecart-chart"');
     expect(html).toContain('data-testid="ecart-chart-nd"');
-    expect(html).toContain("n.d. — aucune valeur à tracer");
+    expect(html).toContain("n.d. — aucune valeur à tracer pour « Coûts chargés non ventilés");
+    expect(html).not.toContain("chaque version est n.d. ou sans objet"); // la raison de chaque version est listée, pas de phrase en plus
     expect(html).toContain("rubrique sans objet pour cette version");
   });
   it("cascade : la rubrique initiale est tracée, une rubrique n.d. donne sa raison", () => {
@@ -287,8 +294,29 @@ describe("cascade titrée", () => {
     expect(pont).not.toContain("wf-hint");
     const etp = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-etp", title: "ETP", start: 61000, end: 64300, steps: etpSteps, unit: "etp" }));
     expect(etp).toContain("--wf-min:462px"); // 7 barres : (5 + 2) × 58 + 56
-    expect(etp).toContain("faire défiler le graphique horizontalement");
     expect(etp).toContain("Axe tronqué à 5,8 ETP");
+    expect(etp).not.toContain("wf-hint"); // plus de phrase sur le défilement : le glossaire la porte, le dégradé de bord l'indique
+    expect(etp).not.toContain("faire défiler");
+  });
+  it("badge d'axe : texte seul (plus d'infobulle explicative), suivi du « ? » fourni par le serveur ; pas de « ? » sans badge", () => {
+    const help = h("a", { className: "gloss-link", href: "/e/demo/glossaire#def-axe-ajuste" }, "?");
+    const props = { ...base, testid: "wf-pont", title: "Pont", unit: "eur" as const };
+    const tronque = renderToStaticMarkup(h(TitledWaterfall, { ...props, start: 6642000, end: 6997000, steps: pontSteps, axisHelp: help }));
+    expect(tronque).not.toContain("proportionnelle");
+    expect(tronque).toMatch(/data-testid="wf-pont-axe">Axe tronqué à 64 k€<\/span><a class="gloss-link"/);
+    const large = renderToStaticMarkup(h(TitledWaterfall, { ...props, start: 100000, end: 500000, steps: [{ label: "x", value: 400000 }], axisHelp: help }));
+    expect(large).not.toContain("gloss-link");
+  });
+  it("tendance : « cost » colore les cascades en euros (légende « Hausse de coût / Baisse de coût »), sans la prop la cascade d'ETP reste bleue et grise", () => {
+    const eur = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-pont", title: "Pont", start: 6642000, end: 6997000, steps: pontSteps, unit: "eur", trend: "cost" }));
+    expect(eur).toContain("Hausse de coût");
+    expect(eur).toContain("Baisse de coût");
+    expect(eur).toContain('fill="var(--bad)"'); // effet volume : hausse de coût
+    expect(eur).toContain('fill="var(--good)"'); // effet coût moyen : baisse de coût
+    const etp = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-etp", title: "ETP", start: 61000, end: 64300, steps: etpSteps, unit: "etp" }));
+    expect(etp).not.toContain("var(--bad)");
+    expect(etp).not.toContain("var(--good)");
+    expect(etp).not.toContain("de coût");
   });
   it("axe non tronqué : pas de badge", () => {
     const html = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-x", title: "Large", start: 100000, end: 500000, steps: [{ label: "x", value: 400000 }], unit: "eur" }));
@@ -335,6 +363,12 @@ describe("barre de filtres commune à l'écart budgétaire et à l'analyse des �
     expect(three).toContain('id="v3"');
     expect(two).not.toContain('id="v3"');
   });
+  it("avec l'espace, le premier mois porte son « ? » vers « Rangs de mois » ; sans l'espace, aucun lien", () => {
+    const withHelp = renderToStaticMarkup(h(PickerForm, { path: "/p", loaded, columns: 2, slug: "demo" }));
+    expect(withHelp).toMatch(/Premier mois<a class="gloss-link" href="\/e\/demo\/glossaire#def-rangs-de-mois"/);
+    expect(withHelp.match(/gloss-link/g)).toHaveLength(1);
+    expect(renderToStaticMarkup(h(PickerForm, { path: "/p", loaded, columns: 2 }))).not.toContain("gloss-link");
+  });
   it("le libellé complet de la version choisie est répété en infobulle du champ", () => {
     const html = renderToStaticMarkup(h(PickerForm, { path: "/p", loaded, columns: 2 }));
     expect(html).toContain(`title="${long}"`);
@@ -351,17 +385,198 @@ describe("barre de filtres commune à l'écart budgétaire et à l'analyse des �
   });
 });
 
-describe("vocabulaire de l'analyse des écarts", () => {
-  it("les commentaires du tableau d'ETP parlent de « version 1 » et « version 2 », jamais de version A ou B", () => {
-    const ids = Object.keys(STEP_COMMENTS);
-    expect(ids.sort()).toEqual(["entrees-new", "entrees-report", "etp-change", "sorties", "sorties-deport"]);
-    for (const text of Object.values(STEP_COMMENTS)) {
-      expect(text).not.toMatch(/\b(version|versions) [AB]\b/);
-      expect(text).not.toMatch(/ (en|pendant|de) [AB]\b/);
-      expect(text).toMatch(/version [12]/);
+// Glossaire des écarts : chaque explication retirée des écrans y est (cas écrits à la main : les phrases d'origine, reprises).
+describe("glossaire des écarts", () => {
+  const entry = (id: string) => GLOSSARY_ECART.find((e) => e.id === id)!;
+  it("chaque identifiant vers lequel les écrans renvoient existe, une seule fois dans tout le glossaire", () => {
+    const ids = [...Object.values(ECART_TERMS), ...Object.values(STEP_TERMS)];
+    expect(ids.length).toBeGreaterThanOrEqual(22);
+    for (const id of ids) {
+      expect(glossaryEntry(id), id).toBeDefined();
+      expect(GLOSSARY.filter((e) => e.id === id), id).toHaveLength(1);
     }
-    expect(STEP_COMMENTS["entrees-new"]).toBe("Salariés présents dans la version 2 et jamais présents dans la version 1.");
-    expect(STEP_COMMENTS.sorties).toBe("Salariés présents dans la version 1 et jamais présents dans la version 2.");
+    expect(new Set(GLOSSARY_ECART.map((e) => e.id)).size).toBe(GLOSSARY_ECART.length);
+  });
+  it("les anciennes ancres #def-<id> sont conservées (mêmes identifiants que les définitions d'origine)", () => {
+    expect(ECART_DEFINITIONS.map((d) => d.id).sort()).toEqual(["cascade", "contributions", "ecart", "effectifs", "rubriques", "versions", "zoom"]);
+    for (const d of ECART_DEFINITIONS) expect(entry(d.id)?.family, d.id).toBe("Écarts");
+  });
+  it("un « ? » par palier de la cascade d'ETP : mêmes cinq paliers que les libellés de la cascade", () => {
+    expect(Object.keys(STEP_TERMS).sort()).toEqual(Object.keys(STEP_LABELS).sort());
+    expect(entry(STEP_TERMS["entrees-new"]).definition).toContain("présents dans la version 2 et jamais présents dans la version 1");
+    expect(entry(STEP_TERMS.sorties).definition).toContain("présents dans la version 1 et jamais présents dans la version 2");
+    expect(entry(STEP_TERMS["entrees-report"]).definition).toContain("plus de mois de présence dans la version 2 que dans la version 1");
+    expect(entry(STEP_TERMS["sorties-deport"]).definition).toContain("moins de mois de présence dans la version 2 que dans la version 1");
+    expect(entry(STEP_TERMS["etp-change"]).definition).toContain("quotité moyenne diffère");
+  });
+  it("vocabulaire : version 1 et version 2, jamais A ou B ; aucun terme interdit ni tutoiement", () => {
+    for (const e of GLOSSARY_ECART) {
+      const text = `${e.term} ${e.definition} ${e.formula ?? ""}`;
+      expect(text, e.id).not.toMatch(/\b(version|versions) [AB]\b/);
+      expect(text, e.id).not.toMatch(/ (en|pendant|de) [AB]\b/);
+      for (const w of ["outil observé", "cahier", "webinaire", "capture", " toi ", "avec toi", " tu "]) expect(text.toLowerCase(), `${e.id} : ${w}`).not.toContain(w);
+    }
+  });
+  it("écart, écart en pourcentage, poids : les règles écrites sous les tableaux sont déplacées", () => {
+    expect(entry("ecart").definition).toContain("valeur de la version suivante − valeur de la version précédente");
+    expect(entry("ecart").formula).toBe("écart = version suivante − version précédente");
+    expect(entry("ecart-pourcentage").definition).toContain("n.d. quand cette valeur est nulle");
+    expect(entry("ecart-pourcentage").definition).toContain("Une contribution d'ETP n'a pas de valeur de départ propre");
+    expect(entry("poids-ecarts").formula).toBe("poids = contribution ÷ écart total");
+    expect(entry("poids-ecarts").definition).toContain("écart total est nul");
+  });
+  it("courbes, cascades, axe ajusté, rangs de mois, pont, résiduel : les notes de lecture sont déplacées", () => {
+    const courbes = entry("ecart-courbes").definition;
+    for (const phrase of ["Trait plein : version 1", "zone teintée", "valeur du mois", "valeur de la période", "interrompt la courbe"]) expect(courbes, phrase).toContain(phrase);
+    expect(entry("axe-ajuste").definition).toContain("ne part pas de zéro");
+    expect(entry("axe-ajuste").definition).toContain("Axe tronqué à");
+    expect(entry("ecart-cascades").definition).toContain("départ + contributions (+ résiduel) = arrivée");
+    expect(entry("ecart-cascades").definition).toContain("Rubriques n.d.");
+    expect(entry("rangs-de-mois").definition).toContain("appliqués à l'année de chaque version");
+    expect(entry("pont-volume-cout").definition).toContain("effet de structure");
+    expect(entry("pont-volume-cout").formula).toContain("coût par ETP-mois v1");
+    expect(entry("residuel").definition).toContain("nul par construction");
+    expect(entry("analyse-ecarts").definition).toContain("réservé aux administrateurs et aux éditeurs");
+    expect(entry("zoom").definition).toContain("chevron");
+  });
+  it("« Voir aussi » : les graphiques et les tableaux renvoient à leurs définitions voisines (rubriques, effectifs, paliers, résiduel)", () => {
+    expect(entry("ecart-courbes").see).toEqual(expect.arrayContaining(["rubriques", "effectifs", "rangs-de-mois", "axe-ajuste"]));
+    expect(entry("contributions").see).toEqual(expect.arrayContaining(["rubriques", "residuel", "poids-ecarts"]));
+    expect(entry("cascade").see).toEqual(expect.arrayContaining(Object.values(STEP_TERMS)));
+    for (const id of Object.values(STEP_TERMS)) expect(entry(id).see, id).toEqual(["cascade"]);
+    for (const e of GLOSSARY_ECART) for (const id of e.see ?? []) {
+      expect(glossaryEntry(id), `${e.id} → ${id}`).toBeDefined();
+      expect(id, e.id).not.toBe(e.id);
+    }
+  });
+  it("couleurs : rouge = coût en hausse, vert = coût en baisse, effectifs neutres, la couleur n'est jamais seule", () => {
+    const d = entry("ecart-couleurs").definition;
+    expect(d).toContain("une hausse est une tendance défavorable, en rouge");
+    expect(d).toContain("une baisse est une tendance favorable, en vert");
+    expect(d).toContain("ne portent ni rouge ni vert");
+    expect(d).toContain("La couleur n'est jamais seule");
+  });
+});
+
+// Tendances : seules les rubriques qui sont des montants de coût portent rouge / vert (cas écrits à la main : écart de masse
+// 66 420,00 € → 69 970,00 € = +3 550,00 €, pourcentage 355 000 ÷ 6 642 000).
+describe("tendance des écarts de coût", () => {
+  const agg = (num: number, den = 1): Agg => ({ kind: "value", num, den });
+  const hausse = diff(agg(6642000), agg(6997000));
+  const baisse = diff(agg(6997000), agg(6642000));
+  const nul = diff(agg(6642000), agg(6642000));
+  it("masse chargée : une hausse est rouge (écart et pourcentage), une baisse verte, un écart nul neutre", () => {
+    expect(gapTone("masse", hausse)).toBe("bad");
+    expect(gapTone("masse", hausse, "pct")).toBe("bad");
+    expect(gapTone("masse", baisse)).toBe("good");
+    expect(gapTone("masse", baisse, "pct")).toBe("good");
+    expect(gapTone("masse", nul)).toBe("flat");
+    expect(gapTone("masse", nul, "pct")).toBe("flat");
+  });
+  it("toutes les rubriques en euros sont des coûts ; ETP, inscrits, entrées et sorties restent neutres même en hausse", () => {
+    const euros = (Object.keys(ROW_UNIT) as RowKey[]).filter((k) => ROW_UNIT[k] === "eur");
+    expect(euros.sort()).toEqual([...COST_ROWS].sort());
+    expect(euros).toHaveLength(8);
+    for (const k of euros) expect(gapTone(k, hausse), k).toBe("bad");
+    for (const k of ["etp", "headcount", "entrees", "sorties"] as RowKey[]) {
+      expect(isCostRow(k)).toBe(false);
+      expect(gapTone(k, diff(agg(61000, 10000), agg(64300, 10000))), k).toBe("flat");
+      expect(gapTone(k, diff(agg(64300, 10000), agg(61000, 10000)), "pct"), k).toBe("flat");
+    }
+  });
+  it("valeur n.d. ou sans objet : aucune couleur ; pourcentage n.d. (départ nul) : aucune couleur, l'écart de coût reste rouge", () => {
+    expect(gapTone("masse", diff({ kind: "nd", reason: "paie non clôturée" }, agg(100)))).toBe("flat");
+    expect(gapTone("autres", diff({ kind: "na" }, agg(100)))).toBe("flat");
+    const departNul = diff(agg(0), agg(120000));
+    expect(departNul).toMatchObject({ kind: "value", num: 120000, pct: null });
+    expect(gapTone("primes", departNul)).toBe("bad");
+    expect(gapTone("primes", departNul, "pct")).toBe("flat");
+  });
+  it("classe de la cellule : trend-bad / trend-good pour un coût, rien pour un écart neutre ; légende unique « Coût en hausse / Coût en baisse » avec son « ? »", () => {
+    expect(toneClass("num gap", "bad")).toBe("num gap trend-bad");
+    expect(toneClass("num gap", "good")).toBe("num gap trend-good");
+    expect(toneClass("num gap", "flat")).toBe("num gap");
+    const legend = renderToStaticMarkup(h(TrendLegend, { slug: "demo" }));
+    expect(legend).toContain('class="trend-legend ecart-legend"');
+    expect(legend).toContain('<i class="dot bad" aria-hidden="true"></i>Coût en hausse');
+    expect(legend).toContain('<i class="dot good" aria-hidden="true"></i>Coût en baisse');
+    expect(legend).toContain('href="/e/demo/glossaire#def-ecart-couleurs"');
+    expect(legend.match(/class="trend-legend/g)).toHaveLength(1);
+  });
+  it("cascade de masse : barres rouges / vertes ; cascade d'ETP : bleu et gris (AnalyseChart suit la tendance de chaque rubrique)", () => {
+    const etp = etpWaterfall({ kind: "value", months: 3, start: 61000, end: 64300, residual: 0, steps: [step("entrees-new", 3300), step("entrees-report", 0), step("sorties", -1200), step("sorties-deport", 800), step("etp-change", 400)] });
+    const masse = masseWaterfall({ kind: "value", start: 6642000, end: 6997000, residual: 0, steps: [{ key: "remun", label: "Rémunération de base", delta: 187500, reason: null }, { key: "primes", label: "Primes", delta: -100000, reason: null }, { key: "charges", label: "Charges", delta: 267500, reason: null }] });
+    const items = {
+      etp: { label: "ETP", title: "ETP", ariaLabel: "Cascade des ETP", startLabel: "A", endLabel: "B", trend: "neutral" as const, data: etp },
+      masse: { label: "Masse", title: "Masse", ariaLabel: "Cascade de la masse", startLabel: "A", endLabel: "B", trend: "cost" as const, data: masse },
+    };
+    const options = [{ key: "etp", label: "ETP" }, { key: "masse", label: "Masse salariale chargée" }];
+    const a = renderToStaticMarkup(h(AnalyseChart, { initial: "etp", options, items }));
+    expect(a).not.toContain("var(--bad)");
+    expect(a).not.toContain("var(--good)");
+    const b = renderToStaticMarkup(h(AnalyseChart, { initial: "masse", options, items }));
+    expect(b).toContain('fill="var(--bad)"');
+    expect(b).toContain('fill="var(--good)"');
+    expect(b).toContain("Hausse de coût");
+  });
+});
+
+// Moins de narratif : titre court + « ? », une seule ligne de contexte, plus de bloc de définitions ni de phrase sous les tableaux.
+describe("écrans sans narratif", () => {
+  const dir = "src/app/e/[slug]/studio-rh/masse-salariale";
+  const ecart = readFileSync(`${dir}/ecart/page.tsx`, "utf8");
+  const analyse = readFileSync(`${dir}/analyse/page.tsx`, "utf8");
+  it("l'en-tête ne répète plus le résumé du module sous le titre", () => {
+    const html = renderToStaticMarkup(h(MsHeader, { title: "Masse salariale", summary: "Brut, charges et coût chargé par mois." }));
+    expect(html).toContain("<h1>Masse salariale</h1>");
+    expect(html).not.toContain("Brut, charges");
+    expect(html).not.toContain('class="desc"');
+  });
+  it("titre de panneau : titre, « ? » vers le glossaire, et sous-titre seulement pour la ligne de contexte", () => {
+    const sans = renderToStaticMarkup(h(PanelTitle, { title: "Écart par rubrique", slug: "demo", term: ECART_TERMS.ecart, label: "Écart" }));
+    expect(sans).toContain("<h2>Écart par rubrique</h2>");
+    expect(sans).toContain('href="/e/demo/glossaire#def-ecart"');
+    expect(sans).not.toContain('class="desc"');
+    expect(renderToStaticMarkup(h(PanelTitle, { title: "Sans lien" }))).not.toContain("gloss-link");
+  });
+  it("plus de bloc « Définitions et règles de calcul », d'ancres #def- locales ni d'import des définitions", () => {
+    for (const src of [ecart, analyse]) {
+      expect(src).not.toContain("Définitions et règles de calcul");
+      expect(src).not.toContain("ECART_DEFINITIONS");
+      expect(src).not.toContain('href="#def-');
+      expect(src).not.toContain("ecart-defs");
+    }
+  });
+  it("phrases d'explication retirées (écart, pourcentage, poids, rangs de mois, axe, flèche, pont)", () => {
+    for (const phrase of ["Écart = version suivante", "Écart (%) = écart ÷", "Poids = contribution", "La flèche indique seulement", "rangs de mois appliqués", "Le graphique est une lecture", "Le même écart de masse, en deux effets", "Valeurs exactes", "Nul par construction", "Somme des contributions et du résiduel", "écart d'ETP-mois", "Un écart souligné en pointillés"]) {
+      expect(ecart, phrase).not.toContain(phrase);
+      expect(analyse, phrase).not.toContain(phrase);
+    }
+    expect(analyse).not.toContain("Commentaire");
+    expect(analyse).not.toContain("STEP_COMMENTS");
+  });
+  it("la ligne qui répétait versions → période → service sous le formulaire n'existe plus ; la chaîne de versions reste dans le détail par salarié", () => {
+    expect(ecart).not.toContain("ecart-selection");
+    expect(analyse).not.toContain("analyse-context");
+    expect(analyse).not.toContain("VersionChain");
+    expect(ecart.match(/<VersionChain/g)).toHaveLength(1); // détail par salarié : la paire de versions peut être 2 → 3
+    expect(analyse).toContain('data-testid="analyse-vers-ecart"');
+    expect(ecart.match(/<PickerForm[^>]*slug=\{slug\}/g)).toHaveLength(1);
+    expect(analyse.match(/<PickerForm[^>]*slug=\{slug\}/g)).toHaveLength(1);
+  });
+  it("une seule légende de tendance par page : le détail par salarié ou le pont ne la répètent que si le tableau précédent est absent", () => {
+    expect(ecart.match(/<TrendLegend/g)).toHaveLength(2); // tableau d'écart ; détail par salarié
+    expect(ecart).toContain("{!showTable && <TrendLegend slug={slug} />}");
+    expect(analyse.match(/<TrendLegend/g)).toHaveLength(2); // tableau de masse ; pont
+    expect(analyse).toContain("!legendInMasse && <TrendLegend");
+  });
+  it("tendances branchées : écart et pourcentage des coûts via gapTone, ETP neutre, cascades de masse et pont en « cost »", () => {
+    expect(ecart).toContain('gapTone(r.key, g)');
+    expect(ecart).toContain('gapTone(r.key, g, "pct")');
+    expect(ecart).toContain("costTone(r.d)"); // détail par salarié : écart de coût de chaque ligne
+    expect(analyse).toContain('trend: "cost"');
+    expect(analyse).toContain('trend="cost"');
+    expect(analyse).toContain('trend: "neutral"');
   });
 });
 
@@ -374,6 +589,12 @@ describe("pages « Prévu » de la masse salariale", () => {
   });
   it("aucun terme interdit dans l'interface (outil observé, cahier, webinaire, capture, recette juridique, tutoiement, « rien n'est simulé »)", () => {
     for (const w of ["outil observé", "cahier", "webinaire", "capture", "recette juridique", "rien n'est simulé", " toi ", "avec toi", "tu "]) expect(src.toLowerCase()).not.toContain(w);
+  });
+  it("pages courtes : phrase d'état d'une ligne, textes des liens et des points ouverts en quelques mots", () => {
+    for (const l of [...src.matchAll(/lead: "([^"]+)"/g)].map((m) => m[1])) expect(l.length).toBeLessThanOrEqual(170);
+    for (const t of [...src.matchAll(/ text: "([^"]+)"/g)].map((m) => m[1])) expect(t.length).toBeLessThanOrEqual(80);
+    for (const o of [...src.matchAll(/open: \["([^"]+)"\]/g)].map((m) => m[1])) expect(o.length).toBeLessThanOrEqual(110);
+    expect([...src.matchAll(/open: \[/g)]).toHaveLength(4);
   });
   it("le titre de la page écrit « Masse salariale par organisation » en toutes lettres (l'onglet garde « MS »)", () => {
     expect(src).toContain('"Masse salariale par organisation"');

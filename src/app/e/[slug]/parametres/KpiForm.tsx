@@ -1,5 +1,5 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, type ReactNode } from "react";
 import type { OriginKind } from "../donnees/ui";
 import { Feedback } from "./Feedback";
 import { saveKpiSettings } from "./actions";
@@ -16,6 +16,8 @@ type Values = {
   absenceStatuses: string[];
   dayBasis: string;
 };
+// Liens « ? » vers le glossaire, rendus par la page (composant serveur) : le glossaire n'est pas embarqué dans ce composant client.
+export type KpiHelpKey = "etp" | "turnover" | "sortiesNonComptees" | "absenceTypes" | "absenceStatuts" | "absenceBase";
 export type KpiFormProps = {
   slug: string;
   values: Values;
@@ -27,6 +29,7 @@ export type KpiFormProps = {
   readLabel: string | null; // « lecture du 21/10/2026 » ; null si aucune lecture PayFit appliquée
   statuses: { code: string; label: string }[];
   disabled: boolean;
+  helps?: Partial<Record<KpiHelpKey, ReactNode>>;
 };
 
 // Origine d'une règle : rien pour un défaut validé (dit une fois par carte), sa mention pour une exception (modifiée, proposée, illisible).
@@ -39,11 +42,19 @@ function Origin({ id, name, kinds, origins }: { id: string; name: string; kinds:
   );
 }
 
+// Titre d'une règle : le « ? » du glossaire reste hors du libellé qui nomme le groupe (aria-labelledby).
+const ItemHead = ({ id, title, help }: { id: string; title: string; help?: ReactNode }) => (
+  <span className="pm-item-head">
+    <span className="pm-item-title" id={id}>{title}</span>
+    {help}
+  </span>
+);
+
 // Phrase unique d'une carte : l'origine des défauts validés.
 const CardNote = ({ id, text }: { id: string; text: string | null }) =>
   text ? <p className="desc pm-origin pm-card-note" data-testid={`setting-kpi-defaults-${id}`}>{text}</p> : null;
 
-export function KpiForm({ slug, values, origins, kinds, notes, natures, types, readLabel, statuses, disabled }: KpiFormProps) {
+export function KpiForm({ slug, values, origins, kinds, notes, natures, types, readLabel, statuses, disabled, helps = {} }: KpiFormProps) {
   const [state, action, pending] = useActionState(saveKpiSettings.bind(null, slug), undefined);
   return (
     <form className="form" action={action}>
@@ -51,33 +62,33 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
 
       <div className="pm-cols">
         <fieldset className="pm-card" disabled={disabled}>
-          <legend className="label">ETP contractuel</legend>
+          <legend className="label">ETP contractuel{helps.etp}</legend>
           <div className="pm-card-body">
             <CardNote id="etp" text={notes.etp} />
             <div className="pm-item">
               <label className="check">
                 <input type="checkbox" name="fullTimeIsOne" defaultChecked={values.fullTimeIsOne} data-testid="setting-kpi-etp-full-time" />
-                <span>Un contrat à temps plein vaut 1 ETP quelle que soit sa durée (39 h = 1 ; forfait jours à temps plein = 1). PayFit : indicateur « temps plein » ; DSN : modalité S21.G00.40.014 = 10.</span>
+                <span>Un contrat à temps plein vaut 1 ETP, quelle que soit sa durée</span>
               </label>
               <Origin id="etp-full-time" name="fullTimeIsOne" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item">
               <label className="check">
                 <input type="checkbox" name="capAtOne" defaultChecked={values.capAtOne} data-testid="setting-kpi-etp-cap" />
-                <span>Un contrat ne vaut jamais plus de 1 ETP (rapport supérieur à 1 ramené à 1 et signalé).</span>
+                <span>Un contrat ne vaut jamais plus de 1 ETP</span>
               </label>
               <Origin id="etp-cap" name="capAtOne" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item">
               <label className="check">
                 <input type="checkbox" name="forfaitJoursIsOne" defaultChecked={values.forfaitJoursIsOne} data-testid="setting-kpi-etp-forfait-jours" />
-                <span>PayFit : un contrat au forfait jours sans quotité ni indicateur « temps plein » renseignés vaut 1 ETP (signalé dans le détail). Un indicateur « temps plein » à non reste n.d.</span>
+                <span>PayFit : un contrat au forfait jours sans quotité ni indicateur « temps plein » vaut 1 ETP</span>
               </label>
               <Origin id="etp-forfait-jours" name="forfaitJoursIsOne" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item">
               <div className="field-row pm-field-narrow">
-                <label htmlFor="etpDecimals">Décimales de la quotité de chaque contrat (arrondie avant la somme)</label>
+                <label htmlFor="etpDecimals">Décimales de la quotité de chaque contrat</label>
                 <select className="select" id="etpDecimals" name="etpDecimals" defaultValue={String(values.etpDecimals)} data-testid="setting-kpi-etp-decimals">
                   <option value="2">2</option>
                   <option value="3">3</option>
@@ -90,7 +101,7 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
         </fieldset>
 
         <fieldset className="pm-card" disabled={disabled}>
-          <legend className="label">Turnover</legend>
+          <legend className="label">Turnover{helps.turnover}</legend>
           <div className="pm-card-body">
             <CardNote id="turnover" text={notes.turnover} />
             <div className="pm-item">
@@ -107,13 +118,12 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
             <div className="pm-item">
               <label className="check">
                 <input type="checkbox" name="neutralizeContinuity" defaultChecked={values.neutralizeContinuity} data-testid="setting-kpi-turnover-continuity" />
-                <span>Contrats continus neutralisés : fin le jour J et nouveau contrat de la même personne le jour J+1 (ex. CDD → CDI), les deux de natures comptées : ni sortie, ni entrée.</span>
+                <span>Contrats continus neutralisés : ni sortie, ni entrée</span>
               </label>
               <Origin id="turnover-continuity" name="neutralizeContinuity" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item" role="group" aria-labelledby="kpi-excluded-title">
-              <span className="pm-item-title" id="kpi-excluded-title">Sorties non comptées au turnover, par nature</span>
-              <p className="desc">Le motif DSN n'est pas utilisé : PayFit ne le fournit pas. Aucune nature cochée : toutes les sorties comptent.</p>
+              <ItemHead id="kpi-excluded-title" title="Sorties non comptées au turnover, par nature" help={helps.sortiesNonComptees} />
               <div className="pm-checks pm-chips">
                 {natures.map((n) => (
                   <label key={n.code} className="check">
@@ -132,13 +142,11 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
           <div className="pm-card-body">
             <CardNote id="absence" text={notes.absence} />
             <div className="pm-item" role="group" aria-labelledby="kpi-types-title">
-              <span className="pm-item-title" id="kpi-types-title">Types d'absence comptés</span>
+              <ItemHead id="kpi-types-title" title="Types d'absence comptés" help={helps.absenceTypes} />
               {readLabel === null ? (
-                <p className="desc" data-testid="setting-kpi-types-empty">
-                  Aucune lecture PayFit appliquée : les types ne peuvent pas encore être choisis ; en DSN, les arrêts ne sont pas extraits.
-                </p>
+                <p className="desc" data-testid="setting-kpi-types-empty">Aucune lecture PayFit appliquée : aucun type à choisir. DSN : arrêts non extraits.</p>
               ) : (
-                <p className="desc">Types présents dans la {readLabel}, avec leur nombre d'absences.</p>
+                <p className="desc">Types de la {readLabel}.</p>
               )}
               <div className="pm-checks">
                 {types.map((t) => (
@@ -151,12 +159,11 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
                   </label>
                 ))}
               </div>
-              {values.absenceTypes.length === 0 && <p className="desc">Aucun type choisi : l'absentéisme est n.d.</p>}
+              {values.absenceTypes.length === 0 && <p className="desc">Aucun type choisi : absentéisme n.d.</p>}
               <Origin id="absence-types" name="absenceTypes" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item" role="group" aria-labelledby="kpi-statuses-title">
-              <span className="pm-item-title" id="kpi-statuses-title">Statuts PayFit comptés</span>
-              <p className="desc">Une absence sans statut n'est jamais comptée : le taux devient « ≥ x ».</p>
+              <ItemHead id="kpi-statuses-title" title="Statuts PayFit comptés" help={helps.absenceStatuts} />
               <div className="pm-checks pm-chips">
                 {statuses.map((s) => (
                   <label key={s.code} className="check">
@@ -168,14 +175,14 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
               <Origin id="absence-statuses" name="absenceStatuses" kinds={kinds} origins={origins} />
             </div>
             <div className="pm-item" role="group" aria-labelledby="kpi-basis-title">
-              <span className="pm-item-title" id="kpi-basis-title">Base de comptage des jours</span>
+              <ItemHead id="kpi-basis-title" title="Base de comptage des jours" help={helps.absenceBase} />
               <label className="check">
                 <input type="radio" name="dayBasis" value="calendar" defaultChecked={values.dayBasis === "calendar"} data-testid="setting-kpi-absence-basis" />
                 <span>Jours calendaires</span>
               </label>
               <label className="check">
                 <input type="radio" name="dayBasis" value="weekdays" defaultChecked={values.dayBasis === "weekdays"} />
-                <span>Jours du lundi au vendredi (aucun jour férié n'est connu de l'application)</span>
+                <span>Jours du lundi au vendredi</span>
               </label>
               <Origin id="absence-basis" name="dayBasis" kinds={kinds} origins={origins} />
             </div>

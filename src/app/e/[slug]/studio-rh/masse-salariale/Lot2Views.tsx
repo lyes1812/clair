@@ -1,11 +1,13 @@
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { formatMonth } from "@/lib/dates";
+import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { servicesOf, shiftYear, windowPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
 import { comptaGap, labelTotals, operatingRevenue, provisionMonth, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
 import { fmtPercent } from "@/lib/rh/kpi/format";
-import { brutParts, capital, euros, eurosSigned, fixeVariableMonths, fixeVariableSeries, hueReuseNote, monthsAxis, ndNote, noPeriod, pluriel, primesSeries, provisionParts, provisionTotals, reasonText, reconMonthSeries, reconRubricChart, type PrimesMonth } from "@/lib/viz/masse";
-import { ChartGuard, GraphFoot, monthlyNote, NdLines, NdState, PanelHead, ScrollTable, Tile, type Affichage } from "./components";
+import { brutParts, capital, euros, eurosSigned, fixeVariableMonths, fixeVariableSeries, hasNd, monthsAxis, noPeriod, numTrend, pluriel, primesSeries, provisionParts, provisionTotals, reasonText, reconMonthSeries, reconRubricChart, trendOf, type PrimesMonth } from "@/lib/viz/masse";
+import { ChartGuard, GraphFoot, NdKey, NdLines, NdState, PanelHead, ScrollTable, Tile, type Affichage } from "./components";
 
 const lowerMonth = (m: string) => formatMonth(m).toLowerCase();
 // Écart en % : « n.d. » avec sa raison quand la valeur de départ est nulle ou négative ; le moins est le vrai signe moins.
@@ -19,7 +21,7 @@ const ndReasons = (reasons: (string | null | undefined)[]) => {
 };
 
 // --- Onglet « Fixe & variable » : brut par rubrique et par libellé de paie PayFit, N et N-1, primes par famille et par mois.
-export function FixeVariableView({ input, months, prevMonths, aff = "tout", tableHref = "" }: { input: JournalInput; months: string[]; prevMonths: string[]; aff?: Affichage; tableHref?: string }) {
+export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout", tableHref = "" }: { slug?: string; input: JournalInput; months: string[]; prevMonths: string[]; aff?: Affichage; tableHref?: string }) {
   const cur = windowPayroll(input, months);
   const prev = windowPayroll(input, prevMonths);
   const showGraph = aff !== "tableau";
@@ -42,7 +44,6 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
         unit="eur"
         mode="stacked"
         toggle
-        note={["Fixe + variable + gratifications de stage = brut du mois.", monthlyNote(open, fvSeries)].filter(Boolean).join(" ")}
       />
     </ChartGuard>
   );
@@ -52,7 +53,7 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
         <NdState testid="fv-nd" reason={capital(cur.nd.reason)} />
         {showGraph && (
           <section className="panel" data-testid="fv-graphs">
-            <PanelHead title="Graphiques" desc="Brut par nature, mois par mois ; montants en euros. La raison de chaque mois n.d. est écrite plus haut." />
+            <PanelHead title="Graphiques" slug={slug} term={MASSE_TERMS.graphiques} />
             <div className="ms-charts"><div className="ms-chart wide">{monthsChart}</div></div>
           </section>
         )}
@@ -70,7 +71,8 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
   const families = n.filter((t) => t.rubric === "primes").sort((a, b) => a.label.localeCompare(b.label));
   // Une rubrique sans aucune ligne dans le journal sur la période : le zéro est dit « aucune ligne », pas présenté comme un montant lu.
   const hasStages = n.some((t) => t.rubric === "stages");
-  const tile = (id: string, label: string, a: number | null, b: number | null, foot: string, sub = false) => (
+  // Tuile : montant, N-1, puis l'écart de ce coût (rouge si en hausse, vert si en baisse ; le % n'est coloré que s'il est défini).
+  const tile = (id: string, label: string, a: number | null, b: number | null, foot: string | undefined, term: string, sub = false) => (
     <Tile
       testid={`fv-tile-${id}`}
       label={label}
@@ -78,8 +80,18 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
       value={a === null ? "n.d." : euros(a)}
       nd={a === null}
       lead={foot}
-      compare={<span className="tile-foot">N-1 : {b === null ? "n.d." : euros(b)}{a !== null && b !== null ? ` · écart ${eurosSigned(a - b)} · ${pct(a, b)}` : ""}</span>}
-      def="fixe-variable"
+      compare={
+        <span className="tile-foot">
+          N-1 : {b === null ? "n.d." : euros(b)}
+          {a !== null && b !== null && (
+            <>
+              {" "}· écart <span className={`ms-delta ${trendOf(a - b)}`.trim()}>{eurosSigned(a - b)}</span> · <span className={b > 0 ? trendOf(a - b) : undefined}>{pct(a, b)}</span>
+            </>
+          )}
+        </span>
+      }
+      def={term}
+      slug={slug}
     />
   );
   // Primes par famille et par mois : une seule lecture des lignes de chaque mois pour le tableau et pour le graphique.
@@ -96,22 +108,24 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
   // Les primes tiennent dans une demi-largeur tant que les colonnes y écrivent leurs montants (neuf mois au plus), à côté de l'anneau.
   const half = families.length > 0 && months.length <= 9;
   const half2 = half ? "ms-chart" : "ms-chart wide";
+  // Clé de lecture des n.d. : écrite une fois sous les graphiques, seulement si l'un d'eux en contient un.
+  const anyNd = [fvSeries, ...(families.length > 0 && families.length <= 8 ? [primesSeriesList] : [])].some(hasNd);
   return (
     <>
       <section className="panel">
-        <PanelHead title="Fixe et variable" desc="Brut de la période par nature, comparé à la même période un an plus tôt (N-1) ; chaque chiffre renvoie à sa définition." />
+        <PanelHead title="Fixe et variable" slug={slug} term={MASSE_TERMS.fixeVariable} />
         <dl className="facts ms-tiles four">
-          {tile("fixe", "Fixe (salaires et congés payés)", fixe(cur), fixe(prev), "rubrique « Salaires et appointements »")}
-          {tile("variable", "Variable (primes et indemnités)", variable(cur), variable(prev), "rubriques « Primes » et « Indemnités et avantages »")}
-          {tile("primes", "dont primes", cur.byRubric.primes, prev.kind === "value" ? prev.byRubric.primes : null, `part du variable · ${families.length ? `${pluriel(families.length, "famille")} : ${families.map((f) => f.label).join(", ")}` : "aucune famille"}`, true)}
-          {tile("stages", "Gratifications de stage", cur.byRubric.stages, prev.kind === "value" ? prev.byRubric.stages : null, hasStages ? "rubrique à part, comptée dans le brut" : "rubrique à part, comptée dans le brut ; aucune ligne dans le journal sur la période")}
+          {tile("fixe", "Fixe (salaires et congés payés)", fixe(cur), fixe(prev), undefined, MASSE_TERMS.fixeVariable)}
+          {tile("variable", "Variable (primes et indemnités)", variable(cur), variable(prev), undefined, MASSE_TERMS.fixeVariable)}
+          {tile("primes", "dont primes", cur.byRubric.primes, prev.kind === "value" ? prev.byRubric.primes : null, families.length ? `${pluriel(families.length, "famille")} : ${families.map((f) => f.label).join(", ")}` : "aucune famille", MASSE_TERMS.primes, true)}
+          {tile("stages", "Gratifications de stage", cur.byRubric.stages, prev.kind === "value" ? prev.byRubric.stages : null, hasStages ? undefined : "aucune ligne dans le journal sur la période", MASSE_TERMS.stages)}
         </dl>
         <NdLines lines={prevNd ? [`N-1 (${prevMonths[0]} → ${prevMonths.at(-1)}) : ${prevNd}`] : []} testid="fv-tiles-nd" />
       </section>
 
       {showGraph && (
         <section className="panel" data-testid="fv-graphs">
-          <PanelHead title="Graphiques" desc={`Brut par nature, mois par mois et sur la période ; montants en euros.`} />
+          <PanelHead title="Graphiques" slug={slug} term={MASSE_TERMS.graphiques} />
           <div className="ms-charts">
             <div className="ms-chart wide">{monthsChart}</div>
             <div className={half2}>
@@ -122,7 +136,7 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
                 parts={brutParts(brutSplit)}
                 unit="eur"
                 centerLabel="brut"
-                note={omittedParts.length ? `Nature sans montant positif, absente de l'anneau : ${omittedParts.join(" ; ")}. Les parts sont calculées sur les natures tracées.` : undefined}
+                note={omittedParts.length ? `Hors anneau (montant nul ou négatif) : ${omittedParts.join(" ; ")}. Parts calculées sur les natures tracées.` : undefined}
               />
             </div>
             {families.length > 0 && (
@@ -138,24 +152,20 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
                     unit="eur"
                     mode="stacked"
                     toggle
-                    note={[
-                      "Familles = libellés des lignes de prime du journal PayFit.",
-                      noPrimeMonths.length ? "Un mois sans colonne n'a aucune prime (0,00 €) : il n'est pas absent." : "",
-                      hueReuseNote(families.length, "familles", "fixe, variable, gratifications de stage"),
-                      monthlyNote(open, primesSeriesList),
-                    ].filter(Boolean).join(" ")}
+                    note={noPrimeMonths.length ? "Mois sans colonne : aucune prime (0,00 €)." : undefined}
                   />
                 ) : (
                   <NdState
                     testid="fv-chart-primes-nd"
                     heading={`Répartition mensuelle des primes, ${year}`}
                     title="Graphique non tracé"
-                    reason={<>Plus de huit familles de prime : l'empilement par mois ne tient plus lisiblement dans les huit teintes de la charte. Les montants de chaque famille, mois par mois, sont dans le tableau « Primes par famille et par mois » (affichage <a href={tableHref}>Tableau</a>).</>}
+                    reason={<>Plus de huit familles de prime : graphique non tracé. Montants dans le tableau « Primes par famille et par mois » (affichage <a href={tableHref}>Tableau</a>).</>}
                   />
                 )}
               </div>
             )}
           </div>
+          {anyNd && <NdKey />}
           <GraphFoot aff={aff} tableHref={tableHref} />
         </section>
       )}
@@ -163,7 +173,7 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
       {showTable && (
         <>
           <section className="panel">
-            <PanelHead title="Fixe et variable par mois" desc="Brut de chaque mois par nature : fixe + variable + gratifications de stage = brut ; « dont primes » est une part de la colonne Variable." />
+            <PanelHead title="Fixe et variable par mois" slug={slug} term={MASSE_TERMS.fixeVariable} />
             <ScrollTable label="Tableau du fixe et du variable par mois">
               <table className="data-table sticky sticky-first ms-table" data-testid="fv-months">
                 <caption className="ms-sr">Brut par mois : fixe, variable, dont primes, gratifications de stage</caption>
@@ -203,11 +213,11 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
             {ndReasons(fvMonths.map((m) => (m.kind === "nd" ? `${formatMonth(m.month)} : ${m.reason}` : null)))}
           </section>
           <section className="panel">
-            <PanelHead title="Brut par libellé de paie" desc="Libellés des lignes du journal PayFit, classés par la grille de comptes." />
+            <PanelHead title="Brut par libellé de paie" slug={slug} term={MASSE_TERMS.grille} />
             <ScrollTable label="Tableau du brut par libellé de paie">
               <table className="data-table sticky sticky-first ms-table" data-testid="fv-labels">
                 <caption className="ms-sr">Brut par libellé de paie, période et N-1</caption>
-                <thead><tr><th scope="col">Libellé (PayFit)</th><th scope="col" className="num">{year}</th><th scope="col" className="num n1">N-1</th><th scope="col" className="num">Écart €</th><th scope="col" className="num">Écart %</th><th scope="col">Rubrique</th></tr></thead>
+                <thead><tr><th scope="col">Libellé (PayFit)</th><th scope="col" className="num">{year}</th><th scope="col" className="num n1">N-1</th><th scope="col" className="num">Écart</th><th scope="col" className="num">Écart (%)</th><th scope="col">Rubrique</th></tr></thead>
                 <tbody>
                   {keys.map((t) => {
                     const k = t.key;
@@ -218,24 +228,24 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
                         <th scope="row" className="wrap">{t.label}</th>
                         <td className="num" data-col="n">{euros(a)}</td>
                         <td className="num n1" data-col="n1">{prev.kind === "value" ? euros(b) : "n.d."}</td>
-                        <td className="num">{prev.kind === "value" ? eurosSigned(a - b) : "n.d."}</td>
-                        <td className="num">{prev.kind === "value" ? pct(a, b) : "n.d."}</td>
+                        <td className={numTrend(prev.kind === "value" ? a - b : null)}>{prev.kind === "value" ? eurosSigned(a - b) : "n.d."}</td>
+                        <td className={numTrend(prev.kind === "value" && b > 0 ? a - b : null)}>{prev.kind === "value" ? pct(a, b) : "n.d."}</td>
                         <td>{rubricLabel(t.rubric)}</td>
                       </tr>
                     );
                   })}
                 </tbody>
                 <tfoot>
-                  <tr className="total" data-testid="fv-labels-total"><th scope="row">Brut</th><td className="num" data-col="n">{euros(cur.brut)}</td><td className="num n1">{prev.kind === "value" ? euros(prev.brut) : "n.d."}</td><td className="num">{prev.kind === "value" ? eurosSigned(cur.brut - prev.brut) : "n.d."}</td><td className="num">{prev.kind === "value" ? pct(cur.brut, prev.brut) : "n.d."}</td><td /></tr>
+                  <tr className="total" data-testid="fv-labels-total"><th scope="row">Brut</th><td className="num" data-col="n">{euros(cur.brut)}</td><td className="num n1">{prev.kind === "value" ? euros(prev.brut) : "n.d."}</td><td className={numTrend(prev.kind === "value" ? cur.brut - prev.brut : null)}>{prev.kind === "value" ? eurosSigned(cur.brut - prev.brut) : "n.d."}</td><td className={numTrend(prev.kind === "value" && prev.brut > 0 ? cur.brut - prev.brut : null)}>{prev.kind === "value" ? pct(cur.brut, prev.brut) : "n.d."}</td><td /></tr>
                 </tfoot>
               </table>
             </ScrollTable>
             {ndReasons([prevNd && `N-1 (${prevMonths[0]} → ${prevMonths.at(-1)}) : ${prevNd}`])}
           </section>
           <section className="panel">
-            <PanelHead title="Primes par famille et par mois" desc="Une colonne par famille de prime (libellé de paie du journal PayFit) ; le total des primes est la colonne « dont primes » du tableau précédent." />
+            <PanelHead title="Primes par famille et par mois" slug={slug} term={MASSE_TERMS.primes} />
             {families.length === 0 ? (
-              <p className="desc">Aucune prime sur la période (rubrique « Primes » de la grille de comptes).</p>
+              <p className="desc">Aucune prime sur la période.</p>
             ) : (
               <ScrollTable label="Tableau des primes par famille et par mois">
                 <table className="data-table sticky sticky-first ms-table" data-testid="fv-primes-months">
@@ -265,8 +275,7 @@ export function FixeVariableView({ input, months, prevMonths, aff = "tout", tabl
             )}
             {ndReasons(primesMonths.map((m) => (m.kind === "nd" ? `${formatMonth(m.month)} : ${m.reason}` : null)))}
             <p className="tile-foot ms-note" data-testid="fv-non-recurrents">
-              Éléments non récurrents (indemnités de rupture conventionnelle, indemnités compensatrices de congés payés) : non distingués par le journal PayFit, qui les passe avec
-              les autres lignes du compte 6414 « Indemnités et avantages divers » ; ils restent dans la rubrique « Indemnités et avantages ».
+              Éléments non récurrents (ruptures conventionnelles, indemnités compensatrices de congés payés) : non distingués par le journal PayFit, ils restent dans la rubrique « Indemnités et avantages ».
             </p>
           </section>
         </>
@@ -302,10 +311,15 @@ export function PaieComptaView(props: {
   // Raisons des n.d. de la provision : mois n.d., ou part (congés, charges) n.d. — le total l'est alors aussi.
   const why = (x: ProvisionMonth, m: string) => (x.kind === "nd" ? `${m} : ${x.reason}` : x.missing.length ? `${m} : ${x.missing.join(" ; ")}` : null);
   const totalOf = (x: ProvisionMonth) => (x.kind === "value" ? x.total : null);
-  const gapOf = (a: ProvisionMonth, b: ProvisionMonth) => {
+  // Écart de provision entre deux fins de mois (centimes) ; null si l'un des deux totaux est n.d.
+  const gapC = (a: ProvisionMonth, b: ProvisionMonth) => {
     const ta = totalOf(a);
     const tb = totalOf(b);
-    return ta === null || tb === null ? "n.d." : eurosSigned(ta - tb);
+    return ta === null || tb === null ? null : ta - tb;
+  };
+  const gapOf = (a: ProvisionMonth, b: ProvisionMonth) => {
+    const g = gapC(a, b);
+    return g === null ? "n.d." : eurosSigned(g);
   };
   const services = fullInput.serviceAxis ? servicesOf(fullInput, [last, shiftYear(last, -1)]) : [];
   const recon = serviceFiltered ? null : compta.source ? reconcile(fullInput, compta.lines, compta.months, months, compta.nd) : null;
@@ -348,7 +362,7 @@ export function PaieComptaView(props: {
   return (
     <>
       <section className="panel" data-testid="pc-provision">
-        <PanelHead title="Que doit l'entreprise en congés payés ?" desc="Provision à fin de mois, charges sociales comprises ; comparée à la même fin de mois un an plus tôt (N-1)." />
+        <PanelHead title="Que doit l'entreprise en congés payés ?" slug={slug} term={MASSE_TERMS.provision} />
         {(() => {
           const tile = (
             <dl className="facts ms-tiles single">
@@ -360,8 +374,18 @@ export function PaieComptaView(props: {
                 nd={totalOf(cur) === null}
                 ndLong
                 lead={`congés payés ${show(cur, (v) => v.conges)} + charges sociales ${show(cur, (v) => v.charges)}`}
-                compare={<span className="tile-foot" data-testid="pc-tile-provision-n1">fin {lowerMonth(shiftYear(last, -1))} : {totalOf(n1) === null ? `n.d. — ${why(n1, shiftYear(last, -1))}` : euros(totalOf(n1)!)}{totalOf(cur) !== null && totalOf(n1) !== null ? ` · écart ${gapOf(cur, n1)}` : ""}</span>}
-                def="provision"
+                compare={
+                  <span className="tile-foot" data-testid="pc-tile-provision-n1">
+                    fin {lowerMonth(shiftYear(last, -1))} : {totalOf(n1) === null ? `n.d. — ${why(n1, shiftYear(last, -1))}` : euros(totalOf(n1)!)}
+                    {totalOf(cur) !== null && totalOf(n1) !== null && (
+                      <>
+                        {" "}· écart <span className={`ms-delta ${trendOf(gapC(cur, n1))}`.trim()}>{gapOf(cur, n1)}</span>
+                      </>
+                    )}
+                  </span>
+                }
+                def={MASSE_TERMS.provision}
+                slug={slug}
               />
             </dl>
           );
@@ -378,7 +402,6 @@ export function PaieComptaView(props: {
                 unit="eur"
                 mode="stacked"
                 toggle
-                note={["Congés payés + charges sociales = provision du mois.", provParts.some((s) => s.values.some((v) => v === null)) ? "Une part n.d. (sans ligne de dotation « Mois courant ») n'est pas tracée et rend le total n.d." : ""].filter(Boolean).join(" ")}
               />
             </ChartGuard>
           );
@@ -407,7 +430,6 @@ export function PaieComptaView(props: {
                     categoryTitles={axisBoth.titles}
                     series={provTotals}
                     unit="eur"
-                    note={ndNote(provTotals, "courbe") || undefined}
                   />
                 </ChartGuard>
               </div>
@@ -415,6 +437,7 @@ export function PaieComptaView(props: {
           );
         })()}
         {showGraph && !showTable && ndReasons(months.flatMap((m, i) => [why(provCur[i], m), why(provPrev[i], shiftYear(m, -1))]))}
+        {showGraph && [provParts, provTotals].some(hasNd) && <NdKey />}
         {showGraph && <GraphFoot aff={aff} tableHref={tableHref} />}
         {showTable && (
           <>
@@ -431,7 +454,7 @@ export function PaieComptaView(props: {
                         <th scope="row">{formatMonth(m)}</th>
                         <td className="num" data-col="total">{show(a, (v) => v.total)}</td>
                         <td className="num n1" data-col="total-n1">{show(b, (v) => v.total)}</td>
-                        <td className="num">{gapOf(a, b)}</td>
+                        <td className={numTrend(gapC(a, b))}>{gapOf(a, b)}</td>
                         <td className="num">{show(a, (v) => v.conges)}</td>
                         <td className="num">{show(a, (v) => v.charges)}</td>
                       </tr>
@@ -456,7 +479,7 @@ export function PaieComptaView(props: {
                             <th scope="row">{s ?? "Non ventilé"}</th>
                             <td className="num" data-col="total">{show(a, (v) => v.total)}</td>
                             <td className="num n1">{show(b, (v) => v.total)}</td>
-                            <td className="num">{gapOf(a, b)}</td>
+                            <td className={numTrend(gapC(a, b))}>{gapOf(a, b)}</td>
                             <td className="num">{show(a, (v) => v.conges)}</td>
                             <td className="num">{show(a, (v) => v.charges)}</td>
                           </tr>
@@ -473,7 +496,7 @@ export function PaieComptaView(props: {
       </section>
 
       <section className="panel" data-testid="pc-recon">
-        <PanelHead title="Comptabilité" desc="Rapprochement des comptes 63 et 64 du journal de paie avec la comptabilité (mêmes mois, même grille), puis poids de la masse salariale dans les produits d'exploitation." />
+        <PanelHead title="Comptabilité" slug={slug} term={MASSE_TERMS.rapprochement} />
         {serviceFiltered ? (
           <NdState
             testid="pc-recon-nd"
@@ -500,7 +523,6 @@ export function PaieComptaView(props: {
                           categoryTitles={reconAxis.titles}
                           series={reconMonthSeries(recon.months)}
                           unit="eur"
-                          note="Écart = journal de paie − comptabilité (dans le tableau)."
                         />
                       </div>
                       <div className="ms-chart">
@@ -512,7 +534,6 @@ export function PaieComptaView(props: {
                           categoryTitles={reconRubrics.titles}
                           series={reconRubrics.series}
                           unit="eur"
-                          note="Écart par rubrique = journal de paie − comptabilité ; noms complets des rubriques dans l'infobulle."
                         />
                       </div>
                     </div>
@@ -529,14 +550,14 @@ export function PaieComptaView(props: {
                           {recon.rows.map((r) => (
                             <tr key={r.rubric} data-rubric={r.rubric}>
                               <th scope="row">{rubricLabel(r.rubric)}</th>
-                              <td className="num" data-col="ecart">{eurosSigned(r.ecart)}</td>
+                              <td className={numTrend(r.ecart)} data-col="ecart">{eurosSigned(r.ecart)}</td>
                               <td className="num">{euros(r.journal)}</td>
                               <td className="num">{euros(r.compta)}</td>
                             </tr>
                           ))}
                         </tbody>
                         <tfoot>
-                          <tr className="total" data-testid="pc-recon-total"><th scope="row">Total comptes 63/64</th><td className="num" data-col="ecart">{eurosSigned(recon.ecart)}</td><td className="num">{euros(recon.journal)}</td><td className="num">{euros(recon.compta)}</td></tr>
+                          <tr className="total" data-testid="pc-recon-total"><th scope="row">Total comptes 63/64</th><td className={numTrend(recon.ecart)} data-col="ecart">{eurosSigned(recon.ecart)}</td><td className="num">{euros(recon.journal)}</td><td className="num">{euros(recon.compta)}</td></tr>
                         </tfoot>
                       </table>
                     </ScrollTable>
@@ -546,7 +567,7 @@ export function PaieComptaView(props: {
                         <thead><tr><th scope="col">Mois</th><th scope="col" className="num">Écart</th><th scope="col" className="num">Journal de paie</th><th scope="col" className="num">Comptabilité</th></tr></thead>
                         <tbody>
                           {recon.months.map((m) => (
-                            <tr key={m.month} data-month={m.month}><th scope="row">{formatMonth(m.month)}</th><td className="num" data-col="ecart">{eurosSigned(m.journal - m.compta)}</td><td className="num">{euros(m.journal)}</td><td className="num">{euros(m.compta)}</td></tr>
+                            <tr key={m.month} data-month={m.month}><th scope="row">{formatMonth(m.month)}</th><td className={numTrend(m.journal - m.compta)} data-col="ecart">{eurosSigned(m.journal - m.compta)}</td><td className="num">{euros(m.journal)}</td><td className="num">{euros(m.compta)}</td></tr>
                           ))}
                         </tbody>
                       </table>
@@ -556,7 +577,10 @@ export function PaieComptaView(props: {
               </>
             )}
             <div className="ms-ratio" data-testid="pc-ratio">
-              <h3 className="ms-sub">Masse salariale ÷ produits d'exploitation</h3>
+              <h3 className="ms-sub">
+                Masse salariale ÷ produits d'exploitation
+                <GlossaryLink slug={slug} term={MASSE_TERMS.ratio} />
+              </h3>
               <p data-testid="pc-ratio-value">{ratioText ?? "n.d. — produits d'exploitation (comptes 70 à 75) non disponibles"}</p>
             </div>
           </>

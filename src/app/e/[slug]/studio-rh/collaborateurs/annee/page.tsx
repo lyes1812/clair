@@ -1,4 +1,5 @@
 import "@/styles/collaborateurs.css";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { formatDate } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
@@ -158,15 +159,16 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
         )}
         <NdNote reasons={tileNd} testid="year-tiles-nd" />
         <dl className="facts collab-tiles five">
-          <Tile id="year-jan1" label={`Effectif au 01/01/${year} (personnes)`} shown={shownJan1} def="headcount-persons" />
-          <Tile id="year-dec31" label={`Effectif au 31/12/${year} (personnes)`} shown={shownDec31} def="headcount-persons" />
-          <Tile id="year-entries" label="Entrées de l'année" shown={shownEntries} def="movements" />
-          <Tile id="year-exits" label="Sorties de l'année" shown={shownExits} def="movements" />
+          <Tile id="year-jan1" label={`Effectif au 01/01/${year} (personnes)`} shown={shownJan1} def="headcount-persons" slug={slug} />
+          <Tile id="year-dec31" label={`Effectif au 31/12/${year} (personnes)`} shown={shownDec31} def="headcount-persons" slug={slug} />
+          <Tile id="year-entries" label="Entrées de l'année" shown={shownEntries} def="movements" slug={slug} />
+          <Tile id="year-exits" label="Sorties de l'année" shown={shownExits} def="movements" slug={slug} />
           <Tile
             id="year-covered"
             label="Mois couverts"
             shown={covered === 12 ? { text: "12/12", kind: "value" } : { text: `${covered}/12`, kind: "value", foot: covered === 0 ? undefined : `${12 - covered} mois non ${12 - covered > 1 ? "couverts" : "couvert"}` }}
-            def="reference-date"
+            def="collab-covered-months"
+            slug={slug}
           />
         </dl>
       </section>
@@ -183,10 +185,11 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
           </div>
         </ListToolbar>
         <p className="collab-legend" data-testid="strip-legend">
-          <span>Colonne « Fin de mois » : un carré par mois, par trimestre —</span>
+          <span>Fin de mois</span>
           <span><i className="sw present" aria-hidden="true" />présent</span>
           <span><i className="sw" aria-hidden="true" />absent</span>
-          <span><i className="sw nd" aria-hidden="true" />n.d. (raison au survol)</span>
+          <span><i className="sw nd" aria-hidden="true" />n.d.</span>
+          <GlossaryLink slug={slug} term="strip-presence" />
         </p>
         <div className={pg.items.length > 12 ? "table-wrap scroll collab-scroll" : "table-wrap scroll collab-flat"}>
           <table className="data-table sticky sticky-first collab-table collab-who" data-testid="collab-annual-table">
@@ -195,7 +198,7 @@ export default async function CollaborateursAnneePage({ params, searchParams }: 
               <tr>
                 <th scope="col">Personne</th><th scope="col">Matricule</th><th scope="col">Contrats dans l'année</th><th scope="col">Présent au 01/01</th><th scope="col">Présent au 31/12</th><th scope="col">Entrées</th><th scope="col">Sorties</th>
                 <th scope="col">Fin de mois<StripScale /></th>
-                <th scope="col" className="num">Mois présents</th><th scope="col">Établissements</th><th scope="col" className="num">Constats</th>
+                <th scope="col" className="num">Mois présents<GlossaryLink slug={slug} term="strip-presence" /></th><th scope="col">Établissements</th><th scope="col" className="num">Constats<GlossaryLink slug={slug} term="collab-findings" /></th>
               </tr>
             </thead>
             <tbody>

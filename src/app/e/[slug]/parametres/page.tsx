@@ -6,7 +6,6 @@ import { dateTimeFmt } from "@/lib/connectors/labels";
 import { ABSENCE_STATUSES } from "@/lib/connectors/payfit/client";
 import { getKpiSettings, KPI_DEFAULT_STATUS, KPI_DEFAULTS_VALIDATED_ON, kpiOriginText, type KpiSettingKey } from "@/lib/rh-kpi-settings";
 import { getHeadcountNatures, getPayfitHistoryMode, HEADCOUNT_NATURES_KEY, natureChoices, PAYFIT_HISTORY_KEY } from "@/lib/rh-settings";
-import { PAYFIT_ARCHIVED_RETENTION_MONTHS } from "@/lib/rh/referential/build-payfit";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
 import { KpiForm } from "./KpiForm";
@@ -18,7 +17,8 @@ import { getPayrollGrid, getServiceAxis } from "@/lib/payroll-settings";
 import { journalAxes } from "@/lib/payroll/context";
 import { ServiceAxisForm } from "./ServiceAxisForm";
 import { gridRubrics } from "@/lib/payroll/grid";
-import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
+import { getConventions } from "@/lib/budget/settings";
+import type { Prorata } from "@/lib/budget/types";
 import { ProrataForm } from "./ProrataForm";
 import { CategoryNaturesForm } from "./CategoryNaturesForm";
 import { categoryOfNature, getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
@@ -26,12 +26,22 @@ import { ContractCategoriesForm } from "./ContractCategoriesForm";
 import { loadCollabContext } from "@/lib/rh/view";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { personLabel } from "@/lib/rh/view";
+import { GlossaryLink } from "@/components/GlossaryLink";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { ParamLayout } from "@/components/ParamLayout";
 import { absenceTypeLabel } from "@/lib/viz/kpi";
 import { defaultsNote, PageHead, Pill, type OriginKind, type Tone } from "../donnees/ui";
 import { NavDisclosure } from "./NavDisclosure";
 
 export const dynamic = "force-dynamic";
+
+// Libellés des trois règles de prorata : l'essentiel pour choisir ; le détail (jours fériés pris en compte) est au glossaire.
+const PRORATA_CHOICES: Record<Prorata, string> = {
+  calendaire: "Jours calendaires : jours payés ÷ jours du mois",
+  ouvres: "Jours ouvrés : jours ouvrés payés ÷ jours ouvrés du mois",
+  aucun: "Aucun prorata : un mois commencé ou terminé compte entier",
+};
+const PRORATA_NAMES: Record<Prorata, string> = { calendaire: "jours calendaires", ouvres: "jours ouvrés", aucun: "aucun prorata" };
 
 export default async function ParametresPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -115,9 +125,9 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   return (
     <>
       <PageHead kicker="Espace" title="Paramètres">
-        <p className="desc">Règles métier de l'espace. Chaque règle est écrite ici et appliquée telle quelle ; aucune valeur n'est cachée.</p>
+        <p className="desc">Règles métier de l'espace.<GlossaryLink slug={slug} term={DONNEES_TERMS.origine} /></p>
       </PageHead>
-      {!isAdmin && <p className="notice" data-testid="pm-readonly">Lecture seule : seul un administrateur de l'espace modifie ces règles.</p>}
+      {!isAdmin && <p className="notice" data-testid="pm-readonly">Lecture seule : réservé aux administrateurs.</p>}
 
       <ParamLayout aside={aside} testid="pm-layout">
         <section className="pm-group" aria-labelledby="pm-g-effectifs">
@@ -128,16 +138,12 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
 
           <section className="panel pm-panel" data-testid="setting-headcount" id="effectif">
             <div className="pm-panel-head">
-              <h3>Définition de l'effectif</h3>
+              <h3>Définition de l'effectif<GlossaryLink slug={slug} term={DONNEES_TERMS.effectif} /></h3>
               {stateTag("effectif")}
             </div>
-            <p className="pm-lead">
-              <strong>Effectif à une date</strong> = nombre de personnes ayant au moins un contrat en cours à cette date (début et fin inclus), parmi les natures
-              de contrat ci-dessous. Une personne avec plusieurs contrats compte une fois. Les contrats des autres natures sont affichés à part.
-            </p>
             <p className="desc pm-origin" data-testid="setting-headcount-origin">
               {natures.origin === "default"
-                ? "Valeur par défaut validée le 21/10/2026 : CDI et CDD. Modifiable par un administrateur."
+                ? "Valeur par défaut validée le 21/10/2026 : CDI et CDD."
                 : `Modifié le ${row ? dateTimeFmt.format(row) : "n.d."} par un administrateur.`}
             </p>
             <HeadcountForm slug={slug} choices={natureChoices()} selected={natures.codes} disabled={!isAdmin} />
@@ -145,17 +151,12 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
 
           <section className="panel pm-panel" data-testid="setting-payfit-history" id="payfit-historique">
             <div className="pm-panel-head">
-              <h3>Historique PayFit</h3>
+              <h3>Historique PayFit<GlossaryLink slug={slug} term={DONNEES_TERMS.historique} /></h3>
               {stateTag("payfit-historique")}
             </div>
-            <p className="pm-lead">
-              PayFit ne renvoie plus les contrats archivés depuis plus de {PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois. Pour les mois antérieurs à la date de
-              lecture moins {PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois, les chiffres calculés sur ce que l'API renvoie ne comptent pas ces salariés :
-              les effectifs, l'ETP et les sorties peuvent être sous-estimés ; les entrées, le turnover et l'absentéisme peuvent être faussés dans un sens ou dans l'autre (un contrat qui fait suite à un contrat non renvoyé compte comme une entrée, et les dénominateurs sont réduits).
-            </p>
             <p className="desc pm-origin" data-testid="setting-payfit-history-origin">
               {history.origin === "default"
-                ? "Valeur par défaut validée le 22/10/2026 : brut. Modifiable par un administrateur."
+                ? "Valeur par défaut validée le 22/10/2026 : brut."
                 : `Modifié le ${historyAt ? dateTimeFmt.format(historyAt) : "n.d."} par un administrateur.`}
             </p>
             <PayfitHistoryForm slug={slug} mode={history.mode} disabled={!isAdmin} />
@@ -163,13 +164,9 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
 
           <section className="panel pm-panel" data-testid="setting-kpi" id="kpi">
             <div className="pm-panel-head">
-              <h3>Définitions des KPI</h3>
+              <h3>Définitions des KPI<GlossaryLink slug={slug} term={DONNEES_TERMS.kpi} /></h3>
               {stateTag("kpi")}
             </div>
-            <p className="pm-lead">
-              Règles appliquées par Studio RH › KPI RH. Elles sont recalculées à chaque affichage, sans reconstruire le référentiel. Les natures comptées
-              sont celles de la définition de l'effectif ci-dessus.
-            </p>
             <KpiForm
               slug={slug}
               values={kpi.values}
@@ -181,6 +178,14 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
               readLabel={active ? `lecture du ${dateTimeFmt.format(active.startedAt)}` : null}
               statuses={[...ABSENCE_STATUSES].map((code) => ({ code, label: ABSENCE_STATUS_LABELS[code] ?? code }))}
               disabled={!isAdmin}
+              helps={{
+                etp: <GlossaryLink slug={slug} term={DONNEES_TERMS.etp} />,
+                turnover: <GlossaryLink slug={slug} term={DONNEES_TERMS.turnover} />,
+                sortiesNonComptees: <GlossaryLink slug={slug} term={DONNEES_TERMS.sortiesNonComptees} />,
+                absenceTypes: <GlossaryLink slug={slug} term={DONNEES_TERMS.absenceTypes} />,
+                absenceStatuts: <GlossaryLink slug={slug} term={DONNEES_TERMS.absenceStatuts} />,
+                absenceBase: <GlossaryLink slug={slug} term={DONNEES_TERMS.absenceBase} />,
+              }}
             />
           </section>
         </section>
@@ -193,21 +198,17 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
 
           <section className="panel pm-panel" data-testid="setting-payroll" id="masse-salariale">
             <div className="pm-panel-head">
-              <h3>Masse salariale : grille de comptes</h3>
+              <h3>Masse salariale : grille de comptes<GlossaryLink slug={slug} term={DONNEES_TERMS.grille} /></h3>
               {stateTag("masse-salariale")}
             </div>
-            <p className="pm-lead">
-              Studio RH › Masse salariale lit le journal comptable de paie renvoyé par PayFit. Chaque compte est classé dans la rubrique dont un préfixe est le
-              plus long. Masse salariale chargée = rubriques « brut » + « cotisations patronales ». Les comptes 63 et 64 sans rubrique sont signalés « non classés ».
-            </p>
             <p className="desc pm-origin" data-testid="setting-payroll-origin">
               {payroll.origin === "default"
-                ? "Valeur par défaut validée le 22/10/2026 : 641 brut (dont primes 6413, gratifications de stage 64137, indemnités et avantages 6414/6417), cotisations 645 et taxes 63, provisions 6412/6485 et autres charges 646-648 hors masse."
+                ? "Valeur par défaut validée le 22/10/2026."
                 : `Modifié le ${payroll.updatedAt ? dateTimeFmt.format(payroll.updatedAt) : "n.d."} par un administrateur.`}
             </p>
             <PayrollGridForm slug={slug} rows={gridRubrics(payroll.grid)} disabled={!isAdmin} />
             <div className="pm-sub">
-              <h4>Ventilation par service</h4>
+              <h4>Ventilation par service<GlossaryLink slug={slug} term={DONNEES_TERMS.axeService} /></h4>
               <p className="desc pm-origin" data-testid="setting-payroll-axis-origin">
                 Service : {serviceAxis.origin === "setting" ? `axe « ${serviceAxis.axis ?? "aucun"} », modifié le ${serviceAxis.updatedAt ? dateTimeFmt.format(serviceAxis.updatedAt) : "n.d."}` : serviceAxis.origin === "single-axis" ? `axe « ${serviceAxis.axis} », seul axe analytique présent dans le journal (défaut)` : axes.length ? "aucun axe choisi" : "aucun code analytique dans le journal PayFit appliqué"}.
               </p>
@@ -224,32 +225,23 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
 
           <section className="panel pm-panel" data-testid="setting-projection" id="projection">
             <div className="pm-panel-head">
-              <h3>Projection : conventions de calcul</h3>
+              <h3>Projection : conventions de calcul<GlossaryLink slug={slug} term={DONNEES_TERMS.prorata} /></h3>
               {stateTag("projection")}
             </div>
-            <p className="pm-lead">
-              Studio RH › Hypothèses budgétaires projette chaque contrat mois par mois. La règle de prorata des entrées et sorties en cours de mois n'a pas de
-              valeur par défaut : tant qu'elle n'est pas choisie, aucun scénario ne peut être créé. Elle est copiée dans chaque scénario à sa création ; la
-              modifier ne change pas les scénarios existants.
-            </p>
             <p className="desc pm-origin" data-testid="setting-projection-origin" data-missing={projection ? undefined : "true"}>
-              {projection ? `Règle : ${PRORATA_LABELS[projection.conventions.prorata]} — modifiée le ${dateTimeFmt.format(projection.updatedAt)}.` : "Non renseignée : aucun scénario ne peut être créé."}
+              {projection ? `Règle : ${PRORATA_NAMES[projection.conventions.prorata]} — modifiée le ${dateTimeFmt.format(projection.updatedAt)}.` : "Non renseignée : aucun scénario ne peut être créé."}
             </p>
-            <ProrataForm slug={slug} current={projection?.conventions.prorata ?? null} labels={PRORATA_LABELS} disabled={!isAdmin} />
+            <ProrataForm slug={slug} current={projection?.conventions.prorata ?? null} labels={PRORATA_CHOICES} disabled={!isAdmin} />
             <div className="pm-sub">
-              <h4>Catégories de contrat</h4>
+              <h4>Catégories de contrat<GlossaryLink slug={slug} term={DONNEES_TERMS.categories} /></h4>
               <p className="desc pm-origin" data-testid="setting-category-origin">
-                {categories.origin === "default" ? "Valeur proposée (nomenclature DSN : 01 CDI, 02 CDD, 29 convention de stage), modifiable." : "Modifié par un administrateur."}
+                {categories.origin === "default" ? "Valeur proposée (nomenclature DSN)." : "Modifié par un administrateur."}
               </p>
-              <p className="desc">
-                Un contrat dont la nature n'est dans aucune catégorie est « non classé ».
-                {categories.natures.apprenti.length === 0 && " Aucun code n'est rattaché à « apprenti » : PayFit code certains apprentis en CDD, à corriger contrat par contrat ci-dessous."}
-              </p>
+              {categories.natures.apprenti.length === 0 && <p className="desc">Aucun code n'est rattaché à « apprenti » : à corriger contrat par contrat.</p>}
               <CategoryNaturesForm slug={slug} natures={categories.natures} disabled={!isAdmin} />
             </div>
             <div className="pm-sub">
-              <h4>Correction contrat par contrat</h4>
-              <p className="desc">Pour les cas que la nature ne distingue pas (ex. une apprentie codée CDD). Utilisée par les KPI RH et par les scénarios créés ensuite.</p>
+              <h4>Correction contrat par contrat<GlossaryLink slug={slug} term={DONNEES_TERMS.categories} /></h4>
               <ContractCategoriesForm slug={slug} rows={contractRows} disabled={!isAdmin} />
             </div>
           </section>

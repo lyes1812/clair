@@ -1,15 +1,18 @@
+import { Fragment } from "react";
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { hireKey, roundDiv } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { CATEGORY_IDS, CATEGORY_LABELS, type BaseContract, type BaseSnapshot, type CategoryId, type Hypothesis, type Projection } from "@/lib/budget/types";
+import { BUDGET_TERMS } from "@/lib/glossary/budget";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import { dateFr, matchesQuery, pageNumber, paginate } from "@/lib/viz/hyp-saisie";
 import { frDates } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { addHypothesisAction, bulkDeparturesAction, bulkRaisesAction, deleteHypothesisAction } from "./actions";
-import { AmountFields, CardTitle, Field, FieldGroup, pct, Rules } from "./shared";
+import { AmountFields, CardTitle, Field, FieldGroup, pct, trendOf } from "./shared";
 
 type Row = { key: string; label: string; kind: "base" | "embauche"; service: string | null; category: CategoryId | null; etp4: number | null; monthly: number | null; entry: string | null; contract: BaseContract | null };
 type Depart = Extract<Hypothesis, { kind: "depart" }>;
@@ -50,14 +53,15 @@ const detail = (h: Hypothesis): string => {
 
 // Ce que les hypothèses du scénario changent pour un salarié (colonnes colorées du tableau) : rien n'est écrit tant qu'aucune
 // hypothèse n'existe (« — »), jamais une valeur par défaut.
-type Effect = { exitDate: string | null; exitMotif: string | null; raises: string[]; changes: string[]; recategorised: boolean; events: Hypothesis[] };
+type Raise = { text: string; rateBps: number };
+type Effect = { exitDate: string | null; exitMotif: string | null; raises: Raise[]; changes: string[]; recategorised: boolean; events: Hypothesis[] };
 function effectOf(key: string, hyps: Hypothesis[]): Effect {
   const events = eventsOf(key, hyps);
   const dep = events.find((h): h is Depart => h.kind === "depart");
   return {
     exitDate: dep?.lastPaidDate ?? null,
     exitMotif: dep?.motif ?? null,
-    raises: events.flatMap((h) => (h.kind === "augmentation" ? [`${h.rateBps > 0 ? "+" : ""}${pct(h.rateBps)} dès ${lower(h.from)}`] : [])),
+    raises: events.flatMap((h) => (h.kind === "augmentation" ? [{ text: `${h.rateBps > 0 ? "+" : ""}${pct(h.rateBps)} dès ${lower(h.from)}`, rateBps: h.rateBps }] : [])),
     changes: events.flatMap((h) => (h.kind === "changement" ? [`${[h.service ? `service ${h.service}` : null, h.quotaBps !== undefined ? `quotité ${pct(h.quotaBps)}` : null, h.poste ? `poste ${h.poste}` : null].filter(Boolean).join(" · ") || "sans effet saisi"} dès ${lower(h.from)}`] : [])),
     recategorised: events.some((h) => h.kind === "categorie"),
     events,
@@ -78,10 +82,7 @@ function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: S
   const leavers = base.contracts.filter((c) => !departing.has(c.contractKey));
   return (
     <section className="panel hs-events" id="sal-bulk" data-testid="sal-bulk">
-      <div className="hs-title">
-        <h2>Saisie en masse</h2>
-        <p className="desc">Une ligne par salarié ; les lignes vides sont ignorées et le lot est enregistré en entier ou pas du tout. <a href="#def-saisie-masse">Règle</a></p>
-      </div>
+      <CardTitle title="Saisie en masse" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.saisieMasse} />} />
       <details>
         <summary>Départs ({leavers.length} salarié{leavers.length > 1 ? "s" : ""} sans départ saisi)</summary>
         <ActionForm action={bulkDeparturesAction.bind(null, slug, scenario.id)} submit="Enregistrer les départs renseignés" testid="sal-bulk-departs">
@@ -103,7 +104,6 @@ function BulkSection({ slug, scenario, base, hyps }: { slug: string; scenario: S
             </table>
           </div>
           <datalist id="bulk-motifs">{MOTIFS.map((m) => <option key={m} value={m} />)}</datalist>
-          <p className="tile-foot">Coûts de sortie en coût chargé, imputés au mois du départ (facultatif). Pour les saisir en brut + taux de charges, utilisez la fiche du salarié.</p>
         </ActionForm>
       </details>
       <details>
@@ -157,7 +157,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
   // Recherche « toutes les colonnes » : chaque mot saisi doit se retrouver dans au moins une colonne du tableau.
   const shown = line.filter(({ r }) => svc === "" || (svc === NO_SERVICE ? r.service === null : r.service === svc)).filter(({ r, fx, end, etp, cost }) => matchesQuery([
     r.label, catText(r.category), r.contract?.nature, r.service ?? "Non ventilé", r.entry, dateFr(r.entry), end, dateFr(end), etp, cost,
-    fx.exitDate, dateFr(fx.exitDate), fx.exitMotif, ...fx.raises, ...fx.changes, String(fx.events.length),
+    fx.exitDate, dateFr(fx.exitDate), fx.exitMotif, ...fx.raises.map((r) => r.text), ...fx.changes, String(fx.events.length),
   ], q));
   const paged = paginate(shown, pageNumber(page), PAGE_SIZE);
   const sel = rows.find((r) => r.key === selected) ?? null;
@@ -174,7 +174,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
     <>
       <section className="panel" data-testid="sal-list">
         <div className="panel-head">
-          <CardTitle title="Modifications de postes">Cherchez un salarié, ouvrez sa fiche, puis créez-lui un événement daté. Les colonnes « hypothèse », sur fond bleu, montrent ce que ce scénario change.</CardTitle>
+          <CardTitle title="Modifications de postes" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.postes} />} />
           {canEdit && <div className="panel-tools"><a className="btn" href="#sal-bulk" data-testid="sal-bulk-link">Aller à la saisie en masse</a></div>}
         </div>
         <form method="get" action={`/e/${slug}/studio-rh/hypotheses`} className="hs-search" data-testid="sal-search" role="search" aria-label="Recherche des salariés">
@@ -226,7 +226,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                   <td className="num" title={cost === "n.d." ? fr(r.contract?.baseNd) : undefined}>{cost}</td>
                   <td className={fx.exitDate ? "changed" : undefined} data-col="sortie">{dateFr(fx.exitDate) ?? "—"}</td>
                   <td className={fx.exitDate ? "changed wrap" : "wrap"}>{fx.exitDate ? fx.exitMotif ?? "non précisé" : "—"}</td>
-                  <td className={fx.raises.length ? "changed wrap" : "wrap"}>{fx.raises.length ? fx.raises.join(" ; ") : "—"}</td>
+                  <td className={fx.raises.length ? "changed wrap" : "wrap"} data-col="augmentation">{fx.raises.length ? fx.raises.map((x, i) => <Fragment key={i}>{i > 0 ? " ; " : ""}<span className={trendOf(x.rateBps).cls} data-sign={trendOf(x.rateBps).sign}>{x.text}</span></Fragment>) : "—"}</td>
                   <td className={fx.changes.length ? "changed wrap" : "wrap"}>{fx.changes.length ? fx.changes.join(" ; ") : "—"}</td>
                   <td className="num" title={fx.events.map((h) => KIND_TEXT[h.kind]).join(" ; ") || undefined}>{fx.events.length}</td>
                   <td className="hs-row-actions">
@@ -240,11 +240,6 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
           </table>
         </div>
         {paged.pages > 1 ? <Pager page={paged.page} pageSize={PAGE_SIZE} total={shown.length} href={pageHref} testid="sal-pager" /> : shown.length > 0 ? <p className="tile-foot" data-testid="sal-pager">{paged.from}–{paged.to} sur {shown.length}</p> : null}
-        <Rules summary="Lecture du tableau et règles">
-          <p>Catégorie proposée depuis la nature du contrat (Paramètres › Projection), corrigée ici si besoin (ex. une apprentie codée CDD par PayFit).</p>
-          <p>Colonnes « hypothèse » : ce que ce scénario saisit pour le salarié ; « — » : aucune hypothèse, la projection reconduit sa base.</p>
-          <p>Règles : <a href="#def-augmentation">augmentation</a>, <a href="#def-absence">congé non payé</a>, <a href="#def-changement">changement de service ou de quotité</a>, <a href="#def-prorata">prorata</a>, <a href="#def-categories">catégories</a>.</p>
-        </Rules>
       </section>
 
       {sel && (
@@ -260,9 +255,9 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
             </div>
             <div className="panel-tools"><a className="btn" href={`${base_}${qPart}${pagePart(paged.page)}`} data-testid="sal-fiche-close">Fermer la fiche</a></div>
           </div>
-          <h3>Événements</h3>
+          <h3>Événements<GlossaryLink slug={slug} term={BUDGET_TERMS.evenement} /></h3>
           {eventsOf(sel.key, hyps).filter((h) => h.kind !== "embauche").length === 0 ? (
-            <p className="desc">Aucun événement pour ce salarié : la projection reconduit sa base.</p>
+            <p className="desc">Aucun événement pour ce salarié.</p>
           ) : (
             <div className="table-wrap">
               <table className="data-table" data-testid="sal-events">
@@ -278,7 +273,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
               </table>
             </div>
           )}
-          <h3>Coût mensuel projeté</h3>
+          <h3>Coût mensuel projeté<GlossaryLink slug={slug} term={BUDGET_TERMS.contribution} /></h3>
           {proj.kind === "error" ? (
             <p className="nd">n.d. — projection refusée : {frDates(proj.errors.join(" ; "))}</p>
           ) : (
@@ -302,13 +297,12 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
           )}
           {canEdit && (
             <div id="sal-add" className="hs-events" data-testid="sal-add">
-              <h3>Créer un événement pour {sel.label}</h3>
-              <p className="desc">Chaque événement est daté et enregistré directement dans le brouillon ; il apparaît ensuite dans la projection et dans les contrôles des changements.</p>
+              <h3>Créer un événement pour {sel.label}<GlossaryLink slug={slug} term={BUDGET_TERMS.evenement} /></h3>
               <details open={open("augmentation")}>
                 <summary>Augmentation de salaire</summary>
                 <ActionForm action={add("augmentation")} submit="Ajouter l'augmentation" testid="sal-form-augmentation">
                   <input type="hidden" name="scope" value={`contrat:${sel.key}`} />
-                  <FieldGroup title="Augmentation" hint="Effet au 1er du mois choisi, en pourcentage du salaire déjà augmenté.">
+                  <FieldGroup title="Augmentation">
                     <Field id="s-aug-l" label="Libellé"><input className="input" id="s-aug-l" name="label" defaultValue={`Augmentation ${sel.label}`} maxLength={200} required /></Field>
                     <Field id="s-aug-r" label="Taux (%)" hint="Ex. 2,5 pour +2,5 %."><input className="input" id="s-aug-r" name="rate" inputMode="decimal" required /></Field>
                     <Field id="s-aug-f" label="À compter de (mois)" hint={horizon}><input className="input" id="s-aug-f" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
@@ -323,10 +317,10 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                       <input type="hidden" name="contractKey" value={sel.key} />
                       <FieldGroup title="Départ">
                         <Field id="s-dep-l" label="Libellé"><input className="input" id="s-dep-l" name="label" defaultValue={`Départ ${sel.label}`} maxLength={200} required /></Field>
-                        <Field id="s-dep-m" label="Motif" hint="Facultatif : suggestions ou saisie libre."><input className="input" id="s-dep-m" name="motif" list="sal-motifs" maxLength={100} /></Field>
-                        <Field id="s-dep-d" label="Dernier jour payé" hint="Dernier jour rémunéré, inclus."><input className="input" id="s-dep-d" name="lastPaidDate" type="date" required /></Field>
+                        <Field id="s-dep-m" label="Motif"><input className="input" id="s-dep-m" name="motif" list="sal-motifs" maxLength={100} /></Field>
+                        <Field id="s-dep-d" label="Dernier jour payé"><input className="input" id="s-dep-d" name="lastPaidDate" type="date" required /></Field>
                       </FieldGroup>
-                      <FieldGroup title="Coûts de sortie (mois du départ, facultatif)" hint="Imputés au mois du départ ; « Aucun » : pas de coût de sortie.">
+                      <FieldGroup title="Coûts de sortie (mois du départ, facultatif)">
                         <AmountFields prefix="exit" idp="s-dep-e" optional />
                       </FieldGroup>
                       <datalist id="sal-motifs">{MOTIFS.map((m) => <option key={m} value={m} />)}</datalist>
@@ -340,7 +334,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                         <Field id="s-abs-l" label="Libellé"><input className="input" id="s-abs-l" name="label" defaultValue={`Congé ${sel.label}`} maxLength={200} required /></Field>
                         <Field id="s-abs-f" label="Du"><input className="input" id="s-abs-f" name="from" type="date" required /></Field>
                         <Field id="s-abs-t" label="Au (inclus)"><input className="input" id="s-abs-t" name="to" type="date" required /></Field>
-                        <Field id="s-abs-p" label="Part du salaire payée (%) — 0 : aucun salaire" hint="100 : salaire maintenu en entier ; entre les deux : maintien partiel."><input className="input" id="s-abs-p" name="paid" inputMode="decimal" required /></Field>
+                        <Field id="s-abs-p" label="Part du salaire payée (%) — 0 : aucun salaire"><input className="input" id="s-abs-p" name="paid" inputMode="decimal" required /></Field>
                       </FieldGroup>
                     </ActionForm>
                   </details>
@@ -371,29 +365,28 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
                   <FieldGroup title="Montant">
                     <AmountFields prefix="amount" idp="s-p-amount" />
                   </FieldGroup>
-                  <label className="check"><input type="checkbox" name="nonRecurring" value="oui" /><span>Non récurrent (retiré de l'atterrissage retraité)</span></label>
+                  <label className="check"><input type="checkbox" name="nonRecurring" value="oui" /><span>Non récurrent</span></label>
                 </ActionForm>
               </details>
               <details open={open("changement")}>
                 <summary>Changement de service ou de quotité (à compter d'un mois)</summary>
                 <ActionForm action={add("changement")} submit="Ajouter le changement" testid="sal-form-changement">
                   <input type="hidden" name="contractKey" value={sel.key} />
-                  <FieldGroup title="Changement" hint="Effet au 1er jour du mois ; renseignez le service, la quotité ou les deux.">
+                  <FieldGroup title="Changement" hint="Service, quotité, ou les deux.">
                     <Field id="s-ch-l" label="Libellé"><input className="input" id="s-ch-l" name="label" defaultValue={`Changement ${sel.label}`} maxLength={200} required /></Field>
                     <Field id="s-ch-f" label="À compter de (mois)" hint={horizon}><input className="input" id="s-ch-f" name="from" type="month" min={scenario.firstMonth} max={scenario.lastMonth} required /></Field>
-                    <Field id="s-ch-s" label="Nouveau service (facultatif)" hint="Existant ou nouveau."><input className="input" id="s-ch-s" name="service" list="sal-services" maxLength={200} /></Field>
+                    <Field id="s-ch-s" label="Nouveau service (facultatif)"><input className="input" id="s-ch-s" name="service" list="sal-services" maxLength={200} /></Field>
                     <Field id="s-ch-q" label="Nouvelle quotité (%, facultatif)" hint="Entre 0 et 100 %."><input className="input" id="s-ch-q" name="quota" inputMode="decimal" /></Field>
                     <Field id="s-ch-p" label="Poste (facultatif, descriptif)"><input className="input" id="s-ch-p" name="poste" maxLength={200} /></Field>
                   </FieldGroup>
                   <datalist id="sal-services">{services.map((x) => <option key={x} value={x} />)}</datalist>
-                  <p className="tile-foot">Service : les coûts de ce salarié sont attribués au nouveau service à compter du mois choisi (les augmentations ciblées par service continuent de suivre le service de la base). Quotité : salaire proportionnel (nouvelle quotité ÷ quotité actuelle), même taux de charges, ETP au nouveau niveau. Effet au 1er jour du mois.</p>
                 </ActionForm>
               </details>
               <details open={open("categorie")}>
                 <summary>Catégorie (CDI, CDD, apprenti, stagiaire)</summary>
                 <ActionForm action={add("categorie")} submit="Enregistrer la catégorie" testid="sal-form-categorie">
                   <input type="hidden" name="contractKey" value={sel.key} />
-                  <FieldGroup title="Catégorie" hint="Correction de la catégorie proposée depuis la nature du contrat.">
+                  <FieldGroup title="Catégorie">
                     <Field id="s-c-l" label="Libellé"><input className="input" id="s-c-l" name="label" defaultValue={`Catégorie ${sel.label}`} maxLength={200} required /></Field>
                     <Field id="s-c-c" label="Catégorie">
                       <select className="select" id="s-c-c" name="category" defaultValue={sel.category ?? ""}><option value="" disabled>Choisir…</option>{CATEGORY_IDS.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}</select>

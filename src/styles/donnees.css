@@ -1,6 +1,7 @@
-/* Données, Paramètres, Membres et accès, Reporting social (charte « 101 ») : en-tête de page, « Où en suis-je », cartes de sources,
-   étapes d'une source, formulaires en grille, navigation des paramètres, rôles, chapitres de la BDESE.
-   Variables et échelle typographique de globals.css / typography.css ; teintes de charts.css.
+/* Données, Paramètres, Membres et accès, Reporting social (charte « 101 », univers bleu / blanc / noir) : en-tête de page, cartes de
+   sources, étapes d'une source, formulaires en grille, navigation des paramètres, membres, chapitres de la BDESE.
+   Variables et échelle typographique de globals.css / typography.css ; teintes de charts.css. Aucune couleur hors de l'univers bleu,
+   blanc, noir et gris : le rouge (--danger) ne sert qu'aux erreurs, aux échecs et aux refus de calcul.
    Tout est préfixé « dn- » (Données et commun), « pm- » (Paramètres), « mb- » (Membres) ou « rs- » (Reporting social). */
 
 /* --- Commun ------------------------------------------------------------------------------------------------------------ */
@@ -19,8 +20,17 @@
 .dn-section-head .desc { max-width: 78ch; }
 .dn-section-head .group-title { margin-top: 0; }
 
-/* Pastille neutre (rien d'appliqué, abandonné, remplacé…) : gris plus foncé que celui de globals.css pour tenir 4,5:1. */
-.status-pill.neutral { background: #eef0f5; color: #5b6270; }
+/* Pastilles d'état : le libellé porte l'information, la teinte la renforce (pas d'information par la couleur seule).
+   Appliquée : bleu plein en dégradé ; à valider : bleu cerné ; en cours : bleu clair ; échec : rouge ; sans effet : gris (4,5:1 tenu). */
+.status-pill.dn-pill { gap: 6px; border: 1px solid transparent; }
+.status-pill.dn-pill.applied { background: linear-gradient(135deg, var(--chart-4), var(--blue)); color: #fff; }
+.status-pill.dn-pill.preview { background: #fff; color: var(--blue); border-color: var(--blue); }
+.status-pill.dn-pill.running { background: var(--blue-soft); color: var(--blue); border-color: #d6e3ff; }
+.status-pill.dn-pill.running::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); animation: dn-pulse 1.2s ease-in-out infinite; }
+.status-pill.dn-pill.failed { background: var(--danger-bg); color: var(--danger); border-color: #f1d6dc; }
+.status-pill.dn-pill.neutral { background: linear-gradient(180deg, #f7f8fb, #eef0f5); color: #5b6270; border-color: var(--line); }
+@keyframes dn-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .status-pill.dn-pill.running::before { animation: none; } }
 
 /* Zone vide : on dit ce qui manque. */
 .dn-empty { padding: 16px 18px; border: 1px dashed #d8dce5; border-radius: 8px; background: #fff; color: var(--muted); font-size: var(--clair-type-form); }
@@ -40,7 +50,7 @@
 .dn-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 16px; }
 .panel.dn-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 /* Carte de la source retenue : simple repère visuel (l'état est dit en toutes lettres dans « Source retenue pour les modules »). */
-.panel.dn-card[data-chosen="true"] { box-shadow: inset 0 3px 0 var(--blue); }
+.panel.dn-card[data-chosen="true"] { background: #fff linear-gradient(90deg, var(--chart-4), var(--blue), var(--chart-3)) top / 100% 3px no-repeat; }
 .dn-conn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .dn-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
 .dn-card-head > div { display: grid; gap: 6px; min-width: 0; flex: 1 1 220px; }
@@ -72,16 +82,17 @@
 .dn-danger-zone { padding-top: 4px; }
 
 /* Décision sur un aperçu : appliquer ou abandonner. */
-.dn-decision { gap: 12px; padding: 16px 18px; border: 1px solid #d6e3ff; border-radius: 8px; background: var(--blue-soft); }
+.dn-decision { gap: 12px; padding: 16px 18px; border: 1px solid #d6e3ff; border-radius: 8px; background: linear-gradient(180deg, var(--blue-soft), #fff); }
 .dn-decision-text { display: grid; gap: 4px; }
 .dn-decision-text .desc { color: var(--ink); line-height: 1.55; }
 
 /* Avancement d'une source : connexion, lecture, aperçu, application. */
+.dn-steps-head { display: flex; align-items: center; margin: 0 0 -6px; }
 .dn-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 10px; }
 .dn-steps li { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .dn-step-no { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border: 1.5px solid #9aa3b5; border-radius: 50%; color: var(--muted); font-size: var(--clair-type-label); font-weight: 650; }
 .dn-step-text { display: grid; gap: 2px; min-width: 0; font-size: var(--clair-type-form); }
-.dn-steps li[data-state="done"] .dn-step-no { background: var(--ok); border-color: var(--ok); color: #fff; }
+.dn-steps li[data-state="done"] .dn-step-no { background: linear-gradient(135deg, var(--chart-4), var(--blue)); border-color: var(--blue); color: #fff; }
 .dn-steps li[data-state="current"] { border-color: var(--blue); background: var(--blue-soft); }
 .dn-steps li[data-state="current"] .dn-step-no { background: var(--blue); border-color: var(--blue); color: #fff; }
 .dn-steps li[data-state="current"] .desc { color: var(--ink); }
@@ -95,7 +106,7 @@
 .dn-meta > div { display: grid; gap: 2px; align-content: start; }
 .dn-meta dt { font-size: var(--clair-type-label); color: var(--muted); }
 .dn-meta dd { margin: 0; font-size: var(--clair-type-form); font-weight: 550; }
-.dn-warnings { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--chart-6); border-radius: 8px; background: #fff; }
+.dn-warnings { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 8px; background: #fff; }
 .dn-warnings h3 { font-size: var(--clair-type-form); }
 .dn-warnings ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--clair-type-form); line-height: 1.5; }
 
@@ -103,10 +114,12 @@
 .pm-group { display: grid; gap: 16px; min-width: 0; }
 .panel.pm-panel { gap: 14px; scroll-margin-top: 72px; }
 .pm-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-/* Introduction de carte : grise, 13 px (les options à régler pèsent autant que le texte qui les explique). */
-.pm-lead { max-width: 82ch; font-size: 13px; line-height: 1.6; color: var(--muted); }
-.pm-lead strong { color: var(--ink); }
 .pm-panel .check, .pm-panel .pm-item-title { font-size: 13px; }
+/* Cases et boutons radio dans l'univers bleu (et non la teinte du navigateur). */
+.pm-panel input[type="checkbox"], .pm-panel input[type="radio"] { accent-color: var(--blue); }
+/* Titre d'une règle suivi de son « ? » vers le glossaire. */
+.pm-item-head { display: inline-flex; flex-wrap: wrap; align-items: center; }
+.pm-card > legend .gloss-link { letter-spacing: 0; text-transform: none; }
 .pm-panel .field-row > label { font-size: var(--clair-type-form); }
 /* Origine d'une valeur : dite une fois par carte (défaut validé) ; seules les exceptions portent leur mention (modifiée,
    proposée, illisible ou manquante : alors en rouge, en toutes lettres). */
@@ -210,15 +223,11 @@
 }
 
 /* --- Membres et accès -------------------------------------------------------------------------------------------------- */
-/* Les trois rôles : une liste de définitions, pas des cartes à choisir ; « Votre rôle » est un badge. */
-.mb-roles { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 14px 28px; }
-.mb-roles > div { display: grid; gap: 4px; align-content: start; padding-top: 12px; border-top: 1px solid var(--line); }
-.mb-roles dt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--clair-type-subheading); font-weight: 600; }
-.mb-roles dt .tag { font-size: var(--clair-type-label); font-weight: 600; color: var(--blue); border-color: #d6e3ff; background: var(--blue-soft); }
-.mb-roles dd { margin: 0; font-size: var(--clair-type-description); line-height: 1.55; color: var(--muted); }
+/* Profil de la personne connectée : un badge ; ce que peut chaque profil est au glossaire. */
+.mb-role-tag { color: var(--blue); border-color: #d6e3ff; background: var(--blue-soft); }
 .mb-members li { padding: 12px 0; }
 .mb-person { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.mb-person .avatar { flex: none; width: 34px; height: 34px; font-size: 11px; }
+.mb-person .avatar { flex: none; width: 34px; height: 34px; font-size: 11px; background: linear-gradient(135deg, var(--blue-soft), #dbe5ff); color: var(--chart-4); }
 .mb-id { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .mb-id .muted { font-size: var(--clair-type-form); }
 .mb-self { font-weight: 400; color: var(--muted); }
@@ -253,7 +262,6 @@
 
 /* --- Reporting social : aperçu du catalogue de la BDESE (rien n'est construit : les cartes sont inertes) ------------------ */
 .panel.rs-preview { gap: 16px; }
-.rs-banner { margin: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: var(--clair-type-form); }
 .rs-tools { display: grid; gap: 8px; }
 .rs-tools h3 { font-size: var(--clair-type-note); font-weight: 650; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
 .rs-tools ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; }
@@ -261,7 +269,7 @@
 .rs-tools li { padding: 12px 14px; font-size: var(--clair-type-form); color: var(--ink); }
 .rs-chapters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px; }
 .rs-chapter { display: flex; align-items: stretch; min-height: 84px; overflow: hidden; }
-.rs-no { flex: none; display: grid; place-items: center; width: 60px; background: #e7eaf0; color: #5b6270; font-size: var(--clair-type-secondary); font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rs-no { flex: none; display: grid; place-items: center; width: 60px; background: linear-gradient(160deg, #e8eefc, #d3dcf3); color: var(--chart-2); font-size: var(--clair-type-secondary); font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .rs-body { display: grid; gap: 4px; align-content: center; justify-items: start; min-width: 0; padding: 12px 16px; }
 .rs-body strong { font-size: var(--clair-type-subheading); font-weight: 600; line-height: 1.3; }
 .rs-kicker { font-size: var(--clair-type-label); color: var(--muted); }

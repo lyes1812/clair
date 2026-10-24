@@ -116,6 +116,15 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   const body = await csv.text();
   expect(body).toContain('"Masse salariale chargée";"66420,00";"69970,00";"3550,00";"5,34"');
 
+  // Tendance financière : +3 550,00 € de masse salariale chargée est une hausse de coût (rouge, signe écrit) ; un ETP n'est jamais coloré.
+  const back = new URL(page.url());
+  for (const k of ["zoom", "zq", "nz", "zp"]) back.searchParams.delete(k);
+  await page.goto(`${back.pathname}?${back.searchParams.toString()}`);
+  const masseGap = page.locator("tr[data-row='masse'] td[data-col='g1']").first();
+  await expect(masseGap).toHaveClass(/trend-bad/);
+  await expect(masseGap).toContainText("+3 550,00 €");
+  await expect(page.locator("tr[data-row='etp'] td.trend-bad, tr[data-row='etp'] td.trend-good")).toHaveCount(0);
+
   // Analyse des écarts : cascade d'ETP, contributions de masse, pont volume / coût moyen.
   await page.goto(`/e/${slug}/studio-rh/masse-salariale/analyse`);
   const f2 = page.getByTestId("ecart-form");

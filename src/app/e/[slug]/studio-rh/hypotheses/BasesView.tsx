@@ -1,8 +1,10 @@
+import { GlossaryLink } from "@/components/GlossaryLink";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { enteredAfter, roundDiv } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
+import { BUDGET_TERMS } from "@/lib/glossary/budget";
 import { fmtEtp4, fmtFixed } from "@/lib/rh/kpi/format";
 import { dateFr } from "@/lib/viz/hyp-saisie";
 import { deMois, frDates } from "@/lib/viz/hyp-saisie-fmt";
@@ -34,7 +36,7 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
             return (
               <tr key={c.contractKey} data-contract={c.externalId}>
                 <td>{c.label}{canEdit && <input type="hidden" name={`key_${i}`} value={c.contractKey} />}</td>
-                <td>{c.service ?? <span title={c.serviceNd ? frDates(c.serviceNd) : undefined}>Non ventilé{c.serviceNd ? " ⚠" : ""}</span>}</td>
+                <td>{c.service ?? <span title={c.serviceNd ? frDates(c.serviceNd) : undefined}>Non ventilé{c.serviceNd ? " (voir note)" : ""}</span>}</td>
                 <td>{c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "n.d."}</td>
                 <td>{dateFr(c.startDate) ?? "n.d."}</td>
                 <td>{dateFr(c.endDate) ?? "—"}</td>
@@ -59,24 +61,25 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
   // « Copier vers le bas » seulement : un salaire n'a pas de sens dans la colonne des charges, ni l'inverse.
   const frame = (
     <div className="hs-grid" data-grid-root>
-      <GridTools filename={`bases-${scenario.firstMonth}.csv`} tools={["down"]} readOnly={!canEdit} />
+      <GridTools filename={`bases-${scenario.firstMonth}.csv`} tools={["down"]} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} />
       {table}
     </div>
   );
   return (
     <section className="panel" data-testid="hyp-base">
-      <CardTitle title={`Base figée sur ${formatMonth(base.refMonth).toLowerCase()}`}>Base de départ de la projection, contrat par contrat. <a href="#def-base-contrat">Coût de référence d'un contrat</a></CardTitle>
+      <CardTitle title={`Base figée sur ${formatMonth(base.refMonth).toLowerCase()}`} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.base} />} />
       {base.origin && (
         <p className="notice" data-testid="hyp-base-origin">
-          Base dérivée du scénario « {base.origin.scenarioName} » : état projeté fin {formatMonth(base.origin.month).toLowerCase()} (salaires du mois complet, augmentations comprises ; embauches reprises ; départs et éléments ponctuels non repris).
-          {base.origin.notCarried.length ? ` Non repris car postérieurs à ${formatMonth(base.origin.month).toLowerCase()} : ${frDates(base.origin.notCarried.join(" ; "))} — à ressaisir si besoin.` : ""}
+          Base dérivée du scénario « {base.origin.scenarioName} » : état projeté fin {formatMonth(base.origin.month).toLowerCase()}.
+          {base.origin.notCarried.length ? ` Non repris car postérieurs à ${formatMonth(base.origin.month).toLowerCase()} : ${frDates(base.origin.notCarried.join(" ; "))}.` : ""}
+          <GlossaryLink slug={slug} term={BUDGET_TERMS.derivee} />
         </p>
       )}
       <dl className="facts hs-tiles">
         <div data-testid="hyp-base-total">
           <dt>Coût mensuel de la base ({base.contracts.filter((c) => !enteredAfter(base, c)).length} contrats présents fin {formatMonth(base.refMonth).toLowerCase()})</dt>
           <dd className={base.refBaseCost === null ? "nd" : undefined}>{base.refBaseCost === null ? `n.d. — ${base.contracts.filter((c) => !c.base && !enteredAfter(base, c)).length} base(s) de contrat n.d.` : formatEuros(base.refBaseCost)}</dd>
-          <span className="tile-foot">salaires et gratifications de stage + charges au taux observé de chaque contrat</span>
+          <span className="tile-foot"><GlossaryLink slug={slug} term={BUDGET_TERMS.baseContrat} /></span>
         </div>
         <div data-testid="hyp-base-masse">
           {base.origin ? (
@@ -97,23 +100,20 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
             <>
               <dt>Masse salariale réelle {deMois(base.refMonth)}</dt>
               <dd>{formatEuros(base.refMasse)}</dd>
-              <span className="tile-foot">{base.refBaseCost === null ? "écart avec la base : n.d." : `hors base : ${formatEuros(base.refMasse - base.refBaseCost)} (primes, indemnités, contrats sortis dans le mois, lignes sans contrat)`}</span>
+              <span className="tile-foot">{base.refBaseCost === null ? "écart avec la base : n.d." : `hors base : ${formatEuros(base.refMasse - base.refBaseCost)}`}</span>
             </>
           )}
         </div>
       </dl>
       {toFix.length > 0 && (
-        <p className="notice" data-testid="hyp-base-nd">{toFix.length} contrat(s) sans base : la projection est n.d. tant qu'une correction de base n'est pas saisie (salaire mensuel et taux de charges).</p>
+        <p className="notice" data-testid="hyp-base-nd">{toFix.length} contrat(s) sans base : la projection est n.d. tant qu'une correction de base n'est pas saisie.</p>
       )}
-      <div className="hs-title">
-        <h3>Contrats de la base</h3>
-        <p className="desc">{canEdit ? "Une ligne par contrat : la base figée est lue à gauche ; saisissez à droite la correction du salaire et du taux de charges, ou laissez vide pour garder la base." : "Une ligne par contrat : base figée et correction éventuelle."}</p>
-      </div>
+      <h3>Contrats de la base<GlossaryLink slug={slug} term={BUDGET_TERMS.bases} /></h3>
       {canEdit ? (
         <ActionForm action={saveBasesAction.bind(null, slug, scenario.id)} submit="Enregistrer les bases corrigées" testid="bases-grid" className="form hs-grid-form" footer={<DirtyIndicator />}>
           <input type="hidden" name="n" value={rows.length} />
           {frame}
-          <p className="tile-foot">Correction de la base d'un contrat : salaire mensuel de base et taux de charges vont ensemble (0 € possible pour un contrat non payé). Les deux champs vides : pas de correction (une correction existante est retirée).</p>
+          <p className="tile-foot">Correction de la base d'un contrat : salaire et taux vont ensemble ; les deux champs vides retirent la correction.</p>
         </ActionForm>
       ) : frame}
       {(base.etpNote || base.contracts.some((c) => c.serviceNd)) && (
