@@ -72,7 +72,7 @@ p { margin: 0; }
 
 /* Pages d'authentification */
 .auth-page { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; background: var(--surface); }
-.auth-card { width: min(420px, 100%); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 32px; display: grid; gap: 20px; }
+.auth-card { width: min(420px, 100%); background: #fff; border: 1px solid var(--line); border-radius: var(--clair-radius-card); padding: 32px; display: grid; gap: 20px; }
 .brand { font-weight: 720; font-size: 30px; letter-spacing: -1.9px; line-height: 1; color: var(--ink); text-decoration: none; }
 .brand span { color: var(--blue); }
 
@@ -131,7 +131,7 @@ p { margin: 0; }
 .user-menu-id { display: grid; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 6px; overflow-wrap: anywhere; }
 .user-menu-panel a, .user-menu-panel .linklike { display: block; padding: 8px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; text-align: left; font-size: inherit; }
 .user-menu-panel a:hover, .user-menu-panel .linklike:hover { background: var(--surface); }
-.main { padding: 32px 36px 64px; display: grid; gap: 24px; align-content: start; min-width: 0; max-width: 1360px; width: 100%; margin: 0 auto; }
+.main { padding: 32px 36px 64px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-content: start; min-width: 0; max-width: 1360px; width: 100%; margin: 0 auto; }
 .placeholder { border: 1px dashed #d8dce5; border-radius: 8px; padding: 26px; display: grid; gap: 10px; background: var(--surface); }
 
 @media (max-width: 860px) {
@@ -309,6 +309,12 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
   .workspace-display-tools { gap: 8px; }
   .workspace-display-tools .table-density button { font-size: 11px; padding: 6px; }
   .workspace-display-tools .table-density { padding: 2px; }
+  /* Ces tableaux deviennent des cartes/listes : la densité ne doit pas ajouter d'espace à chaque champ. */
+  .pm-contracts { --clair-table-pad-y: 2px; }
+  .mb-journal { --clair-table-pad-y: 0px; }
+}
+@media screen and (max-width: 720px) {
+  .data-table.collab-fiche-table { --clair-table-pad-y: 0px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html[data-clair-theme="airy"] :is(.btn, .nav a, .ws-card, .tabs a, .mega-panel a, .nav-group .chevron, .kpi-tile, .ms-tile, .sy-tile, .collab-tile, .hr-tile, .hs-tiles > div, .pont-tiles > div, .dn-card) { transition: none; }
