@@ -43,6 +43,20 @@ describe("réel (fixture PayFit fictive, septembre 2026)", async () => {
     expect(sv.kind).toBe("nd");
     expect(sv.kind === "nd" && sv.reason).toContain("axe analytique");
   });
+  it("ETP par service : un mois sans aucune ligne de paie lue est n.d. (jamais un mois à 0,00) ; la répartition ne retombe pas sur un total nul", async () => {
+    const { nd, val } = await import("@/lib/budget/versions");
+    const lines: LedgerLine[] = [{ key: "1", month: "2026-09", accountId: "641100", accountName: null, debitCents: 300000, creditCents: null, contractId: "C1", analytic: [{ type: "SERVICE", code: "TECH", value: "TECH" }] }];
+    const journal: JournalInput = { months: ["2026-09"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "SERVICE", lines };
+    // ETP par service (cas écrit à la main) : TECH 2,13 ETP en septembre, 21,33 de référence non utilisés ici.
+    const etpService = (_m: string, f: { value: string | null }) => (f.value === "TECH" ? val(21300) : nd("service inconnu"));
+    const r = monthlyGrid({ measure: "etp", axis: "service", year: "2026", real: { ...real, journal, etpService }, scenario: null });
+    expect(row(r, "TECH", ["2026-09"])).toEqual([21300]);
+    expect(row(r, "TECH", ["2026-08", "2026-10", "2026-12"])).toEqual(["nd", "nd", "nd"]);
+    const c = grid(r).total("2026-10");
+    expect(c.kind).toBe("nd");
+    expect(c.kind === "nd" && c.reason).toContain("aucune ligne de paie lue pour 2026-10");
+    expect(grid(r).total("2026-09")).toEqual({ kind: "value", v: 21300 });
+  });
   it("entrées et sorties du mois : somme des groupes = nombre d'événements comptés du KPI", async () => {
     const { monthMovements } = await import("@/lib/rh/kpi/turnover");
     for (const month of ["2026-02", "2026-09"]) {

@@ -98,6 +98,8 @@ function realMonth(src: RealSource, m: string, measure: Measure, axis: Axis): Mo
     if (!src.etpService) return nd("ETP par service indisponible");
     const services = new Set<string | null>();
     for (const l of journal.lines) if (l.month === m) services.add(serviceOf(l, journal.serviceAxis));
+    // Un mois sans aucune ligne de paie n'a pas été lu : ETP par service indisponible (n.d.), jamais un mois à zéro.
+    if (services.size === 0) return nd(`aucune ligne de paie lue pour ${m} : ETP par service indisponible`);
     for (const s of services) {
       const c = src.etpService(m, { value: s });
       if (c.kind === "nd") return nd(c.reason);
