@@ -315,6 +315,7 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 }
 @media screen and (max-width: 720px) {
   .data-table.collab-fiche-table { --clair-table-pad-y: 0px; }
+  .view-switch { flex-wrap: wrap; min-width: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   html[data-clair-theme="airy"] :is(.btn, .nav a, .ws-card, .tabs a, .mega-panel a, .nav-group .chevron, .kpi-tile, .ms-tile, .sy-tile, .collab-tile, .hr-tile, .hs-tiles > div, .pont-tiles > div, .dn-card) { transition: none; }
