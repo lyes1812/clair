@@ -41,8 +41,19 @@ export async function createWorkspaceAsAdmin(page: Page, name: string) {
   await page.getByLabel("Mot de passe").fill(PASSWORD);
   await page.getByRole("button", { name: "Configurer" }).click();
   const secret = (await page.getByTestId("totp-secret").textContent())!.trim();
-  await page.getByLabel("Code à 6 chiffres").fill(await freshTotp(secret));
-  await page.getByRole("button", { name: "Activer" }).click();
+  // Le serveur limite les vérifications de code par adresse IP (enchaînement de specs) : en cas de refus, on attend la
+  // fenêtre suivante et on réessaie avec un code neuf.
+  for (let attempt = 0; ; attempt++) {
+    await page.getByLabel("Code à 6 chiffres").fill(await freshTotp(secret));
+    await page.getByRole("button", { name: "Activer" }).click();
+    const outcome = await Promise.race([
+      page.getByTestId("totp-enabled").waitFor(NAV).then(() => "ok" as const),
+      page.locator("p.error").waitFor(NAV).then(() => "error" as const),
+    ]).catch(() => "timeout" as const);
+    if (outcome === "ok") break;
+    if (attempt >= 3) throw new Error(`Activation du TOTP refusée : ${outcome === "error" ? await page.locator("p.error").textContent() : "aucune réponse"}`);
+    await page.waitForTimeout(11_000);
+  }
   await expect(page.getByTestId("totp-enabled")).toBeVisible(NAV);
   await page.getByRole("button", { name: "Continuer" }).click();
   await expect(page).toHaveURL(/\/e\/[a-z0-9-]+\/donnees$/, NAV);
