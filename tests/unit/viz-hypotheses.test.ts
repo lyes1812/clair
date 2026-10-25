@@ -1,3 +1,4 @@
+import { ComparisonPicker } from "@/app/e/[slug]/studio-rh/hypotheses/ComparisonPicker";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -568,7 +569,7 @@ describe("ProjectionView rendue", () => {
     for (const id of ["proj-affichage", "proj-tile-landing", "proj-tile-horizon", "proj-tile-headcount", "proj-chart", "proj-chart-effectif", "proj-chart-etp", "proj-chart-nature", "proj-table", "proj-categories"]) expect(html).toContain(`data-testid="${id}"`);
     // Atterrissage : 63 000,00 + (10 650,00 + 10 940,50 + 11 049,91) ; les valeurs de tuile ne changent pas.
     expect(html).toContain("Coût projeté");
-    expect(html).toContain("aria-current=\"page\"");
+    expect(html).toContain('data-view="tout" selected=""');
   });
   it("tableau par nature : mêmes montants que le graphique (base 10 650,00 € ; augmentations 0, 290,50 €, 399,91 €) et coût du mois du moteur en dernière ligne", () => {
     const html = render("tableau");
@@ -1124,5 +1125,45 @@ describe("lot 10 : couleurs de la zone", () => {
     }
     // Les écrans qui lisent des écarts de coût passent par costTone / trendClass (jamais une classe de couleur écrite à la main).
     for (const f of [`${HYP_DIR}/ComparisonView.tsx`, `${HYP_DIR}/LandingView.tsx`]) expect(readFileSync(f, "utf8"), f).toMatch(/costTone|savingTone/);
+  });
+});
+
+
+describe("sélecteur replié des lectures de comparaison", () => {
+  const options = [
+    { value: "reel", label: "Réel courant" },
+    { value: "n1", label: "N-1" },
+    { value: "budget:budget-fictif", label: "Budget saisi" },
+    { value: "scenario:scenario-fictif", label: "Scénario comparé" },
+  ];
+  const renderPicker = (selected: string[]) => renderToStaticMarkup(h(ComparisonPicker, { options, selected }));
+  it("liste repliée au départ et compteur des cases cochées conservé dans le résumé", () => {
+    const html = renderPicker(["reel", "n1"]);
+    const details = /<details[^>]*data-testid="cmp-picker"[^>]*>/.exec(html)?.[0] ?? "";
+    expect(details).not.toBe("");
+    expect(details).not.toMatch(/\bopen(?:=|\s|>)/);
+    const summary = /<summary[^>]*>[\s\S]*?<\/summary>/.exec(html)?.[0] ?? "";
+    expect(summary).toContain("Comparer avec");
+    expect(summary).toContain('data-testid="cmp-selected-count">2 sélectionnées');
+    expect(html).toContain("Comparer avec (3 lectures au plus)");
+  });
+  it("les quatre libellés, noms et valeurs natifs restent présents pour soumettre les mêmes cmp", () => {
+    const html = renderPicker(["reel", "budget:budget-fictif"]);
+    const inputs = [...html.matchAll(/<input[^>]*type="checkbox"[^>]*>/g)].map((match) => match[0]);
+    expect(inputs).toHaveLength(4);
+    options.forEach((option) => {
+      const input = inputs.find((element) => element.includes(`value="${option.value}"`));
+      expect(input).toContain('name="cmp"');
+      expect(html).toContain(`<span>${option.label}</span>`);
+      expect(input?.includes('checked=""')).toBe(["reel", "budget:budget-fictif"].includes(option.value));
+    });
+  });
+  it("au maximum de trois lectures, on peut décocher les choix actifs et les autres restent désactivés", () => {
+    const html = renderPicker(["reel", "n1", "budget:budget-fictif"]);
+    const inputs = [...html.matchAll(/<input[^>]*type="checkbox"[^>]*>/g)].map((match) => match[0]);
+    expect(inputs.filter((input) => input.includes('disabled=""'))).toHaveLength(1);
+    expect(inputs.find((input) => input.includes('value="scenario:scenario-fictif"'))).toContain('disabled=""');
+    expect(inputs.filter((input) => input.includes('checked=""')).every((input) => !input.includes('disabled=""'))).toBe(true);
+    expect(html).toContain('data-testid="cmp-selected-count">3 sélectionnées');
   });
 });

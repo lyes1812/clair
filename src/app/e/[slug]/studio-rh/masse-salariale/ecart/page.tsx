@@ -17,6 +17,7 @@ import { eurosSigned, Gap, gapSign, gapText, GapPct, MsHeader, MsTabs, neg, Pane
 import { peopleIndex } from "../people-index";
 import { EcartChart } from "./EcartChart";
 import { LiveLink, LiveViewSwitch, RubInput } from "./LiveRub";
+import { ExportMenu } from "@/components/ExportMenu";
 
 export const dynamic = "force-dynamic";
 type Search = Record<string, string | string[] | undefined>;
@@ -118,7 +119,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
               <VersionChain labels={[a.label, b.label]} first={pair + 1} /> · {period} · {scope}
             </PanelTitle>
             <div className="panel-tools">
-              <a className="btn" href={`${base}/export?${exportZoom.toString()}`} data-testid="zoom-export">Exporter le détail (CSV)</a>
+              <ExportMenu label="Exporter le détail" testid="zoom-export-menu" options={[{ label: "CSV (.csv)", href: `${base}/export?${exportZoom.toString()}`, testid: "zoom-export" }]} />
             </div>
           </div>
           <form method="get" action={base} className="filters" data-testid="zoom-filters">
@@ -217,7 +218,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
                 current={vue}
                 options={[{ key: "synthese", label: "Synthèse", href: q({ ...view, vue: "synthese" }) }, { key: "detail", label: "Détail", href: q({ ...view, vue: "detail" }) }]}
               />
-              <a className="btn" href={`${base}/export?${exportQuery.toString()}`} data-testid="ecart-export">Exporter en CSV</a>
+              <ExportMenu testid="ecart-export-menu" options={[{ label: "CSV (.csv)", href: `${base}/export?${exportQuery.toString()}`, testid: "ecart-export" }]} />
             </div>
           </div>
           <TrendLegend slug={slug} />

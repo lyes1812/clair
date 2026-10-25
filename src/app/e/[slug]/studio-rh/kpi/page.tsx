@@ -56,6 +56,7 @@ import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Prevu, type PrevuLink } from "@/components/Prevu";
 import { EffectifsMensuels } from "./EffectifsMensuels";
+import { PeriodModeFields } from "./PeriodModeFields";
 import { KPI_VUES, resolveKpiVue } from "./tabs";
 
 export const dynamic = "force-dynamic";
@@ -343,29 +344,14 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
 
       <form method="get" className="filters bar kpi-bar" data-testid="kpi-filters" aria-label="Période et périmètre des indicateurs">
         {vue !== "suivi" && <input type="hidden" name="vue" value={vue} />}
-        <div className="field-row">
-          <label htmlFor="mode">Période</label>
-          <select className="select" id="mode" name="mode" defaultValue={mode}>
-            <option value="glissant">12 mois glissants</option>
-            <option value="civil">Année civile</option>
-          </select>
-        </div>
-        <div className="field-row">
-          <label htmlFor="fin">Fin des 12 mois glissants</label>
-          <select className="select" id="fin" name="fin" defaultValue={fin}>
-            {[...closed].reverse().map((m) => (
-              <option key={m} value={m}>{m}{lowerMonths.has(m) ? " — borne basse" : ""}</option>
-            ))}
-          </select>
-        </div>
-        <div className="field-row">
-          <label htmlFor="annee">Année civile</label>
-          <select className="select" id="annee" name="annee" defaultValue={String(year)}>
-            {[...years].reverse().map((y) => (
-              <option key={y.year} value={y.year}>{y.year}{y.closed ? "" : " — non close"}</option>
-            ))}
-          </select>
-        </div>
+        <PeriodModeFields
+          key={`${mode}:${fin}:${year}`}
+          initialMode={mode}
+          initialEnd={fin}
+          initialYear={String(year)}
+          ends={[...closed].reverse().map((month) => ({ value: month, label: `${month}${lowerMonths.has(month) ? " — borne basse" : ""}` }))}
+          years={[...years].reverse().map((entry) => ({ value: String(entry.year), label: `${entry.year}${entry.closed ? "" : " — non close"}` }))}
+        />
         {ctx.collab.establishments.length > 1 && (
           <div className="field-row">
             <label htmlFor="etab">Établissement</label>

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { DropdownMenu } from "@/components/DropdownMenu";
 import { checkFill, dirtyText, downTargets, neighborInColumn, reportTargets, rightTargets, rowTargets, scanFields, type FieldState, type GridCell } from "@/lib/viz/hyp-saisie";
 
 // Outils d'une grille mensuelle (formulaire serveur à champs non contrôlés). Tout se passe dans le navigateur, sans appel
@@ -246,17 +247,20 @@ export function GridTools({ filename, years, tools = ["right", "down", "fill"], 
             Réinitialiser
           </button>
         )}
+        <DropdownMenu label="Exporter" testid="grid-export-menu">
         <button
           type="button"
           className="btn small"
           data-testid="grid-csv"
+          data-dropdown-close=""
           onClick={() => {
             const scope = scopeOf(root.current);
             if (scope) exportCsv(scope, filename);
           }}
         >
-          Télécharger (CSV)
+          CSV (.csv)
         </button>
+        </DropdownMenu>
         {help}
       </div>
       {!readOnly && (

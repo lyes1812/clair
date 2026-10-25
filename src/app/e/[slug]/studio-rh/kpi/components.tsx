@@ -147,7 +147,7 @@ export function PayfitNotice({ ctx }: { ctx: KpiContext }) {
       <div className="kpi-limits-body">
         {raw && <PayfitHistoryNotice ctx={ctx.collab} />}
         <p className="notice" data-testid="kpi-payfit-notice">
-          Quotités à la date de lecture ({formatDate(data.build.referenceDate)}), non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.
+          Quotités non historisées par PayFit : la même quotité sert pour tous les mois, N-1 compris.
           <GlossaryLink slug={ctx.collab.slug} term={KPI_TERMS.limits} />
         </p>
         {archive && (

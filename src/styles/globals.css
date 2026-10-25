@@ -326,4 +326,20 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
   .ws-topbar .mega-panel { top: calc(100% + 4px); }
 }
 .money-display { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.view-select { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--clair-type-label); max-width: 100%; }
+.view-select .select { width: auto; min-width: 0; max-width: 100%; color: var(--ink); }
+.ui-dropdown { position: relative; display: inline-block; max-width: 100%; }
+.ui-dropdown > summary { display: inline-flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; }
+.ui-dropdown > summary::-webkit-details-marker { display: none; }
+.ui-dropdown > summary > svg { flex: none; transition: transform 150ms; }
+.ui-dropdown[open] > summary > svg { transform: rotate(180deg); }
+.ui-dropdown-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: max-content; max-width: min(420px, calc(100vw - 48px)); max-height: min(440px, 65vh); overflow: auto; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: var(--clair-radius-card); box-shadow: 0 12px 36px #14182412; }
+.ui-dropdown-panel > a { display: flex; padding: 9px 12px; border-radius: var(--clair-radius-control); color: var(--ink); text-decoration: none; }
+.ui-dropdown-panel > a:hover, .ui-dropdown-panel > a:focus-visible { background: var(--blue-soft); color: var(--blue); }
+.comparison-picker .ui-dropdown-panel { left: 0; right: auto; min-width: min(320px, calc(100vw - 48px)); }
+.comparison-picker .checks { margin: 0; border: 0; padding: 0; }
+.comparison-picker .check { padding: 6px 0; }
+.comparison-picker .check:has(input:disabled) { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .ui-dropdown > summary > svg { transition: none; } }
+@media print { .ui-dropdown, .view-select { display: none; } }
 @media print { .table-density { display: none; } }

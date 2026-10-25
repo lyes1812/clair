@@ -234,8 +234,8 @@ describe("liens qui gardent la rubrique du graphique", () => {
     expect(l).toContain("v1=reel%3A2025");
     expect(l).toContain("#zoom");
     const v = renderToStaticMarkup(h(LiveViewSwitch, { initialRub: "etp", testid: "t", label: "Affichage", current: "tout", options: [{ key: "tout", label: "Afficher tout", href: "/p?v1=a" }, { key: "graphique", label: "Graphique", href: "/p?v1=a&affichage=graphique" }] }));
-    expect(v).toContain('href="/p?v1=a&amp;rub=etp"');
-    expect(v).toContain('href="/p?v1=a&amp;affichage=graphique&amp;rub=etp"');
+    expect(v).toContain('value="/p?v1=a&amp;rub=etp"');
+    expect(v).toContain('value="/p?v1=a&amp;affichage=graphique&amp;rub=etp"');
   });
 });
 
