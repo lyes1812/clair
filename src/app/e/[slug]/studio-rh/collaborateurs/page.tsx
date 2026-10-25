@@ -1,3 +1,4 @@
+import { SearchableSelect } from "@/components/SearchableSelect";
 import "@/styles/collaborateurs.css";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
@@ -180,10 +181,10 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
         {ctx.establishments.length > 1 && (
           <div className="field-row">
             <label htmlFor="etab">Établissement</label>
-            <select className="select" id="etab" name="etab" defaultValue={etab}>
-              <option value="">Tous</option>
-              {ctx.establishments.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
-            </select>
+            <SearchableSelect className="select" id="etab" name="etab" defaultValue={etab} searchLabel="Établissement" options={[
+              { value: "", label: "Tous" },
+              ...ctx.establishments.map((establishment) => ({ value: establishment.id, label: establishment.label })),
+            ]} />
           </div>
         )}
         <FilterActions label="Afficher" />
@@ -223,10 +224,10 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
           <ListToolbar testid="month-toolbar" label="Recherche et filtres du tableau des contrats du mois" hidden={{ mois: month, etab: etab || undefined }} q={q} size={size} resetHref={resetHref}>
             <div className="field-row">
               <label htmlFor="nature">Nature</label>
-              <select className="select" id="nature" name="nature" defaultValue={nature}>
-                <option value="">Toutes</option>
-                {natures.map((n) => <option key={n} value={n}>{contractNatureLabel(n)}</option>)}
-              </select>
+              <SearchableSelect className="select" id="nature" name="nature" defaultValue={nature} searchLabel="Nature de contrat" options={[
+                { value: "", label: "Toutes" },
+                ...natures.map((natureCode) => ({ value: natureCode, label: contractNatureLabel(natureCode) })),
+              ]} />
             </div>
             <div className="field-row">
               <label htmlFor="etat">État</label>

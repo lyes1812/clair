@@ -342,4 +342,11 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 .comparison-picker .check:has(input:disabled) { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .ui-dropdown > summary > svg { transition: none; } }
 @media print { .ui-dropdown, .view-select { display: none; } }
+.filter-choice { min-width: 0; max-width: 100%; }
+.filter-choice-control, .filter-choice-query { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.filter-choice-control > .select, .filter-choice-query > .input { flex: 1; width: 100%; min-width: 0; }
+.filter-choice-toggle, .filter-choice-clear { flex: none; padding: 8px; }
+.filter-choice-search { margin-top: 6px; }
+.filter-choice-search .hint { margin: 4px 0 0; font-size: var(--clair-type-label); }
+@media print { .filter-choice-search, .filter-choice-toggle { display: none; } }
 @media print { .table-density { display: none; } }

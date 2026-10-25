@@ -1,4 +1,5 @@
 "use client";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { cloneElement, useState } from "react";
 import type { HireProfile } from "@/lib/budget/bulk";
 import { CATEGORY_IDS, CATEGORY_LABELS } from "@/lib/budget/types";
@@ -32,10 +33,10 @@ export function HireForm({ action, profiles, deps }: { action: (prev: FormState,
     <ActionForm action={action} submit="Ajouter l'embauche" testid="hyp-form-embauche">
       <Group title="Profil de départ">
         <Field id="hire-copy" label="Recopier le profil d'un salarié (facultatif)">
-          <select className="select" id="hire-copy" value={key} onChange={(e) => setKey(e.target.value)} data-testid="hire-copy">
-            <option value="">— saisie libre</option>
-            {profiles.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
-          </select>
+          <SearchableSelect className="select" id="hire-copy" value={key} onChange={(e) => setKey(e.target.value)} data-testid="hire-copy" searchLabel="Profil de départ" options={[
+            { value: "", label: "— saisie libre" },
+            ...profiles.map((profile) => ({ value: profile.key, label: profile.label })),
+          ]} />
         </Field>
       </Group>
       {p && <p className="tile-foot" data-testid="hire-copy-note">{p.note}</p>}
@@ -75,10 +76,10 @@ export function HireForm({ action, profiles, deps }: { action: (prev: FormState,
             </select>
           </Field>
           <Field id="hire-replaces" label="Remplace (un seul poste)">
-            <select className="select" id="hire-replaces" name="replaces" defaultValue="">
-              <option value="">— (création de poste)</option>
-              {deps.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-            </select>
+            <SearchableSelect className="select" id="hire-replaces" name="replaces" defaultValue="" searchLabel="Poste à remplacer" options={[
+              { value: "", label: "— (création de poste)" },
+              ...deps.map((departure) => ({ value: departure.id, label: departure.label })),
+            ]} />
           </Field>
         </Group>
       </div>
