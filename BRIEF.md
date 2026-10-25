@@ -41,5 +41,12 @@ Objectif : un Studio RH utilisable au quotidien par un DAF, sur données réelle
 ## Hors V1
 IA dans le produit, multidevise actif, SSO/SCIM, préréglages de conventions collectives, partie planification financière Pigment (après la V1 RH), connecteur Pennylane (après le FEC en upload).
 
+## Lots d'ergonomie — 25 octobre 2026
+Statut : mis en œuvre. Le catalogue, ses libellés et statuts, les calculs et les données restent inchangés. Les menus d'export ne proposent que les formats déjà disponibles dans la version concernée.
+- **Filtres** : afficher seulement les champs utiles au mode temporel choisi dans KPI RH ; replier les longues listes de comparaisons en conservant les lectures sélectionnées et la limite de trois.
+- **Menus déroulants** : regrouper les formats déjà disponibles sous « Exporter » et les choix Tout / Graphiques / Tableaux sous « Affichage », avec les mêmes fichiers, paramètres et adresses ; accès au clavier et sur mobile.
+- **Informations répétées** : retirer les répétitions de contexte et de date, garder les définitions et détails accessibles depuis leur emplacement commun. Conserver visibles la source active, la période, N-1, les mois non clos, les limites de couverture et les raisons des « n.d. » ; distinguer la période du scénario de celle de la projection.
+**Accepté quand :** les choix restent conservés après navigation, chaque action et information utile reste accessible, et une vérification sur TEST confirme le comportement sans modification de la navigation métier ni des résultats.
+
 ## Première consigne à donner
 « Lis CLAUDE.md, BRIEF.md et HERITAGE-CODEX.md. Propose-moi le plan du module 0 uniquement, avec la pile technique retenue et pourquoi. Ne code rien avant ma validation. »
