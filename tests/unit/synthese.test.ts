@@ -326,10 +326,12 @@ describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
     expect(tile(html, "etp-moyen").text).toContain("5,77 N-1 : 4,80 Écart : +0,97 ETP");
     // Masse chargée : 3 × 4 200,00 € = 12 600,00 € ; N-1 : 3 × 3 780,00 € = 11 340,00 € ; évolution +1 260,00 € = +11,11 %.
     const masse = tile(html, "masse");
-    expect(masse.text).toContain("12 600,00 € N-1 : 11 340,00 € Évolution : +1 260,00 € (+11,11 %)");
+    expect(masse.text).toContain("12 600 € N-1 : 11 340 € Évolution : +1 260 € (+11,11 %)");
     expect(masse.raw).toContain('class="sy-delta trend-bad"');
+    expect(masse.raw).toContain('data-money-cents="1260000"');
+    expect(masse.raw).toContain('data-money-cents="1134000"');
     // Coût par ETP-mois : 1 260 000 centimes ÷ 17,30 ETP-mois = 728,32 € ; N-1 : 1 134 000 ÷ 14,40 = 787,50 €.
-    expect(tile(html, "cout-etp").text).toContain("17,30 ETP-mois 728,32 € N-1 : 787,50 €");
+    expect(tile(html, "cout-etp").text).toContain("17,30 ETP-mois 728 € N-1 : 788 €");
     // Un effectif ou un ETP n'est jamais rouge ni vert.
     expect(tile(html, "etp-fin").raw).not.toMatch(/trend-(bad|good)/);
     expect(tile(html, "effectif").raw).not.toMatch(/trend-(bad|good)/);
@@ -355,8 +357,8 @@ describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
     expect(html).toContain('data-testid="sy-chart-masse"');
     expect(html).toContain('data-testid="sy-chart-etp"');
     const t = text(/data-testid="sy-table-masse"[\s\S]*?<\/details>/.exec(html)![0]);
-    expect(t).toContain("janvier 2026 4 200,00 € 3 780,00 €");
-    expect(t).toContain("Période 12 600,00 € 11 340,00 €");
+    expect(t).toContain("janvier 2026 4 200 € 3 780 €");
+    expect(t).toContain("Période 12 600 € 11 340 €");
     expect(text(/data-testid="sy-table-etp"[\s\S]*?<\/details>/.exec(html)![0])).toContain("janvier 2026 5,10 4,80 février 2026 6,10 4,80 mars 2026 6,10 4,80");
   });
   it("chaque graphique renvoie au glossaire (graphique et tableau exact) ; la clé « n.d. » aussi quand un mois est n.d.", async () => {
@@ -419,7 +421,7 @@ describe("page : référence de l'année civile 2025 et période par défaut (va
     reset();
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
     const names = [...html.matchAll(/<summary>Tableau exact<span class="sy-sr"> : ([^<]*)<\/span><\/summary>/g)].map((m) => decode(m[1]));
-    expect(names).toEqual(["Masse chargée par mois, 2026 face à 2025 (N-1), en euros", "ETP de fin de mois, 2026 face à 2025 (N-1), en ETP"]);
+    expect(names).toEqual(["Masse chargée par mois, 2026 face à 2025 (N-1), montants monétaires", "ETP de fin de mois, 2026 face à 2025 (N-1), en ETP"]);
   });
   it("périodes rapides : la période courante est marquée", async () => {
     reset();
@@ -466,7 +468,7 @@ describe("page : menu déroulant, rôle, refus de calculer", () => {
     const rh = /data-testid="sy-rh-nd"[\s\S]*?<\/div>/.exec(html)![0];
     expect(text(rh)).toContain("Paramètres des KPI illisibles");
     expect(rh).toContain('href="/e/demo/parametres#kpi"');
-    expect(tile(html, "masse").text).toContain("12 600,00 €");
+    expect(tile(html, "masse").text).toContain("12 600 €");
     expect(html).not.toContain('data-testid="sy-tile-etp-fin"');
   });
   it("journal de paie absent : masse et graphique n.d. avec la raison, indicateurs RH inchangés", async () => {
@@ -507,8 +509,8 @@ describe("page : atterrissage du dernier scénario face au budget saisi", () => 
     arm([budget("Budget saisi 2026", 800000, "2026-10-07T08:00:00Z")]);
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
     const t = tile(html, "atterrissage");
-    expect(t.text).toContain("Atterrissage 2026 ? Scénario « Budget 2026 » 94 950,00 €");
-    expect(t.text).toContain("Budget saisi « Budget saisi 2026 » : 96 000,00 € ? Écart : −1 050,00 € (−1,09 %)");
+    expect(t.text).toContain("Atterrissage 2026 ? Scénario « Budget 2026 » 94 950 €");
+    expect(t.text).toContain("Budget saisi « Budget saisi 2026 » : 96 000 € ? Écart : −1 050 € (−1,09 %)");
     // « ? » du glossaire sur l'atterrissage et sur le budget saisi.
     expect(t.raw).toContain('aria-label="Définition : Budget saisi"');
     expect(t.raw.match(/class="gloss-link"/g)).toHaveLength(2);
@@ -518,13 +520,13 @@ describe("page : atterrissage du dernier scénario face au budget saisi", () => 
   it("plusieurs budgets de l'année : le plus récemment modifié, nommé dans la tuile", async () => {
     arm([budget("Ancien", 700000, "2026-01-07T08:00:00Z"), budget("Révision d'octobre", 900000, "2026-10-07T08:00:00Z")]);
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
-    expect(tile(html, "atterrissage").text).toContain("Budget saisi « Révision d'octobre » : 108 000,00 € ? Écart : −13 050,00 €");
+    expect(tile(html, "atterrissage").text).toContain("Budget saisi « Révision d'octobre » : 108 000 € ? Écart : −13 050 €");
   });
   it("sans budget saisi pour l'année : atterrissage affiché, budget n.d. avec sa raison", async () => {
     arm([]);
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
     const t = tile(html, "atterrissage");
-    expect(t.text).toContain("94 950,00 €");
+    expect(t.text).toContain("94 950 €");
     expect(t.text).toContain("Budget saisi : n.d.");
     expect(t.text).toContain("aucun budget saisi pour 2026");
     expect(t.raw).not.toMatch(/trend-(bad|good)/);

@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
@@ -66,7 +67,7 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
     </div>
   );
   return (
-    <section className="panel" data-testid="hyp-base">
+    <MoneyText><section className="panel" data-testid="hyp-base">
       <CardTitle title={`Base figée sur ${formatMonth(base.refMonth).toLowerCase()}`} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.base} />} />
       {base.origin && (
         <p className="notice" data-testid="hyp-base-origin">
@@ -122,6 +123,6 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
           {base.contracts.filter((c) => c.serviceNd).map((c) => `${c.label} : ${frDates(c.serviceNd ?? "")}`).join(" ; ")}
         </p>
       )}
-    </section>
+    </section></MoneyText>
   );
 }

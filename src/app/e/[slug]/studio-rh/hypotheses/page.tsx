@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import "@/styles/hypotheses-saisie.css";
 import { notFound, redirect } from "next/navigation";
 import { dateTimeFmt } from "@/lib/connectors/labels";
@@ -144,7 +145,7 @@ function BudgetsSection({ slug, budgets, canEdit }: { slug: string; budgets: Bud
     return v.length === 12 && v.every((x) => x !== null) ? formatEuros(v.reduce((s, x) => s! + x!, 0)!) : `n.d. — ${12 - v.filter((x) => x !== null).length} mois non saisi(s)`;
   };
   return (
-    <section className="panel" data-testid="hyp-budgets">
+    <MoneyText><section className="panel" data-testid="hyp-budgets">
       <CardTitle title="Budgets saisis" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.budgetSaisi} />} />
       {budgets.length === 0 ? (
         <p className="desc">Aucun budget saisi.</p>
@@ -179,7 +180,7 @@ function BudgetsSection({ slug, budgets, canEdit }: { slug: string; budgets: Bud
           <BudgetForm slug={slug} budget={null} testid="budget-create" />
         </details>
       )}
-    </section>
+    </section></MoneyText>
   );
 }
 

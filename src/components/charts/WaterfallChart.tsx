@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { niceTicks } from "./scale";
-import { unitFormat, type UnitName } from "./units";
-import { Frame, labelWidth, TipBox, useRoving, useWidth, type Tip } from "./shared";
+import { axisLabelWidth, axisTexts, chartUnitText, unitFormat, type UnitName } from "./units";
+import { useMoneyUnit } from "@/components/CurrencyPreference";
+import { Frame, TipBox, useRoving, useWidth, type Tip } from "./shared";
 
 export type WaterfallProps = {
   testid: string;
@@ -25,12 +26,14 @@ export type WaterfallProps = {
 // règle métier ne dit qu'une baisse est « défavorable » (aplat gris à contour noir ; la hachure est réservée aux valeurs n.d.). L'axe est tronqué quand les contributions
 // sont petites devant les totaux ; la troncature est écrite sous le graphique.
 export function WaterfallChart(p: WaterfallProps) {
+  const moneyUnit = useMoneyUnit();
   const cost = p.trend === "cost";
   const [ref, width] = useWidth();
   const [tip, setTip] = useState<Tip | null>(null);
+  useEffect(() => { setTip(null); }, [moneyUnit]);
   const [on, setOn] = useState<number | null>(null);
   const rov = useRoving(p.steps.length + 2);
-  const u = unitFormat(p.unit);
+  const u = unitFormat(p.unit, moneyUnit);
   const axisFmt = u.axis;
   const levels: number[] = [p.start];
   for (const s of p.steps) levels.push(levels.at(-1)! + s.value);
@@ -41,12 +44,13 @@ export function WaterfallChart(p: WaterfallProps) {
   const t = niceTicks(lo, top + (top - lo) * 0.06, 5);
   const bars = [
     { label: p.startLabel, from: Math.max(t.min, 0) > 0 ? t.min : 0, to: p.start, kind: "total" as const, text: u.fmt(p.start), value: p.start },
-    ...p.steps.map((s, i) => ({ label: s.label, from: levels[i], to: levels[i + 1], kind: (s.value >= 0 ? "up" : "down") as "up" | "down", text: `${s.value > 0 ? "+" : ""}${u.fmt(s.value)}`, value: s.value })),
+    ...p.steps.map((s, i) => ({ label: s.label, from: levels[i], to: levels[i + 1], kind: (s.value >= 0 ? "up" : "down") as "up" | "down", text: u.signed(s.value), value: s.value })),
     { label: p.endLabel, from: Math.max(t.min, 0) > 0 ? t.min : 0, to: p.end, kind: "total" as const, text: u.fmt(p.end), value: p.end },
   ];
   const n = bars.length;
   const H = 280;
-  const left = labelWidth(t.ticks.map(axisFmt));
+  const left = axisLabelWidth(p.unit, t.ticks);
+  const tickTexts = p.unit === "eur" ? axisTexts(t.ticks, axisFmt) : t.ticks.map(axisFmt);
   const right = 10;
   const topM = 22;
   const narrow = (width - left - right) / n < 78;
@@ -62,18 +66,21 @@ export function WaterfallChart(p: WaterfallProps) {
     const max = Math.max(8, Math.floor(band / 5.4));
     return s.length > max ? `${s.slice(0, max - 1)}…` : s;
   };
-  const valText = (v: number, signed: boolean) => (narrow ? `${signed && v > 0 ? "+" : ""}${u.label(v)}` : `${signed && v > 0 ? "+" : ""}${u.fmt(v)}`);
+  const valText = (v: number, signed: boolean) => {
+    if (p.unit === "eur") return signed ? u.signed(v) : u.fmt(v);
+    return `${signed && v > 0 ? "+" : ""}${narrow ? u.label(v) : u.fmt(v)}`;
+  };
   const tipOf = (i: number): Tip => ({ x: left + i * band + band / 2, y: topM, title: bars[i].label, rows: [{ name: bars[i].kind === "total" ? "Valeur" : "Contribution", value: bars[i].text, strong: true }] });
   const note = [p.note, truncated ? `Axe tronqué : il commence à ${axisFmt(Math.round(t.min))}.` : null].filter(Boolean).join(" ");
   return (
-    <Frame testid={p.testid} title={p.title} note={note || undefined} legend={<ul className="chart-legend" aria-label="Légende"><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-ink)" }} />Total</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: cost ? "var(--bad)" : "var(--chart-1)" }} />{cost ? "Hausse de coût" : "Hausse"}</span></li><li><span className="legend-btn static"><i className="swatch" style={cost ? { background: "var(--good)" } : { background: "var(--chart-5)", border: "1px solid var(--chart-ink)" }} />{cost ? "Baisse de coût" : "Baisse"}</span></li></ul>}>
+    <Frame testid={p.testid} title={p.title ? chartUnitText(p.title, p.unit, moneyUnit) : undefined} note={note || undefined} legend={<ul className="chart-legend" aria-label="Légende"><li><span className="legend-btn static"><i className="swatch" style={{ background: "var(--chart-ink)" }} />Total</span></li><li><span className="legend-btn static"><i className="swatch" style={{ background: cost ? "var(--bad)" : "var(--chart-1)" }} />{cost ? "Hausse de coût" : "Hausse"}</span></li><li><span className="legend-btn static"><i className="swatch" style={cost ? { background: "var(--good)" } : { background: "var(--chart-5)", border: "1px solid var(--chart-ink)" }} />{cost ? "Baisse de coût" : "Baisse"}</span></li></ul>}>
       <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setOn(null); }}>
-        <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={p.label}>
+        <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
           <g transform={`translate(${left},${topM})`}>
-            {t.ticks.map((v) => (
+            {t.ticks.map((v, index) => (
               <g key={v}>
                 <line x1={0} x2={plotW} y1={Y(v)} y2={Y(v)} className={v === 0 ? "axis" : "grid"} />
-                <text x={-8} y={Y(v)} textAnchor="end" dominantBaseline="middle" className="tick">{axisFmt(v)}</text>
+                <text x={-8} y={Y(v)} textAnchor="end" dominantBaseline="middle" className="tick">{tickTexts[index]}</text>
               </g>
             ))}
             {bars.slice(0, -1).map((b, i) => (

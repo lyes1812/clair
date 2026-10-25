@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import "@/styles/ecart.css";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { formatEuros } from "@/lib/money";
@@ -86,7 +87,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
   const legendInMasse = showTables && !!masse && masse.kind === "value";
 
   return (
-    <>
+    <MoneyText><>
       <MsHeader title={ITEM.label} />
       <MsTabs slug={slug} current="analyse" />
       <section className="panel" data-testid="analyse">
@@ -246,6 +247,6 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
           )}
         </section>
       )}
-    </>
+    </></MoneyText>
   );
 }

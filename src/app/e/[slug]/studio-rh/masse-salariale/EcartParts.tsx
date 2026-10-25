@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { ECART_TERMS } from "@/lib/glossary/ecart";
@@ -45,8 +46,8 @@ export function aggText(a: Agg, unit: Unit): string {
   return plain(a.num, a.den, unit);
 }
 export function Val({ agg, unit }: { agg: Agg; unit: Unit }) {
-  if (agg.kind === "nd") return <abbr className="nd" title={agg.reason}>n.d.</abbr>;
-  return <>{aggText(agg, unit)}</>;
+  if (agg.kind === "nd") return <MoneyText><abbr className="nd" title={agg.reason}>n.d.</abbr></MoneyText>;
+  return <MoneyText><>{aggText(agg, unit)}</></MoneyText>;
 }
 
 // Texte d'un écart signé (« +3 550,00 € ») ; null quand l'écart est n.d. ou sans objet.
@@ -54,9 +55,9 @@ export function gapText(d: Diff, unit: Unit): string | null {
   return d.kind === "value" ? `${sign(d.num)}${plain(d.num, d.den, unit)}` : null;
 }
 export function Gap({ d, unit }: { d: Diff; unit: Unit }) {
-  if (d.kind === "nd") return <abbr className="nd" title={d.reason}>n.d.</abbr>;
-  if (d.kind === "na") return <>—</>;
-  return <>{gapText(d, unit)}</>;
+  if (d.kind === "nd") return <MoneyText><abbr className="nd" title={d.reason}>n.d.</abbr></MoneyText>;
+  if (d.kind === "na") return <MoneyText><>—</></MoneyText>;
+  return <MoneyText><>{gapText(d, unit)}</></MoneyText>;
 }
 export function GapPct({ d }: { d: Diff }) {
   if (d.kind === "nd") return <abbr className="nd" title={d.reason}>n.d.</abbr>;

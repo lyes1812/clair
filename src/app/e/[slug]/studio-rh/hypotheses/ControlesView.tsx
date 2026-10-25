@@ -1,3 +1,4 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { formatMonth } from "@/lib/dates";
@@ -108,9 +109,9 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
   const here = `/e/${slug}/studio-rh/hypotheses?scenario=${scenario.id}&vue=ctrl-changements`;
   const pageHref = (p: number) => `${here}${kind ? `&type=${kind}` : ""}${q ? `&q=${encodeURIComponent(q)}` : ""}${p > 1 ? `&page=${p}` : ""}`;
   return (
-    <>
+    <MoneyText><>
       <section className="panel" data-testid="hyp-list-hyps">
-        <CardTitle title="Contrôles des changements" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.controlesChangements} />}>{hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} · coût attribué sur l'horizon, en euros</CardTitle>
+        <CardTitle title="Contrôles des changements" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.controlesChangements} />}>{hypotheses.length} hypothèse{hypotheses.length > 1 ? "s" : ""} · coût attribué sur l'horizon, en <MoneyUnitLabel /></CardTitle>
         {proj.kind === "error" && <ul className="list" data-testid="hyp-errors">{proj.errors.map((e) => <li key={e} className="nd">{frDates(e)}</li>)}</ul>}
         {ndMonths > 0 && <p className="notice">{ndMonths} mois projeté(s) n.d. : leurs contributions ne sont pas comptées dans la colonne « Coût attribué sur l'horizon ».</p>}
         {hypotheses.length > CHANGES_PAGE / 2 && (
@@ -187,7 +188,7 @@ export function ControlesChangements({ slug, scenario, base, hypotheses, proj, c
           </ActionForm>
         </section>
       )}
-    </>
+    </></MoneyText>
   );
 }
 

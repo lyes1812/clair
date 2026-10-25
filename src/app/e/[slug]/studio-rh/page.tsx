@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import "@/styles/synthese.css";
 import type { ReactNode } from "react";
 import { BarChart, LineChart } from "@/components/charts";
@@ -101,7 +102,7 @@ function Tile({ t, slug }: { t: TileData; slug: string }) {
     reasons.push({ key: e.key, text: e.text });
   }
   return (
-    <li className={`sy-tile ${t.size}`} data-testid={`sy-tile-${t.id}`}>
+    <MoneyText><li className={`sy-tile ${t.size}`} data-testid={`sy-tile-${t.id}`}>
       <h3 className="sy-tile-label">
         {t.label}
         <GlossaryLink slug={slug} term={t.term} label={t.label} />
@@ -134,7 +135,7 @@ function Tile({ t, slug }: { t: TileData; slug: string }) {
         {absent && <a href={`/e/${slug}/donnees`} aria-label={`Données : ${t.label}`}>Données</a>}
         <a href={t.href} aria-label={`Détail : ${t.label}`}>Détail</a>
       </p>
-    </li>
+    </li></MoneyText>
   );
 }
 
@@ -178,7 +179,7 @@ function ExactTable({ testid, caption, months, columns, foot }: { testid: string
   const cell = (c: Cell | undefined, key: string) =>
     c === undefined || c.kind === "nd" ? <td key={key} className="num"><span className="nd" title={c?.reason ?? undefined}>n.d.</span></td> : <td key={key} className={c.kind === "lower" ? "num lower" : "num"}>{c.text}</td>;
   return (
-    <details className="sy-exact" data-testid={testid}>
+    <MoneyText><details className="sy-exact" data-testid={testid}>
       <summary>Tableau exact<span className="sy-sr"> : {caption}</span></summary>
       <div className="table-wrap scroll sy-scroll" role="region" aria-label={caption} tabIndex={0}>
         <table className="data-table sticky sticky-first sy-table">
@@ -207,19 +208,19 @@ function ExactTable({ testid, caption, months, columns, foot }: { testid: string
           )}
         </table>
       </div>
-    </details>
+    </details></MoneyText>
   );
 }
 
 function Panel({ testid, title, link, children }: { testid: string; title: string; link?: { href: string; label: string }; children: ReactNode }) {
   return (
-    <section className="panel" data-testid={testid} aria-labelledby={`${testid}-titre`}>
+    <MoneyText><section className="panel" data-testid={testid} aria-labelledby={`${testid}-titre`}>
       <div className="panel-head">
         <h2 id={`${testid}-titre`}>{title}</h2>
         {link && <div className="panel-tools"><a className="sy-panel-link" href={link.href}>{link.label}<span aria-hidden="true"> ›</span></a></div>}
       </div>
       {children}
-    </section>
+    </section></MoneyText>
   );
 }
 
@@ -296,7 +297,7 @@ export default async function SynthesePage({ params, searchParams }: { params: P
   const period = resolvePeriod([...rhClosed, ...payrollClosed], { annee: one(sp.annee), de: one(sp.de), a: one(sp.a) });
   if (!period) {
     return (
-      <>
+      <MoneyText><>
         {head}
         {switchNotice}
         <NdState
@@ -305,7 +306,7 @@ export default async function SynthesePage({ params, searchParams }: { params: P
           reason={capital(rhRefusal ?? payrollWhy ?? "aucun mois clos à la date de référence")}
           action={rhRefusal !== null && kpi.settings.invalid.length > 0 ? rhAction : dataAction}
         />
-      </>
+      </></MoneyText>
     );
   }
 
@@ -432,7 +433,7 @@ export default async function SynthesePage({ params, searchParams }: { params: P
   const anyTrend = [...payTiles, ...(landingTile ? [landingTile] : [])].some((t) => t.delta && t.delta.tone !== "flat");
 
   return (
-    <>
+    <MoneyText><>
       {head}
       {switchNotice}
 
@@ -514,12 +515,12 @@ export default async function SynthesePage({ params, searchParams }: { params: P
           <div className="sy-chart" data-testid="sy-chart-masse-bloc">
             {pay && hasData(masseS) ? (
               <>
-                <BarChart testid="sy-chart-masse" label={`Masse salariale chargée par mois, ${year} et ${prevYear}, en euros`} title={masseTitle} categories={axis.categories} categoryTitles={axis.titles} series={masseS} unit="eur" mode="grouped" />
+                <BarChart testid="sy-chart-masse" label={`Masse salariale chargée par mois, ${year} et ${prevYear}, montants monétaires`} title={masseTitle} categories={axis.categories} categoryTitles={axis.titles} series={masseS} unit="eur" mode="grouped" />
                 {hasNd(masseS) && <p className="chart-legend sy-nd-key"><span className="legend-btn static"><i className="swatch hatch" aria-hidden="true" />n.d. (raison au survol)</span><GlossaryLink slug={slug} term={T.hachure} /></p>}
                 <NdLines lines={ndReasonLines([months, prevMonths], masseS)} testid="sy-chart-masse-nd" />
                 <ExactTable
                   testid="sy-table-masse"
-                  caption={`${masseTitle}, en euros`}
+                  caption={`${masseTitle}, montants monétaires`}
                   months={months}
                   columns={[{ name: masseNames.cur, cells: masseCells(pay.cur.months) }, { name: masseNames.prev, cells: masseCells(pay.prev.months) }]}
                   foot={{ label: "Période", cells: [pay.cur, pay.prev].map((w): Cell => (w.kind === "nd" ? nd(w.nd.reason) : { text: euros(w.masse), kind: "value", reason: null })) }}
@@ -550,6 +551,6 @@ export default async function SynthesePage({ params, searchParams }: { params: P
           </div>
         </div>
       </Panel>
-    </>
+    </></MoneyText>
   );
 }

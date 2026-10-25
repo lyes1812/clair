@@ -180,7 +180,8 @@ const clean = (html: string) => {
   expect(html).not.toContain("NaN");
   expect(html).not.toContain("undefined");
   expect(html).not.toContain("[object");
-  return html;
+  // Compare le texte affiché ; la précision source est vérifiée séparément dans les tests monétaires.
+  return html.replace(/<span class="money-display"[^>]*>([^<]*)<\/span>/g, "$1");
 };
 const flat = (html: string) => html.replace(/\s/g, " ");
 const contract = (key: string, over: Partial<BaseContract>): BaseContract => ({
@@ -218,7 +219,7 @@ describe("PostesView rendue", () => {
     expect(flat(row("Alice"))).toContain("quotité 50,00 % dès décembre 2026");
     expect(row("Alice")).toContain('<td data-col="sortie">—</td>');
     expect(row("Chloé")).toContain('<td class="changed">Apprenti<span class="tile-foot"> (hypothèse)</span></td>');
-    expect(flat(row("Alice"))).toContain("4 200,00 €");
+    expect(flat(row("Alice"))).toContain("4 200 €");
     expect(row("Alice")).toContain("06/01/2025");
     expect(row("Chloé")).toContain("31/12/2026"); // fin de contrat connue
     // Un départ de contrat ne se lit pas dans la colonne « fin connue » des autres.
@@ -315,8 +316,8 @@ describe("PostesView rendue", () => {
     expect(events).toContain("+2,50 % à compter de novembre 2026");
     expect(events).toContain("du 26/10/2026 au 25/11/2026 · payé à 50,50 %");
     expect(events).toContain("dernier jour payé 10/12/2026");
-    expect(events).toContain("1 000,00 € brut + 42,50 %");
-    expect(events).toContain("1 000,00 € brut + 30,50 %");
+    expect(events).toContain("1 000 € brut + 42,50 %");
+    expect(events).toContain("1 000 € brut + 30,50 %");
     expect(events).not.toMatch(/\d\.\d+ %/);
     expect(events).not.toMatch(/\d{4}-\d{2}-\d{2}/);
   });

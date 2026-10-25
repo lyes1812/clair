@@ -21,7 +21,7 @@ import { signedEuros, trendOf } from "@/app/e/[slug]/studio-rh/hypotheses/shared
 // d'un montant de coût, plus de narratif sous les titres (tout est au glossaire, un « ? » par carte). Cas écrits à la main.
 const norm = (html: string) => html.replace(/[  ]/g, " "); // espaces insécables des montants
 const render = (el: React.ReactElement) => {
-  const html = norm(renderToStaticMarkup(el));
+  const html = norm(renderToStaticMarkup(el).replace(/<span class="money-display"[^>]*>([^<]*)<\/span>/g, "$1"));
   for (const bad of ["NaN", "undefined", "[object"]) expect(html).not.toContain(bad);
   return html;
 };
@@ -134,10 +134,10 @@ describe("tendance d'un montant de coût", () => {
     };
     const html = render(h(ControlesChangements, { slug: SLUG, scenario: sc, base, hypotheses: hyps, proj, canEdit: false, others: [] }));
     const effet = (id: string) => /<td class="([^"]*)" data-col="effet"( data-sign="[a-z]+")?>([^<]*)<\/td>/.exec(html.split(`data-hyp="${id}"`)[1].split("</tr>")[0]);
-    expect(effet("Chargé de mission")!.slice(1)).toEqual(["num hs-trend trend-bad", ' data-sign="up"', "+5 000,00 €"]);
-    expect(effet("Départ Bruno")!.slice(1)).toEqual(["num hs-trend trend-good", ' data-sign="down"', "−2 500,00 €"]);
-    expect(effet("Base Alice")!.slice(1)).toEqual(["num", undefined, "4 000,00 €"]);
-    expect(effet("Prime nulle")!.slice(1)).toEqual(["num hs-trend", ' data-sign="zero"', "0,00 €"]);
+    expect(effet("Chargé de mission")!.slice(1)).toEqual(["num hs-trend trend-bad", ' data-sign="up"', "+5 000 €"]);
+    expect(effet("Départ Bruno")!.slice(1)).toEqual(["num hs-trend trend-good", ' data-sign="down"', "−2 500 €"]);
+    expect(effet("Base Alice")!.slice(1)).toEqual(["num", undefined, "4 000 €"]);
+    expect(effet("Prime nulle")!.slice(1)).toEqual(["num hs-trend", ' data-sign="zero"', "0 €"]);
     expect(effet("Plafond")!.slice(1)).toEqual(["num", undefined, "—"]);
     expect(effet("Rupture réalisée")!.slice(1)).toEqual(["num", undefined, "—"]);
   });
@@ -197,7 +197,7 @@ describe("moins de narratif, un « ? » vers le glossaire par carte", () => {
     expect(html).toContain(link(BUDGET_TERMS.bases));
     for (const gone of ["Base de départ de la projection, contrat par contrat", "salaires et gratifications de stage + charges au taux observé", "primes, indemnités, contrats sortis dans le mois", "la base figée est lue à gauche"]) expect(html, gone).not.toContain(gone);
     // Réel 7 000,00 € moins base 7 100,00 € : l'écart est écrit, sans sa composition.
-    expect(html).toContain("hors base : -100,00 €");
+    expect(html).toContain("hors base : −100 €");
     // Une ligne d'état en une phrase : salaire et taux vont ensemble, deux champs vides retirent la correction.
     expect(html).toContain("Correction de la base d&#x27;un contrat : salaire et taux vont ensemble ; les deux champs vides retirent la correction.");
   });
@@ -242,7 +242,7 @@ describe("moins de narratif, un « ? » vers le glossaire par carte", () => {
     noNarrative(chg);
     expect(chg).toContain(link(BUDGET_TERMS.controlesChangements));
     expect(chg).toContain(link(BUDGET_TERMS.recopie));
-    expect(chg).toContain("0 hypothèse · coût attribué sur l&#x27;horizon, en euros");
+    expect(chg).toContain("0 hypothèse · coût attribué sur l&#x27;horizon, en €");
     expect(chg).toContain("Aucune hypothèse dans ce scénario.");
     for (const gone of ["de quoi vérifier d&#x27;un coup d&#x27;œil", "Copie, dans ce scénario, les hypothèses du type choisi", "Lecture de la colonne"]) expect(chg, gone).not.toContain(gone);
   });

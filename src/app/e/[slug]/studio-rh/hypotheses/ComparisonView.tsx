@@ -1,3 +1,4 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import "@/styles/hypotheses-resultat.css";
 import { BarChart, LineChart, WaterfallChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
@@ -46,7 +47,7 @@ export function ComparisonView({
   const origin = layerSpans(principal, months);
   const bridges = compared.map((c) => ({ c, b: bridge(principal, c, months) }));
   return (
-    <>
+    <MoneyText><>
       <div className="hr-switch">
         <ViewSwitch
           testid="cmp-affichage"
@@ -59,7 +60,7 @@ export function ComparisonView({
           ]}
         />
         <div className="hr-line-bar">
-          <p className="hr-context">{year} · coût employeur mensuel · {principal.label}{compared.length ? ` face à ${compared.map((c) => c.label).join(", ")}` : ""} · euros</p>
+          <p className="hr-context">{year} · coût employeur mensuel · {principal.label}{compared.length ? ` face à ${compared.map((c) => c.label).join(", ")}` : ""} · <MoneyUnitLabel /></p>
           {compared.length > 0 && <TrendLegend slug={slug} />}
         </div>
       </div>
@@ -87,7 +88,7 @@ export function ComparisonView({
 
       {compared.length > 0 && (
         <section className="panel" data-testid="cmp-ecarts">
-          <PanelTitle title={`Écarts ${year}`} desc={`${principal.label} − lecture comparée · euros`} slug={slug} term={HYP_TERMS.comparaison} />
+          <PanelTitle title={`Écarts ${year}`} desc={<>{principal.label} − lecture comparée · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.comparaison} />
           <dl className="facts hr-tiles hr-tiles-sm">
             {compared.map((c) => {
               const y = gap(principal, c, months);
@@ -266,6 +267,6 @@ export function ComparisonView({
           )}
         </section>
       )}
-    </>
+    </></MoneyText>
   );
 }
