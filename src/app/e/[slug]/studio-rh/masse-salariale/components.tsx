@@ -4,6 +4,7 @@ import { BarChart } from "@/components/charts";
 import type { ChartSeries } from "@/components/charts/shared";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Sparkline } from "@/components/Sparkline";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import type { MonthPayroll } from "@/lib/payroll/engine";
 import { fmtFixed } from "@/lib/rh/kpi/format";
@@ -137,10 +138,8 @@ export function PeriodBar(p: {
       {p.service && (
         <div className="field-row">
           <label htmlFor="service">Service</label>
-          <select className="select" id="service" name="service" defaultValue={p.service.value}>
-            <option value="">Tous les services</option>
-            {p.service.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <SearchableSelect className="select" id="service" name="service" defaultValue={p.service.value}
+            searchLabel="Service" options={[{ value: "", label: "Tous les services" }, ...p.service.options]} />
         </div>
       )}
       <div className="ms-bar-actions">

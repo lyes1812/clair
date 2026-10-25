@@ -10,6 +10,7 @@ import { eurosSigned, neg, periodText } from "@/lib/viz/ecart";
 import { monthShort } from "./components";
 import { NV, type Loaded } from "./ecart-data";
 import { RubInput } from "./ecart/LiveRub";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 import { MS_PREVU, type MsTab } from "./tabs";
 export { MS_PREVU, type MsTab };
@@ -112,10 +113,8 @@ export function PickerForm({ path, loaded, columns, hidden = {}, slug }: { path:
       {cols.map((i) => (
         <div className="field-row ef-v" key={i}>
           <label htmlFor={`v${i + 1}`}><span className="ver-badge" aria-hidden="true">{i + 1}</span>Version {i + 1}</label>
-          <select className="select" id={`v${i + 1}`} name={`v${i + 1}`} defaultValue={loaded.selected[i] ?? ""} title={labelOf(loaded.selected[i])}>
-            <option value="">— aucune</option>
-            {loaded.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <SearchableSelect className="select" id={`v${i + 1}`} name={`v${i + 1}`} defaultValue={loaded.selected[i] ?? ""} title={labelOf(loaded.selected[i])}
+            searchLabel={`Version ${i + 1}`} options={[{ value: "", label: "— aucune" }, ...loaded.options]} />
         </div>
       ))}
       <div className="field-row ef-m ef-m1">
@@ -128,11 +127,12 @@ export function PickerForm({ path, loaded, columns, hidden = {}, slug }: { path:
       </div>
       <div className="field-row ef-s">
         <label htmlFor="service">Service</label>
-        <select className="select" id="service" name="service" defaultValue={loaded.filter === null ? "" : (loaded.filter.value ?? NV)}>
-          <option value="">Tous les services</option>
-          {loaded.services.map((s) => <option key={s} value={s}>{s}</option>)}
-          {loaded.hasNv && <option value={NV}>Non ventilé</option>}
-        </select>
+        <SearchableSelect className="select" id="service" name="service" defaultValue={loaded.filter === null ? "" : (loaded.filter.value ?? NV)}
+          searchLabel="Service" options={[
+            { value: "", label: "Tous les services" },
+            ...loaded.services.map((service) => ({ value: service, label: service })),
+            ...(loaded.hasNv ? [{ value: NV, label: "Non ventilé" }] : []),
+          ]} />
       </div>
       <div className="ecart-filter-actions">
         <button className="btn primary" type="submit">Afficher</button>
