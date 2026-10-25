@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import type { ReactNode } from "react";
 import { BarChart } from "@/components/charts";
 import type { ChartSeries } from "@/components/charts/shared";
@@ -164,14 +165,14 @@ export function PeriodBar(p: {
 export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: boolean; ndLong?: boolean; main?: boolean; sub?: boolean; lead?: ReactNode; compare?: ReactNode; foot?: ReactNode; def?: string; slug?: string; trend?: string; sparkline?: readonly (number | null)[] }) {
   const dd = [p.nd ? (p.ndLong ? "nd long" : "nd") : "", p.nd ? "" : (p.trend ?? "")].filter(Boolean).join(" ");
   return (
-    <div data-testid={p.testid} className={["ms-tile", p.main ? "main" : "", p.sub ? "sub" : ""].filter(Boolean).join(" ")}>
+    <MoneyText><div data-testid={p.testid} className={["ms-tile", p.main ? "main" : "", p.sub ? "sub" : ""].filter(Boolean).join(" ")}>
       <dt>{p.label}{p.def && p.slug && <GlossaryLink slug={p.slug} term={p.def} label={p.label} />}</dt>
       <dd className={dd || undefined}>{p.value}</dd>
       {p.lead && <span className="tile-foot ms-tile-lead">{p.lead}</span>}
       {!p.nd && p.sparkline && <Sparkline values={p.sparkline} />}
       {p.compare && <div className="ms-tile-compare">{p.compare}</div>}
       {p.foot}
-    </div>
+    </div></MoneyText>
   );
 }
 
@@ -179,10 +180,10 @@ export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: 
 export function NdLines({ lines, testid = "ms-nd-reasons" }: { lines: string[]; testid?: string }) {
   if (lines.length === 0) return null;
   return (
-    <div className="tile-foot ms-nd-lines" data-testid={testid}>
+    <MoneyText><div className="tile-foot ms-nd-lines" data-testid={testid}>
       <strong className="nd">n.d.</strong>
       <ul>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
-    </div>
+    </div></MoneyText>
   );
 }
 
@@ -190,9 +191,9 @@ export function NdLines({ lines, testid = "ms-nd-reasons" }: { lines: string[]; 
 // nommée pour les lecteurs d'écran ; `gap` : espace au-dessus quand elle suit un autre bloc.
 export function ScrollTable({ label, gap, children }: { label: string; gap?: boolean; children: ReactNode }) {
   return (
-    <div className={gap ? "table-wrap scroll ms-scroll ms-scroll-gap" : "table-wrap scroll ms-scroll"} role="region" aria-label={label} tabIndex={0}>
+    <MoneyText><div className={gap ? "table-wrap scroll ms-scroll ms-scroll-gap" : "table-wrap scroll ms-scroll"} role="region" aria-label={label} tabIndex={0}>
       {children}
-    </div>
+    </div></MoneyText>
   );
 }
 
@@ -211,7 +212,7 @@ export function GraphFoot({ aff, tableHref, testid = "ms-graph-foot" }: { aff: A
 // absents). Titre « n.d. » (ou `title`), la raison écrite une fois, puis l'action pour y remédier.
 export function NdState({ testid, heading, title = "n.d.", reason, reasons = [], more = 0, action, children }: { testid: string; heading?: string; title?: string; reason?: ReactNode; reasons?: string[]; more?: number; action?: { href: string; label: string }; children?: ReactNode }) {
   return (
-    <div className="ms-nd-state" data-testid={testid}>
+    <MoneyText><div className="ms-nd-state" data-testid={testid}>
       {heading && <h3 className="ms-sub">{heading}</h3>}
       <p className="ms-nd-title">{title}</p>
       {reason && <p className="ms-nd-reason">{reason}</p>}
@@ -219,7 +220,7 @@ export function NdState({ testid, heading, title = "n.d.", reason, reasons = [],
       {reasons.length > 0 && <ul className="ms-nd-reasons">{reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
       {more > 0 && <p className="tile-foot">… et {more} autre{more > 1 ? "s" : ""} raison{more > 1 ? "s" : ""}.</p>}
       {action && <a className="ms-nd-action" href={action.href}>{action.label}<span aria-hidden="true"> →</span></a>}
-    </div>
+    </div></MoneyText>
   );
 }
 
@@ -247,7 +248,7 @@ export function TrendChart({ rows, previous, lines }: { rows: MonthPayroll[]; pr
     <ChartGuard testid="ms-trend" title={title} series={series} lines={lines}>
       <BarChart
         testid="ms-trend"
-        label={`Masse salariale chargée par mois, ${year} et ${prevYear}, en euros`}
+        label={`Masse salariale chargée par mois, ${year} et ${prevYear}, montants monétaires`}
         title={title}
         categories={axis.categories}
         categoryTitles={axis.titles}
@@ -262,11 +263,11 @@ export function TrendChart({ rows, previous, lines }: { rows: MonthPayroll[]; pr
 // Composition du coût : part du brut et des cotisations dans la masse chargée.
 export function Composition({ brut, cotisations }: { brut: number; cotisations: number }) {
   const total = brut + cotisations;
-  if (total <= 0) return <p className="nd">n.d. — masse chargée nulle ou négative sur la période</p>;
+  if (total <= 0) return <MoneyText><p className="nd">n.d. — masse chargée nulle ou négative sur la période</p></MoneyText>;
   const pct = (v: number) => fmtFixed({ num: v * 100, den: total }, 1);
   const width = (v: number) => `${Math.max(0, Math.min(100, (v / total) * 100))}%`;
   return (
-    <div className="ms-composition" data-testid="ms-composition">
+    <MoneyText><div className="ms-composition" data-testid="ms-composition">
       <h3 className="ms-sub">Composition de la masse chargée</h3>
       <div className="ms-composition-bar" aria-hidden="true">
         <span style={{ width: width(brut), background: COLORS.brut }} />
@@ -276,6 +277,6 @@ export function Composition({ brut, cotisations }: { brut: number; cotisations: 
         <li><i className="swatch" style={{ background: COLORS.brut }} aria-hidden="true" />Brut {pct(brut)} % · {euros(brut)}</li>
         <li><i className="swatch" style={{ background: COLORS.cotisations }} aria-hidden="true" />Cotisations patronales {pct(cotisations)} % · {euros(cotisations)}</li>
       </ul>
-    </div>
+    </div></MoneyText>
   );
 }

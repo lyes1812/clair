@@ -2,6 +2,7 @@ import { Brand } from "@/components/AuthCard";
 import { SidebarDrawer } from "@/components/SidebarDrawer";
 import { WorkspaceNav } from "@/components/WorkspaceNav";
 import { WorkspaceTopBar } from "@/components/WorkspaceTopBar";
+import { CurrencyProvider } from "@/components/CurrencyPreference";
 import { menuFamilies } from "@/lib/menu";
 import { ROLE_LABELS } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
@@ -18,7 +19,7 @@ export default async function WorkspaceLayout({
   const { slug } = await params;
   const { session, workspace } = await requireWorkspace(slug);
   return (
-    <div className="shell">
+    <CurrencyProvider><div className="shell">
       <aside className="sidebar">
         <div className="sidebar-brand"><Brand /></div>
         <SidebarDrawer>
@@ -40,6 +41,6 @@ export default async function WorkspaceLayout({
         <WorkspaceTopBar slug={slug} workspaceName={workspace.name} userName={session.user.name} email={session.user.email} families={menuFamilies(slug)} />
         <main className="main">{children}</main>
       </div>
-    </div>
+    </div></CurrencyProvider>
   );
 }

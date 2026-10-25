@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import "@/styles/donnees.css";
 import { notFound } from "next/navigation";
 import { AutoRefresh } from "@/components/AutoRefresh";
@@ -50,7 +51,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
   const providerLabel = PROVIDER_LABELS[sync.provider as keyof typeof PROVIDER_LABELS];
 
   return (
-    <>
+    <MoneyText><>
       {status === "running" && <AutoRefresh />}
       <PageHead
         crumbs={[
@@ -292,6 +293,6 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
           </div>
         </section>
       )}
-    </>
+    </></MoneyText>
   );
 }

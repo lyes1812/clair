@@ -1,11 +1,12 @@
+import { MoneyText } from "@/components/Money";
 import type { FecExercise } from "@/lib/fec/import";
 import { formatEuros } from "@/lib/money";
 import { Empty, Pill } from "../ui";
 
 export function ExercisesTable({ rows, showWarnings = false }: { rows: (FecExercise & { syncId: string; pending: boolean })[]; showWarnings?: boolean }) {
-  if (rows.length === 0) return <Empty testid="fec-coverage-empty">n.d. — aucun FEC appliqué.</Empty>;
+  if (rows.length === 0) return <MoneyText><Empty testid="fec-coverage-empty">n.d. — aucun FEC appliqué.</Empty></MoneyText>;
   return (
-    <div className="table-wrap scroll">
+    <MoneyText><div className="table-wrap scroll">
       <table className="data-table sticky" data-testid="fec-exercises">
         <thead>
           <tr><th scope="col">Fichier</th><th scope="col">SIREN</th><th scope="col">Période</th><th scope="col" className="num">Lignes</th><th scope="col" className="num">Écritures</th><th scope="col" className="num">Total débit</th><th scope="col" className="num">Total crédit</th><th scope="col">Équilibre</th>{showWarnings && <th scope="col">Constats</th>}</tr>
@@ -26,6 +27,6 @@ export function ExercisesTable({ rows, showWarnings = false }: { rows: (FecExerc
           ))}
         </tbody>
       </table>
-    </div>
+    </div></MoneyText>
   );
 }

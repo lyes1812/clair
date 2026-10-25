@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { landing as landingOf, project } from "@/lib/budget/engine";
 import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
 import { GLOSSARY_HYPOTHESES, HYP_TERMS } from "@/lib/glossary/hypotheses";
-import { formatEuros } from "@/lib/money";
+import { formatMoneyDisplay } from "@/lib/money-display";
+const displayEuros = (cents: number) => formatMoneyDisplay(cents, "eur");
 import { measures as measuresOf, sensitivities, type Retraite, type SensitivityRow } from "@/lib/budget/lot3";
 import { bridge, budgetSeries, scenarioSeries, shifted, type Bridge, type Layer as SeriesLayer, type Point, type Series } from "@/lib/budget/series";
 import type { ScenarioRow } from "@/lib/budget/store";
@@ -555,7 +556,8 @@ const clean = (html: string) => {
   expect(html).not.toContain("NaN");
   expect(html).not.toContain("undefined");
   expect(html).not.toContain("[object");
-  return html;
+  // Les cellules gardent un span monétaire : assertions ci-dessous sur le texte visible et la classe de tendance.
+  return html.replace(/<span class="money-display"[^>]*>([^<]*)<\/span>/g, "$1");
 };
 
 describe("ProjectionView rendue", () => {
@@ -572,13 +574,13 @@ describe("ProjectionView rendue", () => {
     const html = render("tableau");
     expect(html).toContain('data-testid="proj-nature-table"');
     const row = (k: string) => html.slice(html.indexOf(`data-nature="${k}"`), html.indexOf("</tr>", html.indexOf(`data-nature="${k}"`)));
-    for (const v of [1065000, 1065000, 1065000]) expect(row("base")).toContain(formatEuros(v));
+    for (const v of [1065000, 1065000, 1065000]) expect(row("base")).toContain(displayEuros(v));
     // Octobre : aucune augmentation n'existe encore, le tableau écrit « — » (et non 0,00 €) avec sa raison au survol.
-    for (const v of [29050, 39991]) expect(row("augmentation")).toContain(formatEuros(v));
-    expect(row("augmentation")).not.toContain(formatEuros(0));
+    for (const v of [29050, 39991]) expect(row("augmentation")).toContain(displayEuros(v));
+    expect(row("augmentation")).not.toContain(`>${displayEuros(0)}</td>`);
     expect(row("augmentation")).toContain('title="aucune contribution de cette nature ce mois-là">—</td>');
     const foot = html.slice(html.indexOf('data-testid="proj-nature-total"'));
-    for (const v of [1065000, 1094050, 1104991]) expect(foot.slice(0, 700)).toContain(formatEuros(v));
+    for (const v of [1065000, 1094050, 1104991]) expect(foot.slice(0, 700)).toContain(displayEuros(v));
     // Les graphiques seuls n'ont pas ce tableau ; une projection n.d. n'a pas de nature à lister.
     expect(render("graphique")).not.toContain('data-testid="proj-nature-table"');
     expect(render("tableau", project(base, "2026-10", "2026-12", [], conv))).not.toContain('data-testid="proj-nature-table"');
@@ -605,7 +607,7 @@ describe("ProjectionView rendue", () => {
     expect(g.indexOf('data-testid="proj-chart-nature"')).toBeGreaterThan(-1);
     expect(g.indexOf('data-testid="proj-chart-contributions"')).toBeGreaterThan(g.indexOf('data-testid="proj-chart-nature"'));
     expect(g).toContain("<h2>Contributions hors base</h2>");
-    expect(g).toContain("octobre 2026 → décembre 2026 · euros");
+    expect(g).toContain("octobre 2026 → décembre 2026 · €");
     expect(render("tableau")).not.toContain('data-testid="proj-chart-contributions"');
     // Base seule (aucune hypothèse de contribution) : pas de graphique, une phrase.
     const none = render("graphique", projOf([fixC]));
@@ -646,7 +648,7 @@ describe("ProjectionView rendue", () => {
     expect(html).toContain("réel figé ou projeté par le scénario parent avant octobre 2026, projeté ensuite");
     // Base non dérivée : la ligne de contexte ne parle pas d'un scénario parent.
     expect(render()).not.toContain("projeté par le scénario parent avant");
-    expect(render()).toContain("réel figé avant octobre 2026, projeté ensuite · euros");
+    expect(render()).toContain("réel figé avant octobre 2026, projeté ensuite · €");
   });
   it("projection refusée : message d'erreur seul", () => {
     const html = render("graphique", { kind: "error", errors: ["« X » : refusé"] });
@@ -744,7 +746,7 @@ describe("LandingView rendue", () => {
       { label: "Projeté oct.–déc.", value: 2908333, text: "projeté (aucun mois réel dans l'année)" },
     ]);
     // Le pied de la tuile d'atterrissage écrit les mêmes montants que la cascade : le tableau exact qui l'accompagne.
-    expect(render()).toContain(`réel janv.–sept. ${formatEuros(6300000)} + projeté oct.–déc. ${formatEuros(2908333)}`);
+    expect(render()).toContain(`réel janv.–sept. ${displayEuros(6300000)} + projeté oct.–déc. ${displayEuros(2908333)}`);
     expect(retraiteWaterfall(retraite)).toMatchObject({ kind: "value", start: 9208333, steps: [{ label: "Prévu", value: -100000 }], end: 9108333 });
   });
   it("mesures : plus de note sous le graphique ; un départ sans remplaçant lié est écrit « sans remplacement » dans le tableau", () => {
@@ -923,7 +925,7 @@ describe("lot 10 : projection sans narratif", () => {
   it("une seule ligne de contexte sous le contrôle d'affichage ; aucune tendance rouge / vert (rien n'est un écart de coût ici)", () => {
     const html = render();
     expect(countOf(html, 'class="hr-context"')).toBe(1);
-    expect(html).toContain("janvier 2026 → décembre 2026 · réel figé avant octobre 2026, projeté ensuite · euros");
+    expect(html).toContain("janvier 2026 → décembre 2026 · réel figé avant octobre 2026, projeté ensuite · €");
     expect(html).not.toMatch(/trend-(bad|good)|hr-trend-legend|tile-trend/);
   });
   it("mois n.d. : la légende n.d. (une seule) et les raisons restent écrites ; sans mois n.d., aucune légende", () => {
@@ -954,24 +956,24 @@ describe("lot 10 : comparaison, écarts de coût en rouge et vert", () => {
     clean(renderToStaticMarkup(h(ComparisonView, { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: scenario.id, years: ["2026"], year: "2026", principal: principal12, compared: [budget12], options: [], selected: ["budget:aa"], refMonth: "2026-03", ...over })));
   it("mois par mois : écart positif = coût en hausse (rouge, flèche ▲), négatif = baisse (vert), nul = neutre ; le signe reste écrit", () => {
     const html = render({ affichage: "tableau" });
-    expect(tdOf(html, "2026-01", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${formatEuros(10000)}</td>`);
-    expect(tdOf(html, "2026-02", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-good" data-col="budget-aa-ecart">${formatEuros(-10000)}</td>`);
-    expect(tdOf(html, "2026-03", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${formatEuros(5000)}</td>`);
-    expect(tdOf(html, "2026-04", "budget-aa-ecart")).toBe(`<td class="num" data-col="budget-aa-ecart">${formatEuros(0)}</td>`);
+    expect(tdOf(html, "2026-01", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${displayEuros(10000)}</td>`);
+    expect(tdOf(html, "2026-02", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-good" data-col="budget-aa-ecart">${displayEuros(-10000)}</td>`);
+    expect(tdOf(html, "2026-03", "budget-aa-ecart")).toBe(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${displayEuros(5000)}</td>`);
+    expect(tdOf(html, "2026-04", "budget-aa-ecart")).toBe(`<td class="num" data-col="budget-aa-ecart">${displayEuros(0)}</td>`);
     // Le total de l'année : 12 200,00 € contre 12 150,00 €, +50,00 €.
-    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${formatEuros(5000)}</td></tr></tfoot>`);
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="budget-aa-ecart">+${displayEuros(5000)}</td></tr></tfoot>`);
   });
   it("tuile d'écart : fond et valeur rouges pour +50,00 €, le texte garde le signe ; les « mêmes mois » portent aussi la tendance", () => {
     const html = render();
     const tile = html.slice(html.indexOf('data-testid="cmp-tile-budget-aa"') - 60, html.indexOf("</dl>"));
     expect(tile).toContain('class="hr-tile tile-trend-bad"');
-    expect(tile).toContain(`<dd class="hr-gap trend-bad">+${formatEuros(5000)} · +`);
-    expect(tile).toContain(`<span class="hr-gap trend-bad">+${formatEuros(5000)} · +`);
+    expect(tile).toContain(`<dd class="hr-gap trend-bad">+${displayEuros(5000)} · +`);
+    expect(tile).toContain(`<span class="hr-gap trend-bad">+${displayEuros(5000)} · +`);
     // Un écart négatif donne le vert : le budget passe au-dessus du scénario.
     const low = render({ compared: [series("budget-aa", "Budget", YEAR.map((m) => ptE(m, 110000, 20000)))] });
     expect(low).toContain('class="hr-tile tile-trend-good"');
     // Scénario 12 200,00 € contre 13 200,00 € : −1 000,00 €.
-    expect(low).toContain(`<dd class="hr-gap trend-good">${formatEuros(-100000)} · `);
+    expect(low).toContain(`<dd class="hr-gap trend-good">${displayEuros(-100000)} · `);
   });
   it("pont d'écart : la raison n.d. de l'effet de structure reste écrite, dans la colonne du tableau, ou sous les cascades quand le tableau n'est pas affiché", () => {
     const graph = render({ affichage: "graphique" });
@@ -984,9 +986,9 @@ describe("lot 10 : comparaison, écarts de coût en rouge et vert", () => {
   });
   it("pont d'écart : volume +3 037,50 € (rouge), coût moyen −2 987,50 € (vert), cascade en euros avec hausse / baisse de coût", () => {
     const html = render();
-    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="delta">+${formatEuros(5000)}</td>`);
-    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="volume">+${formatEuros(303750)}</td>`);
-    expect(html).toContain(`<td class="num hr-gap trend-good" data-col="cout-moyen">${formatEuros(-298750)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="delta">+${displayEuros(5000)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="volume">+${displayEuros(303750)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-good" data-col="cout-moyen">${displayEuros(-298750)}</td>`);
     expect(html).toContain("Hausse de coût");
     expect(html).toContain("Baisse de coût");
   });
@@ -1002,7 +1004,7 @@ describe("lot 10 : comparaison, écarts de coût en rouge et vert", () => {
     const html = render();
     for (const gone of ["Origine des mois du scénario", "Courbe interrompue : mois sans valeur", "Écart = coût du scénario", "positif = au-dessus", "Un total est n.d. dès qu'un de ses mois l'est", "L'effet de structure n'est pas calculé : il demande", "Montants exacts :", "Volume et coût moyen.", 'href="#def-']) expect(html, gone).not.toContain(gone);
     for (const id of [HYP_TERMS.comparaison, HYP_TERMS.comparaisonGraphiques, HYP_TERMS.origineMois, HYP_TERMS.pont]) expect(html, id).toContain(linkTo(id));
-    expect(html).toContain("2026 · coût employeur mensuel · Scénario face à Budget · euros");
+    expect(html).toContain("2026 · coût employeur mensuel · Scénario face à Budget · €");
   });
   it("n.d. : légende et raison écrites sous les graphiques quand une lecture n'a pas tous ses mois ; sinon rien", () => {
     const partial = series("budget-aa", "Budget", [ptE("2026-01", 90000, 20000)]);
@@ -1029,14 +1031,14 @@ describe("lot 10 : atterrissage, mesures et sensibilités", () => {
   });
   it("sensibilité : décaler le départ de B de 5 jours (novembre payé 25/30 au lieu de 20/30 de 2 900,00 € : 2 416,67 − 1 933,33 = +483,34 €) hausse le coût : effet en rouge, avec son signe", () => {
     const html = render("tableau");
-    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="effect">+${formatEuros(48334)}</td>`);
-    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="retraite">+${formatEuros(48334)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="effect">+${displayEuros(48334)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-bad" data-col="retraite">+${displayEuros(48334)}</td>`);
     // L'atterrissage après variation est un montant, pas un écart : neutre.
     expect(html).toContain('<td class="num" data-col="total">');
   });
   it("mesures : économie nette de B 2 866,67 € = économie, en vert ; le montant de paie évitée et les coûts de sortie restent neutres", () => {
     const html = render("tableau");
-    expect(html).toContain(`<td class="num hr-gap trend-good" data-col="net">${formatEuros(286667)}</td>`);
+    expect(html).toContain(`<td class="num hr-gap trend-good" data-col="net">${displayEuros(286667)}</td>`);
     expect(html).toContain('<td class="num" data-col="avoided">');
     expect(html).toContain('<td class="num" data-col="exit">');
   });
@@ -1056,7 +1058,7 @@ describe("lot 10 : atterrissage, mesures et sensibilités", () => {
     const html = render();
     for (const gone of ["Éléments déjà en comptabilité : saisis à la main", "Économie nette = paie évitée", "Valeur : jours (décalage de date)", "Chaque barre ajoute un ensemble de mois", "Éléments non récurrents retirés de l'atterrissage", "Les numéros sont ceux des variations", "Départ sans remplaçant lié : pas de barre", "Économie nette : définition ci-dessous", 'href="#def-', "Définition</a>"]) expect(html, gone).not.toContain(gone);
     for (const id of [HYP_TERMS.retraite, HYP_TERMS.atterrissage, HYP_TERMS.cascades, HYP_TERMS.mesures, HYP_TERMS.mesuresLecture, HYP_TERMS.sensibilites, HYP_TERMS.sensibilitesLecture, HYP_TERMS.tendances]) expect(html, id).toContain(linkTo(id));
-    expect(html).toContain("Chaque départ est évalué seul · euros");
+    expect(html).toContain("Chaque départ est évalué seul · €");
     expect(countOf(html, 'class="hr-context"')).toBe(1);
   });
   it("le rouge de la légende vient des classes de tendance : aucun rouge ni vert écrit dans les graphiques de cet écran", () => {

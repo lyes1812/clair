@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import { Fragment } from "react";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
@@ -171,7 +172,7 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
   const open = (k: string) => forme === k;
   const COLS = 13;
   return (
-    <>
+    <MoneyText><>
       <section className="panel" data-testid="sal-list">
         <div className="panel-head">
           <CardTitle title="Modifications de postes" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.postes} />} />
@@ -400,6 +401,6 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
       )}
 
       {canEdit && <BulkSection slug={slug} scenario={scenario} base={base} hyps={hyps} />}
-    </>
+    </></MoneyText>
   );
 }

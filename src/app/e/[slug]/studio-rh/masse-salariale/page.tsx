@@ -1,3 +1,4 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import "@/styles/masse-salariale.css";
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
 import { FamilyTabs } from "@/components/FamilyTabs";
@@ -39,7 +40,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const sp = await searchParams;
   const ctx = await loadPayrollContext(slug);
   const base = `/e/${slug}/studio-rh/masse-salariale`;
-  if (ctx.source === "dsn") return <DsnView slug={slug} dsn={ctx.dsn} sp={{ annee: one(sp.annee), de: one(sp.de), a: one(sp.a), affichage: one(sp.affichage) }} />;
+  if (ctx.source === "dsn") return <MoneyText><DsnView slug={slug} dsn={ctx.dsn} sp={{ annee: one(sp.annee), de: one(sp.de), a: one(sp.a), affichage: one(sp.affichage) }} /></MoneyText>;
   const head = () => <MsHead title={ITEM.label} />;
   const gridOrigin = ctx.grid.origin === "default" ? "valeur par défaut validée le 22/10/2026" : `modifiée le ${ctx.grid.updatedAt ? dateTimeFmt.format(ctx.grid.updatedAt) : "n.d."}`;
   const sourceLine = ctx.read ? (
@@ -65,13 +66,13 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const fullInput = ctx.input;
   if (!fullInput) {
     return (
-      <>
+      <MoneyText><>
         {head()}
         <MsRead source={sourceLine}>{ctx.read ? gridLine : null}</MsRead>
         <NdState testid="ms-nd" reason={ctx.unavailable ? sourceReason(ctx.unavailable) : undefined} action={{ href: `/e/${slug}/donnees`, label: "Choisir ou lire une source dans Données" }}>
           <p className="ms-nd-reason">La masse salariale réelle suit la source RH retenue : journal comptable de paie PayFit (API) ou DSN déposées.</p>
         </NdState>
-      </>
+      </></MoneyText>
     );
   }
 
@@ -80,11 +81,11 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const last = closed.at(-1) ?? valueMonths.at(-1) ?? null;
   if (!last) {
     return (
-      <>
+      <MoneyText><>
         {head()}
         <MsRead source={sourceLine}>{gridLine}</MsRead>
         <NdState testid="ms-nd" reason="Aucun mois de journal de paie dans la lecture appliquée." action={{ href: `/e/${slug}/donnees`, label: "Lire le journal de paie dans Données" }} />
-      </>
+      </></MoneyText>
     );
   }
 
@@ -225,7 +226,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const anyNd = [masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" }), brutCotisSeries, costEtpSeries, ...(ctx.service.axis && serviceRows.length > 0 && serviceRows.length <= 8 ? [svcMonthSeries] : [])].some(hasNd);
 
   return (
-    <>
+    <MoneyText><>
       {head()}
       <FamilyTabs
         label="Vues"
@@ -272,7 +273,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         ))}
         <div className="ms-toolbar">
           <p className="desc ms-period" data-testid="ms-period">
-            <strong>{label(months)}</strong> · N-1 : {label(prevMonths)} · {scope} · euros
+            <strong>{label(months)}</strong> · N-1 : {label(prevMonths)} · {scope} · <MoneyUnitLabel />
             {cur.kind === "value" && cur.openMonths.length > 0 && <> · mois provisoires (paie non clôturée) : {cur.openMonths.map(monthShortYear).join(", ")}</>}
           </p>
           <TrendLegend slug={slug} />
@@ -374,7 +375,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                       <div className="ms-chart">
                         <DonutChart
                           testid="ms-chart-services"
-                          label={`Répartition de la masse chargée par service, ${label(months)}, en euros`}
+                          label={`Répartition de la masse chargée par service, ${label(months)}, montants monétaires`}
                           title={`Par service, ${label(months)}`}
                           parts={svcParts.parts}
                           unit="eur"
@@ -391,7 +392,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                           <ChartGuard testid="ms-chart-services-months" title={`Répartition mensuelle par service, ${year}`} series={svcMonthSeries} lines={ndList}>
                           <BarChart
                             testid="ms-chart-services-months"
-                            label={`Masse chargée par mois et par service, ${year}, en euros`}
+                            label={`Masse chargée par mois et par service, ${year}, montants monétaires`}
                             title={`Répartition mensuelle par service, ${year}`}
                             categories={axisN.categories}
                             categoryTitles={axisN.titles}
@@ -425,7 +426,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                   <ChartGuard testid="ms-chart-brut-cotisations" title={`Brut et cotisations patronales par mois, ${year}`} series={brutCotisSeries} lines={ndList}>
                     <BarChart
                       testid="ms-chart-brut-cotisations"
-                      label={`Brut et cotisations patronales par mois, ${year}, en euros`}
+                      label={`Brut et cotisations patronales par mois, ${year}, montants monétaires`}
                       title={`Brut et cotisations patronales par mois, ${year}`}
                       categories={axisN.categories}
                       categoryTitles={axisN.titles}
@@ -440,7 +441,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                   <ChartGuard testid="ms-chart-cout-etp" title={`Coût par ETP et par mois, ${year} face à ${year - 1} (N-1)`} series={costEtpSeries} lines={ndList}>
                     <LineChart
                       testid="ms-chart-cout-etp"
-                      label={`Coût par ETP et par mois, ${year} et ${year - 1}, en euros`}
+                      label={`Coût par ETP et par mois, ${year} et ${year - 1}, montants monétaires`}
                       title={`Coût par ETP et par mois, ${year} face à ${year - 1} (N-1)`}
                       categories={axis.categories}
                       categoryTitles={axis.titles}
@@ -718,6 +719,6 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
           )}
         </>
       )}
-    </>
+    </></MoneyText>
   );
 }

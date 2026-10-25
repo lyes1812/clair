@@ -20,7 +20,7 @@ const scenarioOf = (firstMonth: string, lastMonth: string) => ({ id: "11111111-1
 const render = (el: React.ReactElement) => {
   const html = renderToStaticMarkup(el);
   for (const bad of ["NaN", "undefined", "[object"]) expect(html).not.toContain(bad);
-  return html;
+  return html.replace(/<span class="money-display"[^>]*>([^<]*)<\/span>/g, "$1");
 };
 const contract = (key: string, over: Partial<BaseContract>): BaseContract => ({
   contractKey: key, externalId: key, label: key, service: null, serviceNd: null, startDate: "2025-01-06", endDate: null, counted: true, etp4: 10000, etpNd: null, category: "cdi", executive: false, base: null, baseNd: null, ...over,
@@ -111,9 +111,9 @@ describe("un seul format de date", () => {
     const origin = { kind: "scenario" as const, scenarioId: "p", scenarioName: "Révisé T4", month: "2026-12", at: "2026-10-24", notCarried: ["Prime 2026-12 (1 300,00 €)"], gap: [{ label: "éléments ponctuels de 2026-12", cost: 130000 }, { label: "éléments ponctuels de 2026-10", cost: 5000 }] };
     const chained = { ...base, refMonth: "2026-10", refBaseCost: 600000, origin };
     const html = render(h(BasesView, { slug: "d", scenario: sc, base: chained, hypotheses: noHyps, canEdit: false })).replace(/[\u00a0\u202f]/g, " "); // espaces insécables des montants
-    expect(html).toContain("non repris dans la base : éléments ponctuels de décembre 2026 1 300,00 € ; éléments ponctuels d&#x27;octobre 2026 50,00 €");
+    expect(html).toContain("non repris dans la base : éléments ponctuels de décembre 2026 1 300 € ; éléments ponctuels d&#x27;octobre 2026 50 €");
     expect(html).toContain("Coût projeté d&#x27;octobre 2026 par « Révisé T4 »");
-    expect(html).toContain("Prime décembre 2026 (1 300,00 €)");
+    expect(html).toContain("Prime décembre 2026 (1 300 €)");
     expect(html).not.toMatch(/\d{4}-\d{2}/);
   });
   it("bases : « Correction » et non l'impératif « Corrige » ; chiffres de référence en tuiles", () => {
@@ -187,5 +187,35 @@ describe("formulaire d'embauche", () => {
     expect(html).toContain('placeholder="Existant ou nouveau"');
     expect(html).not.toContain("vide : non ventilé)\"");
     expect(html.match(/<fieldset class="hs-group">/g)?.length).toBe(5);
+  });
+});
+
+
+describe("lecture monétaire et saisie des hypothèses", () => {
+  it("arrondit une enveloppe en lecture sans altérer sa valeur CSV ni sa source", () => {
+    const env = { id: "env-centimes", kind: "enveloppe", label: "Enveloppe", axis: "service", target: "TECH", monthly: { "2026-10": 153449 }, chargesBps: null } as unknown as Hypothesis;
+    const before = JSON.stringify(env);
+    const html = renderToStaticMarkup(h(EnveloppesView, { slug: "d", scenario: sc, base, hypotheses: [env], axis: "service", canEdit: false })).replace(/[\u00a0\u202f]/g, " ");
+    expect(html).toContain('data-csv="1534,49"');
+    expect(html).toContain('data-money-cents="153449" data-money-exact="1 534,49 €">1 534 €</span>');
+    expect(JSON.stringify(env)).toBe(before);
+  });
+  it("garde les centimes en saisie, même avec l'affichage arrondi des lectures", () => {
+    const env = { id: "env-centimes", kind: "enveloppe", label: "Enveloppe", axis: "service", target: "TECH", monthly: { "2026-10": 153449 }, chargesBps: null } as unknown as Hypothesis;
+    const html = renderToStaticMarkup(h(EnveloppesView, { slug: "d", scenario: sc, base, hypotheses: [env], axis: "service", canEdit: true }));
+    expect(html).toMatch(/<input[^>]*name="m_0_2026-10"[^>]*value="1534,49"/);
+    expect(html).toContain("Montants en € par mois");
+  });
+  it("convertit seulement les constantes en euros, en laissant les constantes de nombre exactes", () => {
+    const hyps = [
+      { id: "c-eur", kind: "constante", label: "Montant", unit: "eur", source: "Notice fictive", values: { "2026-10": 153449 } },
+      { id: "c-nombre", kind: "constante", label: "Nombre", unit: "nombre", source: "Notice fictive", values: { "2026-10": 153449 } },
+    ] as unknown as Hypothesis[];
+    const html = renderToStaticMarkup(h(GlobalesView, { slug: "d", scenario: sc, base, hypotheses: hyps, canEdit: false })).replace(/[\u00a0\u202f]/g, " ");
+    const money = html.split('data-const="Montant"')[1].split("</tr>")[0];
+    const count = html.split('data-const="Nombre"')[1].split("</tr>")[0];
+    expect(money).toContain('data-money-exact="1 534,49 €">1 534 €</span>');
+    expect(count).not.toContain('class="money-display"');
+    expect(count).toContain('data-csv="1534,49">1534,49</td>');
   });
 });

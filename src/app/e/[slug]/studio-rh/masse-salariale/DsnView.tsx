@@ -1,3 +1,4 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { BarChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { ViewSwitch } from "@/components/ViewSwitch";
@@ -31,11 +32,11 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
   );
   if (!last) {
     return (
-      <>
+      <MoneyText><>
         <MsHead title={ITEM.label} />
         <MsRead source={source} />
         <NdState testid="ms-nd" reason="Aucune DSN appliquée avec une rémunération de type 001." action={{ href: `/e/${slug}/donnees`, label: "Déposer des DSN dans Données" }} />
-      </>
+      </></MoneyText>
     );
   }
   const notices: string[] = [];
@@ -80,14 +81,14 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
   // Seule note conservée sous le graphique : les mois à DSN incomplète (le brut ne couvre que les établissements déclarés).
   const incompleteNote = incomplete.length ? `Mois à DSN incomplète (⚠ dans le tableau) : ${incomplete.map(monthShortYear).join(", ")}.` : "";
   return (
-    <>
+    <MoneyText><>
       <MsHead title={ITEM.label} />
       <div className="ms-controls">
         <MsRead source={source} />
         <PeriodBar years={years} year={year} from={from} to={to} hidden={aff !== "tout" ? { affichage: aff } : {}} presets={presets} resetHref={aff !== "tout" ? `${base}?affichage=${aff}` : base} />
         {notices.map((n) => <p key={n} className="notice" data-testid="ms-param-notice">{n}</p>)}
         <div className="ms-toolbar">
-          <p className="desc ms-period" data-testid="ms-period"><strong>{label(months)}</strong> · N-1 : {label(prevMonths)} · euros</p>
+          <p className="desc ms-period" data-testid="ms-period"><strong>{label(months)}</strong> · N-1 : {label(prevMonths)} · <MoneyUnitLabel /></p>
           <TrendLegend slug={slug} />
           <ViewSwitch
             testid="ms-affichage"
@@ -143,7 +144,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
               <ChartGuard testid="ms-trend" title={`Brut déclaré par mois, ${year} face à ${year - 1} (N-1)`} series={brutSeries}>
                 <BarChart
                   testid="ms-trend"
-                  label={`Brut déclaré en DSN par mois, ${year} et ${year - 1}, en euros`}
+                  label={`Brut déclaré en DSN par mois, ${year} et ${year - 1}, montants monétaires`}
                   title={`Brut déclaré par mois, ${year} face à ${year - 1} (N-1)`}
                   categories={axis.categories}
                   categoryTitles={axis.titles}
@@ -194,6 +195,6 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
           <NdLines lines={dsnNd} />
         </section>
       )}
-    </>
+    </></MoneyText>
   );
 }

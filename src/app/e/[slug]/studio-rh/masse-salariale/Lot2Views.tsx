@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { formatMonth } from "@/lib/dates";
@@ -36,7 +37,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
     <ChartGuard testid="fv-chart-months" title={`Brut par nature et par mois, ${year}`} series={fvSeries}>
       <BarChart
         testid="fv-chart-months"
-        label={`Brut par mois, fixe, variable et gratifications de stage, ${year}, en euros`}
+        label={`Brut par mois, fixe, variable et gratifications de stage, ${year}, montants monétaires`}
         title={`Brut par nature et par mois, ${year}`}
         categories={axis.categories}
         categoryTitles={axis.titles}
@@ -49,7 +50,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
   );
   if (cur.kind === "nd") {
     return (
-      <>
+      <MoneyText><>
         <NdState testid="fv-nd" reason={capital(cur.nd.reason)} />
         {showGraph && (
           <section className="panel" data-testid="fv-graphs">
@@ -57,7 +58,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
             <div className="ms-charts"><div className="ms-chart wide">{monthsChart}</div></div>
           </section>
         )}
-      </>
+      </></MoneyText>
     );
   }
   const n = labelTotals(input, months);
@@ -111,7 +112,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
   // Clé de lecture des n.d. : écrite une fois sous les graphiques, seulement si l'un d'eux en contient un.
   const anyNd = [fvSeries, ...(families.length > 0 && families.length <= 8 ? [primesSeriesList] : [])].some(hasNd);
   return (
-    <>
+    <MoneyText><>
       <section className="panel">
         <PanelHead title="Fixe et variable" slug={slug} term={MASSE_TERMS.fixeVariable} />
         <dl className="facts ms-tiles four">
@@ -131,7 +132,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
             <div className={half2}>
               <DonutChart
                 testid="fv-chart-brut"
-                label="Répartition du brut de la période entre fixe, variable et gratifications de stage, en euros"
+                label="Répartition du brut de la période entre fixe, variable et gratifications de stage, montants monétaires"
                 title="Répartition du brut de la période"
                 parts={brutParts(brutSplit)}
                 unit="eur"
@@ -144,7 +145,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
                 {families.length <= 8 ? (
                   <BarChart
                     testid="fv-chart-primes"
-                    label="Primes par famille et par mois, en euros"
+                    label="Primes par famille et par mois, montants monétaires"
                     title={`Répartition mensuelle des primes, ${year}`}
                     categories={axis.categories}
                     categoryTitles={axis.titles}
@@ -280,7 +281,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
           </section>
         </>
       )}
-    </>
+    </></MoneyText>
   );
 }
 
@@ -360,7 +361,7 @@ export function PaieComptaView(props: {
         ? "n.d. — aucun produit d'exploitation (comptes 70 à 75) sur la période"
         : `${fmtPercent({ num: masse.masse, den: produits })} — masse chargée ${euros(masse.masse)} ÷ produits d'exploitation ${euros(produits)}`;
   return (
-    <>
+    <MoneyText><>
       <section className="panel" data-testid="pc-provision">
         <PanelHead title="Que doit l'entreprise en congés payés ?" slug={slug} term={MASSE_TERMS.provision} />
         {(() => {
@@ -394,7 +395,7 @@ export function PaieComptaView(props: {
             <ChartGuard testid="pc-chart-provision" title={`Provision fin de mois, ${year}`} series={provParts}>
               <BarChart
                 testid="pc-chart-provision"
-                label={`Provision de congés payés à fin de mois, ${year}, congés payés et charges sociales, en euros`}
+                label={`Provision de congés payés à fin de mois, ${year}, congés payés et charges sociales, montants monétaires`}
                 title={`Provision fin de mois, ${year}`}
                 categories={axisN.categories}
                 categoryTitles={axisN.titles}
@@ -424,7 +425,7 @@ export function PaieComptaView(props: {
                 <ChartGuard testid="pc-chart-provision-n1" title={`Total de la provision, ${year} face à ${prevYear} (N-1)`} series={provTotals}>
                   <LineChart
                     testid="pc-chart-provision-n1"
-                    label={`Total de la provision à fin de mois, ${year} et ${prevYear}, en euros`}
+                    label={`Total de la provision à fin de mois, ${year} et ${prevYear}, montants monétaires`}
                     title={`Total de la provision, ${year} face à ${prevYear} (N-1)`}
                     categories={axisBoth.categories}
                     categoryTitles={axisBoth.titles}
@@ -517,7 +518,7 @@ export function PaieComptaView(props: {
                       <div className="ms-chart">
                         <BarChart
                           testid="pc-chart-recon-months"
-                          label="Rapprochement par mois : journal de paie et comptabilité, comptes 63 et 64, en euros"
+                          label="Rapprochement par mois : journal de paie et comptabilité, comptes 63 et 64, montants monétaires"
                           title="Journal de paie et comptabilité, par mois"
                           categories={reconAxis.categories}
                           categoryTitles={reconAxis.titles}
@@ -528,7 +529,7 @@ export function PaieComptaView(props: {
                       <div className="ms-chart">
                         <BarChart
                           testid="pc-chart-recon-rubrics"
-                          label="Rapprochement par rubrique : journal de paie et comptabilité, en euros"
+                          label="Rapprochement par rubrique : journal de paie et comptabilité, montants monétaires"
                           title="Journal de paie et comptabilité, par rubrique"
                           categories={reconRubrics.categories}
                           categoryTitles={reconRubrics.titles}
@@ -586,6 +587,6 @@ export function PaieComptaView(props: {
           </>
         )}
       </section>
-    </>
+    </></MoneyText>
   );
 }

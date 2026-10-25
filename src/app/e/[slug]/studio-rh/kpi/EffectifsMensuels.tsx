@@ -1,3 +1,4 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { CalendarDays, ListChecks, PieChart } from "lucide-react";
 import { BarChart, DonutChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
@@ -120,11 +121,11 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
             </div>
           </div>
           <p className="desc" data-testid="em-context">
-            {mdef.label} · par {axisLabel} · {versionLabel} · {year} · {unitLabel(unit)}
+            {mdef.label} · par {axisLabel} · {versionLabel} · {year} · {unit === "eur" ? <MoneyUnitLabel /> : unitLabel(unit)}
             <GlossaryLink slug={slug} term={full ? KPI_TERMS.effectifsVersion : KPI_TERMS.effectifs} label={full ? "Version et mois projetés" : "Effectifs mensuels"} />
           </p>
 
-          {grid.kind === "nd" || !repart || !axisMonths ? (
+          <MoneyText>{grid.kind === "nd" || !repart || !axisMonths ? (
             <section className="panel">
               <p className="nd" data-testid="em-nd">n.d. — {grid.kind === "nd" ? grid.reason : "aucune valeur"}</p>
             </section>
@@ -199,11 +200,11 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
                 </div>
               </section>
             </>
-          )}
+          )}</MoneyText>
         </ParamLayout>
       </form>
       {/* Hors du volet de paramètres : le tableau prend toute la largeur de la page et se lit en entier (colonnes mois compactes). */}
-      {grid.kind === "value" && repart && axisMonths && (
+      <MoneyText>{grid.kind === "value" && repart && axisMonths && (
         <section className="panel" data-testid="em-monthly-panel">
           <div className="panel-head">
             <PanelTitle slug={slug} term={KPI_TERMS.effectifsBreakdown} label="Ventilation par axe et tableau de référence">Répartition mensuelle</PanelTitle>
@@ -239,7 +240,7 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
           </div>
           {ndReasons.length > 0 && <details data-testid="em-nd-list"><summary>Mois n.d. ({ndReasons.length})</summary><ul className="list">{ndReasons.map((r) => <li key={r} className="desc">{r}</li>)}</ul></details>}
         </section>
-      )}
+      )}</MoneyText>
     </>
   );
 }

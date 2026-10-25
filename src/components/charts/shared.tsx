@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MoneyText } from "@/components/Money";
 
 // Couleurs de série : charte « 101 » (un bleu mesuré, gris / noir) étendues à huit teintes distinctes. La couleur n'est
 // jamais le seul porteur d'information : légende nommée, étiquettes et infobulle donnent le nom et la valeur.
@@ -110,13 +111,13 @@ export function Frame({ testid, title, tools, legend, note, children }: { testid
     <figure className="chart" data-testid={testid}>
       {(title || tools) && (
         <figcaption className="chart-head">
-          {title && <span className="chart-title">{title}</span>}
+          {title && <span className="chart-title"><MoneyText>{title}</MoneyText></span>}
           {tools && <div className="chart-tools">{tools}</div>}
         </figcaption>
       )}
       {children}
       {legend}
-      {note && <p className="chart-note">{note}</p>}
+      {note && <p className="chart-note"><MoneyText>{note}</MoneyText></p>}
     </figure>
   );
 }

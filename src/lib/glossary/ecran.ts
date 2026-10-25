@@ -50,7 +50,7 @@ export const GLOSSARY_ECRAN: GlossaryEntry[] = [
     term: "Graphique et tableau exact",
     family: FAMILY,
     definition: [
-      "Un graphique est une lecture du tableau qui l'accompagne : le tableau reste la référence. Les montants y sont donnés au centime ; les ETP et les taux y sont affichés avec deux décimales (voir « Unités »). Le graphique ne montre que des valeurs déjà calculées, sans calcul supplémentaire.",
+      "Un graphique est une lecture du tableau qui l'accompagne : le tableau reste la référence. Les montants affichés sont arrondis à l'euro ou au millier d'euros selon le choix € / k€ ; les ETP et les taux gardent leurs décimales (voir « Unités »). Le graphique ne montre que des valeurs déjà calculées, sans calcul supplémentaire.",
       "L'infobulle, au survol ou au clavier, donne le mois ou le groupe, puis pour chaque série son nom et sa valeur, dans la même unité que le tableau, ou « n.d. » avec sa raison. Sur un graphique à plusieurs séries, un clic sur un nom de la légende masque ou réaffiche la série.",
       "Au clavier, une tabulation place le focus sur le graphique ; les flèches gauche et droite (et les touches Début et Fin) passent d'une colonne à l'autre.",
     ].join("\n\n"),
@@ -107,7 +107,7 @@ export const GLOSSARY_ECRAN: GlossaryEntry[] = [
     term: "Unités : euros, ETP, personnes, pourcentages",
     family: FAMILY,
     definition: [
-      "Euros : les montants sont conservés en centimes entiers avec leur devise (l'euro est la seule devise active) et affichés en euros avec deux décimales (1 234,56 €). Sur l'axe d'un graphique, ils sont abrégés en milliers (k€) ou en millions (M€) ; la valeur exacte est dans l'infobulle.",
+      "Euros : les montants restent conservés en centimes entiers avec leur devise (l'euro est la seule devise active). Le choix € / k€ arrondit seulement la lecture à l'écran, sans décimales : 1 234,56 € devient 1 235 € ou 1 k€. Les saisies, calculs et exports gardent leur précision ; une somme d'arrondis affichés peut donc différer du total arrondi.",
       "ETP (équivalent temps plein) : somme des quotités des contrats, conservée au dix-millième d'ETP et affichée avec deux décimales. Sur l'écran KPI RH, la valeur au dix-millième se lit au survol et dans le détail du calcul.",
       "Personnes : un effectif de fin de mois est un nombre entier de personnes ; une moyenne d'effectif est affichée avec deux décimales.",
       "Pourcentages : un taux est affiché avec deux décimales (5,34 %) ; sur un graphique, l'étiquette d'une barre peut n'avoir qu'une décimale, l'infobulle donne les deux. L'écart entre deux taux est exprimé en points de pourcentage (pts), jamais en pourcentage d'un pourcentage.",
