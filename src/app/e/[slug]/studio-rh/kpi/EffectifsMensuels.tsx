@@ -1,3 +1,4 @@
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { CalendarDays, ListChecks, PieChart } from "lucide-react";
 import { BarChart, DonutChart } from "@/components/charts";
@@ -109,7 +110,7 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
           <div className="filters bar kpi-bar" data-testid="em-filters">
             <div className="field-row em-version">
               <label htmlFor="version">Version</label>
-              <select className="select" id="version" name="version" defaultValue={version}>{versions.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}</select>
+              <SearchableSelect className="select" id="version" name="version" defaultValue={version} searchLabel="Version" options={versions} />
             </div>
             <div className="field-row">
               <label htmlFor="annee">Année</label>

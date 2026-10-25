@@ -260,6 +260,16 @@ describe("PostesView rendue", () => {
     expect(render({ service: "TECH" })).toContain('data-testid="sal-search-clear"');
     expect(render({ service: "TECH", selected: "A" })).toContain("salarie=A&amp;service=TECH");
   });
+  it("la recherche d'un service long garde le champ GET et le service courant parmi toutes les options", () => {
+    const manyServices = baseOf(Array.from({ length: 10 }, (_, i) => contract(`F${i}`, { label: `Collaborateur fictif ${i}`, service: `Service ${i}` })));
+    const html = render({ base: manyServices, hyps: [], proj: projOf(manyServices, []), service: "Service 9" });
+    const select = /<select[^>]*id="sal-service"[^>]*>[\s\S]*?<\/select>/.exec(html)?.[0] ?? "";
+    expect(select).toContain('name="service"');
+    expect(select.match(/<option/g)).toHaveLength(11);
+    expect(select).toContain('<option value="Service 9" selected="">Service 9</option>');
+    expect(html).toContain('aria-label="Rechercher : Service"');
+    expect(select).toContain('<option value="">Tous les services</option>');
+  });
   it("pagination : 45 salariés par 20 ; page 2 = 21–40 ; la recherche et le salarié ouvert sont conservés dans les liens", () => {
     const many = baseOf(Array.from({ length: 45 }, (_, i) => contract(`K${String(i + 1).padStart(2, "0")}`, { label: `Salarié ${String(i + 1).padStart(2, "0")}`, service: "TECH" })));
     const p = (over: Partial<Parameters<typeof PostesView>[0]>) => render({ base: many, hyps: [], proj: projOf(many, []), ...over });
@@ -434,6 +444,25 @@ describe("formulaires", () => {
     expect(html.match(/<button/g)?.length).toBe(1);
     expect(html).toContain('</button><span id="pied">pied</span>');
     expect(html).toContain('data-testid="t"');
+  });
+  it("HireForm : les longues listes conservent leurs sentinelles et n'appliquent aucun profil au rendu", () => {
+    const profiles = Array.from({ length: 20 }, (_, i) => ({ key: `profil-fictif-${i}`, label: `Profil fictif ${i}`, service: "FICTIF", category: "cdi" as const, grossFullTime: "3123.45", quotaPct: "80.00", chargesPct: "42.50", counted: true, note: "Profil de test" }));
+    const deps = Array.from({ length: 20 }, (_, i) => ({ id: `depart-fictif-${i}`, label: `Départ fictif ${i}` }));
+    const before = JSON.stringify(profiles);
+    const html = clean(renderToStaticMarkup(h(HireForm, { action: noop, profiles, deps })));
+    const profileSelect = /<select[^>]*id="hire-copy"[^>]*>[\s\S]*?<\/select>/.exec(html)?.[0] ?? "";
+    const replacesSelect = /<select[^>]*id="hire-replaces"[^>]*>[\s\S]*?<\/select>/.exec(html)?.[0] ?? "";
+    expect(profileSelect.match(/<option/g)).toHaveLength(21);
+    expect(profileSelect).toContain('<option value="" selected="">— saisie libre</option>');
+    expect(profileSelect).not.toContain('name="');
+    expect(replacesSelect).toContain('name="replaces"');
+    expect(replacesSelect.match(/<option/g)).toHaveLength(21);
+    expect(replacesSelect).toContain('<option value="" selected="">— (création de poste)</option>');
+    expect(html).toContain('aria-label="Rechercher : Profil de départ"');
+    expect(html).toContain('aria-label="Rechercher : Poste à remplacer"');
+    expect(html).toContain('name="copiedFrom" value=""');
+    expect(html).not.toContain('value="3123.45"');
+    expect(JSON.stringify(profiles)).toBe(before);
   });
   it("HireForm : champs groupés, aides reliées aux champs, noms de champs conservés, un seul bouton", () => {
     const html = clean(renderToStaticMarkup(h(HireForm, { action: noop, profiles: [], deps: [{ id: "d1", label: "Départ Bruno" }] })));

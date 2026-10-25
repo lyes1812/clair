@@ -1,3 +1,4 @@
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { MoneyText } from "@/components/Money";
 import { Fragment } from "react";
 import { GlossaryLink } from "@/components/GlossaryLink";
@@ -187,11 +188,11 @@ export function PostesView({ slug, scenario, base, hyps, proj, q, selected, canE
           </div>
           <div className="field-row hs-narrow">
             <label htmlFor="sal-service">Service</label>
-            <select className="select" id="sal-service" name="service" defaultValue={svc}>
-              <option value="">Tous les services</option>
-              {services.map((x) => <option key={x} value={x}>{x}</option>)}
-              {hasNoService && <option value={NO_SERVICE}>Non ventilé</option>}
-            </select>
+            <SearchableSelect className="select" id="sal-service" name="service" defaultValue={svc} searchLabel="Service" options={[
+              { value: "", label: "Tous les services" },
+              ...services.map((service) => ({ value: service, label: service })),
+              ...(hasNoService ? [{ value: NO_SERVICE, label: "Non ventilé" }] : []),
+            ]} />
           </div>
           <button className="btn" type="submit">Rechercher</button>
           {(q || svc) && <a className="btn" href={base_} data-testid="sal-search-clear">Effacer la recherche</a>}

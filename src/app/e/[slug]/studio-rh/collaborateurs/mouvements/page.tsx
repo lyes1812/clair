@@ -1,3 +1,4 @@
+import { SearchableSelect } from "@/components/SearchableSelect";
 import "@/styles/collaborateurs.css";
 import { BarChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
@@ -82,10 +83,10 @@ export default async function CollaborateursMouvementsPage({ params, searchParam
         {ctx.establishments.length > 1 && (
           <div className="field-row">
             <label htmlFor="etab">Établissement</label>
-            <select className="select" id="etab" name="etab" defaultValue={etab}>
-              <option value="">Tous</option>
-              {ctx.establishments.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
-            </select>
+            <SearchableSelect className="select" id="etab" name="etab" defaultValue={etab} searchLabel="Établissement" options={[
+              { value: "", label: "Tous" },
+              ...ctx.establishments.map((establishment) => ({ value: establishment.id, label: establishment.label })),
+            ]} />
           </div>
         )}
         <FilterActions label="Afficher" />

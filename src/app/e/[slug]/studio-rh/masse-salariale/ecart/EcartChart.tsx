@@ -2,6 +2,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { LineChart } from "@/components/charts";
 import type { RubricChart } from "@/lib/viz/ecart";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 // Courbes de l'écart budgétaire : une courbe par version, mois par mois, pour la rubrique choisie. Le choix de rubrique se fait
 // sans recharger la page (toutes les rubriques sont déjà calculées côté serveur) ; il est reporté dans l'adresse pour pouvoir être
@@ -63,13 +64,8 @@ export function EcartChart(p: EcartChartProps) {
       <div className="ecart-chart-controls">
         <div className="field-row">
           <label htmlFor={`${uid}-rub`}>Rubrique</label>
-          <select className="select" id={`${uid}-rub`} value={rub} onChange={(e) => pick(e.target.value)} data-testid={`${p.testid}-rubrique`}>
-            {p.groups.map((g) => (
-              <optgroup key={g.label} label={g.label}>
-                {g.options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-              </optgroup>
-            ))}
-          </select>
+            <SearchableSelect className="select" id={`${uid}-rub`} value={rub} onChange={(e) => pick(e.target.value)} data-testid={`${p.testid}-rubrique`}
+              searchLabel="Rubrique" options={p.groups.flatMap((group) => group.options.map((option) => ({ value: option.key, label: option.label, group: group.label })))} />
         </div>
         <label className="check">
           <input type="checkbox" checked={zero} onChange={(e) => setZero(e.target.checked)} />
