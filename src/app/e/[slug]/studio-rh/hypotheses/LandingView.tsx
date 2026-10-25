@@ -1,3 +1,4 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import "@/styles/hypotheses-resultat.css";
 import { BarChart, WaterfallChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
@@ -66,7 +67,7 @@ export function LandingView({
   const trended = (measures.kind === "value" && measures.rows.length > 0) || sens.some((x) => x.effect.kind === "value");
   const barsNd = (bars.kind === "value" && hasNd(bars.series)) || (sensBars.kind === "value" && hasNd(sensBars.series));
   return (
-    <>
+    <MoneyText><>
       <div className="hr-switch">
         <ViewSwitch
           testid="atr-affichage"
@@ -79,12 +80,12 @@ export function LandingView({
           ]}
         />
         <div className="hr-line-bar">
-          <p className="hr-context">Année {year} · mois réels puis mois projetés · euros</p>
+          <p className="hr-context">Année {year} · mois réels puis mois projetés · <MoneyUnitLabel /></p>
           {trended && <TrendLegend slug={slug} />}
         </div>
       </div>
       <section className="panel" data-testid="atr-retraite">
-        <PanelTitle title={`Atterrissage ${year} retraité`} desc="Hors éléments non récurrents · euros" slug={slug} term={HYP_TERMS.retraite} />
+        <PanelTitle title={`Atterrissage ${year} retraité`} desc={<>Hors éléments non récurrents · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.retraite} />
         <dl className="facts hr-tiles">
           <div className="hr-tile" data-testid="atr-tile-landing">
             <TileTitle title={`Atterrissage ${year}`} sub="coût employeur · réel + projeté" slug={slug} term={HYP_TERMS.atterrissage} />
@@ -146,7 +147,7 @@ export function LandingView({
       </section>
 
       <section className="panel" data-testid="atr-measures">
-        <PanelTitle title={`Mesures de management — ${year}`} desc="Chaque départ est évalué seul · euros" slug={slug} term={HYP_TERMS.mesures} />
+        <PanelTitle title={`Mesures de management — ${year}`} desc={<>Chaque départ est évalué seul · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.mesures} />
         {measures.kind === "nd" ? (
           <p className="nd">n.d. — {frDates(measures.reason)}</p>
         ) : measures.rows.length === 0 ? (
@@ -194,7 +195,7 @@ export function LandingView({
       </section>
 
       <section className="panel" data-testid="atr-sens">
-        <PanelTitle title="Sensibilités" desc={`Effet sur l'atterrissage ${year} · chaque variation est calculée seule · euros`} slug={slug} term={HYP_TERMS.sensibilites} />
+        <PanelTitle title="Sensibilités" desc={<>Effet sur l’atterrissage {year} · chaque variation est calculée seule · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.sensibilites} />
         <form method="get" action={hrefBase} data-testid="atr-sens-form">
           <input type="hidden" name="scenario" value={scenarioId} />
           <input type="hidden" name="vue" value="atterrissage" />
@@ -254,6 +255,6 @@ export function LandingView({
           </div>
         )}
       </section>
-    </>
+    </></MoneyText>
   );
 }

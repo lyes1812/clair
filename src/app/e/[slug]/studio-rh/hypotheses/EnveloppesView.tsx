@@ -1,4 +1,6 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { GlossaryLink } from "@/components/GlossaryLink";
+import { formatEuros } from "@/lib/money";
 import { monthRange } from "@/lib/connectors/months";
 import { formatMonth } from "@/lib/dates";
 import type { ScenarioRow } from "@/lib/budget/store";
@@ -63,7 +65,7 @@ export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit
                   <td>{e!.chargesBps === null ? "Coût chargé" : "Brut + charges"}</td>
                   <td className="num">{e!.chargesBps === null ? "—" : `${decText(e!.chargesBps)} %`}</td>
                   <td>{e!.nonRecurring ? "oui" : "non"}</td>
-                  {months.map((m) => <td key={m} className="num" data-yi={gy.index(m)}>{e!.monthly[m] === undefined ? "—" : decText(e!.monthly[m])}</td>)}
+                  {months.map((m) => <td key={m} className="num" data-yi={gy.index(m)} data-csv={e!.monthly[m] === undefined ? "—" : decText(e!.monthly[m])}>{e!.monthly[m] === undefined ? "—" : formatEuros(e!.monthly[m])}</td>)}
                 </>
               )}
             </tr>
@@ -76,13 +78,13 @@ export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit
   const frame = (
     <div className="hs-grid" data-grid-root data-ys={gy.multi ? "0" : undefined}>
       <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} />
-      <p className="hs-unit">{gridCaption("Montants en € par mois (chargés ou bruts selon la ligne)", months)}</p>
+      <p className="hs-unit">{canEdit ? gridCaption("Montants en € par mois (chargés ou bruts selon la ligne)", months) : <>Montants en <MoneyUnitLabel /> par mois (chargés ou bruts selon la ligne) · {gridCaption("", months).replace(/^ · /, "")}</>}</p>
       {grid}
     </div>
   );
   const none = rows.every((r) => r === null);
   return (
-    <>
+    <MoneyText><>
       <section className="panel" data-testid={`env-${axis}`}>
         <CardTitle title={`Enveloppes par ${axis === "service" ? "service" : "rubrique"}`} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.enveloppe} />} />
         {canEdit && none && <p className="hs-empty" data-testid={`env-${axis}-empty`}>Aucune enveloppe saisie.</p>}
@@ -125,6 +127,6 @@ export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit
           </details>
         </section>
       )}
-    </>
+    </></MoneyText>
   );
 }

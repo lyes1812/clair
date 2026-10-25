@@ -5,6 +5,7 @@ import type { MenuFamily } from "@/lib/menu";
 import { MegaMenu } from "./MegaMenu";
 import { SignOutButton } from "./SignOutButton";
 import { TableDensity } from "./TableDensity";
+import { CurrencySwitch } from "./CurrencyPreference";
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
@@ -25,6 +26,7 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email, families
         </nav>
       </div>
       <div className="workspace-display-tools">
+      <CurrencySwitch />
       <TableDensity />
       <details className="user-menu">
         <summary aria-label={`Compte de ${userName}`} data-testid="user-menu"><span className="avatar">{initials(userName)}</span></summary>

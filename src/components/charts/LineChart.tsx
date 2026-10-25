@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { niceTicks } from "./scale";
-import { unitFormat, type UnitName } from "./units";
-import { colorOf, Frame, labelWidth, Legend, TipBox, useRoving, useWidth, type ChartSeries, type Tip } from "./shared";
+import { axisLabelWidth, axisTexts, chartUnitText, unitFormat, type UnitName } from "./units";
+import { useMoneyUnit } from "@/components/CurrencyPreference";
+import { colorOf, Frame, Legend, TipBox, useRoving, useWidth, type ChartSeries, type Tip } from "./shared";
 
 export type LineChartProps = {
   testid: string;
@@ -20,12 +21,14 @@ export type LineChartProps = {
 // Courbes multi-séries (réel, scénarios, budget). Une valeur n.d. interrompt la ligne : jamais de point à zéro, jamais de
 // valeur interpolée. L'infobulle suit la colonne survolée et liste toutes les séries avec leur valeur ou leur raison n.d.
 export function LineChart(p: LineChartProps) {
+  const moneyUnit = useMoneyUnit();
   const [ref, width] = useWidth();
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [tip, setTip] = useState<Tip | null>(null);
+  useEffect(() => { setTip(null); }, [moneyUnit]);
   const [at, setAt] = useState<number | null>(null);
   const rov = useRoving(p.categories.length);
-  const u = unitFormat(p.unit);
+  const u = unitFormat(p.unit, moneyUnit);
   const axisFmt = u.axis;
   const vis = p.series.map((s, i) => ({ s, i })).filter(({ s }) => !hidden.has(s.key));
   const all = vis.flatMap(({ s }) => s.values.filter((v): v is number => v !== null && v !== undefined));
@@ -38,7 +41,8 @@ export function LineChart(p: LineChartProps) {
   const truncated = !zero && t.min > 0;
   const nCat = p.categories.length;
   const H = p.height ?? 260;
-  const left = labelWidth(t.ticks.map(axisFmt));
+  const left = axisLabelWidth(p.unit, t.ticks);
+  const tickTexts = p.unit === "eur" ? axisTexts(t.ticks, axisFmt) : t.ticks.map(axisFmt);
   const right = 14;
   const top = 14;
   const rotate = (width - left - right) / Math.max(1, nCat) < 40;
@@ -75,14 +79,14 @@ export function LineChart(p: LineChartProps) {
   const aria = (c: number) => `${catTitle(c)} : ${p.series.map((s) => `${s.name} ${s.values[c] === null || s.values[c] === undefined ? `n.d.${s.reasons?.[c] ? ` (${s.reasons[c]})` : ""}` : u.fmt(s.values[c] as number)}`).join(", ")}`;
   const note = [p.note, truncated ? `Axe vertical ajusté aux valeurs (il ne part pas de zéro) : ${axisFmt(t.min)} à ${axisFmt(t.max)}.` : null].filter(Boolean).join(" ");
   return (
-    <Frame testid={p.testid} title={p.title} legend={<Legend items={p.series.map((s, i) => ({ key: s.key, name: s.name, color: colorOf(i, s.color), dashed: s.dashed }))} hidden={hidden} onToggle={p.series.length > 1 ? toggleHidden : undefined} />} note={note || undefined}>
+    <Frame testid={p.testid} title={p.title ? chartUnitText(p.title, p.unit, moneyUnit) : undefined} legend={<Legend items={p.series.map((s, i) => ({ key: s.key, name: s.name, color: colorOf(i, s.color), dashed: s.dashed }))} hidden={hidden} onToggle={p.series.length > 1 ? toggleHidden : undefined} />} note={note || undefined}>
       <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setAt(null); }}>
-        <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={p.label}>
+        <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
           <g transform={`translate(${left},${top})`}>
-            {t.ticks.map((v) => (
+            {t.ticks.map((v, index) => (
               <g key={v}>
                 <line x1={0} x2={plotW} y1={Y(v)} y2={Y(v)} className={v === 0 ? "axis" : "grid"} />
-                <text x={-8} y={Y(v)} textAnchor="end" dominantBaseline="middle" className="tick">{axisFmt(v)}</text>
+                <text x={-8} y={Y(v)} textAnchor="end" dominantBaseline="middle" className="tick">{tickTexts[index]}</text>
               </g>
             ))}
             {Array.from({ length: nCat }, (_, c) => (

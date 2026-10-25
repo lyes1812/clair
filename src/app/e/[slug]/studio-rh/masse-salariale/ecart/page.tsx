@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import "@/styles/ecart.css";
 import { ExportButtons } from "@/components/ExportButtons";
 import { GlossaryLink } from "@/components/GlossaryLink";
@@ -162,7 +163,7 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
   const chart = showGraph ? ecartChartData(versions, loaded.shorts, monthsOf) : null;
 
   return (
-    <>
+    <MoneyText><>
       <MsHeader title={ITEM.label} />
       <MsTabs slug={slug} current="ecart" />
       <section className="panel" data-testid="ecart">
@@ -272,6 +273,6 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
         </section>
       )}
       {zoomBlock}
-    </>
+    </></MoneyText>
   );
 }

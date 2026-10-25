@@ -1,3 +1,4 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import "@/styles/hypotheses-resultat.css";
 import type { ReactNode } from "react";
 import { BarChart, LineChart } from "@/components/charts";
@@ -126,7 +127,7 @@ function Lecture({ slug, rows, months, nature }: { slug: string; rows: Row[]; mo
   return (
     <div className="hr-stack" data-testid="proj-lecture">
       <section className="panel">
-        <PanelTitle title="Coût, effectif et ETP par mois" desc={`${range} · euros, personnes et ETP`} slug={slug} term={HYP_TERMS.projectionGraphiques} />
+        <PanelTitle title="Coût, effectif et ETP par mois" desc={<>{range} · <MoneyUnitLabel />, personnes et ETP</>} slug={slug} term={HYP_TERMS.projectionGraphiques} />
         <div className="hr-charts">
           <BarChart
             testid="proj-chart"
@@ -183,7 +184,7 @@ function Lecture({ slug, rows, months, nature }: { slug: string; rows: Row[]; mo
       {hasValues(nature.series) ? (
         <>
           <section className="panel hr-chart-panel" data-testid="proj-nature-chart">
-            <PanelTitle title="Coût projeté par nature de contribution" desc={`${natureRange} · euros`} slug={slug} term={HYP_TERMS.coutNature} />
+            <PanelTitle title="Coût projeté par nature de contribution" desc={<>{natureRange} · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.coutNature} />
             <BarChart
               testid="proj-chart-nature"
               label={`Coût projeté par nature de contribution, en euros, de ${monthLongLabel(months[0].month)} à ${monthLongLabel(months.at(-1)!.month)}`}
@@ -196,7 +197,7 @@ function Lecture({ slug, rows, months, nature }: { slug: string; rows: Row[]; mo
             />
           </section>
           <section className="panel hr-chart-panel" data-testid="proj-contributions">
-            <PanelTitle title="Contributions hors base" desc={`${natureRange} · euros`} slug={slug} term={HYP_TERMS.contributionsHorsBase} />
+            <PanelTitle title="Contributions hors base" desc={<>{natureRange} · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.contributionsHorsBase} />
             {contrib.series.length > 0 ? (
               <BarChart
                 testid="proj-chart-contributions"
@@ -227,10 +228,10 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
   const href = `/e/${slug}/studio-rh/hypotheses?scenario=${scenario.id}`;
   if (proj.kind === "error") {
     return (
-      <section className="panel" data-testid="proj-error">
+      <MoneyText><section className="panel" data-testid="proj-error">
         <h2>Projection refusée</h2>
         <ul className="list">{proj.errors.map((e) => <li key={e} className="nd">{frDates(e)}</li>)}</ul>
-      </section>
+      </section></MoneyText>
     );
   }
   const aff = affichageOf(affichage);
@@ -250,7 +251,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
   const range = `${formatMonth(first).toLowerCase()} → ${formatMonth(rows.at(-1)?.month ?? scenario.lastMonth).toLowerCase()}`;
   const origin = (base.prior?.length ?? 0) > 0 ? "réel figé ou projeté par le scénario parent" : "réel figé";
   return (
-    <>
+    <MoneyText><>
       <div className="hr-switch">
         <ViewSwitch
           testid="proj-affichage"
@@ -262,7 +263,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
             { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
           ]}
         />
-        <p className="hr-context">{range} · {origin} avant {formatMonth(scenario.firstMonth).toLowerCase()}, projeté ensuite · euros</p>
+        <p className="hr-context">{range} · {origin} avant {formatMonth(scenario.firstMonth).toLowerCase()}, projeté ensuite · <MoneyUnitLabel /></p>
       </div>
       {ndMonths.length > 0 && (
         <p className="notice" data-testid="proj-nd">
@@ -329,7 +330,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
       {showTables(aff) && <NatureTable slug={slug} nature={nature} months={pm} />}
       {showTables(aff) && <CategoriesTable slug={slug} proj={proj} base={base} />}
       {showTables(aff) && detail && detail.kind === "value" && <Detail slug={slug} month={detail} />}
-    </>
+    </></MoneyText>
   );
 }
 
@@ -340,8 +341,8 @@ function NatureTable({ slug, nature, months }: { slug: string; nature: NatureCha
   if (!hasValues(nature.series)) return null;
   const why = (m: ProjectedMonth) => (m.kind === "nd" ? frDates(m.reasons.join(" ; ")) : undefined);
   return (
-    <section className="panel" data-testid="proj-nature">
-      <PanelTitle title="Coût projeté par nature de contribution" desc="Mois projetés · euros" slug={slug} term={HYP_TERMS.coutNature} />
+    <MoneyText><section className="panel" data-testid="proj-nature">
+      <PanelTitle title="Coût projeté par nature de contribution" desc={<>Mois projetés · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.coutNature} />
       <div className="table-wrap">
         <table className="data-table sticky-first" data-testid="proj-nature-table">
           <thead><tr><th>Nature</th>{months.map((m, i) => <th key={m.month} className="num" title={nature.titles[i]}>{nature.categories[i]}</th>)}</tr></thead>
@@ -365,7 +366,7 @@ function NatureTable({ slug, nature, months }: { slug: string; nature: NatureCha
           </tfoot>
         </table>
       </div>
-    </section>
+    </section></MoneyText>
   );
 }
 
@@ -421,7 +422,7 @@ function Detail({ slug, month }: { slug: string; month: Extract<ProjectedMonth, 
     byHyp.set(k, g);
   }
   return (
-    <section className="panel" id="proj-detail" data-testid="proj-detail">
+    <MoneyText><section className="panel" id="proj-detail" data-testid="proj-detail">
       <PanelTitle title={`${formatMonth(month.month)} — de quoi est fait le coût projeté`} slug={slug} term={HYP_TERMS.contribution} />
       <div className="table-wrap">
         <table className="data-table" data-testid="proj-detail-hyps">
@@ -448,6 +449,6 @@ function Detail({ slug, month }: { slug: string; month: Extract<ProjectedMonth, 
           </table>
         </div>
       </details>
-    </section>
+    </section></MoneyText>
   );
 }

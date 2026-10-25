@@ -1,3 +1,4 @@
+import { MoneyText } from "@/components/Money";
 import "@/styles/hypotheses-resultat.css";
 import { BarChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
@@ -48,7 +49,7 @@ export function EmbauchesView({ slug, scenario, base, hypotheses, canEdit, par, 
   const years = yearSpan(months);
   const maxPerMonth = Math.max(0, ...data.totals);
   return (
-    <>
+    <MoneyText><>
       <div className="hr-switch">
         <ViewSwitch
           testid="emb-affichage"
@@ -167,6 +168,6 @@ export function EmbauchesView({ slug, scenario, base, hypotheses, canEdit, par, 
           )}
         </section>
       )}
-    </>
+    </></MoneyText>
   );
 }

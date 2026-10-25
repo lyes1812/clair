@@ -44,6 +44,7 @@ const scen = version("scen", "Scénario Révisé 2026", "scenario", "2026", [
 const monthsOf = (v: Version) => (v.year === "2025" ? ["2025-01", "2025-02", "2025-03"] : ["2026-01", "2026-02", "2026-03"]);
 
 const g = rubricGroups;
+const visible = (html: string) => html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
 
 describe("courbes par version", () => {
   const d = ecartChartData([reel, scen], ["Réel 2025", "Révisé 2026"], monthsOf);
@@ -268,10 +269,10 @@ describe("badge d'axe tronqué des cascades", () => {
       { start: 100000, end: 500000, steps: [{ label: "x", value: 400000 }], unit: "eur" as const },
     ];
     for (const c of cases) {
-      const html = renderToStaticMarkup(h(WaterfallChart, { testid: "wf", label: "test", startLabel: "A", endLabel: "B", ...c }));
-      const fromNote = /il commence à ([^<]*?)\.(?:<| )/.exec(html)?.[1];
-      const badge = waterfallAxisBadge(c);
-      if (fromNote === undefined) expect(badge).toBeNull();
+      const html = renderToStaticMarkup(h(TitledWaterfall, { testid: "wf", title: "test", label: "test", startLabel: "A", endLabel: "B", ...c }));
+      const fromNote = /il commence à (.*?)\./.exec(visible(html))?.[1];
+      const badge = /Axe tronqué à .*$/.exec(visible(html.split('<div class="wf-scroll">')[0]))?.[0];
+      if (fromNote === undefined) expect(badge).toBeUndefined();
       else expect(badge).toBe(`Axe tronqué à ${fromNote}${c.unit === "etp" ? " ETP" : ""}`);
     }
   });
@@ -281,7 +282,9 @@ describe("cascade titrée", () => {
   const base = { label: "Cascade de test", startLabel: "A", endLabel: "B" };
   it("axe tronqué : le badge est écrit à côté du titre, la note est hors de la zone qui défile", () => {
     const html = renderToStaticMarkup(h(TitledWaterfall, { ...base, testid: "wf-pont", title: "Du coût de la version 1 à celui de la version 2", note: "Note de test.", start: 6642000, end: 6997000, steps: pontSteps, unit: "eur" }));
-    expect(html).toMatch(/<h3 class="chart-title" id="wf-pont-titre">Du coût de la version 1 à celui de la version 2<\/h3><span class="wf-badge" data-testid="wf-pont-axe"[^>]*>Axe tronqué à 64 k€<\/span>/);
+    expect(html).toMatch(/<h3 class="chart-title" id="wf-pont-titre">Du coût de la version 1 à celui de la version 2<\/h3><span class="wf-badge" data-testid="wf-pont-axe"[^>]*>Axe tronqué à /);
+    expect(visible(html.split('<div class="wf-scroll">')[0])).toContain("Axe tronqué à 64 000 €");
+    expect(html).toContain('data-money-cents="6400000"');
     expect(html).toContain('aria-labelledby="wf-pont-titre"');
     expect(html).toContain('data-testid="wf-pont"'); // la figure du composant partagé est conservée
     expect(html.indexOf('class="wf-scroll"')).toBeLessThan(html.indexOf('data-testid="wf-pont"'));
@@ -303,7 +306,8 @@ describe("cascade titrée", () => {
     const props = { ...base, testid: "wf-pont", title: "Pont", unit: "eur" as const };
     const tronque = renderToStaticMarkup(h(TitledWaterfall, { ...props, start: 6642000, end: 6997000, steps: pontSteps, axisHelp: help }));
     expect(tronque).not.toContain("proportionnelle");
-    expect(tronque).toMatch(/data-testid="wf-pont-axe">Axe tronqué à 64 k€<\/span><a class="gloss-link"/);
+    expect(tronque).toMatch(/data-testid="wf-pont-axe">Axe tronqué à <span class="money-display"[^>]*>[^<]*<\/span><\/span><a class="gloss-link"/);
+    expect(visible(tronque.split('<div class="wf-scroll">')[0])).toContain("Axe tronqué à 64 000 €");
     const large = renderToStaticMarkup(h(TitledWaterfall, { ...props, start: 100000, end: 500000, steps: [{ label: "x", value: 400000 }], axisHelp: help }));
     expect(large).not.toContain("gloss-link");
   });

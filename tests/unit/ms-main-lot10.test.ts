@@ -6,7 +6,6 @@ import { glossaryEntry } from "@/lib/glossary";
 import type { DsnMonth } from "@/lib/payroll/dsn";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
-import { euros, eurosSigned } from "@/lib/viz/masse";
 
 // Écrans de la Masse salariale rendus de bout en bout (lot 10) sur un journal fictif écrit à la main : tendances rouge / vert d'un coût,
 // aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif.
@@ -73,6 +72,8 @@ const page = async (sp: Record<string, string> = {}) => {
   for (const bad of ["NaN", "undefined", "[object"]) expect(html).not.toContain(bad);
   return html;
 };
+// Retire seulement la balise de présentation monétaire pour vérifier le texte et la couleur de son parent.
+const shownHtml = (html: string) => html.replace(/<span class="money-display"[^>]*>([^<]*)<\/span>/g, "$1");
 const count = (html: string, re: RegExp) => (html.match(re) ?? []).length;
 const NARRATIF = /Un graphique est une lecture|Sens de « n\.d\. »|Montants tels que (renvoyés|déclarés)|\(N − N-1\) ÷ N-1 =|brut \+ cotisations patronales<|Définitions et règles de calcul|ms-definitions|Coût = masse chargée \(brut|chaque chiffre renvoie à sa définition|une colonne hachurée est un mois n\.d\./i;
 
@@ -80,15 +81,17 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
   it("référence écrite à la main : janvier 2026 = 4 900,00 € contre 4 410,00 € en janvier 2025, soit +490,00 € et +11,11\u00a0% (coût en hausse : rouge)", async () => {
     const html = await page();
     expect(html).toContain('data-testid="ms-tile-masse"');
-    expect(html).toContain(euros(490000));
+    expect(html).toContain('data-money-cents="490000"');
+    expect(html).toContain('data-money-cents="163333"');
+    expect(shownHtml(html)).toContain("4\u202f900\u00a0€");
     expect(html).toContain(`<dd class="trend-bad">+11,11\u00a0%</dd>`);
-    expect(html).toContain(`<span class="ms-delta trend-bad">${eurosSigned(49000)}</span>`);
+    expect(shownHtml(html)).toContain(`<span class="ms-delta trend-bad">+490 €</span>`);
     // Services : A +340,00 € et B +150,00 € ; total +490,00 € ; une ligne par service, écarts de montant colorés.
-    expect(html).toContain(`<td class="num trend-bad" data-col="ecart">${eurosSigned(34000)}</td>`);
-    expect(html).toContain(`<td class="num trend-bad" data-col="ecart">${eurosSigned(15000)}</td>`);
+    expect(shownHtml(html)).toContain(`<td class="num trend-bad" data-col="ecart">+340 €</td>`);
+    expect(shownHtml(html)).toContain(`<td class="num trend-bad" data-col="ecart">+150 €</td>`);
     expect(html).toContain(`<td class="num trend-bad" data-col="ecart-pct">+11,11\u00a0%</td>`);
     // Tableau mois par mois : écart du mois et de la période.
-    expect(html).toContain(`<td class="num trend-bad" data-col="ecart">${eurosSigned(49000)}</td>`);
+    expect(shownHtml(html)).toContain(`<td class="num trend-bad" data-col="ecart">+490 €</td>`);
   });
   it("une seule légende de tendance ; aucun bloc de définitions en bas ; aucune explication sous les tuiles, les graphiques et les tableaux", async () => {
     const html = await page();
@@ -109,9 +112,9 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
   it("données conservées : grille de comptes en vigueur, postes hors masse, source, période et services avec leur contexte d'une ligne", async () => {
     const html = await page();
     expect(html).toMatch(/data-testid="ms-grid"><li>Salaires et appointements \(brut\) : 641<\/li><li>Primes \(brut\) : 6413<\/li>/);
-    expect(html).toContain(`Provisions de congés payés (hors masse chargée) : <b>${euros(140000)}</b>`);
+    expect(shownHtml(html)).toContain(`Provisions de congés payés (hors masse chargée) : <b>1 400 €</b>`);
     expect(html).toContain("journal comptable de paie PayFit");
-    expect(html).toContain("<strong>Janvier 2026</strong> · N-1 : Janvier 2025 · tous les services · euros");
+    expect(html).toContain("<strong>Janvier 2026</strong> · N-1 : Janvier 2025 · tous les services · €");
     expect(html).toContain("Code analytique « Service » du journal PayFit (seul axe présent)");
     expect(html).toContain("Contrôle DSN : aucune DSN déposée pour ces mois.");
     expect(html).toContain("Grille de comptes : valeur par défaut validée le 22/10/2026");
@@ -163,10 +166,10 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
 describe("Masse salariale, Fixe & variable et Paie & comptabilité (lot 10)", () => {
   it("Fixe & variable : fixe 3 000,00 € contre 2 700,00 € (+300,00 €, +11,11\u00a0%), primes 200,00 € contre 180,00 € (+20,00 €) : coûts en hausse, en rouge", async () => {
     const html = await page({ vue: "fixe-variable" });
-    expect(html).toContain(`N-1 : ${euros(270000)} · écart <span class="ms-delta trend-bad">${eurosSigned(30000)}</span> · <span class="trend-bad">+11,11\u00a0%</span>`);
-    expect(html).toContain(`N-1 : ${euros(18000)} · écart <span class="ms-delta trend-bad">${eurosSigned(2000)}</span> · <span class="trend-bad">+11,11\u00a0%</span>`);
+    expect(shownHtml(html)).toContain(`N-1 : 2 700 € · écart <span class="ms-delta trend-bad">+300 €</span> · <span class="trend-bad">+11,11\u00a0%</span>`);
+    expect(shownHtml(html)).toContain(`N-1 : 180 € · écart <span class="ms-delta trend-bad">+20 €</span> · <span class="trend-bad">+11,11\u00a0%</span>`);
     // Tableau par libellé : écart et écart (%) colorés ; total du brut +320,00 €.
-    expect(html).toContain(`<td class="num trend-bad">${eurosSigned(32000)}</td><td class="num trend-bad">+11,11\u00a0%</td>`);
+    expect(shownHtml(html)).toContain(`<td class="num trend-bad">+320 €</td><td class="num trend-bad">+11,11\u00a0%</td>`);
     expect(html).toContain("<th scope=\"col\" class=\"num\">Écart</th><th scope=\"col\" class=\"num\">Écart (%)</th>");
     expect(count(html, /class="trend-legend"/g)).toBe(1);
     expect(html).not.toMatch(NARRATIF);
@@ -177,10 +180,10 @@ describe("Masse salariale, Fixe & variable et Paie & comptabilité (lot 10)", ()
   });
   it("Paie & comptabilité : provision +140,00 € (1 400,00 € contre 1 260,00 €) en rouge ; rapprochement : −50,00 € en vert, +50,00 € en rouge, 0,00 € neutre", async () => {
     const html = await page({ vue: "paie-compta", annee: "2026", de: "01", a: "01" });
-    expect(html).toContain(`<span class="ms-delta trend-bad">${eurosSigned(14000)}</span>`);
-    expect(html).toContain(`<td class="num trend-good" data-col="ecart">${eurosSigned(-5000)}</td>`);
-    expect(html).toContain(`<td class="num trend-bad" data-col="ecart">${eurosSigned(5000)}</td>`);
-    expect(html).toContain(`<td class="num" data-col="ecart">${euros(0)}</td>`);
+    expect(shownHtml(html)).toContain(`<span class="ms-delta trend-bad">+140 €</span>`);
+    expect(shownHtml(html)).toContain(`<td class="num trend-good" data-col="ecart">−50 €</td>`);
+    expect(shownHtml(html)).toContain(`<td class="num trend-bad" data-col="ecart">+50 €</td>`);
+    expect(shownHtml(html)).toContain(`<td class="num" data-col="ecart">0 €</td>`);
     expect(count(html, /class="trend-legend"/g)).toBe(1);
     expect(html).not.toMatch(NARRATIF);
     expect(html).not.toMatch(/Écart = journal de paie − comptabilité|Écart par rubrique|Congés payés \+ charges sociales = provision/);
@@ -199,8 +202,8 @@ describe("Masse salariale, source DSN (lot 10)", () => {
   it("brut déclaré janvier 2026 = 14 830,00 € contre 13 000,00 € : +1 830,00 € et +14,08\u00a0% (hausse : rouge) ; masse chargée n.d. avec sa raison", () => {
     const html = view({ annee: "2026", de: "01", a: "01" });
     expect(html).toContain(`<dd class="trend-bad">+14,08\u00a0%</dd>`);
-    expect(html).toContain(`<span class="ms-delta trend-bad">${eurosSigned(183000)}</span>`);
-    expect(html).toContain(`<td class="num trend-bad" data-col="ecart">${eurosSigned(183000)}</td>`);
+    expect(shownHtml(html)).toContain(`<span class="ms-delta trend-bad">+1 830 €</span>`);
+    expect(shownHtml(html)).toContain(`<td class="num trend-bad" data-col="ecart">+1 830 €</td>`);
     expect(html).toContain("n.d. — cotisations patronales non portées salarié par salarié par la DSN");
     expect(count(html, /class="trend-legend"/g)).toBe(1);
     expect(html).not.toMatch(NARRATIF);

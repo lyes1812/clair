@@ -1,9 +1,12 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BarChart, DonutChart, LineChart, WaterfallChart } from "@/components/charts";
 import { arcPath, barDomain, barLayout, niceTicks, sliceAngles } from "@/components/charts/scale";
-import { compactEuros, labelEuros, unitFormat } from "@/components/charts/units";
+import { axisTexts, chartUnitText, compactEuros, labelEuros, unitFormat } from "@/components/charts/units";
+
+const { display } = vi.hoisted(() => ({ display: { unit: "eur" as "eur" | "keur" } }));
+vi.mock("@/components/CurrencyPreference", () => ({ useMoneyUnit: () => display.unit }));
 
 // Graphiques : géométrie et rendu serveur, cas écrits à la main.
 describe("graduations rondes", () => {
@@ -78,7 +81,7 @@ describe("rendu serveur", () => {
   const base = { testid: "t", label: "Test", unit: "eur" as const };
   it("barres : valeur n.d. lue « n.d. » avec sa raison, mois entièrement n.d. hachuré, aucune valeur NaN", () => {
     const html = renderToStaticMarkup(h(BarChart, { ...base, categories: ["janv.", "févr."], categoryTitles: ["janvier 2026", "février 2026"], series: [{ key: "a", name: "Réel", values: [120000, null], reasons: [null, "paie non clôturée"] }], toggle: true }));
-    expect(flat(html)).toContain("janvier 2026 : Réel 1 200,00");
+    expect(flat(html)).toContain("janvier 2026 : Réel 1 200 €");
     expect(html).toContain("février 2026 : Réel n.d.");
     expect(html).not.toMatch(/NaN|undefined/);
     expect(html).toContain('data-testid="t"');
@@ -91,7 +94,7 @@ describe("rendu serveur", () => {
   });
   it("anneau : part n.d. listée avec sa raison, hors de l'anneau ; total au centre", () => {
     const html = renderToStaticMarkup(h(DonutChart, { ...base, parts: [{ key: "a", name: "CDI", value: 30000 }, { key: "b", name: "CDD", value: 10000 }, { key: "c", name: "Apprenti", value: null, reason: "quotité absente" }] }));
-    expect(flat(html)).toContain("CDI : 300,00");
+    expect(flat(html)).toContain("CDI : 300 €");
     expect(flat(html)).toContain("75,00 %");
     expect(html).toContain("quotité absente");
     expect((html.match(/data-slice/g) ?? []).length).toBe(2);
@@ -104,8 +107,8 @@ describe("rendu serveur", () => {
   });
   it("cascade : départ, contributions signées et arrivée avec leur valeur signée", () => {
     const html = renderToStaticMarkup(h(WaterfallChart, { ...base, startLabel: "Départ", endLabel: "Arrivée", start: 100000, end: 105000, steps: [{ label: "Hausse", value: 8000 }, { label: "Baisse", value: -3000 }] }));
-    expect(flat(html)).toContain("Hausse : +80,00");
-    expect(flat(html)).toContain("Baisse : -30,00");
+    expect(flat(html)).toContain("Hausse : +80 €");
+    expect(flat(html)).toContain("Baisse : −30 €");
     expect(html).not.toMatch(/NaN/);
   });
 });
@@ -153,5 +156,50 @@ describe("cascade en euros : tendance financière", () => {
     expect(neutral).not.toContain("var(--bad)");
     expect(neutral).not.toContain("var(--good)");
     expect(neutral).toContain('fill="var(--chart-1)"');
+  });
+});
+
+
+describe("unité de lecture monétaire", () => {
+  const flat = (html: string) => html.replace(/[\u202f\u00a0]/g, " ");
+  it("arrondit les montants affichés en € ou k€, sans modifier le format exact ni les autres unités", () => {
+    expect(unitFormat("eur", "eur").fmt(123_450)).toBe("1\u202f235\u00a0€");
+    expect(unitFormat("eur", "keur").fmt(123_450)).toBe("1\u00a0k€");
+    expect(unitFormat("eur", "keur").signed(49_999)).toBe("0\u00a0k€");
+    expect(unitFormat("eur", "keur").signed(-49_999)).toBe("0\u00a0k€");
+    expect(unitFormat("eur").fmt(123_450)).toContain("1\u202f234,50");
+    expect(unitFormat("etp", "keur").fmt(61_000)).toBe("6,10");
+    expect(unitFormat("bps", "keur").fmt(350)).toBe("3,50\u00a0%");
+    expect(axisTexts([0, 20_000, 40_000, 60_000, 80_000, 100_000], unitFormat("eur", "keur").axis)).toEqual(["0\u00a0k€", "", "", "1\u00a0k€", "", ""]);
+    expect(chartUnitText("Coût employeur en euros", "eur", "keur")).toBe("Coût employeur en k€");
+  });
+  it("répercute le choix sur barres, courbes, anneaux et cascades, avec la même géométrie et les mêmes valeurs sources", () => {
+    const series = [{ key: "reel", name: "Réel", values: [123_450, null, 267_890], reasons: [null, "non lu", null] }];
+    const parts = [{ key: "a", name: "A", value: 123_450 }, { key: "b", name: "B", value: 267_890 }];
+    const steps = [{ label: "Petit ajout", value: 1 }, { label: "Petite baisse", value: -1 }];
+    const render = () => [
+      renderToStaticMarkup(h(BarChart, { testid: "b", label: "Barres en euros", unit: "eur", categories: ["janv.", "févr.", "mars"], series })),
+      renderToStaticMarkup(h(LineChart, { testid: "l", label: "Courbes en euros", unit: "eur", categories: ["janv.", "févr.", "mars"], series })),
+      renderToStaticMarkup(h(DonutChart, { testid: "d", label: "Parts en euros", unit: "eur", parts })),
+      renderToStaticMarkup(h(WaterfallChart, { testid: "w", label: "Pont en euros", unit: "eur", startLabel: "Départ", endLabel: "Arrivée", start: 123_450, end: 123_450, steps })),
+    ];
+    const geometry = (html: string) => [...html.matchAll(/<(?:rect|path|circle|line)\b[^>]*>/g)].map((m) => [...m[0].matchAll(/\b(?:d|x|y|x1|x2|y1|y2|cx|cy|r|width|height)="[^"]*"/g)].map((x) => x[0]));
+    try {
+      display.unit = "eur";
+      const euros = render();
+      display.unit = "keur";
+      const keuros = render();
+      for (let i = 0; i < euros.length; i++) {
+        expect(flat(euros[i])).toContain("1 235 €");
+        expect(flat(keuros[i])).toContain("1 k€");
+        expect(geometry(keuros[i])).toEqual(geometry(euros[i]));
+        expect(keuros[i]).not.toMatch(/NaN|undefined|[−+]0(?: |\u00a0)k€/);
+      }
+      expect(flat(keuros[3])).toContain("Petit ajout : 0 k€");
+      expect(flat(keuros[0])).toContain("févr. : Réel n.d.");
+      expect(series[0].values).toEqual([123_450, null, 267_890]);
+      expect(parts.map((part) => part.value)).toEqual([123_450, 267_890]);
+      expect(steps.map((step) => step.value)).toEqual([1, -1]);
+    } finally { display.unit = "eur"; }
   });
 });

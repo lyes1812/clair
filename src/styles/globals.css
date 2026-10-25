@@ -320,4 +320,10 @@ table.data-table { border-collapse: collapse; width: 100%; font-variant-numeric:
 @media (prefers-reduced-motion: reduce) {
   html[data-clair-theme="airy"] :is(.btn, .nav a, .ws-card, .tabs a, .mega-panel a, .nav-group .chevron, .kpi-tile, .ms-tile, .sy-tile, .collab-tile, .hr-tile, .hs-tiles > div, .pont-tiles > div, .dn-card) { transition: none; }
 }
+@media (max-width: 720px) {
+  .ws-topbar { height: auto; min-height: 56px; padding-block: 10px; flex-wrap: wrap; gap: 8px; }
+  .ws-topbar .workspace-display-tools { margin-left: auto; }
+  .ws-topbar .mega-panel { top: calc(100% + 4px); }
+}
+.money-display { font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media print { .table-density { display: none; } }

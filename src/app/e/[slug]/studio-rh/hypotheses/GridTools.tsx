@@ -72,7 +72,13 @@ function exportCsv(scope: HTMLElement, filename: string) {
           const sel = c.querySelector<HTMLSelectElement>("select");
           if (sel) return q(sel.selectedOptions[0]?.text ?? sel.value);
           const input = c.querySelector<HTMLInputElement>("input:not([type=hidden])");
-          return q(safe(input ? input.value : (c.textContent ?? "").replace("Reporter →", "").trim()));
+          if (input) return q(safe(input.value));
+          // Le choix € / k€ arrondit la lecture, jamais le CSV : on restitue les centimes exacts.
+          const exact = c.cloneNode(true) as Element;
+          exact.querySelectorAll<HTMLElement>("[data-money-exact]").forEach((money) => {
+            money.replaceWith(document.createTextNode(money.dataset.moneyExact ?? ""));
+          });
+          return q(safe((exact.textContent ?? "").replace("Reporter →", "").trim()));
         })
         .join(";"),
     );

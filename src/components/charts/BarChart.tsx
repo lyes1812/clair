@@ -1,8 +1,9 @@
 "use client";
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { barDomain, barLayout, niceTicks } from "./scale";
-import { colorOf, Frame, labelWidth, Legend, NdPattern, onColor, TipBox, useRoving, useWidth, type ChartSeries, type Tip } from "./shared";
-import { unitFormat, type UnitName } from "./units";
+import { colorOf, Frame, Legend, NdPattern, onColor, TipBox, useRoving, useWidth, type ChartSeries, type Tip } from "./shared";
+import { axisLabelWidth, axisTexts, chartUnitText, unitFormat, type UnitName } from "./units";
+import { useMoneyUnit } from "@/components/CurrencyPreference";
 
 export type BarChartProps = {
   testid: string;
@@ -23,14 +24,16 @@ const H_DEFAULT = 260;
 // Barres groupées ou empilées, une catégorie par mois (ou par groupe). Une catégorie sans aucune valeur (n.d.) est une
 // colonne hachurée avec sa raison ; une valeur absente d'une série n'est jamais dessinée comme zéro.
 export function BarChart(p: BarChartProps) {
+  const moneyUnit = useMoneyUnit();
   const uid = useId().replace(/:/g, "");
   const [ref, width] = useWidth();
   const [mode, setMode] = useState<"grouped" | "stacked">(p.mode ?? "grouped");
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [tip, setTip] = useState<Tip | null>(null);
+  useEffect(() => { setTip(null); }, [moneyUnit]);
   const [focus, setFocus] = useState<number | null>(null);
   const rov = useRoving(p.categories.length);
-  const u = unitFormat(p.unit);
+  const u = unitFormat(p.unit, moneyUnit);
   const axisFmt = u.axis;
   const labelFmt = u.label;
   const visible = useMemo(() => p.series.map((s, i) => ({ s, i })).filter(({ s }) => !hidden.has(s.key)), [p.series, hidden]);
@@ -39,7 +42,8 @@ export function BarChart(p: BarChartProps) {
   const dom = barDomain(values, nCat, mode);
   const t = niceTicks(dom.lo, Math.max(dom.hi, dom.lo + u.minSpan), 5, u.integer);
   const H = p.height ?? H_DEFAULT;
-  const left = labelWidth(t.ticks.map(axisFmt));
+  const left = axisLabelWidth(p.unit, t.ticks);
+  const tickTexts = p.unit === "eur" ? axisTexts(t.ticks, axisFmt) : t.ticks.map(axisFmt);
   const right = 8;
   const top = 18;
   const rotate = (width - left - right) / Math.max(1, nCat) < 40;
@@ -66,7 +70,7 @@ export function BarChart(p: BarChartProps) {
   return (
     <Frame
       testid={p.testid}
-      title={p.title}
+      title={p.title ? chartUnitText(p.title, p.unit, moneyUnit) : undefined}
       tools={p.toggle && p.series.length > 1 ? (
         <div className="seg" role="group" aria-label="Mode d'affichage">
           <button type="button" className="btn small" aria-pressed={mode === "stacked"} onClick={() => setMode("stacked")}>Empiler</button>
@@ -77,13 +81,13 @@ export function BarChart(p: BarChartProps) {
       note={p.note}
     >
       <div ref={ref} className="chart-plot" onMouseLeave={() => setTip(null)}>
-        <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={p.label}>
+        <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
           <defs><NdPattern id={`nd-${uid}`} /></defs>
           <g transform={`translate(${left},${top})`}>
-            {t.ticks.map((v) => (
+            {t.ticks.map((v, index) => (
               <g key={v}>
                 <line x1={0} x2={plotW} y1={lay.y(v)} y2={lay.y(v)} className={v === 0 ? "axis" : "grid"} />
-                <text x={-8} y={lay.y(v)} textAnchor="end" dominantBaseline="middle" className="tick">{axisFmt(v)}</text>
+                <text x={-8} y={lay.y(v)} textAnchor="end" dominantBaseline="middle" className="tick">{tickTexts[index]}</text>
               </g>
             ))}
             {Array.from({ length: nCat }, (_, c) => {

@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import { arcPath, sliceAngles } from "./scale";
-import { unitFormat, type UnitName } from "./units";
+import { chartUnitText, unitFormat, type UnitName } from "./units";
+import { useMoneyUnit } from "@/components/CurrencyPreference";
 import { colorOf, Frame, TipBox, useRoving, useWidth, type Tip } from "./shared";
 
 export type Part = { key: string; name: string; value: number | null; reason?: string | null; color?: string };
@@ -20,9 +21,11 @@ export type DonutProps = {
 // Répartition en anneau : les parts n.d. ne sont pas dans l'anneau (leur poids est inconnu) mais restent listées avec leur
 // raison. Au-delà de `maxParts` (8), un anneau ne se lit plus : barres horizontales classées.
 export function DonutChart(p: DonutProps) {
-  const u = unitFormat(p.unit);
+  const moneyUnit = useMoneyUnit();
+  const u = unitFormat(p.unit, moneyUnit);
   const [ref, width] = useWidth(360);
   const [tip, setTip] = useState<Tip | null>(null);
+  useEffect(() => { setTip(null); }, [moneyUnit]);
   const [on, setOn] = useState<number | null>(null);
   const maxParts = p.maxParts ?? 8;
   const positive = p.parts.filter((x): x is Part & { value: number } => x.value !== null && x.value > 0);
@@ -35,25 +38,24 @@ export function DonutChart(p: DonutProps) {
   const size = Math.min(220, Math.max(140, width * 0.5));
   const r = size / 2 - 4;
   const slices = sliceAngles(known.map((x) => x.value));
-  // Total au centre : exact s'il tient dans le trou (rayon intérieur = 0,6 × rayon), sinon version compacte.
+  // Total arrondi dans l'unité sélectionnée, avec une police adaptée au trou de l'anneau.
   const hole = r * 0.6 * 2 - 10;
   const exact = u.fmt(total);
-  const centerText = exact.length * 8.6 <= hole ? exact : exact.length * 7.2 <= hole ? exact : u.label(total);
-  const centerFont = exact.length * 8.6 <= hole ? 15 : exact.length * 7.2 <= hole ? 12.5 : 13;
+  const centerFont = Math.min(15, Math.max(9, hole / Math.max(1, exact.length * 0.58)));
   const pct = (v: number) => fmtPercent({ num: v, den: total });
   const tipOf = (i: number): Tip => ({ x: size / 2, y: 8, title: known[i].name, rows: [{ color: colorOf(i, known[i].color), name: "Valeur", value: u.fmt(known[i].value), strong: true }, { name: "Part", value: pct(known[i].value) }] });
   return (
-    <Frame testid={p.testid} title={p.title} note={p.note}>
+    <Frame testid={p.testid} title={p.title ? chartUnitText(p.title, p.unit, moneyUnit) : undefined} note={p.note}>
       <div ref={ref} className="chart-plot donut-wrap" onMouseLeave={() => { setTip(null); setOn(null); }}>
         {total > 0 && !many && (
           <div className="donut-svg" style={{ width: size, height: size }}>
-            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="group" aria-label={p.label}>
+            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
               {slices.map((s, k) => (
                 <path key={known[s.index].key} d={arcPath(size / 2, size / 2, r, r * 0.6, s.start, s.end)} fill={colorOf(s.index, known[s.index].color)} stroke="#fff" strokeWidth={known.length > 1 ? 2 : 0} fillRule="evenodd" opacity={on !== null && on !== s.index ? 0.5 : 1} tabIndex={rov.tab(k)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${known[s.index].name} : ${u.fmt(known[s.index].value)}, ${pct(known[s.index].value)}`}
                   onMouseEnter={() => { setOn(s.index); setTip(tipOf(s.index)); }} onFocus={() => { setOn(s.index); setTip(tipOf(s.index)); }} onBlur={() => { setOn(null); setTip(null); }} data-slice={k} />
               ))}
-              <text x={size / 2} y={size / 2 - 2} textAnchor="middle" className="donut-total">{u.fmt(total)}</text>
-              {p.centerLabel && <text x={size / 2} y={size / 2 + 14} textAnchor="middle" className="tick">{p.centerLabel}</text>}
+              <text x={size / 2} y={size / 2 - 2} textAnchor="middle" className="donut-total" style={{ fontSize: centerFont }}>{exact}</text>
+              {p.centerLabel && <text x={size / 2} y={size / 2 + 14} textAnchor="middle" className="tick">{chartUnitText(p.centerLabel, p.unit, moneyUnit)}</text>}
             </svg>
             <TipBox tip={tip} width={size} />
           </div>

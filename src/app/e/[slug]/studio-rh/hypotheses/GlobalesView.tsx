@@ -1,4 +1,6 @@
+import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { GlossaryLink } from "@/components/GlossaryLink";
+import { formatEuros } from "@/lib/money";
 import { monthRange } from "@/lib/connectors/months";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { scopeKeyOf } from "@/lib/budget/grids";
@@ -102,8 +104,8 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
                 </>
               ) : (
                 <>
-                  <td>{c!.label}</td><td>{UNIT_LABEL[c!.unit]}</td><td>{c!.source}</td>
-                  {months.map((m) => <td key={m} className="num" data-yi={constYears.index(m)}>{c!.values[m] === undefined ? "—" : decText(c!.values[m])}</td>)}
+                  <td>{c!.label}</td><td data-csv={UNIT_LABEL[c!.unit]}>{c!.unit === "eur" ? <>montant en <MoneyUnitLabel /></> : UNIT_LABEL[c!.unit]}</td><td>{c!.source}</td>
+                  {months.map((m) => <td key={m} className="num" data-yi={constYears.index(m)} data-csv={c!.values[m] === undefined ? "—" : decText(c!.values[m])}>{c!.values[m] === undefined ? "—" : c!.unit === "eur" ? formatEuros(c!.values[m]) : decText(c!.values[m])}</td>)}
                 </>
               )}
             </tr>
@@ -123,7 +125,7 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
   const ratesCaption = gridCaption("Taux en % du salaire", months);
   const constCaption = gridCaption("Valeurs mensuelles, sans effet sur le calcul", months);
   return (
-    <>
+    <MoneyText><>
       <section className="panel" data-testid="glob-rates">
         <CardTitle title="Taux d'augmentation par mois" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.globales} />} />
         {canEdit ? (
@@ -149,6 +151,6 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
           </ActionForm>
         ) : frame(constYears, `constantes-${scenario.firstMonth}.csv`, constCaption, constTable)}
       </section>
-    </>
+    </></MoneyText>
   );
 }

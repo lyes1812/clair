@@ -723,8 +723,11 @@ describe("écrans de la Masse salariale : composants sans narratif (lot 10)", ()
     expect(html).toContain('data-testid="ms-tile-evolution"');
     expect(html).toContain('href="/e/demo/glossaire#def-evolution"');
     expect(html).toContain('<dd class="trend-bad">+21,50 %</dd>');
-    expect(html).toContain("+37 390,00 €");
-    expect(html).toContain("N-1 : 173 870,00 €");
+    const visible = html.replace(/<[^>]*>/g, "").replace(/\s/g, " ");
+    expect(visible).toContain("+37 390 €");
+    expect(visible).toContain("N-1 : 173 870 €");
+    expect(html).toContain('data-money-cents="3739000"');
+    expect(html).toContain('data-money-cents="17387000"');
     expect(html).not.toMatch(/ms-tile-def|href="#def-|÷/);
   });
   it("tuile n.d. : la valeur n.d. n'est jamais colorée en tendance, même si une tendance est transmise", () => {
