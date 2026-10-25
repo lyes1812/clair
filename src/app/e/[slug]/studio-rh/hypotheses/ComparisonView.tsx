@@ -12,6 +12,7 @@ import { costTone, trendClass } from "@/lib/trend";
 import { affichageOf, bridgeWaterfall, comparisonSeries, frDates, gapSeries, hasNd, hasValues, layerSpans, monthAxis, ndReadings, showCharts, showTables, slugOf, withAffichage } from "@/lib/viz/hypotheses";
 import { monthShort } from "../masse-salariale/components";
 import { NdBlock, NdKey, PanelTitle, TileTitle, TrendLegend } from "./ProjectionView";
+import { ComparisonPicker } from "./ComparisonPicker";
 
 const LAYER: Record<Layer, string> = { reel: "réel", "projete-parent": "projeté (parent)", projete: "projeté", budget: "budget" };
 const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
@@ -73,16 +74,8 @@ export function ComparisonView({
             <label htmlFor="cmp-year">Année</label>
             <select className="select" id="cmp-year" name="annee" defaultValue={year}>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
           </div>
+          <ComparisonPicker key={JSON.stringify(selected)} options={options} selected={selected} />
         </div>
-        <fieldset className="checks">
-          <legend className="label">Comparer avec (3 lectures au plus)</legend>
-          {options.map((o) => (
-            <label key={o.value} className="check">
-              <input type="checkbox" name="cmp" value={o.value} defaultChecked={selected.includes(o.value)} data-testid={`cmp-opt-${o.value}`} />
-              <span>{o.label}</span>
-            </label>
-          ))}
-        </fieldset>
         <div className="actions"><button className="btn" type="submit">Comparer</button></div>
       </form>
 
