@@ -14,21 +14,13 @@ type Content = { lead: React.ReactNode; existing: PrevuLink[]; open: string[] };
 // données lues »), ce qui existe déjà et ce qui reste à préciser, en quelques mots (gabarit commun de Prevu).
 export default async function MsPrevuPage({ params }: { params: Promise<{ slug: string; vue: string }> }) {
   const { slug, vue } = await params;
-  const tab = MS_PREVU.find((t) => t.key === vue);
+  // Seules les entrées encore « Prévu » ont leur page ici (« Masse salariale croisée » a sa propre page, croisee/).
+  const tab = MS_PREVU.filter((t) => t.soon).find((t) => t.key === vue);
   if (!tab) notFound();
   await requireWorkspace(slug);
   const ms = `/e/${slug}/studio-rh/masse-salariale`;
   const hyp = `/e/${slug}/studio-rh/hypotheses`;
   const content: Record<string, Content> = {
-    croisee: {
-      lead: "Non réalisé : le rapport croisé en plusieurs chapitres n'existe pas encore dans Clair.",
-      existing: [
-        { href: ms, title: "Synthèse", text: "Masse salariale par mois, service et rubrique." },
-        { href: `${ms}?vue=fixe-variable`, title: "Fixe & variable", text: "Part fixe et variable, brut, primes." },
-        { href: `${ms}?vue=paie-compta`, title: "Paie & comptabilité", text: "Congés payés dus, rapprochement comptable." },
-      ],
-      open: ["Chapitres à croiser et filtres à définir."],
-    },
     organisation: {
       lead: "Non réalisé : la masse salariale par organisation (direction, établissement, société) n'existe pas encore dans Clair.",
       existing: [

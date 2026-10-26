@@ -31,7 +31,7 @@ export function MsTabs({ slug, current, extra = "" }: { slug: string; current: M
     { key: "synthese", label: "Synthèse", href: `${base}${extra}` },
     { key: "fixe-variable", label: "Fixe & variable", href: `${base}?vue=fixe-variable${extra.replace("?", "&")}` },
     { key: "paie-compta", label: "Paie & comptabilité", href: `${base}?vue=paie-compta${extra.replace("?", "&")}` },
-    ...MS_PREVU.map((t) => ({ key: t.key as MsTab, label: t.label, href: `${base}${t.path}`, soon: true })),
+    ...MS_PREVU.map((t) => ({ key: t.key as MsTab, label: t.label, href: `${base}${t.path}`, soon: t.soon })),
     { key: "ecart", label: "Écart budgétaire", href: `${base}/ecart` },
     { key: "analyse", label: "Analyse des écarts", href: `${base}/analyse` },
   ];

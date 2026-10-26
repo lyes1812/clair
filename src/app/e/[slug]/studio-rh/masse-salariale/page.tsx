@@ -234,7 +234,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         current={vue}
         tabs={[
           ...(Object.keys(VUES) as (keyof typeof VUES)[]).map((v) => ({ key: v, label: VUES[v], href: href({ v: v === "synthese" ? "" : `&vue=${v}` }) })),
-          ...MS_PREVU.map((t) => ({ key: t.key, label: t.label, href: `${base}${t.path}`, soon: true })),
+          ...MS_PREVU.map((t) => ({ key: t.key, label: t.label, href: `${base}${t.path}`, soon: t.soon })),
           { key: "ecart", label: "Écart budgétaire", href: `${base}/ecart` },
           { key: "analyse", label: "Analyse des écarts", href: `${base}/analyse` },
         ]}

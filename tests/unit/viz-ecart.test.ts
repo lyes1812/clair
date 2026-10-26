@@ -588,7 +588,7 @@ describe("pages « Prévu » de la masse salariale", () => {
   const src = readFileSync("src/app/e/[slug]/studio-rh/masse-salariale/[vue]/page.tsx", "utf8");
   it("chaque phrase d'état commence par « Non réalisé : » ou « Non disponible avec les données lues : »", () => {
     const leads = [...src.matchAll(/lead: "([^"]+)"/g)].map((m) => m[1]);
-    expect(leads).toHaveLength(4);
+    expect(leads).toHaveLength(3); // organisation, reel, suivi : « Masse salariale croisée » a sa propre page (croisee/)
     for (const l of leads) expect(l).toMatch(/^(Non réalisé|Non disponible avec les données lues) : /);
   });
   it("aucun terme interdit dans l'interface (outil observé, cahier, webinaire, capture, recette juridique, tutoiement, « rien n'est simulé »)", () => {
@@ -598,7 +598,7 @@ describe("pages « Prévu » de la masse salariale", () => {
     for (const l of [...src.matchAll(/lead: "([^"]+)"/g)].map((m) => m[1])) expect(l.length).toBeLessThanOrEqual(170);
     for (const t of [...src.matchAll(/ text: "([^"]+)"/g)].map((m) => m[1])) expect(t.length).toBeLessThanOrEqual(80);
     for (const o of [...src.matchAll(/open: \["([^"]+)"\]/g)].map((m) => m[1])) expect(o.length).toBeLessThanOrEqual(110);
-    expect([...src.matchAll(/open: \[/g)]).toHaveLength(4);
+    expect([...src.matchAll(/open: \[/g)]).toHaveLength(3);
   });
   it("le titre de la page écrit « Masse salariale par organisation » en toutes lettres (l'onglet garde « MS »)", () => {
     expect(src).toContain('"Masse salariale par organisation"');

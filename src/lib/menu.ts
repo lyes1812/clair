@@ -19,7 +19,7 @@ export function menuFamilies(slug: string): MenuFamily[] {
       { label: "Synthèse", href: root("studio-rh/masse-salariale") },
       { label: "Fixe & variable", href: `${root("studio-rh/masse-salariale")}?vue=fixe-variable` },
       { label: "Paie & comptabilité", href: `${root("studio-rh/masse-salariale")}?vue=paie-compta` },
-      ...MS_PREVU.map((t) => ({ label: t.label, href: `${root("studio-rh/masse-salariale")}${t.path}`, soon: true })),
+      ...MS_PREVU.map((t) => ({ label: t.label, href: `${root("studio-rh/masse-salariale")}${t.path}`, soon: t.soon })),
       { label: "Écart budgétaire", href: `${root("studio-rh/masse-salariale")}/ecart` },
       { label: "Analyse des écarts", href: `${root("studio-rh/masse-salariale")}/analyse` },
     ],

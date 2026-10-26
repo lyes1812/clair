@@ -73,7 +73,8 @@ export async function getCroiseeSettings(workspaceId: string): Promise<CroiseeSe
 }
 
 // Valeur utilisable, ou null (absente ou illisible : la raison est donnée par croiseeSettingReason).
-export const settingValue = <T>(s: CroiseeSetting<T>): T | null => (s.kind === "set" ? s.value : null);
+type SetValue<S> = S extends { kind: "set"; value: infer V } ? V : never;
+export const settingValue = <S extends CroiseeSetting<unknown>>(s: S): SetValue<S> | null => (s.kind === "set" ? (s as { value: SetValue<S> }).value : null);
 
 const NAMES: Record<CroiseeSettingKey, { absent: string; invalid: string }> = {
   confidentialite: { absent: "seuil de confidentialité non défini (Paramètres)", invalid: "seuil de confidentialité illisible : à ré-enregistrer (Paramètres)" },

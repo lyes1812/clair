@@ -114,8 +114,14 @@ export const variationTone = (tile: Pick<TileSpec, "cost">, v: TileVariation): T
 export function sparkValues(values: readonly (number | { nd: string } | null | undefined)[]): (number | null)[] {
   return values.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null));
 }
-// Une mini-courbe n'est tracée qu'avec deux valeurs connues au moins (un point isolé n'est pas une tendance).
-export const sparkDrawable = (values: readonly (number | null)[]): boolean => values.filter((v) => v !== null && Number.isFinite(v)).length >= 2;
+// Une mini-courbe n'est tracée qu'avec deux mois connus consécutifs au moins (des points isolés ne font pas une tendance), même règle
+// que Sparkline : sans cela, aucune image n'est annoncée.
+export function sparkDrawable(values: readonly (number | null)[]): boolean {
+  const ok = (v: number | null | undefined): v is number => typeof v === "number" && Number.isFinite(v);
+  const known = values.filter(ok);
+  if (known.length < 2 || !Number.isFinite(Math.max(...known) - Math.min(...known))) return false;
+  return values.some((v, i) => ok(v) && ok(values[i + 1]));
+}
 
 // --- Alertes « À surveiller » ----------------------------------------------------------------------------------------------------
 
