@@ -561,9 +561,10 @@ describe("ExportButtons : Excel en premier, CSV conservé, mêmes paramètres qu
     expect(html).toContain('data-testid="x-xlsx"');
     expect(html).toContain('data-testid="x-csv"');
     expect(html).toContain("Excel (.xlsx)");
-    expect(html).toContain(">CSV<");
-    expect(html).toContain('aria-label="Exporter le tableau"');
-    expect(html).toContain('class="btn"');
+    expect(html).toContain(">CSV (.csv)<");
+    // Menu « Exporter » (lot d'ergonomie du 25/10) : divulgation native, libellé visible sur le bouton.
+    expect(html).toContain('class="ui-dropdown export-menu"');
+    expect(html).toContain('<summary class="btn">Exporter le tableau');
   });
   it("sans paramètre : lien Excel avec le seul format, lien CSV sans point d'interrogation", () => {
     const html = renderToStaticMarkup(h(ExportButtons, { href: "/e/demo/export" }));
