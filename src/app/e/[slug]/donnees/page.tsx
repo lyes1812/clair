@@ -232,7 +232,6 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
       <section className="dn-domain" id="domaine-rh" aria-labelledby="dn-rh-title">
         <div className="dn-section-head">
           <h2 id="dn-rh-title" className="group-title">Ressources humaines</h2>
-          <p className="desc">Par l'API PayFit, ou par les DSN que PayFit génère.</p>
         </div>
         {sourceChoice("rh", rhSource, pendingOf({ label: "PayFit", row: byId.payfit.last }, { label: PROVIDER_LABELS.dsn, row: dsnLast }))}
         <div className="dn-cards">
@@ -244,7 +243,6 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
       <section className="dn-domain" id="domaine-comptabilite" aria-labelledby="dn-acc-title">
         <div className="dn-section-head">
           <h2 id="dn-acc-title" className="group-title">Comptabilité</h2>
-          <p className="desc">Par l'API Pennylane, ou par le FEC que Pennylane génère.</p>
         </div>
         {sourceChoice("accounting", accountingSource, pendingOf({ label: "Pennylane", row: byId.pennylane.last }, { label: PROVIDER_LABELS.fec, row: fecLast }))}
         <div className="dn-cards">
