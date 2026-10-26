@@ -295,7 +295,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       {vue === "synthese" && (
         <>
           <section className="panel">
-            <PanelHead title={`Vue d'ensemble — ${label(months)}`} />
+            <PanelHead title="Vue d'ensemble" />
             <dl className="facts ms-tiles five">
               <Tile
                 testid="ms-tile-masse"
