@@ -1,0 +1,300 @@
+import type { GlossaryEntry } from "./types";
+
+// Identifiants du glossaire vers lesquels renvoient les écrans de la Masse salariale croisée (un test vérifie que chacun existe).
+// Les notions déjà définies ailleurs (masse chargée, évolution, coût par ETP, provision, rapprochement, ETP, turnover,
+// absentéisme, pont, atterrissage…) ne sont pas recopiées : les écrans renvoient à leur entrée.
+export const CROISEE_TERMS = {
+  vueEnsemble: "croisee-vue-ensemble",
+  periodeFiltres: "croisee-periode-filtres",
+  alertes: "croisee-alertes",
+  ecartBudget: "croisee-ecart-budget",
+  atterrissage: "croisee-atterrissage",
+  seuilsEffectif: "croisee-seuils-effectif",
+  confidentialite: "croisee-confidentialite",
+  structureEffectif: "croisee-structure-effectif",
+  echeancesContrat: "croisee-echeances-contrat",
+  journalMouvements: "croisee-journal-mouvements",
+  congesPris: "croisee-conges-pris",
+  arrets: "croisee-arrets",
+  nonRecurrents: "croisee-non-recurrents",
+  calendrierPrimes: "croisee-calendrier-primes",
+  rigidite: "croisee-rigidite",
+  chargesPersonnel: "croisee-charges-personnel",
+  decaissements: "croisee-decaissements",
+  effetsMasseNiveauReport: "croisee-effets-masse-niveau-report",
+  tuilage: "croisee-tuilage",
+  personnesObservees: "croisee-personnes-observees",
+  impression: "croisee-impression",
+  export: "croisee-export",
+  commentaire: "croisee-commentaire",
+  // Entrées existantes, réutilisées telles quelles.
+  etpProratise: "etp-prorated",
+  etpContrat: "etp-contract",
+  etpFinMois: "etp-month-end",
+  etpMoyen: "etp-average",
+  periode: "closed-period",
+  nMoinsUn: "previous-period",
+  nd: "lecture-nd",
+  prevu: "lecture-prevu",
+  unites: "lecture-unites",
+  tendances: "lecture-tendances",
+  source: "lecture-source",
+} as const;
+
+const FAMILY = "Masse salariale" as const;
+const p = (...paragraphs: string[]) => paragraphs.join("\n\n");
+
+export const GLOSSARY_CROISEE: GlossaryEntry[] = [
+  {
+    id: "croisee-vue-ensemble",
+    term: "Masse salariale croisée : chapitres et périmètre",
+    family: FAMILY,
+    definition: p(
+      "La Masse salariale croisée lit la masse salariale avec les effectifs, les absences, la rémunération, les services, le budget et la comptabilité, en dix chapitres : Synthèse ; Effectifs et mouvements ; Absences et congés ; Fixe et variable ; Services ; Budget et prévisions ; Paie et comptabilité ; Effets d'évolution ; Restructuration ; Bibliothèque juridique.",
+      "Un seul chapitre est affiché à la fois. Le Sommaire et les onglets de chapitres mènent aux autres ; les liens « précédent » et « suivant » suivent l'ordre des chapitres. Le chapitre affiché est écrit dans l'adresse de la page (paramètre « chapitre ») : une adresse se partage ou se met en favori telle quelle. Un chapitre inconnu ouvre la Synthèse, avec un avis.",
+      "Les chiffres sont lus à la demande dans les sources retenues (Données), stockés dans Clair et jamais figés dans la page ; seules les données du chapitre affiché sont lues. Un chapitre ou un bloc marqué « Prévu » n'affiche aucun chiffre : il dit ce qui existe déjà ailleurs dans Clair.",
+      "Aucun nom de salarié n'apparaît dans la Masse salariale croisée : les listes (mouvements, échéances) sont anonymes. Le détail nominatif reste dans Collaborateurs, selon les droits de chaque membre.",
+    ),
+    see: ["croisee-periode-filtres", "lecture-prevu"],
+  },
+  {
+    id: "croisee-periode-filtres",
+    term: "Période, service et comparaison à N-1",
+    family: FAMILY,
+    definition: p(
+      "La période se choisit par l'année, le premier et le dernier mois. Les années proposées sont celles des mois clos disponibles, dans le référentiel RH ou dans le journal de paie. Par défaut : de janvier au dernier mois disponible de la dernière année. Les périodes rapides (janvier à mars, à juin, à septembre, année entière, et l'année à ce jour) sont dérivées du dernier mois disponible.",
+      "N-1 désigne les mêmes mois un an plus tôt : un trimestre est comparé au même trimestre de l'année précédente.",
+      "Le filtre de service restreint les chiffres tirés du journal de paie au code analytique retenu comme service dans les Paramètres ; « Non ventilé » regroupe les lignes sans code. Un bloc qui ne se lit pas au niveau d'un service (par exemple le budget saisi, qui est global) l'écrit, ou est n.d. avec sa raison.",
+      "Le budget retenu est, par défaut, le budget saisi de l'année de la période modifié le plus récemment ; le scénario retenu est le plus récent de ceux qui couvrent cette année. Un autre budget ou un autre scénario de l'année se choisit dans les filtres.",
+      "Tous les choix sont écrits dans l'adresse de la page ; « Réinitialiser » revient aux choix par défaut. Une valeur invalide est ignorée et signalée par un avis.",
+    ),
+    see: ["previous-period", "closed-period", "service"],
+  },
+  {
+    id: "croisee-alertes",
+    term: "Points à surveiller : règles de déclenchement",
+    family: FAMILY,
+    definition: p(
+      "Le bloc « À surveiller » liste des comparaisons faites sur des chiffres déjà calculés, classées en trois niveaux toujours écrits en toutes lettres.",
+      "« Défavorable » : le réalisé de la période dépasse le budget saisi des mêmes mois ; l'atterrissage annuel dépasse le total annuel du budget saisi.",
+      "« À compléter » : une donnée manque ou n'est pas calculable : budget saisi absent pour l'année, atterrissage non calculé, source absente, comptes non classés dans une rubrique de la grille.",
+      "« Repère » : une information à connaître : mois au-dessus du budget du mois, effectif moyen proche d'un seuil d'effectif suivi, mois de paie non clôturé dans la période, écart entre le journal de paie et la comptabilité ou la DSN.",
+      "Les comparaisons sont exactes, au centime, sans tolérance d'arrondi. Un mois sans montant de budget saisi est n.d. : il est exclu de la comparaison et le nombre de mois exclus est écrit. Sans seuil d'effectif défini dans les Paramètres, aucune alerte de seuil n'est émise.",
+      "Les niveaux se distinguent par leur libellé et par la forme de leur pastille (disque bleu, anneau bleu, carré gris), jamais par le rouge ou le vert, réservés aux tendances d'un coût. Sans point à surveiller, le bloc l'écrit.",
+    ),
+    see: ["croisee-ecart-budget", "croisee-seuils-effectif"],
+  },
+  {
+    id: "croisee-ecart-budget",
+    term: "Écart au budget saisi",
+    family: FAMILY,
+    formula: "écart = masse chargée réalisée − budget saisi, sur les mêmes mois ; écart (%) = écart ÷ budget saisi",
+    definition: p(
+      "Différence entre la masse salariale chargée réalisée, lue dans le journal de paie, et le budget saisi dans Hypothèses budgétaires, sur les mêmes mois de la période. Un écart positif est un dépassement du budget : pour un coût, c'est une tendance défavorable, en rouge ; un écart négatif est une économie, en vert.",
+      "Seuls les mois qui portent un montant de budget saisi sont comparés : un mois sans montant est n.d., exclu de la somme, et le nombre de mois exclus est écrit. Sans budget saisi pour l'année, l'écart est n.d.",
+      "Le budget saisi est global : il n'existe pas par service. Sous un filtre de service, l'écart au budget est n.d. avec cette raison.",
+    ),
+    see: ["budget-saisi", "lecture-tendances"],
+  },
+  {
+    id: "croisee-atterrissage",
+    term: "Atterrissage annuel (réel + projection)",
+    family: FAMILY,
+    definition: p(
+      "Coût de l'année entière : masse réelle des mois clos, puis masse projetée des mois restants par le scénario retenu dans les filtres (par défaut, le plus récent de ceux qui couvrent l'année). Le calcul est celui des Hypothèses budgétaires (voir « Atterrissage ») : chaque euro projeté remonte à une hypothèse du scénario.",
+      "Il est comparé au total annuel du budget saisi de la même année ; un mois sans montant de budget saisi est exclu de ce total et signalé.",
+      "Tant qu'un mois projeté est n.d., l'atterrissage est n.d. et le point à surveiller « Atterrissage non calculé » en donne la raison. Aucune règle de prolongation n'est appliquée dans la page (ni « au rythme du dernier mois », ni « au budget ») : une telle lecture se construit comme un scénario.",
+    ),
+    see: ["atterrissage", "budget-saisi", "projection"],
+  },
+  {
+    id: "croisee-seuils-effectif",
+    term: "Seuils d'effectif suivis (paramètre)",
+    family: FAMILY,
+    definition: p(
+      "Liste des seuils d'effectif que l'espace souhaite suivre (un libellé et un effectif en nombre de salariés) et marge d'alerte (un nombre de salariés), saisies par un administrateur dans les Paramètres.",
+      "Clair ne contient aucun seuil légal. Sans liste définie, aucun repère n'est tracé, aucune alerte n'est émise, et la mention « seuils d'effectif non définis » le dit.",
+      "Avec une liste, l'effectif moyen est comparé au prochain seuil supérieur ; quand l'écart ne dépasse pas la marge d'alerte, un repère « Effectif proche d'un seuil » apparaît dans « À surveiller ».",
+      "L'effectif moyen de Clair est calculé sur le référentiel lu ; le décompte officiel des effectifs reste celui de l'organisme social, selon ses propres règles.",
+    ),
+    see: ["headcount-average", "croisee-alertes"],
+  },
+  {
+    id: "croisee-confidentialite",
+    term: "Seuil de confidentialité (paramètre)",
+    family: FAMILY,
+    definition: p(
+      "Nombre minimal de personnes qu'un groupe doit compter pour que ses chiffres soient affichés (taux d'un motif d'absence, ligne d'un service, provision par service, statistiques d'arrêts), afin qu'aucune personne ne puisse être reconnue. Il est saisi par un administrateur dans les Paramètres : un nombre entier, au moins égal à 1.",
+      "Il n'a pas de valeur par défaut. Tant qu'il n'est pas défini, chaque bloc concerné est n.d. avec la raison « seuil de confidentialité non défini (Paramètres) » ; « aucun masquage » n'est pas une valeur possible.",
+      "Un groupe qui compte moins de personnes que le seuil est affiché n.d. avec cette raison ; le total de l'entreprise n'en est pas modifié.",
+    ),
+  },
+  {
+    id: "croisee-structure-effectif",
+    term: "Structure de l'effectif et limites des sources",
+    family: FAMILY,
+    definition: p(
+      "Répartition de l'effectif salarié de fin de mois selon les caractéristiques que les sources lues fournissent : nature de contrat (catégories des Paramètres), temps partiel ou temps plein, forfait jours, cadre dirigeant ou non ; comparée à la même fin de mois un an plus tôt.",
+      "Le temps partiel et le forfait jours sont ceux de la date de lecture de la source : ils ne sont pas historisés, et cette limite est écrite sous le tableau.",
+      "Le sexe, l'âge, l'ancienneté et le statut cadre (au-delà de « cadre dirigeant ») ne sont pas lus par Clair : ces lignes sont n.d. avec leur raison. Les lire supposerait de collecter de nouvelles données personnelles ; elles ne sont pas demandées aux sources.",
+    ),
+    see: ["natures", "quota-and-time"],
+  },
+  {
+    id: "croisee-echeances-contrat",
+    term: "Échéances de contrat",
+    family: FAMILY,
+    definition: p(
+      "Liste anonyme des fins de contrat et des entrées déjà signées à venir, dans l'horizon défini dans les Paramètres (un nombre de jours compté à partir de la date de la lecture appliquée de la source RH). Chaque ligne donne la date, le type d'échéance, le service et la nature de contrat, sans nom.",
+      "Sans horizon défini, la liste est n.d. avec la raison « horizon des échéances non défini (Paramètres) ». Les fins de période d'essai ne sont pas lues par Clair.",
+    ),
+    see: ["croisee-journal-mouvements"],
+  },
+  {
+    id: "croisee-journal-mouvements",
+    term: "Journal des mouvements, sans nom",
+    family: FAMILY,
+    definition: p(
+      "Liste datée des entrées et des sorties sur les douze mois qui se terminent avec la période : date, mouvement, service, nature de contrat et, quand la source le fournit, motif de sortie. Aucun nom ni identifiant de personne n'y figure ; le détail nominatif reste dans Collaborateurs › Mouvements.",
+      "Les entrées et les sorties sont celles du turnover : même population, mêmes natures de sortie non comptées et même neutralisation des contrats continus (Paramètres › Définitions des KPI).",
+      "Le motif de sortie vient de la DSN ; l'API PayFit ne l'expose pas : il est alors n.d., jamais déduit.",
+    ),
+    see: ["movements", "turnover"],
+  },
+  {
+    id: "croisee-conges-pris",
+    term: "Congés pris, posés et en attente",
+    family: FAMILY,
+    definition: p(
+      "Jours de congés pris sur la période et sur N-1, par type d'absence tel que la source le nomme (une ligne par type), comptés selon la base de jours des Définitions des KPI, demi-journées comprises. Seules les absences dont le statut est retenu dans les Définitions des KPI sont comptées. Clair ne regroupe aucun type par son nom.",
+      "Les congés posés à venir (approuvés, datés après le dernier mois clos) et les demandes en attente de validation sont lus avec leur statut dans la source ; un congé qui ne peut pas être rattaché à un mois lu est n.d.",
+      "Les soldes de congés en jours ne sont restitués ni par l'API PayFit ni par la DSN : ils sont n.d. Leur valeur en euros se lit dans la provision de congés payés (Paie et comptabilité).",
+    ),
+    see: ["absence-par-motif", "kpi-types-absence", "provision"],
+  },
+  {
+    id: "croisee-arrets",
+    term: "Arrêts de travail sur douze mois",
+    family: FAMILY,
+    definition: p(
+      "Nombre d'arrêts, nombre de salariés concernés, fréquence (arrêts par salarié concerné), durée moyenne et part des arrêts courts, sur les douze mois qui se terminent avec la période.",
+      "Ces statistiques reposent sur des règles qui ne sont pas codées dans Clair : regroupement de deux arrêts qui se suivent, durée en deçà de laquelle un arrêt est court, seuil de confidentialité. Tant que ces règles ne sont pas définies dans les Paramètres, le bloc est « Prévu » ou n.d. avec sa raison.",
+    ),
+    see: ["absenteeism", "croisee-confidentialite"],
+  },
+  {
+    id: "croisee-non-recurrents",
+    term: "Éléments non récurrents (indemnités de départ)",
+    family: FAMILY,
+    definition: p(
+      "Indemnités versées lors des départs, comme les indemnités de rupture conventionnelle et les indemnités compensatrices de congés payés. Comprises dans le brut et dans la masse chargée, elles pèsent sur l'évolution d'une année à l'autre sans traduire un changement durable de la masse.",
+      "Le journal de paie PayFit ne les distingue pas des autres lignes de brut, et la lecture des DSN par Clair ne retient pas encore les éléments de revenu qui les portent : elles sont « Prévu » dans la Masse salariale croisée. Elles ne sont ni estimées ni reconstituées.",
+      "Dans un scénario, un non récurrent réalisé peut être saisi pour calculer l'atterrissage retraité (Hypothèses budgétaires).",
+    ),
+    see: ["retraite", "brut"],
+  },
+  {
+    id: "croisee-calendrier-primes",
+    term: "Calendrier de versement des primes (paramètre)",
+    family: FAMILY,
+    definition: p(
+      "Mois de versement attendus pour chaque famille de primes. Il permettrait de dire si un versement est conforme au calendrier ou hors calendrier.",
+      "Ce calendrier n'est ni déduit des libellés de paie ni codé dans Clair : c'est un paramètre de l'espace, prévu dans une prochaine version ; d'ici là, le bloc est « Prévu ». Les familles de primes sont celles des libellés du journal de paie (Fixe & variable).",
+    ),
+    see: ["primes"],
+  },
+  {
+    id: "croisee-rigidite",
+    term: "Part fixe de la rémunération",
+    family: FAMILY,
+    formula: "part des salaires = salaires et appointements ÷ brut",
+    definition: p(
+      "Part des salaires dans le brut : rubrique « Salaires et appointements » de la grille de comptes divisée par le brut de la période, en pourcentage, comparée à N-1 ; l'écart s'exprime en points.",
+      "Ce n'est pas une mesure de rigidité au sens « fixe contractuel et avantages obligatoires » : Clair ne dispose pas de la classification qui la permettrait, et ne la calcule pas.",
+    ),
+    see: ["fixe-variable", "grille"],
+  },
+  {
+    id: "croisee-charges-personnel",
+    term: "De la masse chargée aux charges de personnel",
+    family: FAMILY,
+    formula: "charges de personnel du journal = masse chargée + provisions de congés payés + autres charges de personnel",
+    definition: p(
+      "Passage de la masse salariale chargée (brut et cotisations patronales) aux charges de personnel du journal de paie : on y ajoute les rubriques que la grille de comptes de l'espace compte hors masse (provisions de congés payés, autres charges de personnel).",
+      "Chaque ligne du passage reprend une rubrique de la grille, sans reclassement ; la somme des lignes est égale au total du journal sur la période. Une rubrique n.d. rend le total n.d.",
+    ),
+    see: ["masse", "hors-masse", "grille"],
+  },
+  {
+    id: "croisee-decaissements",
+    term: "Décaissements au titre de la paie",
+    family: FAMILY,
+    definition: p(
+      "Montants à payer chaque mois au titre de la paie, par créancier : salariés, organismes sociaux, retraite complémentaire, impôt prélevé à la source, mutuelle et prévoyance, autres.",
+      "Ils se lisent dans les comptes de tiers du journal de paie ; leur classement par créancier est un paramètre de l'espace, prévu dans une prochaine version : d'ici là, le bloc est « Prévu ». Une estimation des décaissements à venir serait une hypothèse saisie et tracée, jamais une moyenne calculée sans qu'on le sache.",
+    ),
+  },
+  {
+    id: "croisee-effets-masse-niveau-report",
+    term: "Effet masse, effet niveau, effet report",
+    family: FAMILY,
+    formula: "effet masse = masse annuelle N ÷ masse annuelle N-1 − 1 ; effet niveau = salaire de décembre N ÷ salaire de décembre N-1 − 1 ; effet report sur N+1 = 12 × salaire de décembre N ÷ masse annuelle N − 1",
+    definition: p(
+      "Trois lectures des augmentations de salaire, à effectif constant.",
+      "L'effet masse mesure la hausse de la masse de l'année par rapport à celle de l'année précédente. L'effet niveau mesure la hausse du salaire mensuel entre la fin de l'année précédente et la fin de l'année. L'effet report mesure la part de la hausse de l'année suivante déjà acquise par les augmentations de l'année : une augmentation accordée en cours d'année ne pèse que sur les mois qui la suivent, le reste se reporte sur l'année suivante.",
+      "Dans cette version, ce bloc est « Prévu » : il pourra être dérivé de la grille mensuelle des taux d'augmentation d'un scénario (Hypothèses globales).",
+    ),
+    see: ["augmentation", "pont-volume-cout"],
+  },
+  {
+    id: "croisee-tuilage",
+    term: "Tuilage (recouvrement entre une sortie et une entrée)",
+    family: FAMILY,
+    definition: p(
+      "Période pendant laquelle un salarié qui part et la personne qui le remplace sont présents en même temps, pour la passation : la masse salariale porte alors deux salaires pour un même poste.",
+      "Dans un scénario, un tuilage à venir se saisit avec une embauche liée au départ qu'elle remplace (Hypothèses budgétaires). La lecture des tuilages passés demanderait de désigner les binômes concernés : elle est « Prévu ».",
+    ),
+    see: ["entrant"],
+  },
+  {
+    id: "croisee-personnes-observees",
+    term: "Personnes observées seulement en N-1, seulement en N, dans les deux",
+    family: FAMILY,
+    formula: "contribution d'un groupe = coût N − coût N-1 ; somme des contributions = écart de masse",
+    definition: p(
+      "Partition des personnes payées sur la période et sur N-1 en trois groupes : observées seulement en N-1, seulement en N, et dans les deux périodes. Pour chaque groupe : nombre de personnes, coût N-1, coût N et contribution à l'écart.",
+      "La somme des contributions des trois groupes est égale à l'écart de masse de la période. Seuls des nombres et des montants sont affichés, jamais l'identité des personnes.",
+    ),
+    see: ["evolution", "zoom"],
+  },
+  {
+    id: "croisee-impression",
+    term: "Impression et PDF de la synthèse",
+    family: FAMILY,
+    definition: p(
+      "« Imprimer / Enregistrer en PDF » imprime le chapitre affiché au format A4 paysage, avec en tête le nom de l'espace, le chapitre, la période et le service. Les menus, les onglets, les filtres, les boutons et les blocs repliés ne sont pas imprimés ; un long tableau peut se couper entre deux lignes. Pour obtenir un PDF, choisir « Enregistrer au format PDF » dans la fenêtre d'impression du navigateur.",
+      "« Synthèse en PDF · 1 page », sur le chapitre Synthèse, n'imprime que les cartes, le graphique principal et les points à surveiller, sur une page.",
+      "Les couleurs de tendance s'impriment ; le signe de chaque écart reste écrit.",
+    ),
+    see: ["croisee-export"],
+  },
+  {
+    id: "croisee-export",
+    term: "Exports Excel, CSV et leurs feuilles",
+    family: FAMILY,
+    definition: p(
+      "Quand un chapitre propose le menu « Exporter », ses tableaux chiffrés s'exportent en Excel (.xlsx), proposé en premier, et en CSV. Le classeur reprend les lignes de l'écran, à l'euro près, et trois feuilles fixes : « Filtres » (période, service, budget, scénario), « Sources » (source et date de la lecture) et « Définitions » (les entrées du glossaire citées par le chapitre).",
+      "Une valeur n.d. est écrite « n.d. » avec sa raison, jamais zéro ; une cellule vide est sans objet. Les montants sont de vrais nombres, sans formule. Un texte qui pourrait être pris pour une formule par un tableur (il commence par =, +, -, @, une tabulation ou un retour à la ligne) est précédé d'une apostrophe.",
+    ),
+    see: ["croisee-impression", "lecture-nd"],
+  },
+  {
+    id: "croisee-commentaire",
+    term: "Commentaire du mois",
+    family: FAMILY,
+    definition: p(
+      "Texte libre et court, un par mois de fin de période, écrit par un éditeur ou un administrateur et lu par tous les membres de l'espace ; il est repris à l'impression de la synthèse.",
+      "Il est enregistré dans Clair, pour l'espace, jamais dans le navigateur. Prévu dans une prochaine version.",
+    ),
+  },
+];
