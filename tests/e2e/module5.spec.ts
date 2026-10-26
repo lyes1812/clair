@@ -66,6 +66,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await expect(page.getByTestId("glob-rates-form").getByRole("status")).toContainText("1 ligne écrite", slow);
 
   await tab("Modifications de postes").click();
+  await page.waitForLoadState("networkidle"); // onglet chargé avant la recherche (environnement déployé)
   await page.getByTestId("sal-search").getByLabel("Rechercher (nom, service)").fill("a-008");
   await page.getByTestId("sal-search").getByRole("button", { name: "Rechercher" }).click();
   await page.getByTestId("sal-table").getByRole("link").first().click();
@@ -107,6 +108,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
 
   // Une hypothèse incohérente est refusée avec sa raison (deux départs pour le même contrat) et rien n'est enregistré.
   await tab("Modifications de postes").click();
+  await page.waitForLoadState("networkidle"); // onglet chargé avant la recherche (environnement déployé)
   await page.getByTestId("sal-search").getByLabel("Rechercher (nom, service)").fill("a-008");
   await page.getByTestId("sal-search").getByRole("button", { name: "Rechercher" }).click();
   await page.getByTestId("sal-table").getByRole("link").first().click();
@@ -156,6 +158,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   // Salariés : on cherche un salarié, on lui crée un congé non payé (26 octobre → 25 novembre, 0 %) sur la copie (brouillon).
   await page.getByTestId("hyp-scenarios").getByRole("link", { name: "Variante sans prime" }).click();
   await tab("Modifications de postes").click();
+  await page.waitForLoadState("networkidle"); // onglet chargé avant la recherche (environnement déployé)
   await page.getByTestId("sal-search").getByLabel("Rechercher (nom, service)").fill("a-001");
   await page.getByTestId("sal-search").getByRole("button", { name: "Rechercher" }).click();
   await expect(page.getByTestId("sal-table").locator("tbody tr")).toHaveCount(1);
@@ -267,6 +270,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await expect(page.getByTestId("hyp-base-contracts").locator("tbody tr").first()).toContainText("corrigée");
   // Modifications de postes : changement de quotité à 50 % en décembre pour un salarié.
   await tab("Modifications de postes").click();
+  await page.waitForLoadState("networkidle"); // onglet chargé avant la recherche (environnement déployé)
   await page.getByTestId("sal-search").getByLabel("Rechercher (nom, service)").fill("a-002");
   await page.getByTestId("sal-search").getByRole("button", { name: "Rechercher" }).click();
   await page.getByTestId("sal-table").getByRole("link").first().click();
