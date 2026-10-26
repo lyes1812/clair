@@ -177,7 +177,7 @@ export const donutNote = (omitted: string[]): string | undefined => (omitted.len
 // Taux tous à zéro (tracés) : l'écran le dit en une phrase, sinon la courbe plate ou l'absence de barre se lirait comme une donnée manquante.
 export const zeroRateNote = (list: ChartSeries[]): string | undefined => (allZero(list) ? "Tous les taux tracés valent 0,00 %." : undefined);
 
-// Libellé français d'un type d'absence PayFit déjà nommé par l'application (défaut validé des définitions des KPI : « maladie
+// Libellé français d'un motif d'absence PayFit déjà nommé par l'application (défaut validé des définitions des KPI : « maladie
 // ordinaire »). Un autre code n'a pas de libellé connu : null, et l'écran le montre tel que reçu, sans le deviner.
 const ABSENCE_TYPE_LABELS: Record<string, string> = { fr_maladie_ordinaire: "Maladie ordinaire" };
 export const absenceTypeLabel = (code: string): string | null => ABSENCE_TYPE_LABELS[code] ?? null;

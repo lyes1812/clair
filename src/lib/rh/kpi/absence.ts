@@ -75,7 +75,7 @@ function absenceGuard(input: KpiInput): KpiNd | null {
   const a = input.absences;
   if (a.status === "not-extracted") return kpiNd("not-extracted", a.nd.reason);
   if (a.status === "unavailable") return kpiNd("absences-unavailable", `absences non lues : ${a.nd.reason}`);
-  if (!input.params.absenceTypes.length) return kpiNd("absence-types-unset", "types d'absence non choisis (Paramètres › Définitions des KPI)");
+  if (!input.params.absenceTypes.length) return kpiNd("absence-types-unset", "motifs d'absence non choisis (Paramètres › Définitions des KPI)");
   return null;
 }
 
@@ -175,7 +175,7 @@ export function absenteeismMonth(input: KpiInput, month: string): AbsenteeismMon
       const touches = sd === null && ed === null ? true : sd === null ? month <= monthOf(ed!) : ed === null ? month >= monthOf(sd) : sd <= me && ed >= ms;
       if (!touches) continue;
       if (!params.absenceTypes.includes(a.type)) {
-        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "type", label: `type ${a.type} non choisi`, uncertain: 0 });
+        excluded.push({ absenceId: a.id, contractId: a.contractId, type: a.type, status: a.status, why: "type", label: `motif ${a.type} non retenu`, uncertain: 0 });
         continue;
       }
       if (a.status !== null && !(params.absenceStatuses as string[]).includes(a.status)) {

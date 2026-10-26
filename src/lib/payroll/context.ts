@@ -12,8 +12,8 @@ import { fecCoverage, pennylaneCoverage, withEntries, type ComptaLine } from "./
 import type { FecSyncSummary } from "@/lib/fec/import";
 import { resolveSource } from "@/lib/sources";
 import { sourceSync } from "@/db/schema";
-import { classify, gridRubrics } from "./grid";
-import { axisOf, NO_TYPE, serviceOf, type Analytic, type EtpMonth, type JournalInput, type LedgerLine } from "./engine";
+import { buildContractServiceMap } from "./service-map";
+import { axisOf, NO_TYPE, type Analytic, type EtpMonth, type JournalInput, type LedgerLine } from "./engine";
 
 // Contexte de l'écran Masse salariale : journal de paie de la lecture PayFit appliquée, grille de comptes de l'espace,
 // ETP fin de mois du module KPI RH (même référentiel que Collaborateurs et KPI RH).
@@ -95,21 +95,8 @@ export async function loadPayrollContext(slug: string): Promise<PayrollContext> 
   const service = await getServiceAxis(ws, axes);
   if (service.axis) {
     axisForEtp = service.axis;
-    // Service d'un contrat pour un mois : celui de ses lignes de brut, à défaut de ses autres lignes de charges de
-    // personnel ; les contreparties (42/43…) ne comptent pas. Sans ligne : non ventilé.
-    contractService = new Map();
-    const rank = new Map<string, number>();
-    const rubrics = gridRubrics(grid.grid);
-    for (const l of lines) {
-      if (!l.contractId) continue;
-      const c = classify(l.accountId, rubrics);
-      const r = c.rubric?.role === "brut" ? 2 : c.rubric || c.payroll ? 1 : 0;
-      const k = `${l.month}|${l.contractId}`;
-      if (r > (rank.get(k) ?? 0)) {
-        rank.set(k, r);
-        contractService.set(k, serviceOf(l, service.axis));
-      }
-    }
+    // Service d'un contrat pour un mois (règle partagée avec le script d'administration : service-map.ts).
+    contractService = buildContractServiceMap(lines, grid.grid, service.axis);
   }
   const openMonths = await loadPayrollOpenMonths(ws, sync.id);
   return { kpi, source, grid, read, unavailable: null, input: { lines, months, openMonths, grid: grid.grid, serviceAxis: service.axis }, etp, axes, service, dsn, ...extra, axisMissing: Boolean(service.axis && !axes.includes(service.axis)) };

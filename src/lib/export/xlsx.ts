@@ -1,18 +1,22 @@
 import ExcelJS from "exceljs";
 import { isIsoDate } from "@/lib/dates";
 import { glossaryEntry } from "@/lib/glossary";
+import { safeText } from "./safe-text";
 
 // Export Excel générique : un classeur .xlsx construit à partir d'une description pure (aucun accès base, aucune horloge : la date
 // de génération vient de l'appelant). Code SERVEUR seulement : exceljs ne doit jamais être importé par un composant client.
 //
 // Une cellule est un nombre ENTIER d'unité de base (centimes pour « eur », dix-millièmes pour « etp », points de base pour
-// « pourcent »), une chaîne, ou { nd: raison }. Les montants sont écrits en vrais nombres (jamais en texte) pour que Excel les
+// « pourcent »), une valeur exacte { exact } (fraction num ÷ den en nombre double, dans l'unité affichée : ETP, fraction d'un
+// pourcentage), une chaîne, ou { nd: raison }. Les montants sont écrits en vrais nombres (jamais en texte) pour que Excel les
 // additionne ; une valeur n.d. est le texte « n.d. » avec sa raison en commentaire de cellule (et dans la colonne « Observations »
-// de la feuille quand elle en a une) : jamais un zéro. Aucune formule, aucune macro.
+// de la feuille quand elle en a une) : jamais un zéro. Aucune formule, aucune macro. Les cellules texte passent par safeText.
 
 export type ColumnKind = "text" | "eur" | "etp" | "nombre" | "pourcent" | "date";
 export type NdCell = { nd: string };
-export type ExportCell = number | string | NdCell;
+// Valeur exacte, jamais arrondie par Clair : le format d'affichage de la cellule fait l'unique arrondi (comme à l'écran).
+export type ExactCell = { exact: number };
+export type ExportCell = number | string | NdCell | ExactCell;
 export type ColumnSpec = { header: string; key: string; kind: ColumnKind; width?: number };
 export type SheetSpec = {
   name: string;
@@ -36,7 +40,7 @@ export type WorkbookSpec = {
   definitions: DefinitionSpec[];
 };
 
-// Formats numériques : montants « #,##0.00 » + suffixe €, ETP affichés au centième (valeur stockée exacte au dix-millième),
+// Formats numériques : montants « #,##0.00 » + suffixe €, ETP affichés au centième (la cellule garde la valeur exacte),
 // pourcentages au centième de point.
 export const NUM_FMT = { eur: '#,##0.00 "€"', etp: "#,##0.00", nombre: "#,##0", pourcent: "0.00%", date: "dd/mm/yyyy", datetime: "dd/mm/yyyy hh:mm" } as const;
 const SCALE = { eur: 100, etp: 10_000, nombre: 1, pourcent: 10_000 } as const;
@@ -44,6 +48,8 @@ const AMOUNT_KINDS = new Set<ColumnKind>(["eur", "etp", "nombre"]);
 
 export const SHEET_NAME_MAX = 31;
 export const FIXED_SHEETS = { filters: "Filtres", sources: "Sources", definitions: "Définitions" } as const;
+// Phrase ajoutée à la note de chaque feuille : une cellule vide n'est jamais une donnée absente (celle-ci est écrite « n.d. »).
+export const EMPTY_CELL_NOTE = "Cellule vide : sans objet.";
 // Au-delà de ce nombre de colonnes, la première reste figée au défilement horizontal.
 export const FREEZE_FIRST_FROM = 5;
 
@@ -67,20 +73,30 @@ export function roundedRatio(num: number, den: number, scale = 1): number {
   return r === 0 ? 0 : r;
 }
 
+// num ÷ den en nombre double, sans aucun arrondi de Clair (la division flottante est correctement arrondie au double le plus proche) :
+// la cellule garde la fraction exacte et son format d'affichage fait l'unique arrondi. Jamais −0.
+export function exactRatio(num: number, den: number): number {
+  if (!Number.isSafeInteger(num) || !Number.isSafeInteger(den) || den === 0) throw new RangeError("rapport non entier ou dénominateur nul");
+  const r = num / den;
+  return r === 0 ? 0 : r;
+}
+
 // Forme commune d'un agrégat ou d'un écart déjà calculé (valeur = num ÷ den ; n.d. avec raison ; sans objet).
 export type Rational = { kind: "value"; num: number; den: number } | { kind: "nd"; reason: string } | { kind: "na" };
-// Cellule d'une valeur rationnelle : eur → centimes (num ÷ den), etp → dix-millièmes d'ETP, nombre → entier. n.d. reste n.d., sans objet
+// Cellule d'une valeur rationnelle : eur → centimes (num ÷ den, la valeur est déjà au centime), etp → fraction exacte num ÷ den en ETP
+// (aucun arrondi au dix-millième : le format à deux décimales arrondit une seule fois), nombre → entier. n.d. reste n.d., sans objet
 // donne une cellule vide.
 export function rationalCell(r: Rational, unit: "eur" | "etp" | "nombre"): ExportCell {
   if (r.kind === "nd") return { nd: r.reason };
   if (r.kind === "na") return "";
-  return roundedRatio(r.num, r.den, unit === "etp" ? SCALE.etp : 1);
+  return unit === "etp" ? { exact: exactRatio(r.num, r.den) } : roundedRatio(r.num, r.den, 1);
 }
-// Cellule d'un écart en pourcentage : points de base. Écart n.d. → n.d. ; départ nul → n.d. (le pourcentage n'est pas défini).
+// Cellule d'un écart en pourcentage : fraction exacte num ÷ den (0,125 s'affiche 12,50 %), arrondie une seule fois par le format.
+// Écart n.d. → n.d. ; départ nul → n.d. (le pourcentage n'est pas défini).
 export function percentCell(d: { kind: "value"; pct: { num: number; den: number } | null } | { kind: "nd"; reason: string } | { kind: "na" }): ExportCell {
   if (d.kind === "nd") return { nd: d.reason };
   if (d.kind === "na") return "";
-  return d.pct ? roundedRatio(d.pct.num, d.pct.den, SCALE.pourcent) : { nd: "valeur de départ nulle" };
+  return d.pct ? { exact: exactRatio(d.pct.num, d.pct.den) } : { nd: "valeur de départ nulle" };
 }
 
 // --- Dates (Europe/Paris) ------------------------------------------------------------------------------------------------------
@@ -174,6 +190,7 @@ const BORDER: Partial<ExcelJS.Borders> = { bottom: { style: "hair", color: { arg
 const DEFAULT_WIDTH: Record<ColumnKind, number> = { text: 14, eur: 18, etp: 14, nombre: 14, pourcent: 14, date: 18 };
 
 const isNd = (v: unknown): v is NdCell => typeof v === "object" && v !== null && typeof (v as NdCell).nd === "string";
+const isExact = (v: unknown): v is ExactCell => typeof v === "object" && v !== null && typeof (v as ExactCell).exact === "number";
 const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 const isObservations = (c: ColumnSpec) => c.key === "observations" || fold(c.header) === "observations";
 
@@ -194,12 +211,20 @@ function writeCell(cell: ExcelJS.Cell, v: ExportCell | undefined, kind: ColumnKi
     cell.note = v.nd;
     return v.nd;
   }
+  if (isExact(v)) {
+    // Valeur exacte (ETP, fraction d'un pourcentage) : écrite telle quelle, sans arrondi ; le format de la colonne arrondit à l'affichage.
+    if (!Number.isFinite(v.exact)) throw new RangeError(`${where} : colonne « ${header} », une valeur exacte n'est pas un nombre fini`);
+    if (kind === "text" || kind === "date") throw new RangeError(`${where} : colonne « ${header} », une valeur exacte ne va pas dans une colonne texte ou date`);
+    cell.value = v.exact === 0 ? 0 : v.exact;
+    cell.numFmt = NUM_FMT[kind];
+    return null;
+  }
   if (typeof v === "string") {
     const date = kind === "date" ? dateValue(v) : null;
     if (date) {
       cell.value = date.value;
       cell.numFmt = date.fmt;
-    } else cell.value = v;
+    } else cell.value = safeText(v); // texte : jamais pris pour une formule
     return null;
   }
   if (!Number.isSafeInteger(v)) throw new RangeError(`${where} : colonne « ${header} », une valeur n'est pas un entier d'unité de base`);
@@ -207,7 +232,7 @@ function writeCell(cell: ExcelJS.Cell, v: ExportCell | undefined, kind: ColumnKi
     cell.value = String(v);
     return null;
   }
-  cell.value = v === 0 ? 0 : v / SCALE[kind]; // division exacte (arrondie une seule fois par le calcul flottant, à 2 ou 4 décimales)
+  cell.value = v === 0 ? 0 : v / SCALE[kind]; // entier d'unité de base : division exacte, aucun arrondi de Clair
   cell.numFmt = NUM_FMT[kind];
   return null;
 }
@@ -216,14 +241,14 @@ function writeTable(ws: ExcelJS.Worksheet, t: Table): void {
   const { columns, rows, where } = t;
   t.lines.forEach((l, i) => {
     const c = ws.getCell(i + 1, 1);
-    c.value = l.text;
+    c.value = safeText(l.text);
     c.font = FONT[l.style];
     c.alignment = { vertical: "middle" };
   });
   const headerRow = t.lines.length + 1;
   columns.forEach((col, i) => {
     const c = ws.getCell(headerRow, i + 1);
-    c.value = col.header;
+    c.value = safeText(col.header);
     c.font = FONT.head;
     c.fill = HEAD_FILL;
     c.alignment = { horizontal: col.kind === "text" ? "left" : "right", vertical: "middle", wrapText: true };
@@ -246,6 +271,7 @@ function writeTable(ws: ExcelJS.Worksheet, t: Table): void {
       const parts: string[] = [];
       if (typeof own === "string" && own !== "") parts.push(own);
       else if (typeof own === "number") parts.push(String(own));
+      else if (isExact(own)) parts.push(String(own.exact));
       else if (isNd(own)) note(own.nd, columns[obs].header);
       for (const [reason, heads] of reasons) parts.push(`${heads.join(", ")} : ${reason}`);
       writeCell(ws.getCell(rowNo, obs + 1), parts.join(" ; "), "text", `${where}, ligne ${r + 1}`, columns[obs].header);
@@ -289,15 +315,17 @@ export async function buildWorkbook(spec: WorkbookSpec): Promise<Buffer> {
   const taken = new Set<string>(["history", ...Object.values(FIXED_SHEETS).map((n) => n.toLowerCase())]);
   const meta: Line = { text: `${spec.workspaceName} · exporté le ${formatParis(spec.generatedAt)}`, style: "meta" };
   const filterLine = spec.filters.map((f) => `${f.label} : ${f.value}`).join(" · ");
+  // La note de chaque feuille dit qu'une cellule vide est sans objet ; une donnée absente est écrite « n.d. » avec sa raison.
+  const noteLine = (note?: string): Line => ({ text: note ? `${note} ${EMPTY_CELL_NOTE}` : EMPTY_CELL_NOTE, style: "note" });
   for (const sheet of spec.sheets) {
     const name = uniqueSheetName(sheet.name, taken);
     const lines: Line[] = [{ text: spec.sheets.length > 1 ? `${spec.title} — ${name}` : spec.title, style: "title" }, meta];
     if (filterLine) lines.push({ text: filterLine, style: "meta" });
-    if (sheet.note) lines.push({ text: sheet.note, style: "note" });
+    lines.push(noteLine(sheet.note));
     writeTable(wb.addWorksheet(name), { lines, columns: sheet.columns, rows: sheet.rows, rowKinds: sheet.rowKinds, where: `feuille « ${name} »` });
   }
 
-  const head = (title: string, note?: string): Line[] => [{ text: `${spec.title} — ${title}`, style: "title" }, meta, ...(note ? [{ text: note, style: "note" as const }] : [])];
+  const head = (title: string, note?: string): Line[] => [{ text: `${spec.title} — ${title}`, style: "title" }, meta, noteLine(note)];
   writeTable(wb.addWorksheet(FIXED_SHEETS.filters), {
     lines: head("paramètres de l'export", spec.filters.length === 0 ? "Aucun filtre appliqué." : undefined),
     columns: textCols(["Paramètre", "parametre", 34], ["Valeur", "valeur", 80]),

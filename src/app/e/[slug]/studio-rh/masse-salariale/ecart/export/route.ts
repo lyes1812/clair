@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { aggregate, diff, type Agg, type Diff } from "@/lib/budget/versions";
 import { HORS_SALARIE, zoomOf, ZOOM_RUBRICS, type ZoomRubric } from "@/lib/budget/zoom";
 import { xlsxResponse } from "@/lib/export/response";
+import { safeText } from "@/lib/export/safe-text";
 import { loadSourceInputs, sourceRows, type SourceRequest } from "@/lib/export/sources";
 import { buildWorkbook, definitionsFor, percentCell, rationalCell, type ColumnSpec, type ExportCell, type FilterSpec } from "@/lib/export/xlsx";
 import { ECART_TERMS } from "@/lib/glossary/ecart";
@@ -21,6 +22,8 @@ export const dynamic = "force-dynamic";
 // CSV par défaut ; Excel avec ?format=xlsx (filtres, sources et définitions dans des onglets).
 const BOM = "﻿";
 const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+// Libellé texte du CSV : jamais pris pour une formule à l'ouverture. Les cellules numériques (écarts, y compris négatifs) restent telles quelles.
+const qt = (s: string) => q(safeText(s));
 function decimal(num: number, den: number, decimals: number): string {
   const n = BigInt(num);
   const d = BigInt(den);
@@ -39,6 +42,8 @@ const pctCell = (d: Diff) => (d.kind !== "value" ? "" : d.pct ? decimal(d.pct.nu
 // --- Excel ---------------------------------------------------------------------------------------------------------------------
 
 const UNIT_LABEL = { eur: "€", etp: "ETP", nombre: "Nombre" } as const;
+const ND_REFERENTIEL = "non renseigné dans le référentiel Collaborateurs";
+const isZoomRubric = (s: string): s is ZoomRubric => Object.hasOwn(ZOOM_RUBRICS, s); // jamais « in » : les clés héritées (constructor, toString…) sont refusées
 const USAGE = { payfit: "journal de paie et référentiel Collaborateurs (versions réelles)", dsn: "déclarations (DSN) et référentiel Collaborateurs (versions réelles)" } as const;
 const TABLE_DEFINITIONS = [ECART_TERMS.versions, ECART_TERMS.rangsDeMois, ECART_TERMS.rubriques, ECART_TERMS.effectifs, ECART_TERMS.ecart, ECART_TERMS.ecartPourcentage, "etp-average", MASSE_TERMS.masse, MASSE_TERMS.brut, MASSE_TERMS.cotisations, "lecture-nd"];
 const ZOOM_DEFINITIONS = [ECART_TERMS.zoom, ECART_TERMS.versions, ECART_TERMS.rangsDeMois, ECART_TERMS.ecart, "lecture-nd"];
@@ -97,7 +102,7 @@ async function tableXlsx(workspace: WorkspaceAccess, loaded: Loaded, vue: "synth
           ...r.aggs.flatMap((a, i): ExportCell[] => (i === 0 ? [rationalCell(a, r.unit)] : [rationalCell(a, r.unit), rationalCell(r.gaps[i - 1], r.unit), percentCell(r.gaps[i - 1])])),
           "",
         ]),
-        note: "Montants en euros ; ETP affichés au centième (valeur exacte au dix-millième).",
+        note: "Montants en euros ; ETP et pourcentages affichés au centième, valeur exacte conservée dans la cellule.",
       },
     ],
     sources: await sourcesOf(loaded, workspace.id),
@@ -107,6 +112,8 @@ async function tableXlsx(workspace: WorkspaceAccess, loaded: Loaded, vue: "synth
 }
 
 type ZoomEntry = { k: string; i: { label: string; externalId: string | null; service: string | null; contract: string | null; start: string | null; end: string | null }; av: number | null; bv: number | null };
+
+const orNd = (e: ZoomEntry, v: string | null): ExportCell => v ?? (e.k === HORS_SALARIE ? "" : { nd: ND_REFERENTIEL });
 
 async function zoomXlsx(workspace: WorkspaceAccess, loaded: Loaded, rubric: ZoomRubric, pair: number, entries: ZoomEntry[]): Promise<Response> {
   const a = loaded.versions[pair];
@@ -134,7 +141,8 @@ async function zoomXlsx(workspace: WorkspaceAccess, loaded: Loaded, rubric: Zoom
           { header: b.label, key: "v2", kind: "eur", width: 22 },
           { header: "Écart", key: "ecart", kind: "eur" },
         ],
-        rows: entries.map((e) => [e.i.label, e.i.externalId ?? "", e.i.service ?? "", e.i.contract ?? "", e.i.start ?? "", e.i.end ?? "", e.av ?? "", e.bv ?? "", (e.bv ?? 0) - (e.av ?? 0)]),
+        // Service et contrat absents du référentiel : n.d. avec la raison (« Hors salarié » n'est pas une personne : sans objet, cellule vide).
+        rows: entries.map((e) => [e.i.label, e.i.externalId ?? "", orNd(e, e.i.service), orNd(e, e.i.contract), e.i.start ?? "", e.i.end ?? "", e.av ?? "", e.bv ?? "", (e.bv ?? 0) - (e.av ?? 0)]),
         note: `Somme des écarts : ${formatEuros(total)} · ${reconciliation}.`,
       },
     ],
@@ -155,11 +163,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   const [zr, zp] = (sp.zoom ?? "").split(":");
   if (zr) {
     if (!hasAtLeast(workspace.role, "editor")) return new Response("Détail nominatif réservé aux administrateurs et aux éditeurs.", { status: 403 });
-    const rubric = zr as ZoomRubric;
     const pair = zp === "2" ? 1 : 0;
     const a = loaded.versions[pair];
     const b = loaded.versions[pair + 1];
-    if (!(rubric in ZOOM_RUBRICS) || !a || !b) return new Response("Détail introuvable.", { status: 404 });
+    if (!isZoomRubric(zr) || !a || !b) return new Response("Détail introuvable.", { status: 404 });
+    const rubric = zr;
     const za = zoomOf(loaded.sources[pair], loaded.months(a.year), rubric);
     const zb = zoomOf(loaded.sources[pair + 1], loaded.months(b.year), rubric);
     if (za.kind === "nd" || zb.kind === "nd") return new Response(`n.d. — ${za.kind === "nd" ? za.reason : (zb as { reason: string }).reason}`, { status: 422 });
@@ -170,9 +178,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
       .sort((x, y) => x.i.label.localeCompare(y.i.label))
       .map((k) => ({ ...k, av: za.byKey.get(k.k) ?? null, bv: zb.byKey.get(k.k) ?? null }));
     if (xlsx) return zoomXlsx(workspace, loaded, rubric, pair, entries);
-    const lines = [["Écart (€)", a.label, b.label, "Matricule", "Nom", "Service", "Contrat", "Date d'embauche", "Date de sortie"].map(q).join(";")];
+    const lines = [["Écart (€)", a.label, b.label, "Matricule", "Nom", "Service", "Contrat", "Date d'embauche", "Date de sortie"].map(qt).join(";")];
     for (const k of entries) {
-      lines.push([decimal((k.bv ?? 0) - (k.av ?? 0), 100, 2), k.av === null ? "" : decimal(k.av, 100, 2), k.bv === null ? "" : decimal(k.bv, 100, 2), k.i.externalId ?? "", k.i.label, k.i.service ?? "", k.i.contract ?? "", k.i.start ?? "", k.i.end ?? ""].map((x) => q(String(x))).join(";"));
+      const amounts = [decimal((k.bv ?? 0) - (k.av ?? 0), 100, 2), k.av === null ? "" : decimal(k.av, 100, 2), k.bv === null ? "" : decimal(k.bv, 100, 2)].map(q);
+      const texts = [k.i.externalId ?? "", k.i.label, k.i.service ?? "", k.i.contract ?? "", k.i.start ?? "", k.i.end ?? ""].map(qt);
+      lines.push([...amounts, ...texts].join(";"));
     }
     return new Response(BOM + lines.join("\n") + "\n", { headers: { ...headers, "content-disposition": `attachment; filename="ecart-detail-${rubric}.csv"` } });
   }
@@ -180,7 +190,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   if (xlsx) return tableXlsx(workspace, loaded, vue);
   const rows = ecartRows(loaded, vue);
   const head = ["Rubrique", ...loaded.versions.flatMap((v, i) => (i === 0 ? [v.label] : [v.label, `Écart ${i + 1}−${i}`, `Écart ${i + 1}−${i} %`]))];
-  const lines = [head.map(q).join(";")];
-  for (const r of rows) lines.push([r.label, ...r.aggs.flatMap((a, i) => (i === 0 ? [cell(a, r.unit)] : [cell(a, r.unit), gapCell(r.gaps[i - 1], r.unit), pctCell(r.gaps[i - 1])]))].map((x) => q(String(x))).join(";"));
+  const lines = [head.map(qt).join(";")];
+  for (const r of rows) lines.push([qt(r.label), ...r.aggs.flatMap((a, i) => (i === 0 ? [cell(a, r.unit)] : [cell(a, r.unit), gapCell(r.gaps[i - 1], r.unit), pctCell(r.gaps[i - 1])])).map((x) => q(String(x)))].join(";"));
   return new Response(BOM + lines.join("\n") + "\n", { headers: { ...headers, "content-disposition": 'attachment; filename="ecart-budgetaire.csv"' } });
 }

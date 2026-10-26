@@ -1,32 +1,62 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   absenceTypeRows,
   buildContractServiceMap,
+  coverageRefusal,
   formatList,
+  lostCoverage,
+  NO_ADMIN_MESSAGE,
   orderOf,
   parseArgs,
+  parseCodeList,
   parseMonthRange,
+  parisMonth,
   planKpiSettings,
   previousFromHistory,
   probeKpis,
   probeServiceEtp,
+  rebuildDecision,
+  removalRefusal,
+  removedCollections,
   renderAbsenceTypes,
+  renderOldSettings,
   renderPlan,
   renderProbe,
+  renderWritten,
   resolveOldValue,
+  RH_CURRENT_ANNOUNCE,
+  RH_NO_ADMIN_REFUSAL,
+  RH_REBUILD_ANNOUNCE,
+  RH_REBUILD_REFUSAL,
+  RH_REBUILT_DONE,
+  RH_UP_TO_DATE_DONE,
+  SYNC_FUTURE_MESSAGE,
+  SYNC_MAX_MONTHS,
   syncCounterLines,
+  syncMaxMonthsMessage,
+  USAGE,
+  waitBudget,
   type KpiAdminKey,
   type SettingOrigin,
 } from "@/lib/admin/workspace-ops";
 import { DEFAULT_CATEGORY_NATURES } from "@/lib/budget/categories";
 import { monthRange } from "@/lib/connectors/months";
+import { STALE_AFTER_MS } from "@/lib/connectors/sync";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
-import { KPI_KEYS } from "@/lib/rh-kpi-settings";
-import { DSN_ABSENCES, fixtureAbsences, kpiInput, TYPES_3 } from "./helpers/kpi";
-import { dsnFixtureBuild, payfitFixtureBuild } from "./helpers/rh";
+import { buildContractServiceMap as sharedServiceMap } from "@/lib/payroll/service-map";
+import { KPI_KEYS, KPI_PARSERS } from "@/lib/rh-kpi-settings";
+import { absence, DSN_ABSENCES, fixtureAbsences, kpiInput, readAbsences, TYPES_3 } from "./helpers/kpi";
+import { dsnFixtureBuild, payfitEdgeBuild, payfitFixtureBuild } from "./helpers/rh";
 
-// Script d'administration d'un espace : fonctions pures, cas écrits à la main, valeurs fictives.
+// Script d'administration d'un espace : fonctions pures, cas écrits à la main, valeurs fictives. Aucune base n'est lue ni
+// écrite, mais workspace-ops.ts importe les calculs de l'écran (budget/monthly, réglages KPI) donc le client de base :
+// une DATABASE_URL quelconque (factice) doit être définie à l'import, aucune connexion n'est ouverte (comme budget-monthly.test.ts).
+
+// Horloge fixée : le 24/10/2026 à 12 h (Paris), mois courant 2026-10. Les plages de mois de --from / --to en dépendent.
+const NOW = new Date("2026-10-24T10:00:00Z");
 
 describe("lecture des arguments", () => {
   it("absence-types : commande et slug", () => {
@@ -47,22 +77,31 @@ describe("lecture des arguments", () => {
     expect(parseArgs(["kpi-settings", "espace-test", "--exclude-none", "--absence-types"])).toMatchObject({ ok: false, error: expect.stringContaining("attend une valeur") });
     expect(parseArgs(["kpi-settings", "espace-test", "--exclude-none", "--absence-types", "--dry-run"])).toMatchObject({ ok: false, error: expect.stringContaining("attend une valeur") });
   });
-  it("pennylane-sync : plage de mois, --apply facultatif ; plage vide ou mois invalide refusés", () => {
-    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2025-11", "--to", "2026-02", "--apply"])).toEqual({
-      ok: true, command: "pennylane-sync", slug: "espace-test", from: "2025-11", to: "2026-02", months: ["2025-11", "2025-12", "2026-01", "2026-02"], apply: true,
+  it("pennylane-sync : plage de mois, --apply et --allow-removals facultatifs ; plage vide ou mois invalide refusés", () => {
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2025-11", "--to", "2026-02", "--apply"], NOW)).toEqual({
+      ok: true, command: "pennylane-sync", slug: "espace-test", from: "2025-11", to: "2026-02", months: ["2025-11", "2025-12", "2026-01", "2026-02"], apply: true, allowRemovals: false,
     });
-    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-01", "--to", "2026-01"])).toMatchObject({ ok: true, months: ["2026-01"], apply: false });
-    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-03", "--to", "2026-01"])).toMatchObject({ ok: false, error: expect.stringContaining("vide") });
-    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-13", "--to", "2026-14"])).toMatchObject({ ok: false, error: expect.stringContaining("--from") });
-    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-01"])).toMatchObject({ ok: false, error: expect.stringContaining("--to") });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-01", "--to", "2026-01"], NOW)).toMatchObject({ ok: true, months: ["2026-01"], apply: false, allowRemovals: false });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-01", "--to", "2026-01", "--apply", "--allow-removals"], NOW)).toMatchObject({ ok: true, apply: true, allowRemovals: true });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-03", "--to", "2026-01"], NOW)).toMatchObject({ ok: false, error: expect.stringContaining("vide") });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-13", "--to", "2026-14"], NOW)).toMatchObject({ ok: false, error: expect.stringContaining("--from") });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-01"], NOW)).toMatchObject({ ok: false, error: expect.stringContaining("--to") });
   });
-  it("probe : mois triés et dédoublonnés, fenêtre du premier au dernier mois, anciens réglages facultatifs", () => {
+  it("pennylane-sync : mêmes garde-fous que l'écran Données (mois de fin futur, plus de 24 mois) ; --allow-removals seul refusé", () => {
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-01", "--to", "2062-01"], NOW)).toEqual({ ok: false, error: SYNC_FUTURE_MESSAGE });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2024-10", "--to", "2026-10"], NOW)).toEqual({ ok: false, error: "24 mois au plus par lecture." });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2024-11", "--to", "2026-10"], NOW)).toMatchObject({ ok: true });
+    expect(parseArgs(["pennylane-sync", "espace-test", "--from", "2026-01", "--to", "2026-02", "--allow-removals"], NOW)).toMatchObject({ ok: false, error: expect.stringContaining("--apply") });
+  });
+  it("probe : mois triés et dédoublonnés, fenêtre du premier au dernier mois, anciens réglages facultatifs, --no-rebuild facultatif", () => {
     expect(parseArgs(["probe", "espace-test", "--months", "2026-03,2026-01,2026-03"])).toEqual({
-      ok: true, command: "probe", slug: "espace-test", months: ["2026-01", "2026-03"], window: ["2026-01", "2026-02", "2026-03"], oldExclusions: null, oldAbsenceTypes: null,
+      ok: true, command: "probe", slug: "espace-test", months: ["2026-01", "2026-03"], window: ["2026-01", "2026-02", "2026-03"], oldExclusions: null, oldAbsenceTypes: null, noRebuild: false,
     });
     expect(parseArgs(["probe", "espace-test", "--months", "2026-01", "--old-exclusions", "20,10", "--old-absence-types", "test_a"])).toMatchObject({
-      ok: true, window: ["2026-01"], oldExclusions: ["10", "20"], oldAbsenceTypes: ["test_a"],
+      ok: true, window: ["2026-01"], oldExclusions: ["10", "20"], oldAbsenceTypes: ["test_a"], noRebuild: false,
     });
+    expect(parseArgs(["probe", "espace-test", "--no-rebuild", "--months", "2026-01"])).toMatchObject({ ok: true, noRebuild: true });
+    expect(parseArgs(["probe", "espace-test", "--months", "2026-01", "--no-rebuild=oui"])).toMatchObject({ ok: false, error: expect.stringContaining("n'attend pas de valeur") });
     expect(parseArgs(["probe", "espace-test", "--months", "2026-1"])).toMatchObject({ ok: false });
     expect(parseArgs(["probe", "espace-test", "--months", "2026-01", "--old-exclusions", "1"])).toMatchObject({ ok: false, error: expect.stringContaining("deux chiffres") });
   });
@@ -76,15 +115,67 @@ describe("lecture des arguments", () => {
     expect(parseArgs(["kpi-settings", "espace-test", "--exclude-none=oui", "--absence-types", "a"])).toMatchObject({ ok: false, error: expect.stringContaining("n'attend pas de valeur") });
     expect(parseArgs(["kpi-settings", "espace-test", "--dry-run", "--dry-run", "--exclude-none", "--absence-types", "a"])).toMatchObject({ ok: false, error: expect.stringContaining("répétée") });
     expect(parseArgs(["absence-types", "../etc"])).toMatchObject({ ok: false, error: expect.stringContaining("invalide") });
+    expect(parseArgs(["absence-types", "espace-test", "--no-rebuild"])).toMatchObject({ ok: false, error: expect.stringContaining("Option inconnue") });
+  });
+  it("codes validés par les analyseurs des réglages enregistrés (KPI_PARSERS), pas par une copie des règles", () => {
+    const candidates = ["10", "1", "123", "ab", "a b", "test_ok", "x".repeat(128), "x".repeat(129)];
+    for (const c of candidates) {
+      expect(parseCodeList(c, "--x", "nature").ok, `nature ${c.slice(0, 8)}`).toBe(KPI_PARSERS.excludedExitNatures([c]) !== null);
+      expect(parseCodeList(c, "--x", "absence").ok, `absence ${c.slice(0, 8)}`).toBe(KPI_PARSERS.absenceTypes([c]) !== null);
+    }
+    // Références écrites à la main : « 10 » et « test_ok » acceptés, « 1 », « 123 » et « a b » refusés.
+    expect(parseCodeList("20,10,20", "--x", "nature")).toEqual({ ok: true, value: ["10", "20"] });
+    expect(parseCodeList("1", "--x", "nature").ok).toBe(false);
+    expect(parseCodeList("123", "--x", "nature").ok).toBe(false);
+    expect(parseCodeList("test_ok", "--x", "absence")).toEqual({ ok: true, value: ["test_ok"] });
+    expect(parseCodeList("a b", "--x", "absence").ok).toBe(false);
+  });
+  it("USAGE annonce la reconstruction du référentiel par probe, --no-rebuild, --allow-removals et l'enregistrement explicite", () => {
+    expect(USAGE).toContain("--no-rebuild");
+    expect(USAGE).toContain("reconstruction");
+    expect(USAGE).toContain("rh.rebuilt");
+    expect(USAGE).toContain("sans administrateur");
+    expect(USAGE).toContain("--allow-removals");
+    expect(USAGE).toContain("enregistrée explicitement");
+    expect(USAGE).toContain("--old-exclusions / --old-absence-types");
+    expect(USAGE).toContain("24 mois au plus");
   });
 });
 
 describe("plage de mois", () => {
   it("inclusive, à cheval sur deux années ; début après fin ou mois invalide refusés", () => {
-    expect(parseMonthRange("2025-11", "2026-02")).toEqual({ ok: true, value: ["2025-11", "2025-12", "2026-01", "2026-02"] });
-    expect(parseMonthRange("2026-05", "2026-05")).toEqual({ ok: true, value: ["2026-05"] });
-    expect(parseMonthRange("2026-05", "2026-04")).toMatchObject({ ok: false });
-    expect(parseMonthRange("2026-00", "2026-04")).toMatchObject({ ok: false });
+    expect(parseMonthRange("2025-11", "2026-02", NOW)).toEqual({ ok: true, value: ["2025-11", "2025-12", "2026-01", "2026-02"] });
+    expect(parseMonthRange("2026-05", "2026-05", NOW)).toEqual({ ok: true, value: ["2026-05"] });
+    expect(parseMonthRange("2026-05", "2026-04", NOW)).toMatchObject({ ok: false });
+    expect(parseMonthRange("2026-00", "2026-04", NOW)).toMatchObject({ ok: false });
+  });
+  it("24 mois acceptés (novembre 2024 → octobre 2026 : 2 + 12 + 10), 25 mois refusés", () => {
+    const ok = parseMonthRange("2024-11", "2026-10", NOW);
+    expect(ok.ok && ok.value.length).toBe(24);
+    expect(ok.ok && [ok.value[0], ok.value[23]]).toEqual(["2024-11", "2026-10"]);
+    expect(parseMonthRange("2024-10", "2026-10", NOW)).toEqual({ ok: false, error: "24 mois au plus par lecture." });
+  });
+  it("mois de fin futur refusé, même pour une faute de frappe à des centaines de mois ; le mois courant est accepté", () => {
+    expect(parseMonthRange("2026-10", "2026-11", NOW)).toEqual({ ok: false, error: "Le mois de fin ne peut pas être dans le futur." });
+    expect(parseMonthRange("2026-01", "2062-01", NOW)).toEqual({ ok: false, error: SYNC_FUTURE_MESSAGE });
+    expect(parseMonthRange("2026-10", "2026-10", NOW)).toEqual({ ok: true, value: ["2026-10"] });
+    expect(parseMonthRange("2026-12", "2026-11", NOW)).toMatchObject({ ok: false, error: expect.stringContaining("vide") }); // l'ordre des contrôles est celui de l'écran
+  });
+  it("mois courant au calendrier de Paris : le 1er octobre à 1 h 30 (Paris) est déjà octobre ; le 31 octobre à 23 h 30 (Paris) est déjà novembre", () => {
+    const nuitSeptembre = new Date("2026-09-30T23:30:00Z"); // 1er octobre, 1 h 30 à Paris (UTC+2)
+    expect(parisMonth(nuitSeptembre)).toBe("2026-10");
+    expect(parseMonthRange("2026-10", "2026-10", nuitSeptembre)).toEqual({ ok: true, value: ["2026-10"] });
+    expect(parseMonthRange("2026-10", "2026-11", new Date("2026-10-31T22:30:00Z"))).toMatchObject({ ok: false }); // 31 octobre, 23 h 30 à Paris
+    expect(parseMonthRange("2026-10", "2026-11", new Date("2026-10-31T23:30:00Z"))).toEqual({ ok: true, value: ["2026-10", "2026-11"] }); // 1er novembre, 0 h 30 à Paris (UTC+1)
+  });
+  it("mêmes valeurs et mêmes messages que l'écran Données (launchSync dans donnees/actions.ts, fichier « use server » non importable)", () => {
+    const screen = readFileSync(resolve(process.cwd(), "src/app/e/[slug]/donnees/actions.ts"), "utf8");
+    expect(Number(/const MAX_MONTHS = (\d+);/.exec(screen)?.[1])).toBe(SYNC_MAX_MONTHS);
+    expect(SYNC_MAX_MONTHS).toBe(24);
+    expect(screen).toContain("${MAX_MONTHS} mois au plus par lecture.");
+    expect(syncMaxMonthsMessage()).toBe("24 mois au plus par lecture.");
+    expect(screen).toContain(`"${SYNC_FUTURE_MESSAGE}"`);
+    expect(screen).toContain('timeZone: "Europe/Paris"');
   });
 });
 
@@ -99,8 +190,8 @@ describe("plan des réglages KPI (avant / après)", () => {
       ok: true,
       changedKeys: ["excludedExitNatures", "absenceTypes"],
       rows: [
-        { key: "excludedExitNatures", label: "Natures de sortie exclues du turnover", before: ["10", "20"], after: [], origin: "setting", changed: true },
-        { key: "absenceTypes", label: "Types d'absence retenus pour l'absentéisme", before: ["test_sickness"], after: ["test_accident", "test_sickness"], origin: "default", changed: true },
+        { key: "excludedExitNatures", label: "Natures de sortie exclues du turnover", before: ["10", "20"], after: [], origin: "setting", changed: true, explicit: false },
+        { key: "absenceTypes", label: "Types d'absence retenus pour l'absentéisme", before: ["test_sickness"], after: ["test_accident", "test_sickness"], origin: "default", changed: true, explicit: false },
       ],
     });
     if (!plan.ok) return;
@@ -115,10 +206,42 @@ describe("plan des réglages KPI (avant / après)", () => {
       "  à écrire",
     ]);
   });
-  it("valeurs déjà conformes : aucune clé à écrire", () => {
-    const plan = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_accident", "test_sickness"] }, origins: origins({ excludedExitNatures: "default", absenceTypes: "setting" }), present, absenceTypes: ["test_sickness", "test_accident"] });
+  it("valeurs déjà conformes ET déjà enregistrées : aucune clé à écrire", () => {
+    const plan = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_accident", "test_sickness"] }, origins: origins({ excludedExitNatures: "setting", absenceTypes: "setting" }), present, absenceTypes: ["test_sickness", "test_accident"] });
     expect(plan).toMatchObject({ ok: true, changedKeys: [] });
     if (plan.ok) expect(renderPlan(plan, (k) => KPI_KEYS[k]).filter((l) => l.includes("rien à écrire"))).toHaveLength(2);
+  });
+  it("aucune exclusion par défaut, clé non enregistrée : la liste vide est ENREGISTRÉE explicitement (décision, pas seulement un défaut)", () => {
+    const plan = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_accident", "test_sickness"] }, origins: origins({ excludedExitNatures: "default", absenceTypes: "setting" }), present, absenceTypes: ["test_sickness", "test_accident"] });
+    expect(plan).toEqual({
+      ok: true,
+      changedKeys: ["excludedExitNatures"],
+      rows: [
+        { key: "excludedExitNatures", label: "Natures de sortie exclues du turnover", before: [], after: [], origin: "default", changed: true, explicit: true },
+        { key: "absenceTypes", label: "Types d'absence retenus pour l'absentéisme", before: ["test_accident", "test_sickness"], after: ["test_accident", "test_sickness"], origin: "setting", changed: false, explicit: false },
+      ],
+    });
+    if (!plan.ok) return;
+    const lines = renderPlan(plan, (k) => KPI_KEYS[k]);
+    expect(lines.slice(0, 3)).toEqual(["Natures de sortie exclues du turnover (rh.kpi.turnover.excludedExitNatures)", "  avant : aucune (valeur par défaut)", "  après : aucune"]);
+    expect(lines[3]).toContain("à enregistrer explicitement");
+    expect(lines[7]).toBe("  inchangé, rien à écrire");
+    const written = renderWritten(plan, (k) => KPI_KEYS[k]);
+    expect(written[0]).toBe("Écrit : rh.kpi.turnover.excludedExitNatures (un événement d'audit par clé). Aucun autre réglage touché.");
+    expect(written[1]).toContain("Natures de sortie exclues du turnover : aucune, enregistrée explicitement");
+    expect(written).toHaveLength(2);
+  });
+  it("décision explicite limitée aux exclusions : types d'absence égaux au défaut non enregistrés ou exclusions déjà enregistrées vides ne sont pas réécrits ; illisible : réécrit sans être « explicite »", () => {
+    const sameAsDefault = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_sickness"] }, origins: origins({ excludedExitNatures: "setting", absenceTypes: "default" }), present, absenceTypes: ["test_sickness"] });
+    expect(sameAsDefault).toMatchObject({ ok: true, changedKeys: [] });
+    const invalid = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_sickness"] }, origins: origins({ excludedExitNatures: "invalid", absenceTypes: "setting" }), present, absenceTypes: ["test_sickness"] });
+    expect(invalid).toMatchObject({ ok: true, changedKeys: ["excludedExitNatures"] });
+    if (invalid.ok) expect(invalid.rows[0]).toMatchObject({ changed: true, explicit: false });
+  });
+  it("renderWritten sans décision explicite : une seule ligne", () => {
+    const plan = planKpiSettings({ current, origins: origins(), present, absenceTypes: ["test_sickness", "test_accident"] });
+    if (!plan.ok) throw new Error("plan refusé");
+    expect(renderWritten(plan, (k) => KPI_KEYS[k])).toEqual(["Écrit : rh.kpi.turnover.excludedExitNatures, rh.kpi.absence.types (un événement d'audit par clé). Aucun autre réglage touché."]);
   });
   it("un code absent de la lecture : refus avec la liste triée des codes inconnus, rien d'écrit", () => {
     const plan = planKpiSettings({ current, origins: origins(), present, absenceTypes: ["test_zz", "test_accident", "test_inconnu"] });
@@ -130,7 +253,7 @@ describe("plan des réglages KPI (avant / après)", () => {
   });
   it("un autre réglage illisible : refus (setKpiSettings le réécrirait à sa valeur par défaut) ; un des deux réglages concernés illisible : à réécrire", () => {
     expect(planKpiSettings({ current, origins: origins({ dayBasis: "invalid" }), present, absenceTypes: ["test_sickness"] })).toMatchObject({ ok: false, blockedKeys: ["dayBasis"] });
-    const own = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_sickness"] }, origins: origins({ excludedExitNatures: "default", absenceTypes: "invalid" }), present, absenceTypes: ["test_sickness"] });
+    const own = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_sickness"] }, origins: origins({ excludedExitNatures: "setting", absenceTypes: "invalid" }), present, absenceTypes: ["test_sickness"] });
     expect(own).toMatchObject({ ok: true, changedKeys: ["absenceTypes"] });
     if (own.ok) expect(renderPlan(own, (k) => KPI_KEYS[k])[5]).toBe("  avant : illisible (réécrit par la commande)");
   });
@@ -140,22 +263,30 @@ describe("plan des réglages KPI (avant / après)", () => {
   });
 });
 
-describe("types d'absence de la lecture active", () => {
-  it("union triée des types lus et des types retenus absents de la lecture ; code non retenable signalé", () => {
+describe("types d'absence de la lecture active (jamais un compteur)", () => {
+  it("union triée des types lus et des types retenus absents de la lecture ; code non retenable signalé ; « présent » / « retenu » seulement", () => {
+    // Les compteurs 3, 5 et 1 (lecture) sont ignorés : un effectif faible par code révélerait une situation individuelle.
     const rows = absenceTypeRows([{ type: "test_sickness", count: 3 }, { type: "test_paid_leave", count: 5 }, { type: "type avec espace", count: 1 }], ["test_sickness", "test_old"]);
     expect(rows).toEqual([
-      { type: "test_old", count: 0, chosen: true, inRead: false, retainable: true },
-      { type: "test_paid_leave", count: 5, chosen: false, inRead: true, retainable: true },
-      { type: "test_sickness", count: 3, chosen: true, inRead: true, retainable: true },
-      { type: "type avec espace", count: 1, chosen: false, inRead: true, retainable: false },
+      { type: "test_old", chosen: true, inRead: false, retainable: true },
+      { type: "test_paid_leave", chosen: false, inRead: true, retainable: true },
+      { type: "test_sickness", chosen: true, inRead: true, retainable: true },
+      { type: "type avec espace", chosen: false, inRead: true, retainable: false },
     ]);
-    expect(renderAbsenceTypes(rows)).toEqual([
+    const lines = renderAbsenceTypes(rows);
+    expect(lines).toEqual([
       "  test_old : absent de la lecture · retenu : oui",
-      "  test_paid_leave : 5 absence(s) · retenu : non",
-      "  test_sickness : 3 absence(s) · retenu : oui",
-      "  type avec espace : 1 absence(s) · retenu : non · non retenable (espace ou plus de 128 caractères)",
+      "  test_paid_leave : présent · retenu : non",
+      "  test_sickness : présent · retenu : oui",
+      "  type avec espace : présent · retenu : non · non retenable (espace ou plus de 128 caractères)",
     ]);
+    // Aucun chiffre : le seul « 128 » est la limite de longueur d'un code, dans la remarque d'un code non retenable.
+    expect(lines.filter((l) => !l.includes("non retenable")).join("\n")).not.toMatch(/\d/);
+    expect(lines[3].replace("128", "")).not.toMatch(/\d/);
     expect(renderAbsenceTypes([])).toEqual(["Aucun type d'absence dans la lecture active."]);
+  });
+  it("lecture sans compteur : mêmes lignes", () => {
+    expect(absenceTypeRows([{ type: "test_a" }], [])).toEqual([{ type: "test_a", chosen: false, inRead: true, retainable: true }]);
   });
 });
 
@@ -166,6 +297,52 @@ describe("compteurs de synchronisation", () => {
       "  ledger_lines : 10 au total, 2 ajouté(s), 1 modifié(s), 0 supprimé(s)",
     ]);
     expect(syncCounterLines(undefined)).toEqual(["  aucun compteur par collection"]);
+  });
+});
+
+describe("garde-fous de --apply (suppressions, couverture des mois)", () => {
+  it("suppressions : collections au compteur « supprimé(s) » non nul, triées, nombres seulement ; aucune suppression : liste vide", () => {
+    const diff = {
+      ledger_lines: { total: 10, added: 2, changed: 1, removed: 0 },
+      accounts: { total: 4, added: 0, changed: 0, removed: 1 },
+      "Nom avec espace": { total: 3, added: 0, changed: 0, removed: 3 },
+    };
+    expect(removedCollections(diff)).toEqual([{ collection: "accounts", removed: 1 }, { collection: "collection", removed: 3 }]);
+    expect(removedCollections({ accounts: { total: 4, added: 1, changed: 1, removed: 0 } })).toEqual([]);
+    expect(removedCollections(undefined)).toEqual([]);
+    expect(removalRefusal(removedCollections(diff))).toBe(
+      "--apply refusé : 4 enregistrement(s) supprimé(s) par rapport à la lecture appliquée (accounts : 1, collection : 3). L'aperçu reste en attente, à examiner dans Données ; --allow-removals l'applique malgré tout.",
+    );
+  });
+  // Lecture appliquée du 15/03/2026 sur janvier à mars : janvier et février sont terminés (couverts), mars ne l'est pas (n.d.).
+  const read = { months: ["2026-01", "2026-02", "2026-03"], readAt: new Date("2026-03-15T10:00:00Z") };
+  it("couverture : seuls les mois COUVERTS de la lecture appliquée comptent (mars, n.d. à la lecture, peut sortir de la plage)", () => {
+    expect(lostCoverage(read, ["2026-02", "2026-03", "2026-04"])).toEqual(["2026-01"]);
+    expect(lostCoverage(read, ["2026-01", "2026-02"])).toEqual([]);
+    expect(lostCoverage(read, ["2026-04"])).toEqual(["2026-01", "2026-02"]);
+    expect(lostCoverage(read, ["2025-12", "2026-01", "2026-02", "2026-03"])).toEqual([]);
+  });
+  it("couverture : aucune lecture Pennylane appliquée, rien à perdre", () => {
+    expect(lostCoverage(null, ["2026-01"])).toEqual([]);
+  });
+  it("couverture : date de lecture au calendrier de Paris (31/03 à 22 h 30 UTC = 1er avril à Paris : mars est déjà terminé donc couvert)", () => {
+    const night = { months: ["2026-01", "2026-02", "2026-03"], readAt: new Date("2026-03-31T22:30:00Z") };
+    expect(lostCoverage(night, ["2026-01", "2026-02"])).toEqual(["2026-03"]);
+  });
+  it("message de refus de couverture", () => {
+    expect(coverageRefusal(["2026-01", "2026-02"])).toBe(
+      "--apply refusé : la plage demandée ne couvre pas 2 mois couvert(s) par la lecture Pennylane appliquée (2026-01, 2026-02) ; ils disparaîtraient de la couverture comptable. Étendre la plage, ou --allow-removals pour l'accepter.",
+    );
+  });
+});
+
+describe("délai d'attente d'une lecture", () => {
+  it("une minute en deçà du délai d'expiration : 15 minutes ⇒ 14 minutes (840 000 ms)", () => {
+    expect(waitBudget(15 * 60 * 1000)).toEqual({ maxWaitMs: 840_000, waitMinutes: 14, staleMinutes: 15 });
+  });
+  it("dérivé de STALE_AFTER_MS (sync.ts), jamais recalé à la main", () => {
+    expect(waitBudget(STALE_AFTER_MS).maxWaitMs).toBe(STALE_AFTER_MS - 60_000);
+    expect(waitBudget(STALE_AFTER_MS).maxWaitMs).toBeLessThan(STALE_AFTER_MS);
   });
 });
 
@@ -201,6 +378,52 @@ describe("ancien réglage retrouvé dans le journal d'audit", () => {
   });
 });
 
+describe("anciens réglages : sortie de la sonde", () => {
+  it("retrouvés (option, journal) : une seule ligne, valeurs et provenance", () => {
+    expect(renderOldSettings({ value: ["10"], source: "journal" }, { value: [], source: "option" })).toEqual([
+      "Anciens réglages : exclusions de sortie = 10 (journal d'audit) ; types d'absence = aucun (option de la commande).",
+    ]);
+  });
+  it("introuvables : la sortie dit qu'une valeur par défaut n'est jamais journalisée et quelle option fournir", () => {
+    const both = renderOldSettings({ value: null, source: "introuvable" }, { value: null, source: "introuvable" });
+    expect(both).toEqual([
+      "Anciens réglages : exclusions de sortie inconnues (introuvable dans le journal d'audit) ; types d'absence inconnus (introuvable dans le journal d'audit).",
+      "  Exclusions de sortie introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-exclusions.",
+      "  Types d'absence introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-absence-types.",
+    ]);
+    const onlyTypes = renderOldSettings({ value: ["10"], source: "option" }, { value: null, source: "introuvable" });
+    expect(onlyTypes).toHaveLength(2);
+    expect(onlyTypes[1]).toContain("--old-absence-types");
+    expect(onlyTypes.join("\n")).not.toContain("--old-exclusions");
+  });
+});
+
+describe("référentiel Collaborateurs de la sonde : reconstruction annoncée, refusable", () => {
+  it("référentiel à jour : utilisé sans rien écrire, quelles que soient les options (même sans administrateur)", () => {
+    expect(rebuildDecision({ current: true, noRebuild: false, hasAdmin: true })).toEqual({ action: "use-current" });
+    expect(rebuildDecision({ current: true, noRebuild: true, hasAdmin: false })).toEqual({ action: "use-current" });
+  });
+  it("périmé ou absent avec --no-rebuild : refus « référentiel périmé ou absent : ouvrir l'écran Collaborateurs », avant même le contrôle de l'administrateur", () => {
+    expect(RH_REBUILD_REFUSAL).toBe("référentiel périmé ou absent : ouvrir l'écran Collaborateurs");
+    expect(rebuildDecision({ current: false, noRebuild: true, hasAdmin: true })).toEqual({ action: "refuse", reason: RH_REBUILD_REFUSAL });
+    expect(rebuildDecision({ current: false, noRebuild: true, hasAdmin: false })).toEqual({ action: "refuse", reason: RH_REBUILD_REFUSAL });
+  });
+  it("périmé ou absent sans administrateur : écriture refusée comme les autres commandes ; avec administrateur : reconstruction", () => {
+    expect(rebuildDecision({ current: false, noRebuild: false, hasAdmin: false })).toEqual({ action: "refuse", reason: RH_NO_ADMIN_REFUSAL });
+    expect(RH_NO_ADMIN_REFUSAL).toContain("aucun administrateur");
+    expect(NO_ADMIN_MESSAGE).toBe("Aucun administrateur dans cet espace : écriture refusée.");
+    expect(rebuildDecision({ current: false, noRebuild: false, hasAdmin: true })).toEqual({ action: "rebuild" });
+  });
+  it("annonces de la sortie : écriture dans les tables rh_* et événement rh.rebuilt ; à jour : non reconstruit ; fin de reconstruction", () => {
+    expect(RH_REBUILD_ANNOUNCE).toContain("rh_*");
+    expect(RH_REBUILD_ANNOUNCE).toContain("rh.rebuilt");
+    expect(RH_REBUILD_ANNOUNCE).toContain("écriture");
+    expect(RH_CURRENT_ANNOUNCE).toContain("non reconstruit");
+    expect(RH_REBUILT_DONE).toContain("écriture effectuée");
+    expect(RH_UP_TO_DATE_DONE).toContain("aucune écriture");
+  });
+});
+
 const L = (key: string, month: string, accountId: string, contractId: string | null, service: string | null): LedgerLine => ({
   key, month, accountId, accountName: null, debitCents: 100, creditCents: null, contractId, analytic: service ? [{ type: "SERVICE", code: service, value: service }] : [],
 });
@@ -223,6 +446,11 @@ describe("service d'un contrat par mois (table utilisée pour l'ETP par service)
     expect(Object.fromEntries(map)).toEqual({ "2026-05|C1": "TECH", "2026-05|C2": null, "2026-06|C1": "SALES" });
     expect(map.has("2026-05|C3")).toBe(false);
   });
+  it("une seule règle : le script réexporte la fonction du module partagé avec l'écran Masse salariale (payroll/service-map.ts), même résultat", () => {
+    expect(buildContractServiceMap).toBe(sharedServiceMap);
+    const lines = [L("1", "2026-05", "645", "C1", "SALES"), L("2", "2026-05", "641100", "C1", "TECH")];
+    expect(Object.fromEntries(sharedServiceMap(lines, DEFAULT_PREFIXES, "SERVICE"))).toEqual({ "2026-05|C1": "TECH" });
+  });
 });
 
 describe("diagnostic structurel des KPI (jamais une valeur)", async () => {
@@ -233,6 +461,8 @@ describe("diagnostic structurel des KPI (jamais une valeur)", async () => {
     expect(p.etpEnd).toEqual([{ month: "2026-09", cell: { kind: "exact", code: null } }]);
     expect(p.turnover).toEqual({ current: { kind: "exact", code: null }, old: { kind: "exact", code: null }, order: "gt" });
     expect(p.absenteeism).toEqual({ current: { kind: "nd", code: "not-extracted" }, old: { kind: "nd", code: "not-extracted" }, order: "nc" });
+    // DSN : arrêts non extraits ⇒ aucune ligne de motif, taux tous motifs n.d. avec le même code (rh-kpi-motifs.test.ts).
+    expect(p.motifs).toEqual({ lines: [], all: { kind: "nd", code: "not-extracted" } });
   });
   it("PayFit : ETP fin de mois exact / borne basse / n.d. avant la couverture / n.d. après la référence ; absentéisme maladie seule (0/420) < tous types (60/420) ; ancien turnover non calculé sans ancien réglage", async () => {
     const input = kpiInput(await payfitFixtureBuild(), await fixtureAbsences(), { absenceTypes: ["test_sickness"] });
@@ -246,6 +476,77 @@ describe("diagnostic structurel des KPI (jamais une valeur)", async () => {
     expect(p.absenteeism).toEqual({ current: { kind: "exact", code: null }, old: { kind: "exact", code: null }, order: "lt" });
     expect(p.turnover.old).toBeNull();
     expect(p.turnover.order).toBeNull();
+  });
+  it("PayFit : ETP proratisé par mois, genre et code n.d. seulement : n.d. avant la couverture, borne basse avant la limite de conservation (21/10/2025), exact en février 2026 (28/5), n.d. après la référence", async () => {
+    // Références de rh-kpi-etp-prorata.test.ts (lecture fictive du 21/10/2026) : 2024-09 hors couverture ; 2025-09 en borne basse ; 2026-02 exact ; 2026-10 après la référence.
+    const input = kpiInput(await payfitFixtureBuild(), await fixtureAbsences(), { absenceTypes: ["test_sickness"] });
+    const p = probeKpis(input, ["2024-09", "2025-09", "2026-02", "2026-10"], ["2025-11"], { excludedExitNatures: null, absenceTypes: null });
+    expect(p.etpProrated).toEqual([
+      { month: "2024-09", cell: { kind: "nd", code: "before-coverage" } },
+      { month: "2025-09", cell: { kind: "lower_bound", code: null } },
+      { month: "2026-02", cell: { kind: "exact", code: null } },
+      { month: "2026-10", cell: { kind: "nd", code: "after-reference" } },
+    ]);
+    // Le stock de fin de mois est inchangé et sorti à part, mois par mois.
+    expect(p.etpEnd.map((e) => e.month)).toEqual(p.etpProrated.map((e) => e.month));
+    expect(p.etpEnd[2].cell).toEqual({ kind: "exact", code: null });
+  });
+});
+
+// Absentéisme par motif, avril 2026 (références de rh-kpi-motifs.test.ts) : deux motifs de la lecture, test_paid_leave 18/120 et
+// test_sickness 10/120, tous motifs 22/120 ; les valeurs ne sortent jamais de la sonde, seuls le nombre de lignes et les genres.
+describe("diagnostic de l'absentéisme par motif (nombre de lignes, genre par ligne, jamais une valeur)", async () => {
+  const data = await payfitEdgeBuild({
+    collaborators: [{ id: "P-1" }, { id: "P-2" }],
+    contracts: [
+      { contractId: "C-1", collaboratorId: "P-1", startDate: "2025-01-01", endDate: null },
+      { contractId: "C-2", collaboratorId: "P-2", startDate: "2025-01-01", endDate: null },
+    ],
+  });
+  const day = (id: string, contract: string, from: string, to: string, type: string) => absence(id, contract, from, "beginning-of-day", to, "end-of-day", { type });
+  const rows = [
+    day("a1", "C-1", "2026-04-06", "2026-04-10", "test_sickness"),
+    day("a2", "C-1", "2026-04-08", "2026-04-14", "test_paid_leave"),
+    day("a3", "C-2", "2026-04-20", "2026-04-21", "test_paid_leave"),
+    day("a4", "C-1", "2026-03-02", "2026-03-03", "test_sickness"),
+  ];
+  const probeOf = (absences = readAbsences(rows)) => probeKpis(kpiInput(data, absences, { absenceTypes: ["test_sickness"] }), ["2026-04"], ["2026-04"], { excludedExitNatures: null, absenceTypes: null });
+
+  it("deux lignes exactes et un taux tous motifs exact", () => {
+    expect(probeOf().motifs).toEqual({ lines: [{ kind: "exact", code: null }, { kind: "exact", code: null }], all: { kind: "exact", code: null } });
+  });
+  it("motif incertain (début sans moment) : sa ligne et le taux tous motifs sont en borne basse, les autres lignes restent exactes", () => {
+    const a5 = absence("a5", "C-2", "2026-04-27", null, "2026-04-28", "end-of-day", { type: "test_other" });
+    // Ordre des motifs : test_other, test_paid_leave, test_sickness.
+    expect(probeOf(readAbsences([...rows, a5])).motifs).toEqual({
+      lines: [{ kind: "lower_bound", code: null }, { kind: "exact", code: null }, { kind: "exact", code: null }],
+      all: { kind: "lower_bound", code: null },
+    });
+  });
+  it("mois non lu par la lecture d'absences : chaque ligne et le taux tous motifs n.d. avec leur code, jamais zéro", () => {
+    const p = probeOf(readAbsences(rows, ["2026-03"]));
+    expect(p.motifs).toEqual({ lines: [{ kind: "nd", code: "month-nd" }, { kind: "nd", code: "month-nd" }], all: { kind: "nd", code: "month-nd" } });
+  });
+  it("lecture sans aucune absence : aucune ligne, taux tous motifs n.d. « no-absence-motif »", () => {
+    expect(probeOf(readAbsences([])).motifs).toEqual({ lines: [], all: { kind: "nd", code: "no-absence-motif" } });
+  });
+  it("aucune valeur dans les cellules : seulement « kind » et « code »", () => {
+    const m = probeOf().motifs;
+    for (const c of [...m.lines, m.all]) expect(Object.keys(c).sort()).toEqual(["code", "kind"]);
+  });
+  it("sortie rendue : nombre de lignes, genre par ligne (sans le code du motif), taux tous motifs ; aucun autre chiffre", () => {
+    const p = probeOf();
+    const text = renderProbe({ months: ["2026-04"], service: [{ month: "2026-04", cell: { kind: "nd", code: "journal-unavailable" }, sumEqualsTotal: null }], kpi: p }).join("\n");
+    expect(text).toContain("Absentéisme par motif (fenêtre 2026-04 → 2026-04)");
+    expect(text).toContain("  Lignes de motif : 2");
+    expect(text).toContain("  ligne 1 : exact");
+    expect(text).toContain("  ligne 2 : exact");
+    expect(text).toContain("  Taux tous motifs : exact");
+    expect(text).toContain("  ETP proratisé : ");
+    expect(text).not.toContain("test_sickness");
+    expect(text).not.toContain("test_paid_leave");
+    const stripped = text.replace(/\d{4}-\d{2}/g, "").replace(/\(\d+ mois\)/g, "").replace(/Lignes de motif : \d+/, "").replace(/ligne \d+ :/g, "");
+    expect(stripped).not.toMatch(/\d/);
   });
 });
 
@@ -288,7 +589,11 @@ describe("diagnostic de l'ETP par service (même chemin que l'écran Effectifs m
     const text = renderProbe({ months, service, kpi: p }).join("\n");
     expect(text).toContain("Mois 2026-09");
     expect(text).toContain("somme des services égale à l'ETP fin de mois : oui");
-    expect(text.replace(/\d{4}-\d{2}/g, "").replace(/\(\d+ mois\)/g, "")).not.toMatch(/\d/);
-    for (const x of [...p.etpEnd, ...service]) expect(Object.keys(x.cell).sort()).toEqual(["code", "kind"]);
+    expect(text).toContain("  ETP proratisé : ");
+    expect(text).toContain("  Lignes de motif : 0"); // absences non extraites (entrée DSN) : aucune ligne
+    expect(text).toContain("  Taux tous motifs : nd (code not-extracted)");
+    const stripped = text.replace(/\d{4}-\d{2}/g, "").replace(/\(\d+ mois\)/g, "").replace(/Lignes de motif : \d+/, "");
+    expect(stripped).not.toMatch(/\d/);
+    for (const x of [...p.etpEnd, ...p.etpProrated, ...service]) expect(Object.keys(x.cell).sort()).toEqual(["code", "kind"]);
   });
 });

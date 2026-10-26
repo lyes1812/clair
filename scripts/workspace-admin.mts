@@ -1,42 +1,60 @@
 // Administration ponctuelle d'un espace, à lancer en conteneur ponctuel (aucun serveur web, aucune session) :
 //   scalingo --app clair-test run "npx tsx scripts/workspace-admin.mts <commande> <slug-espace> [options]"
 // Commandes : absence-types, kpi-settings, pennylane-sync, probe (voir USAGE dans src/lib/admin/workspace-ops.ts).
-// N'affiche jamais une clé, un identifiant de société, un nom, un montant ni un effectif. L'acteur des écritures est un
-// administrateur de l'espace. Code de sortie : 0 réussi, 1 échec ou refus, 2 arguments invalides.
+// N'affiche jamais une clé, un identifiant de société, un nom, un montant ni un effectif. L'acteur des écritures est
+// l'administrateur le plus ancien de l'espace (ordre de création, puis identifiant : choix déterministe). Écritures possibles :
+// kpi-settings (réglages), pennylane-sync (lecture, et application avec --apply) et probe (reconstruction du référentiel
+// Collaborateurs s'il est périmé, annoncée ; --no-rebuild la refuse). Code de sortie : 0 réussi, 1 échec ou refus, 2 arguments invalides.
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, pool } from "@/db/client";
-import { member, organization, sourceRecord, workspaceEvent } from "@/db/schema";
+import { member, organization, rhBuild, sourceRecord, sourceSync, workspaceEvent } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import {
   absenceTypeRows,
-  buildContractServiceMap,
+  coverageRefusal,
+  lostCoverage,
+  NO_ADMIN_MESSAGE,
   parseArgs,
   planKpiSettings,
   probeKpis,
   probeServiceEtp,
+  rebuildDecision,
+  removalRefusal,
+  removedCollections,
   renderAbsenceTypes,
+  renderOldSettings,
   renderPlan,
   renderProbe,
+  renderWritten,
   resolveOldValue,
+  RH_CURRENT_ANNOUNCE,
+  RH_REBUILD_ANNOUNCE,
+  RH_REBUILT_DONE,
+  RH_UP_TO_DATE_DONE,
   syncCounterLines,
   USAGE,
-  type OldValue,
+  waitBudget,
   type ParsedArgs,
   type SettingOrigin,
 } from "@/lib/admin/workspace-ops";
 import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
 import { ProviderError } from "@/lib/connectors/http";
-import { activeSync, applySync, getConnection, getSync, listSyncs, startSync, SYNC_STATUS_LABELS, SyncError, type SyncStatus, type SyncSummary } from "@/lib/connectors/sync";
+import { isMonth } from "@/lib/connectors/months";
+import { activeSync, applySync, getConnection, getSync, listSyncs, startSync, STALE_AFTER_MS, SYNC_STATUS_LABELS, SyncError, type SyncStatus, type SyncSummary } from "@/lib/connectors/sync";
 import type { CollectionOutcome } from "@/lib/connectors/types";
 import { formatDate } from "@/lib/dates";
+import { dsnCoverageIn } from "@/lib/dsn/import";
 import { axisOf, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
+import { buildContractServiceMap } from "@/lib/payroll/service-map";
 import { getPayrollGrid, getServiceAxis } from "@/lib/payroll-settings";
-import { getKpiSettings, KPI_KEYS, KPI_PARSERS, setKpiSettings, type KpiSettingValues } from "@/lib/rh-kpi-settings";
+import { getKpiSettings, KPI_KEYS, KPI_PARSERS, setKpiSettings, type KpiSettingKey, type KpiSettingValues } from "@/lib/rh-kpi-settings";
 import { getHeadcountNatures, getPayfitHistoryMode } from "@/lib/rh-settings";
 import { rawPayfitHistory } from "@/lib/rh/raw-history";
+import { RH_BUILDER_VERSION, rhInputsHash } from "@/lib/rh/referential/hash";
 import { ensureRhBuild, loadAbsencesOfSync, loadAbsenceTypes, loadPayrollOpenMonths, loadRhBuild, type RhBuildRow } from "@/lib/rh/referential/store";
-import { nd, type RhBuildData } from "@/lib/rh/referential/types";
+import { nd, type RhBuildData, type RhSource } from "@/lib/rh/referential/types";
 import type { AbsenceInput, KpiInput } from "@/lib/rh/kpi/types";
+import { setSetting } from "@/lib/settings";
 import { resolveSource } from "@/lib/sources";
 
 class AdminError extends Error {}
@@ -58,12 +76,13 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function resolveWorkspace(slug: string): Promise<Workspace> {
   const [ws] = await db.select().from(organization).where(eq(organization.slug, slug));
   if (!ws) throw new AdminError("Espace introuvable.");
-  const [admin] = await db.select().from(member).where(and(eq(member.organizationId, ws.id), eq(member.role, "admin"))).limit(1);
+  // Le plus ancien administrateur (création, puis identifiant) : l'acteur des écritures est stable d'une exécution à l'autre.
+  const [admin] = await db.select().from(member).where(and(eq(member.organizationId, ws.id), eq(member.role, "admin"))).orderBy(member.createdAt, member.id).limit(1);
   return { id: ws.id, adminId: admin?.userId ?? null };
 }
 
 function needAdmin(w: Workspace): string {
-  if (!w.adminId) throw new AdminError("Aucun administrateur dans cet espace : écriture refusée.");
+  if (!w.adminId) throw new AdminError(NO_ADMIN_MESSAGE);
   return w.adminId;
 }
 
@@ -88,11 +107,12 @@ async function rhSourceNote(wsId: string) {
 async function absenceTypes(w: Workspace): Promise<number> {
   const read = await activeAbsenceRead(w.id);
   const settings = await getKpiSettings(w.id);
-  log("Lecture PayFit active : types d'absence présents (codes seulement).");
+  log("Lecture PayFit active : types d'absence présents (codes seulement, aucun compteur).");
   await rhSourceNote(w.id);
   if (settings.origins.absenceTypes.origin === "invalid") log("Attention : le réglage des types d'absence retenus est illisible ; aucun code n'est retenu tant qu'il n'est pas réécrit.");
   const retained = settings.origins.absenceTypes.origin === "invalid" ? [] : settings.values.absenceTypes;
-  for (const line of renderAbsenceTypes(absenceTypeRows(read.types, retained))) log(line);
+  // Les compteurs de la lecture ne sont pas transmis : ils ne doivent jamais sortir (situations individuelles).
+  for (const line of renderAbsenceTypes(absenceTypeRows(read.types.map((t) => ({ type: t.type })), retained))) log(line);
   return 0;
 }
 
@@ -125,15 +145,25 @@ async function kpiSettings(w: Workspace, a: Args<"kpi-settings">): Promise<numbe
   }
   // Valeurs complètes : setKpiSettings n'écrit que les clés dont la valeur change, soit au plus les deux clés du plan.
   const next: KpiSettingValues = { ...settings.values, excludedExitNatures: [], absenceTypes: a.absenceTypes };
-  const written = await setKpiSettings(w.id, next, actor!);
+  const written: KpiSettingKey[] = await setKpiSettings(w.id, next, actor!);
+  // Décision explicite (valeur égale à la valeur par défaut) : setKpiSettings ne l'écrit jamais ; setSetting l'enregistre et la trace.
+  for (const row of plan.rows.filter((r) => r.explicit)) {
+    if (KPI_PARSERS[row.key](row.after) === null) throw new AdminError(`Valeur invalide pour ${KPI_KEYS[row.key]}.`);
+    await setSetting(w.id, KPI_KEYS[row.key], row.after, actor!);
+    written.push(row.key);
+  }
   const expected = [...plan.changedKeys].sort();
   if (JSON.stringify([...written].sort()) !== JSON.stringify(expected)) {
     console.error(`[admin] Écart entre le plan (${expected.join(", ") || "aucune clé"}) et les clés écrites (${written.join(", ") || "aucune clé"}).`);
     return 1;
   }
   const after = await getKpiSettings(w.id);
-  const ok = after.invalid.length === 0 && JSON.stringify(after.values.excludedExitNatures) === "[]" && JSON.stringify(after.values.absenceTypes) === JSON.stringify([...new Set(a.absenceTypes)].sort());
-  log(`Écrit : ${written.map((k) => KPI_KEYS[k]).join(", ")} (un événement d'audit par clé). Aucun autre réglage touché.`);
+  const ok =
+    after.invalid.length === 0 &&
+    JSON.stringify(after.values.excludedExitNatures) === "[]" &&
+    after.origins.excludedExitNatures.origin === "setting" &&
+    JSON.stringify(after.values.absenceTypes) === JSON.stringify([...new Set(a.absenceTypes)].sort());
+  for (const line of renderWritten(plan, (k) => KPI_KEYS[k])) log(line);
   if (!ok) {
     console.error("[admin] Relecture : les valeurs enregistrées ne correspondent pas au plan.");
     return 1;
@@ -145,7 +175,7 @@ async function kpiSettings(w: Workspace, a: Args<"kpi-settings">): Promise<numbe
 // --- pennylane-sync
 
 const POLL_MS = 3_000;
-const MAX_WAIT_MS = 14 * 60 * 1000; // en deçà du délai (15 minutes) après lequel une lecture est déclarée en échec
+const WAIT = waitBudget(STALE_AFTER_MS); // en deçà du délai après lequel une lecture est déclarée en échec
 
 async function pennylaneSync(w: Workspace, a: Args<"pennylane-sync">): Promise<number> {
   const actor = needAdmin(w);
@@ -158,10 +188,22 @@ async function pennylaneSync(w: Workspace, a: Args<"pennylane-sync">): Promise<n
   log(`Connexion Pennylane existante (statut ${connection.status}${connection.lastVerifiedAt ? `, vérifiée le ${instant.format(connection.lastVerifiedAt)}` : ""}). Lecture en GET seulement.`);
   log(`Période : ${a.from} → ${a.to} (${a.months.length} mois).`);
   if (pending) log(`Aperçu(s) Pennylane antérieur(s) en attente : ${pending} (non touchés). Les synchronisations PayFit ne sont jamais modifiées.`);
+  if (a.allowRemovals) log("Suppressions et retraits de mois autorisés (--allow-removals).");
+
+  // Garde-fou de --apply, avant toute lecture : les mois couverts par la lecture appliquée doivent rester dans la plage.
+  if (a.apply && !a.allowRemovals) {
+    const previous = await activeSync(w.id, "pennylane");
+    const scopeMonths = (previous?.scope as { months?: unknown } | undefined)?.months;
+    const lost = lostCoverage(previous ? { months: Array.isArray(scopeMonths) ? scopeMonths.filter(isMonth) : [], readAt: previous.finishedAt ?? previous.startedAt } : null, a.months);
+    if (lost.length) {
+      console.error(`[admin] ${coverageRefusal(lost)}`);
+      return 1;
+    }
+  }
 
   // startSync lance déjà la lecture (runSync, détaché) : l'appeler une seconde fois la doublerait ; on attend sa fin.
   const id = await startSync(w.id, "pennylane", a.months, actor);
-  const deadline = Date.now() + MAX_WAIT_MS;
+  const deadline = Date.now() + WAIT.maxWaitMs;
   let waited = 0;
   let row = await getSync(w.id, id);
   while (row && row.status === "running" && Date.now() < deadline) {
@@ -172,7 +214,7 @@ async function pennylaneSync(w: Workspace, a: Args<"pennylane-sync">): Promise<n
   }
   if (!row) throw new AdminError("Synchronisation introuvable après son lancement.");
   if (row.provider !== "pennylane") throw new AdminError("La synchronisation lancée n'est pas une synchronisation Pennylane : arrêt.");
-  if (row.status === "running") throw new AdminError("Lecture toujours en cours après 14 minutes : arrêt du script ; la lecture sera déclarée en échec au-delà de 15 minutes, relancer la commande.");
+  if (row.status === "running") throw new AdminError(`Lecture toujours en cours après ${WAIT.waitMinutes} minutes : arrêt du script ; la lecture sera déclarée en échec au-delà de ${WAIT.staleMinutes} minutes, relancer la commande.`);
 
   const label = SYNC_STATUS_LABELS[row.status as SyncStatus] ?? row.status;
   log(`Statut final : ${label}.`);
@@ -194,6 +236,12 @@ async function pennylaneSync(w: Workspace, a: Args<"pennylane-sync">): Promise<n
     log("Aperçu laissé en attente (sans --apply) : à appliquer depuis Données, ou en relançant avec --apply.");
     return 0;
   }
+  // Suppressions : l'aperçu reste en attente (rien n'est appliqué) sauf --allow-removals.
+  const removed = removedCollections(summary.diff);
+  if (removed.length && !a.allowRemovals) {
+    console.error(`[admin] ${removalRefusal(removed)}`);
+    return 1;
+  }
   // Seul l'aperçu Pennylane lancé ci-dessus est appliqué : applySync ne remplace que la lecture appliquée de son propre fournisseur.
   await applySync(w.id, id, actor);
   const after = await getSync(w.id, id);
@@ -203,15 +251,58 @@ async function pennylaneSync(w: Workspace, a: Args<"pennylane-sync">): Promise<n
 
 // --- probe
 
+// État du référentiel Collaborateurs sans rien écrire : même empreinte que ensureRhBuild (sonde et « à jour » de
+// src/lib/rh/referential/store.ts : lectures appliquées, version des règles). « current » : le build courant est à jour.
+type Peek = { kind: "current"; build: RhBuildRow } | { kind: "stale"; currentId: string | null };
+async function peekRhBuild(wsId: string, source: RhSource): Promise<Peek> {
+  return withWorkspace(wsId, async (tx): Promise<Peek> => {
+    const [current] = await tx.select().from(rhBuild).where(and(eq(rhBuild.source, source), eq(rhBuild.status, "current"))).limit(1);
+    const stale: Peek = { kind: "stale", currentId: current?.id ?? null };
+    let hash: string;
+    if (source === "payfit") {
+      const [sync] = await tx
+        .select({ id: sourceSync.id, contentHash: sourceSync.contentHash })
+        .from(sourceSync)
+        .where(and(eq(sourceSync.provider, "payfit"), eq(sourceSync.status, "applied")))
+        .orderBy(desc(sourceSync.decidedAt))
+        .limit(1);
+      if (!sync) return stale;
+      hash = rhInputsHash({ source, syncs: [{ id: sync.id, contentHash: sync.contentHash }] });
+    } else {
+      const syncs = await tx.select({ id: sourceSync.id, contentHash: sourceSync.contentHash }).from(sourceSync).where(and(eq(sourceSync.provider, "dsn"), eq(sourceSync.status, "applied")));
+      if (!syncs.length) return stale;
+      const coverage = await dsnCoverageIn(tx);
+      const selected = coverage.flatMap((r) => (r.status === "blocked" ? [] : r.selected.map((d) => ({ syncId: d.sourceId, key: d.key }))));
+      hash = rhInputsHash({ source, syncs, selected });
+    }
+    return current && current.inputsHash === hash && current.builderVersion === RH_BUILDER_VERSION ? { kind: "current", build: current } : stale;
+  });
+}
+
 // Entrée des calculs KPI, construite comme l'écran KPI RH (loadCollabContext puis loadKpiContext) sans session de requête.
-async function loadKpiInput(w: Workspace): Promise<{ input: KpiInput; source: string } | { refusal: string }> {
+// Un référentiel à jour est lu tel quel ; périmé ou absent, il est reconstruit (écriture, annoncée) sauf --no-rebuild.
+async function loadKpiInput(w: Workspace, noRebuild: boolean): Promise<{ input: KpiInput; source: string } | { refusal: string }> {
   const source = await resolveSource(w.id, "rh");
   const natures = await getHeadcountNatures(w.id);
   const chosen = source.chosen === "payfit" || source.chosen === "dsn" ? source.chosen : null;
   if (!chosen) return { refusal: "aucune source RH retenue" };
-  const state = await ensureRhBuild(w.id, chosen, w.adminId);
-  if (state.kind !== "ready") return { refusal: `référentiel Collaborateurs indisponible (${state.kind})` };
-  const stored = await loadRhBuild(w.id, state.build.id);
+  const peek = await peekRhBuild(w.id, chosen);
+  const current = peek.kind === "current" ? peek.build : null;
+  const decision = rebuildDecision({ current: current !== null, noRebuild, hasAdmin: w.adminId !== null });
+  if (decision.action === "refuse") return { refusal: decision.reason };
+  let build: RhBuildRow;
+  if (current && decision.action === "use-current") {
+    log(RH_CURRENT_ANNOUNCE);
+    if (current.unavailableReason) return { refusal: "référentiel Collaborateurs indisponible (unavailable)" };
+    build = current;
+  } else {
+    log(RH_REBUILD_ANNOUNCE);
+    const state = await ensureRhBuild(w.id, chosen, w.adminId);
+    log(peek.kind === "stale" && state.kind !== "none" && state.build.id === peek.currentId ? RH_UP_TO_DATE_DONE : RH_REBUILT_DONE);
+    if (state.kind !== "ready") return { refusal: `référentiel Collaborateurs indisponible (${state.kind})` };
+    build = state.build;
+  }
+  const stored = await loadRhBuild(w.id, build.id);
   let data: RhBuildData & { build: RhBuildRow } = stored;
   if (stored.build.source === "payfit" && (await getPayfitHistoryMode(w.id)).mode === "raw") data = rawPayfitHistory(stored);
   const settings = await getKpiSettings(w.id);
@@ -280,10 +371,8 @@ async function settingHistory(wsId: string, key: string): Promise<unknown[]> {
   return rows.map((r) => (r.detail as { value?: unknown }).value);
 }
 
-const OLD_SOURCE_TEXT: Record<OldValue["source"], string> = { option: "option de la commande", journal: "journal d'audit", introuvable: "introuvable dans le journal d'audit" };
-
 async function probe(w: Workspace, a: Args<"probe">): Promise<number> {
-  const loaded = await loadKpiInput(w);
+  const loaded = await loadKpiInput(w, a.noRebuild);
   if ("refusal" in loaded) {
     console.error(`[admin] Refus : ${loaded.refusal}.`);
     return 1;
@@ -295,7 +384,7 @@ async function probe(w: Workspace, a: Args<"probe">): Promise<number> {
 
   const oldExcl = resolveOldValue(a.oldExclusions, await settingHistory(w.id, KPI_KEYS.excludedExitNatures), input.params.excludedExitNatures, KPI_PARSERS.excludedExitNatures);
   const oldTypes = resolveOldValue(a.oldAbsenceTypes, await settingHistory(w.id, KPI_KEYS.absenceTypes), input.params.absenceTypes, KPI_PARSERS.absenceTypes);
-  log(`Anciens réglages : exclusions de sortie ${oldExcl.value ? `= ${oldExcl.value.join(", ") || "aucune"}` : "inconnues"} (${OLD_SOURCE_TEXT[oldExcl.source]}) ; types d'absence ${oldTypes.value ? `= ${oldTypes.value.join(", ") || "aucun"}` : "inconnus"} (${OLD_SOURCE_TEXT[oldTypes.source]}).`);
+  for (const line of renderOldSettings(oldExcl, oldTypes)) log(line);
 
   const kpi = probeKpis(input, a.months, a.window, { excludedExitNatures: oldExcl.value, absenceTypes: oldTypes.value });
   const service = probeServiceEtp({ kpi: input, journal, contractService, natures: natures.natures, overrides, months: a.months });

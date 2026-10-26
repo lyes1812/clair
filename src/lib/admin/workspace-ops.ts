@@ -2,16 +2,22 @@ import type { CategoryNatures, ContractCategories } from "@/lib/budget/categorie
 import { monthlyGrid, type EtpService, type RealSource } from "@/lib/budget/monthly";
 import { isMonth, monthRange } from "@/lib/connectors/months";
 import type { CollectionDiff } from "@/lib/connectors/sync";
-import { serviceOf, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
-import { classify, gridRubrics, type AccountGrid } from "@/lib/payroll/grid";
-import type { KpiSettingKey } from "@/lib/rh-kpi-settings";
+import type { JournalInput } from "@/lib/payroll/engine";
+import { pennylaneCoverage } from "@/lib/payroll/lot2";
+import { KPI_PARSERS, type KpiSettingKey } from "@/lib/rh-kpi-settings";
+import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import { absenteeism } from "@/lib/rh/kpi/absence";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
+import { etpProratedMonth } from "@/lib/rh/kpi/etp-prorata";
 import { turnover } from "@/lib/rh/kpi/turnover";
 import type { KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
 
-// Opérations d'administration d'un espace (scripts/workspace-admin.mts) : tout ce qui se décide sans base de données.
+export { buildContractServiceMap } from "@/lib/payroll/service-map";
+
+// Opérations d'administration d'un espace (scripts/workspace-admin.mts) : tout ce qui se décide sans lire ni écrire en base.
 // Le script ne fait que lire et écrire ; arguments, plans de modification, plages de mois et diagnostics sont ici.
+// Ce module importe pourtant les calculs de l'écran (budget/monthly, réglages KPI), donc le client de base : une DATABASE_URL
+// doit être définie à l'import (aucune connexion n'est ouverte).
 
 // --- Arguments
 
@@ -19,27 +25,45 @@ export type AdminCommand = "absence-types" | "kpi-settings" | "pennylane-sync" |
 const COMMANDS: AdminCommand[] = ["absence-types", "kpi-settings", "pennylane-sync", "probe"];
 const isCommand = (v: string): v is AdminCommand => (COMMANDS as string[]).includes(v);
 
+// Garde-fous de l'écran Données (launchSync, src/app/e/[slug]/donnees/actions.ts) : mois de fin au plus le mois courant de
+// Paris, 24 mois au plus. Ce fichier d'écran (« use server ») n'exporte que des fonctions asynchrones : les valeurs sont
+// reprises ici, et un test les compare au texte du fichier d'écran.
+export const SYNC_MAX_MONTHS = 24;
+export const SYNC_FUTURE_MESSAGE = "Le mois de fin ne peut pas être dans le futur.";
+export const syncMaxMonthsMessage = (): string => `${SYNC_MAX_MONTHS} mois au plus par lecture.`;
+const parisMonthFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit" });
+const parisDayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" });
+// Mois courant au calendrier de Paris (AAAA-MM).
+export const parisMonth = (now: Date = new Date()): string => parisMonthFormat.format(now);
+
 export const USAGE = [
   "Usage : workspace-admin.mts <commande> <slug-espace> [options]",
   "  absence-types <slug>",
+  "      lecture seule : codes présents et retenus, sans aucun compteur",
   "  kpi-settings <slug> --exclude-none --absence-types a,b,c [--dry-run]",
-  "  pennylane-sync <slug> --from AAAA-MM --to AAAA-MM [--apply]",
-  "  probe <slug> --months AAAA-MM,AAAA-MM [--old-exclusions 10,20] [--old-absence-types a,b]",
+  "      la liste vide des exclusions est enregistrée explicitement (événement d'audit) si la clé n'est pas déjà un réglage enregistré",
+  "  pennylane-sync <slug> --from AAAA-MM --to AAAA-MM [--apply [--allow-removals]]",
+  `      mois de fin au plus le mois courant (Paris), ${SYNC_MAX_MONTHS} mois au plus ; --apply refuse si des enregistrements sont supprimés ou si des mois couverts`,
+  "      par la lecture appliquée ne sont plus dans la plage, sauf --allow-removals",
+  "  probe <slug> --months AAAA-MM,AAAA-MM [--old-exclusions 10,20] [--old-absence-types a,b] [--no-rebuild]",
+  "      écrit si le référentiel Collaborateurs est périmé ou absent : reconstruction (tables rh_*, événement rh.rebuilt), annoncée dans la sortie",
+  "      et refusée sans administrateur ; --no-rebuild refuse au lieu de reconstruire. Une valeur par défaut n'est jamais journalisée :",
+  "      si un ancien réglage est introuvable, le fournir par --old-exclusions / --old-absence-types",
 ].join("\n");
 
 export type ParsedArgs =
   | { ok: false; error: string }
   | { ok: true; command: "absence-types"; slug: string }
   | { ok: true; command: "kpi-settings"; slug: string; excludeNone: true; absenceTypes: string[]; dryRun: boolean }
-  | { ok: true; command: "pennylane-sync"; slug: string; from: string; to: string; months: string[]; apply: boolean }
-  | { ok: true; command: "probe"; slug: string; months: string[]; window: string[]; oldExclusions: string[] | null; oldAbsenceTypes: string[] | null };
+  | { ok: true; command: "pennylane-sync"; slug: string; from: string; to: string; months: string[]; apply: boolean; allowRemovals: boolean }
+  | { ok: true; command: "probe"; slug: string; months: string[]; window: string[]; oldExclusions: string[] | null; oldAbsenceTypes: string[] | null; noRebuild: boolean };
 
 type FlagSpec = { values: string[]; switches: string[] };
 const SPECS: Record<AdminCommand, FlagSpec> = {
   "absence-types": { values: [], switches: [] },
   "kpi-settings": { values: ["absence-types"], switches: ["exclude-none", "dry-run"] },
-  "pennylane-sync": { values: ["from", "to"], switches: ["apply"] },
-  probe: { values: ["months", "old-exclusions", "old-absence-types"], switches: [] },
+  "pennylane-sync": { values: ["from", "to"], switches: ["apply", "allow-removals"] },
+  probe: { values: ["months", "old-exclusions", "old-absence-types"], switches: ["no-rebuild"] },
 };
 
 const SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
@@ -90,15 +114,16 @@ function tokenize(args: string[], spec: FlagSpec): Tokens | string {
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
-// Liste de codes séparés par des virgules : aucun segment vide ; triée et dédoublonnée comme dans les réglages enregistrés.
+// Liste de codes séparés par des virgules : aucun segment vide. La validation, le tri et le dédoublonnage sont ceux des
+// réglages enregistrés (KPI_PARSERS) : une liste acceptée ici est lisible par l'écran KPI.
 export function parseCodeList(raw: string, option: string, kind: "absence" | "nature"): Parsed<string[]> {
   const parts = raw.split(",").map((p) => p.trim());
   if (parts.some((p) => p === "")) return { ok: false, error: `${option} : liste vide ou virgule en trop.` };
-  const valid = (c: string) => (kind === "nature" ? /^\d{2}$/.test(c) : c.length <= 128 && !/\s/.test(c));
-  if (!parts.every(valid)) {
+  const parsed = (kind === "nature" ? KPI_PARSERS.excludedExitNatures : KPI_PARSERS.absenceTypes)(parts);
+  if (parsed === null) {
     return { ok: false, error: kind === "nature" ? `${option} : codes de nature à deux chiffres attendus.` : `${option} : codes sans espace, de 128 caractères au plus.` };
   }
-  return { ok: true, value: sortedUnique(parts) };
+  return { ok: true, value: parsed };
 }
 
 // Liste de mois AAAA-MM séparés par des virgules, triée et dédoublonnée.
@@ -108,16 +133,21 @@ export function parseMonthList(raw: string, option: string): Parsed<string[]> {
   return { ok: true, value: sortedUnique(parts) };
 }
 
-// Plage de mois inclusive ; refus si un bout est invalide ou si la plage est vide (début après fin).
-export function parseMonthRange(from: string, to: string): Parsed<string[]> {
+// Plage de mois inclusive ; refus si un bout est invalide, si la plage est vide (début après fin), si le mois de fin est
+// postérieur au mois courant de Paris ou si elle dépasse SYNC_MAX_MONTHS : mêmes règles et mêmes messages que l'écran Données.
+export function parseMonthRange(from: string, to: string, now: Date = new Date()): Parsed<string[]> {
   if (!isMonth(from)) return { ok: false, error: "--from : mois au format AAAA-MM attendu." };
   if (!isMonth(to)) return { ok: false, error: "--to : mois au format AAAA-MM attendu." };
-  const months = monthRange(from, to);
-  if (!months.length) return { ok: false, error: "Plage de mois vide : --from doit précéder ou égaler --to." };
-  return { ok: true, value: months };
+  if (from > to) return { ok: false, error: "Plage de mois vide : --from doit précéder ou égaler --to." };
+  if (to > parisMonth(now)) return { ok: false, error: SYNC_FUTURE_MESSAGE };
+  // Nombre de mois compté avant de construire la plage : aucune liste démesurée n'est produite avant le refus.
+  const [fy, fm] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  if ((ty - fy) * 12 + (tm - fm) + 1 > SYNC_MAX_MONTHS) return { ok: false, error: syncMaxMonthsMessage() };
+  return { ok: true, value: monthRange(from, to) };
 }
 
-export function parseArgs(argv: string[]): ParsedArgs {
+export function parseArgs(argv: string[], now: Date = new Date()): ParsedArgs {
   const [command, ...rest] = argv;
   if (!command) return fail("Commande manquante.");
   if (!isCommand(command)) return fail(`Commande inconnue : ${short(command)}.`);
@@ -146,9 +176,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const to = need("to");
     if (from === null) return fail("--from est obligatoire (AAAA-MM).");
     if (to === null) return fail("--to est obligatoire (AAAA-MM).");
-    const range = parseMonthRange(from, to);
+    const range = parseMonthRange(from, to, now);
     if (!range.ok) return fail(range.error);
-    return { ok: true, command, slug, from, to, months: range.value, apply: switches.has("apply") };
+    if (switches.has("allow-removals") && !switches.has("apply")) return fail("--allow-removals ne s'utilise qu'avec --apply.");
+    return { ok: true, command, slug, from, to, months: range.value, apply: switches.has("apply"), allowRemovals: switches.has("allow-removals") };
   }
 
   const rawMonths = need("months");
@@ -164,7 +195,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   // Les indicateurs de période couvrent du premier au dernier mois indiqués, mois intermédiaires compris.
   const first = months.value[0];
   const last = months.value[months.value.length - 1];
-  return { ok: true, command: "probe", slug, months: months.value, window: monthRange(first, last), oldExclusions: excl ? excl.value : null, oldAbsenceTypes: types ? types.value : null };
+  return { ok: true, command: "probe", slug, months: months.value, window: monthRange(first, last), oldExclusions: excl ? excl.value : null, oldAbsenceTypes: types ? types.value : null, noRebuild: switches.has("no-rebuild") };
 }
 
 // --- Réglages KPI : plan avant / après
@@ -176,7 +207,8 @@ export const KPI_ADMIN_LABELS: Record<KpiAdminKey, string> = {
   absenceTypes: "Types d'absence retenus pour l'absentéisme",
 };
 export type SettingOrigin = "default" | "setting" | "invalid";
-export type KpiPlanRow = { key: KpiAdminKey; label: string; before: string[]; after: string[]; origin: SettingOrigin; changed: boolean };
+// explicit : valeur identique à la valeur en vigueur, mais à enregistrer quand même (décision de l'administration, clé pas encore enregistrée).
+export type KpiPlanRow = { key: KpiAdminKey; label: string; before: string[]; after: string[]; origin: SettingOrigin; changed: boolean; explicit: boolean };
 export type KpiPlan =
   | { ok: true; rows: KpiPlanRow[]; changedKeys: KpiAdminKey[] }
   | { ok: false; error: string; unknownCodes: string[]; blockedKeys: string[] };
@@ -184,6 +216,8 @@ export type KpiPlan =
 // Décisions de Lyes : aucune exclusion de nature de sortie ; types d'absence = liste explicite, chaque code présent dans la
 // lecture. setKpiSettings réécrit à sa valeur par défaut tout réglage illisible : si un autre réglage que ces deux-là l'est,
 // le plan est refusé plutôt que de le toucher. Les valeurs sont des codes de configuration, jamais des données de personnes.
+// « Aucune exclusion » est une décision, pas seulement un défaut : tant que la clé n'est pas un réglage enregistré, la liste vide
+// est enregistrée explicitement (le script passe par setSetting, setKpiSettings n'écrivant jamais une valeur égale au défaut).
 export function planKpiSettings(a: {
   current: Record<KpiAdminKey, string[]>;
   origins: Record<string, SettingOrigin>;
@@ -217,9 +251,11 @@ export function planKpiSettings(a: {
   const rows: KpiPlanRow[] = KPI_ADMIN_KEYS.map((key) => {
     const origin = a.origins[key] ?? "default";
     const before = sortedUnique(a.current[key]);
-    // Une valeur illisible est toujours réécrite par setKpiSettings ; sinon seule une valeur différente l'est.
-    const changed = origin === "invalid" || JSON.stringify(before) !== JSON.stringify(after[key]);
-    return { key, label: KPI_ADMIN_LABELS[key], before, after: after[key], origin, changed };
+    const same = JSON.stringify(before) === JSON.stringify(after[key]);
+    const explicit = key === "excludedExitNatures" && origin === "default" && same;
+    // Une valeur illisible est toujours réécrite par setKpiSettings ; sinon seule une valeur différente l'est ; à part la décision explicite.
+    const changed = origin === "invalid" || !same || explicit;
+    return { key, label: KPI_ADMIN_LABELS[key], before, after: after[key], origin, changed, explicit };
   });
   return { ok: true, rows, changedKeys: rows.filter((r) => r.changed).map((r) => r.key) };
 }
@@ -233,30 +269,38 @@ export function renderPlan(plan: Extract<KpiPlan, { ok: true }>, keyName: (k: Kp
     out.push(`${r.label} (${keyName(r.key)})`);
     out.push(`  avant : ${r.origin === "invalid" ? "illisible (réécrit par la commande)" : `${formatList(r.before)} (${ORIGIN_TEXT[r.origin]})`}`);
     out.push(`  après : ${formatList(r.after)}`);
-    out.push(`  ${r.changed ? "à écrire" : "inchangé, rien à écrire"}`);
+    out.push(`  ${r.explicit ? "à enregistrer explicitement (valeur égale à la valeur par défaut : la décision est enregistrée et tracée, la clé n'étant pas encore un réglage enregistré)" : r.changed ? "à écrire" : "inchangé, rien à écrire"}`);
+  }
+  return out;
+}
+
+// Sortie après écriture : clés écrites, et décisions enregistrées explicitement.
+export function renderWritten(plan: Extract<KpiPlan, { ok: true }>, keyName: (k: KpiAdminKey) => string): string[] {
+  const out = [`Écrit : ${plan.changedKeys.map(keyName).join(", ")} (un événement d'audit par clé). Aucun autre réglage touché.`];
+  for (const r of plan.rows) {
+    if (r.explicit) out.push(`  ${r.label} : ${formatList(r.after)}, enregistrée explicitement (liste identique à la valeur par défaut, désormais un réglage enregistré et tracé dans le journal d'audit).`);
   }
   return out;
 }
 
 // --- Types d'absence de la lecture active
 
-export type AbsenceTypeRow = { type: string; count: number; chosen: boolean; inRead: boolean; retainable: boolean };
+// Aucun compteur : un effectif faible par code (maternité, longue maladie) révélerait une situation individuelle dans la
+// sortie du terminal, donc dans des journaux. Seuls « présent » et « retenu » sortent ; un éventuel count de la lecture est ignoré.
+export type AbsenceTypeRow = { type: string; chosen: boolean; inRead: boolean; retainable: boolean };
 
-// Un code ne peut être retenu que sans espace et en 128 caractères au plus (règle de lecture des réglages).
-const retainable = (type: string) => type.length > 0 && type.length <= 128 && !/\s/.test(type);
+// Un code ne peut être retenu que s'il est lisible comme réglage (KPI_PARSERS : sans espace, 128 caractères au plus).
+const retainable = (type: string) => KPI_PARSERS.absenceTypes([type]) !== null;
 
-export function absenceTypeRows(read: { type: string; count: number }[], chosen: string[]): AbsenceTypeRow[] {
-  const counts = new Map(read.map((r) => [r.type, r.count]));
-  const types = sortedUnique([...counts.keys(), ...chosen]);
-  return types.map((type) => ({ type, count: counts.get(type) ?? 0, chosen: chosen.includes(type), inRead: counts.has(type), retainable: retainable(type) }));
+export function absenceTypeRows(read: { type: string; count?: number }[], chosen: string[]): AbsenceTypeRow[] {
+  const present = new Set(read.map((r) => r.type));
+  const types = sortedUnique([...present, ...chosen]);
+  return types.map((type) => ({ type, chosen: chosen.includes(type), inRead: present.has(type), retainable: retainable(type) }));
 }
 
 export function renderAbsenceTypes(rows: AbsenceTypeRow[]): string[] {
   if (!rows.length) return ["Aucun type d'absence dans la lecture active."];
-  return rows.map((r) => {
-    const n = r.inRead ? `${r.count} absence(s)` : "absent de la lecture";
-    return `  ${r.type} : ${n} · retenu : ${r.chosen ? "oui" : "non"}${r.retainable ? "" : " · non retenable (espace ou plus de 128 caractères)"}`;
-  });
+  return rows.map((r) => `  ${r.type} : ${r.inRead ? "présent" : "absent de la lecture"} · retenu : ${r.chosen ? "oui" : "non"}${r.retainable ? "" : " · non retenable (espace ou plus de 128 caractères)"}`);
 }
 
 // --- Synchronisation : compteurs par collection (nombres seulement)
@@ -264,7 +308,45 @@ export function renderAbsenceTypes(rows: AbsenceTypeRow[]): string[] {
 export function syncCounterLines(diff: Record<string, CollectionDiff> | undefined): string[] {
   const entries = Object.entries(diff ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   if (!entries.length) return ["  aucun compteur par collection"];
-  return entries.map(([c, d]) => `  ${/^[a-z0-9_]{1,40}$/.test(c) ? c : "collection"} : ${d.total} au total, ${d.added} ajouté(s), ${d.changed} modifié(s), ${d.removed} supprimé(s)`);
+  return entries.map(([c, d]) => `  ${collectionName(c)} : ${d.total} au total, ${d.added} ajouté(s), ${d.changed} modifié(s), ${d.removed} supprimé(s)`);
+}
+
+// --- Garde-fous de --apply (sauf --allow-removals) : suppressions et mois couverts qui disparaîtraient
+
+const collectionName = (c: string) => (/^[a-z0-9_]{1,40}$/.test(c) ? c : "collection");
+
+// Collections dont le compteur « supprimé(s) » est non nul (nombres seulement), triées.
+export function removedCollections(diff: Record<string, CollectionDiff> | undefined): { collection: string; removed: number }[] {
+  return Object.entries(diff ?? {})
+    .filter(([, d]) => d.removed > 0)
+    .map(([c, d]) => ({ collection: collectionName(c), removed: d.removed }))
+    .sort((a, b) => (a.collection < b.collection ? -1 : a.collection > b.collection ? 1 : 0));
+}
+
+export function removalRefusal(list: { collection: string; removed: number }[]): string {
+  const total = list.reduce((s, x) => s + x.removed, 0);
+  return `--apply refusé : ${total} enregistrement(s) supprimé(s) par rapport à la lecture appliquée (${list.map((x) => `${x.collection} : ${x.removed}`).join(", ")}). L'aperçu reste en attente, à examiner dans Données ; --allow-removals l'applique malgré tout.`;
+}
+
+// Mois couverts par la lecture Pennylane appliquée (ceux que la couverture comptable retient : mois terminés à la date de lecture,
+// au calendrier de Paris, voir pennylaneCoverage) qui ne sont plus dans la plage demandée : ils disparaîtraient de la couverture.
+// Les mois que cette lecture déclarait déjà n.d. (mois non terminé à la lecture) n'y comptent pas.
+export function lostCoverage(previous: { months: string[]; readAt: Date } | null, requested: string[]): string[] {
+  if (!previous) return [];
+  const wanted = new Set(requested);
+  return pennylaneCoverage(previous.months, parisDayFormat.format(previous.readAt)).months.filter((m) => !wanted.has(m));
+}
+
+export function coverageRefusal(lost: string[]): string {
+  return `--apply refusé : la plage demandée ne couvre pas ${lost.length} mois couvert(s) par la lecture Pennylane appliquée (${lost.join(", ")}) ; ils disparaîtraient de la couverture comptable. Étendre la plage, ou --allow-removals pour l'accepter.`;
+}
+
+// Délai d'attente d'une lecture : une minute en deçà du délai (STALE_AFTER_MS, src/lib/connectors/sync.ts) après lequel une
+// lecture est déclarée en échec.
+export const WAIT_MARGIN_MS = 60_000;
+export function waitBudget(staleAfterMs: number): { maxWaitMs: number; waitMinutes: number; staleMinutes: number } {
+  const maxWaitMs = staleAfterMs - WAIT_MARGIN_MS;
+  return { maxWaitMs, waitMinutes: Math.floor(maxWaitMs / 60_000), staleMinutes: Math.floor(staleAfterMs / 60_000) };
 }
 
 // --- Diagnostic structurel : jamais de montant, d'effectif, de taux ni de nom
@@ -288,12 +370,16 @@ export type ProbeOld = { excludedExitNatures: string[] | null; absenceTypes: str
 export type KpiProbe = {
   window: { from: string; to: string; months: number };
   etpEnd: { month: string; cell: ProbeCell }[];
+  etpProrated: { month: string; cell: ProbeCell }[];
   turnover: { current: ProbeCell; old: ProbeCell | null; order: Order | null };
   absenteeism: { current: ProbeCell; old: ProbeCell | null; order: Order | null };
+  // Absentéisme par motif sur la fenêtre : une cellule par ligne (dans l'ordre des motifs, sans leur code) et celle du taux tous motifs.
+  motifs: { lines: ProbeCell[]; all: ProbeCell };
 };
 
-// Mêmes fonctions que les écrans (etpMonthEnd, turnover, absenteeism) ; seuls le genre et le code n.d. sortent. L'ancien
-// réglage est recalculé sur une copie de l'entrée (le mémo des calculs est indexé par l'objet d'entrée).
+// Mêmes fonctions que les écrans (etpMonthEnd, etpProratedMonth, turnover, absenteeism, absenceByMotif) ; seuls le genre et le
+// code n.d. sortent, jamais une valeur, un effectif ou un taux. L'ancien réglage est recalculé sur une copie de l'entrée
+// (le mémo des calculs est indexé par l'objet d'entrée).
 export function probeKpis(input: KpiInput, months: string[], windowMonths: string[], old: ProbeOld): KpiProbe {
   const from = windowMonths[0];
   const to = windowMonths[windowMonths.length - 1];
@@ -303,11 +389,14 @@ export function probeKpis(input: KpiInput, months: string[], windowMonths: strin
   const tOld = old.excludedExitNatures ? turnover(withParams({ excludedExitNatures: old.excludedExitNatures }), w) : null;
   const a = absenteeism(input, w);
   const aOld = old.absenceTypes ? absenteeism(withParams({ absenceTypes: old.absenceTypes }), w) : null;
+  const motifs = absenceByMotif(input, w);
   return {
     window: { from, to, months: windowMonths.length },
     etpEnd: months.map((month) => ({ month, cell: probeCell(etpMonthEnd(input, month)) })),
+    etpProrated: months.map((month) => ({ month, cell: probeCell(etpProratedMonth(input, month)) })),
     turnover: { current: probeCell(t), old: tOld && probeCell(tOld), order: tOld && orderOf(t, tOld) },
     absenteeism: { current: probeCell(a), old: aOld && probeCell(aOld), order: aOld && orderOf(a, aOld) },
+    motifs: { lines: motifs.lines.map(probeCell), all: probeCell(motifs.all) },
   };
 }
 
@@ -328,27 +417,40 @@ export function resolveOldValue(option: string[] | null, newestFirst: unknown[],
   return found ? { value: found, source: "journal" } : { value: null, source: "introuvable" };
 }
 
+const OLD_SOURCE_TEXT: Record<OldValue["source"], string> = { option: "option de la commande", journal: "journal d'audit", introuvable: "introuvable dans le journal d'audit" };
+
+// Anciens réglages (codes de configuration) ; quand l'un est introuvable, la sortie dit comment le fournir.
+export function renderOldSettings(exclusions: OldValue, absenceTypes: OldValue): string[] {
+  const out = [
+    `Anciens réglages : exclusions de sortie ${exclusions.value ? `= ${exclusions.value.join(", ") || "aucune"}` : "inconnues"} (${OLD_SOURCE_TEXT[exclusions.source]}) ; types d'absence ${absenceTypes.value ? `= ${absenceTypes.value.join(", ") || "aucun"}` : "inconnus"} (${OLD_SOURCE_TEXT[absenceTypes.source]}).`,
+  ];
+  if (exclusions.source === "introuvable") out.push("  Exclusions de sortie introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-exclusions.");
+  if (absenceTypes.source === "introuvable") out.push("  Types d'absence introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-absence-types.");
+  return out;
+}
+
+// --- Référentiel Collaborateurs de la sonde : reconstruit s'il est périmé (écriture), sauf --no-rebuild
+
+export const RH_REBUILD_REFUSAL = "référentiel périmé ou absent : ouvrir l'écran Collaborateurs";
+export const RH_NO_ADMIN_REFUSAL = "aucun administrateur dans cet espace : reconstruction du référentiel Collaborateurs (écriture) refusée";
+export const RH_REBUILD_ANNOUNCE = "Référentiel Collaborateurs périmé ou absent : reconstruction en cours (écriture dans les tables rh_* et événement rh.rebuilt, acteur : administrateur de l'espace).";
+export const RH_CURRENT_ANNOUNCE = "Référentiel Collaborateurs à jour : utilisé tel quel, non reconstruit.";
+export const RH_REBUILT_DONE = "Référentiel Collaborateurs reconstruit : écriture effectuée (tables rh_*, événement rh.rebuilt).";
+export const RH_UP_TO_DATE_DONE = "Référentiel Collaborateurs déjà à jour à la reconstruction : aucune écriture.";
+export const NO_ADMIN_MESSAGE = "Aucun administrateur dans cet espace : écriture refusée.";
+export type RebuildDecision = { action: "use-current" } | { action: "rebuild" } | { action: "refuse"; reason: string };
+
+// Un référentiel à jour est utilisé sans rien écrire ; sinon reconstruction (annoncée), refusée avec --no-rebuild et sans administrateur.
+export function rebuildDecision(a: { current: boolean; noRebuild: boolean; hasAdmin: boolean }): RebuildDecision {
+  if (a.current) return { action: "use-current" };
+  if (a.noRebuild) return { action: "refuse", reason: RH_REBUILD_REFUSAL };
+  if (!a.hasAdmin) return { action: "refuse", reason: RH_NO_ADMIN_REFUSAL };
+  return { action: "rebuild" };
+}
+
 // --- ETP par service (même chemin que l'écran Effectifs mensuels)
 
-// Service d'un contrat pour un mois : celui de ses lignes de brut, à défaut de ses autres lignes de charges de personnel ;
-// les contreparties (42/43…) ne comptent pas. Sans ligne : absent de la table (non ventilé). Même règle que
-// src/lib/payroll/context.ts, dont le chargeur dépend d'une requête web.
-export function buildContractServiceMap(lines: LedgerLine[], grid: AccountGrid, axis: string): Map<string, string | null> {
-  const map = new Map<string, string | null>();
-  const rank = new Map<string, number>();
-  const rubrics = gridRubrics(grid);
-  for (const l of lines) {
-    if (!l.contractId) continue;
-    const c = classify(l.accountId, rubrics);
-    const r = c.rubric?.role === "brut" ? 2 : c.rubric || c.payroll ? 1 : 0;
-    const k = `${l.month}|${l.contractId}`;
-    if (r > (rank.get(k) ?? 0)) {
-      rank.set(k, r);
-      map.set(k, serviceOf(l, axis));
-    }
-  }
-  return map;
-}
+// Table « service d'un contrat par mois » : buildContractServiceMap (src/lib/payroll/service-map.ts), même fonction que l'écran.
 
 export type ServiceProbeMonth = { month: string; cell: ProbeCell; sumEqualsTotal: boolean | null };
 
@@ -406,6 +508,8 @@ export function renderProbe(a: { months: string[]; service: ServiceProbeMonth[];
     const sv = a.service.find((x) => x.month === m);
     out.push(`Mois ${m}`);
     out.push(`  ETP fin de mois : ${etp ? probeCellText(etp.cell) : "non calculé"}`);
+    const pr = a.kpi.etpProrated.find((x) => x.month === m);
+    out.push(`  ETP proratisé : ${pr ? probeCellText(pr.cell) : "non calculé"}`);
     out.push(`  ETP par service : ${sv ? probeCellText(sv.cell) : "non calculé"}${sv && sv.sumEqualsTotal !== null ? ` ; somme des services égale à l'ETP fin de mois : ${yn(sv.sumEqualsTotal)}` : ""}`);
   }
   out.push(`Fenêtre des indicateurs de période : ${a.kpi.window.from} → ${a.kpi.window.to} (${a.kpi.window.months} mois)`);
@@ -416,5 +520,9 @@ export function renderProbe(a: { months: string[]; service: ServiceProbeMonth[];
   };
   block("Turnover", a.kpi.turnover, "anciennes exclusions de sortie");
   block("Absentéisme", a.kpi.absenteeism, "anciens types d'absence");
+  out.push(`Absentéisme par motif (fenêtre ${a.kpi.window.from} → ${a.kpi.window.to})`);
+  out.push(`  Lignes de motif : ${a.kpi.motifs.lines.length}`);
+  a.kpi.motifs.lines.forEach((c, i) => out.push(`  ligne ${i + 1} : ${probeCellText(c)}`));
+  out.push(`  Taux tous motifs : ${probeCellText(a.kpi.motifs.all)}`);
   return out;
 }

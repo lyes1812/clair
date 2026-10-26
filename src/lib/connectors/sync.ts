@@ -22,7 +22,7 @@ export const SYNC_STATUS_LABELS: Record<SyncStatus, string> = {
   unchanged: "Aucun changement",
 };
 
-const STALE_AFTER_MS = 15 * 60 * 1000;
+export const STALE_AFTER_MS = 15 * 60 * 1000;
 
 export type CollectionDiff = { total: number; added: number; changed: number; removed: number };
 export type SyncSummary = {

@@ -106,8 +106,11 @@ describe("Glossaire « Données » : entrées déplacées depuis les écrans", (
       [DONNEES_TERMS.sortiesNonComptees, "PayFit ne le fournit pas"],
       [DONNEES_TERMS.sortiesNonComptees, "Aucune nature cochée : toutes les sorties comptent"],
       [DONNEES_TERMS.absenceTypes, "en DSN, les arrêts ne sont pas extraits"],
+      [DONNEES_TERMS.absenceTypes, "À défaut de choix enregistré, c'est la valeur par défaut validée qui s'applique (son origine est indiquée dans Paramètres)"],
+      [DONNEES_TERMS.absenceTypes, "l'administrateur coche explicitement les motifs à compter"],
       [DONNEES_TERMS.absenceStatuts, "le taux d'absentéisme devient alors « ≥ x »"],
       [DONNEES_TERMS.absenceBase, "Aucun jour férié n'est connu"],
+      [DONNEES_TERMS.absenceBase, "La même base sert aussi au prorata de l'ETP proratisé"],
       [DONNEES_TERMS.grille, "641 brut (dont primes 6413, gratifications de stage 64137"],
       [DONNEES_TERMS.grille, "la rubrique dont un préfixe est le plus long"],
       [DONNEES_TERMS.axeService, "le seul axe présent dans le journal"],
@@ -121,6 +124,17 @@ describe("Glossaire « Données » : entrées déplacées depuis les écrans", (
       [DONNEES_TERMS.bdese, "chapitre 07 est abrégé"],
     ];
     for (const [id, phrase] of repere) expect(glossaryEntry(id)!.definition, `${id} : ${phrase}`).toContain(phrase);
+  });
+
+  it("motifs d'absence : le glossaire parle de « motifs retenus » sans nommer aucun motif, et la base des jours renvoie à l'ETP proratisé", () => {
+    const types = glossaryEntry(DONNEES_TERMS.absenceTypes)!;
+    expect(types.term).toBe("Paramètre : motifs d'absence retenus");
+    expect(`${types.term} ${types.definition}`).not.toMatch(/fr_maladie_ordinaire|maladie|accident|congé|RTT/i);
+    expect(`${types.term} ${types.definition}`).not.toMatch(/\btypes?\b/i); // vocabulaire : « motifs »
+    expect(types.definition).not.toContain("par défaut : maladie");
+    const base = glossaryEntry(DONNEES_TERMS.absenceBase)!;
+    expect(base.see).toEqual(["absenteeism", "etp-prorated"]);
+    for (const s of base.see ?? []) expect(glossaryEntry(s), s).toBeDefined();
   });
 
   it("français de produit : ni vocabulaire interne, ni tutoiement, ni valeur mal formée", () => {
@@ -263,17 +277,17 @@ describe("Données : écrans sans narratif, avec renvoi au glossaire", () => {
     expect(html.match(/data-testid="setting-kpi-absence-types"/g)).toHaveLength(2);
     expect(html).toContain('data-testid="setting-kpi-types-missing"');
     expect(html).toContain('data-testid="setting-kpi-defaults-etp"');
-    expect(html).toContain("Types de la lecture du 21/10/2026.");
+    expect(html).toContain("Motifs de la lecture du 21/10/2026.");
     expect(html).toContain("Un contrat à temps plein vaut 1 ETP, quelle que soit sa durée");
     // Le « ? » reste hors du libellé qui nomme le groupe (aria-labelledby).
-    expect(html).toMatch(/<span class="pm-item-title" id="kpi-types-title">Types d&#x27;absence comptés<\/span><a /);
+    expect(html).toMatch(/<span class="pm-item-title" id="kpi-types-title">Motifs retenus pour l&#x27;absentéisme<\/span><a /);
     for (const gone of ["S21.G00", "Le motif DSN", "arrondie avant la somme", "jour férié", "sans statut n'est jamais", "J+1"]) expect(html, gone).not.toContain(gone);
 
     // Les libellés restent exacts : le forfait jours dit ses deux conditions, la limite DSN reste dite sans lecture PayFit.
     expect(html).toContain("PayFit : un contrat au forfait jours sans quotité ni indicateur « temps plein » vaut 1 ETP");
     const sans = renderToStaticMarkup(h(KpiForm, { ...props, readLabel: null, helps: undefined, disabled: true }));
     expect(sans).toContain('data-testid="setting-kpi-types-empty"');
-    expect(sans).toContain("Aucune lecture PayFit appliquée : aucun type à choisir.");
+    expect(sans).toContain("Aucune lecture PayFit appliquée : aucun motif à choisir.");
     expect(sans).toContain("DSN : arrêts non extraits.");
     expect(sans).not.toContain("glossaire#");
     expect(sans).not.toContain('data-testid="setting-kpi-save"'); // formulaire en lecture seule

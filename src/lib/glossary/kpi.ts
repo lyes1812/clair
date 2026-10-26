@@ -140,7 +140,7 @@ export const GLOSSARY_KPI: GlossaryEntry[] = [
     family: "KPI RH",
     see: ["absenteeism", "absence-par-motif"],
     definition: [
-      "Motifs retenus : motifs d'absence PayFit que l'espace a cochés explicitement dans Paramètres › Définitions des KPI ; seuls leurs jours entrent dans la tuile Absentéisme. Aucun motif n'est retenu d'office : le calcul ne reconnaît aucun motif par son nom.",
+      "Motifs retenus : motifs d'absence PayFit dont les jours entrent dans la tuile Absentéisme. À défaut de choix enregistré, la valeur par défaut validée s'applique (son origine est indiquée dans Paramètres) ; l'administrateur coche explicitement les motifs à compter dans Paramètres › Définitions des KPI ; le calcul ne reconnaît aucun motif par son nom.",
       "Non retenus : motifs lus dans PayFit mais non cochés. Ils restent visibles dans le détail de l'absentéisme, avec leur propre taux.",
       "Retenus absents de la lecture : aucune absence de ce motif n'a été lue, ils ne comptent aucun jour.",
       "Entre parenthèses : nombre d'absences dans toute la lecture, tous mois et tous contrats. Un motif sans libellé français est affiché tel que reçu de PayFit.",

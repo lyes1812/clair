@@ -300,8 +300,9 @@ describe("écran KPI RH : assemblage (lecture du code de la page)", () => {
     expect(page).toContain('label={`ETP contractuel fin ${monthLabel(w.to)}`}');
     expect(page).toContain('"etp-prorated": ETP_PRORATED_LABEL');
   });
-  it("colonne « ETP proratisé » après « ETP fin de mois », détail cliquable de chaque mois, aucune valeur de période", () => {
-    expect(page.indexOf('<th className="num wrap">ETP fin de mois</th>')).toBeLessThan(page.indexOf('<th className="num wrap">ETP proratisé</th>'));
+  it("colonne « ETP proratisé — quotité actuelle » après « ETP fin de mois », détail cliquable de chaque mois, aucune valeur de période", () => {
+    expect(page.indexOf('<th className="num wrap">ETP fin de mois</th>')).toBeLessThan(page.indexOf('<th className="num wrap">ETP proratisé — quotité actuelle</th>'));
+    expect(page).not.toContain('<th className="num wrap">ETP proratisé</th>');
     expect(page).toContain('href={detailHref("etp-prorated", r.month)}');
     expect(page).toContain('<td data-col="etp-prorated" />');
     expect(page).toContain('detail.id === "etp-prorated" && <EtpProratedDetail');
@@ -415,7 +416,11 @@ describe("glossaire : ETP proratisé, taux tous motifs, absentéisme (lot 11)", 
   it("motifs retenus : terme et définition à jour (nombre d'absences de la lecture, motif sans libellé affiché tel que reçu)", () => {
     const e = entry("kpi-types-absence");
     expect(e.term).toBe("Motifs retenus pour l'absentéisme");
-    expect(e.definition).toContain("Aucun motif n'est retenu d'office");
+    // Cohérent avec « Absentéisme » : à défaut de choix enregistré, la valeur par défaut validée s'applique (aucune contradiction).
+    expect(e.definition).toContain("À défaut de choix enregistré, la valeur par défaut validée s'applique (son origine est indiquée dans Paramètres)");
+    expect(e.definition).toContain("l'administrateur coche explicitement les motifs à compter");
+    expect(e.definition).not.toContain("d'office");
+    expect(entry("absenteeism").definition).toContain("la valeur par défaut validée s'applique (son origine est indiquée dans Paramètres)");
     expect(e.definition).toContain("nombre d'absences dans toute la lecture");
     expect(e.definition).toContain("affiché tel que reçu de PayFit");
   });

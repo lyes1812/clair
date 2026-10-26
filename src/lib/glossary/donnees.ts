@@ -209,12 +209,12 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
   },
   {
     id: DONNEES_TERMS.absenceTypes,
-    term: "Paramètre : types d'absence comptés",
+    term: "Paramètre : motifs d'absence retenus",
     family: FAMILY,
     see: ["kpi-types-absence", "absenteeism"],
     definition: [
-      "Types d'absence PayFit dont les jours entrent dans l'absentéisme. Les types proposés sont ceux de la dernière lecture PayFit appliquée, avec leur nombre d'absences ; un type compté mais absent de la lecture est signalé « sans effet ». Un type sans libellé français est affiché tel que reçu de PayFit, avec son code.",
-      "Type compté par défaut : maladie ordinaire (fr_maladie_ordinaire). Aucun type choisi : l'absentéisme est n.d. Aucune lecture PayFit appliquée : les types ne peuvent pas encore être choisis ; en DSN, les arrêts ne sont pas extraits.",
+      "Motifs d'absence PayFit dont les jours entrent dans l'absentéisme. Les motifs proposés sont ceux de la dernière lecture PayFit appliquée, avec leur nombre d'absences ; un motif retenu mais absent de la lecture est signalé « sans effet ». Un motif sans libellé français est affiché tel que reçu de PayFit, avec son code.",
+      "À défaut de choix enregistré, c'est la valeur par défaut validée qui s'applique (son origine est indiquée dans Paramètres) ; l'administrateur coche explicitement les motifs à compter. Aucun motif retenu : l'absentéisme est n.d. Aucune lecture PayFit appliquée : les motifs ne peuvent pas encore être choisis ; en DSN, les arrêts ne sont pas extraits.",
     ].join("\n\n"),
   },
   {
@@ -227,11 +227,13 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
   },
   {
     id: DONNEES_TERMS.absenceBase,
-    term: "Paramètre : base de comptage des jours d'absence",
+    term: "Paramètre : base de comptage des jours",
     family: FAMILY,
-    see: ["absenteeism"],
-    definition:
-      "Jours calendaires, ou jours du lundi au vendredi. La base s'applique aux jours théoriques (dénominateur) comme aux jours d'absence (numérateur). Aucun jour férié n'est connu de l'application, dans l'un comme dans l'autre mode.",
+    see: ["absenteeism", "etp-prorated"],
+    definition: [
+      "Jours calendaires, ou jours du lundi au vendredi. La base s'applique aux jours théoriques (dénominateur) comme aux jours d'absence (numérateur) de l'absentéisme.",
+      "La même base sert aussi au prorata de l'ETP proratisé (« ETP contractuel proratisé — quotité actuelle ») : elle compte les jours sous contrat du mois et les jours du mois. Aucun jour férié n'est connu de l'application, dans l'un comme dans l'autre mode.",
+    ].join("\n\n"),
   },
   {
     id: DONNEES_TERMS.grille,

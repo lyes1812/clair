@@ -31,14 +31,16 @@ describe("absentéisme — PayFit, lecture du 21/10/2026, absences du transport 
     expect(r(absenteeismMonth(w, "2025-11"))).toBe("exact:40/280");
     expect(r(absenteeismMonth(w, "2025-12"))).toBe("exact:22/322");
   });
-  it("P6n : mois en borne basse, après la référence, période contenant 2025-10, types non choisis, maladie seule", () => {
+  it("P6n : mois en borne basse, après la référence, période contenant 2025-10, motifs non choisis, un seul motif retenu", () => {
     expect(r(absenteeismMonth(input, "2025-10"))).toBe("month-lower-bound");
     expect(r(absenteeismMonth(input, "2026-10"))).toBe("after-reference");
     expect(absenteeism(input, rollingWindow("2026-09"))).toMatchObject({ kind: "nd", nd: { code: "month-lower-bound", months: ["2025-10"] } });
     expect(r(absenteeismMonth(kpiInput(data, abs, { absenceTypes: [] }), "2025-11"))).toBe("absence-types-unset");
+    // La raison affichée sous la tuile parle de « motifs » (texte écrit à la main).
+    expect(absenteeismMonth(kpiInput(data, abs, { absenceTypes: [] }), "2025-11")).toMatchObject({ kind: "nd", nd: { reason: "motifs d'absence non choisis (Paramètres › Définitions des KPI)" } });
     const sick = absenteeismMonth(kpiInput(data, abs, { absenceTypes: ["test_sickness"] }), "2025-11");
     expect(r(sick)).toBe("exact:0/420");
-    if (sick.kind !== "nd") expect(sick.excluded).toMatchObject([{ absenceId: "TEST-A-ABSENCE-2", why: "type", label: "type test_maternity non choisi" }]);
+    if (sick.kind !== "nd") expect(sick.excluded).toMatchObject([{ absenceId: "TEST-A-ABSENCE-2", why: "type", label: "motif test_maternity non retenu" }]);
   });
   it("P7 : jours théoriques — 2025-12 = 217 j (7 × 31) ; 2026-02 = 182 j (004 du 15 au 28)", () => {
     const dec = theoreticalMonth(input, "2025-12");

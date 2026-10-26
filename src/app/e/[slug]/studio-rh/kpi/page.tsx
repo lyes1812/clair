@@ -518,7 +518,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                 {colOn("coverage") && <th>Couverture</th>}
                 {colOn("headcount") && <th className="num wrap">Effectif fin de mois</th>}
                 {colOn("etp") && <th className="num wrap">ETP fin de mois</th>}
-                {colOn("etp-prorated") && <th className="num wrap">ETP proratisé</th>}
+                {colOn("etp-prorated") && <th className="num wrap">ETP proratisé — quotité actuelle</th>}
                 {colOn("entries") && <th className="num">Entrées</th>}
                 {colOn("exits") && <th className="num">Sorties</th>}
                 {colOn("theoretical") && <th className="num wrap">Jours théoriques</th>}

@@ -73,7 +73,7 @@ export async function saveServiceAxis(slug: string, _prev: FormState, formData: 
   return { ok: axis ? "Axe du service enregistré." : "Ventilation par service désactivée." };
 }
 
-// Définitions des KPI : chaque champ passe par son parseur strict ; un type d'absence n'est accepté que s'il figure dans la
+// Définitions des KPI : chaque champ passe par son parseur strict ; un motif d'absence n'est accepté que s'il figure dans la
 // lecture PayFit appliquée ou s'il est déjà enregistré.
 export async function saveKpiSettings(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "admin");
@@ -82,7 +82,7 @@ export async function saveKpiSettings(slug: string, _prev: FormState, formData: 
   const readTypes = new Set(active ? (await loadAbsenceTypes(workspace.id, active.id)).map((t) => t.type) : []);
   const types = formData.getAll("absenceTypes").map(String);
   const unknown = types.filter((t) => !readTypes.has(t) && !current.values.absenceTypes.includes(t));
-  if (unknown.length) return { error: `Type d'absence absent de la lecture appliquée : ${unknown.join(", ")}.` };
+  if (unknown.length) return { error: `Motif d'absence absent de la lecture appliquée : ${unknown.join(", ")}.` };
   const raw: Record<keyof KpiSettingValues, unknown> = {
     fullTimeIsOne: formData.get("fullTimeIsOne") === "on",
     capAtOne: formData.get("capAtOne") === "on",
@@ -103,7 +103,7 @@ export async function saveKpiSettings(slug: string, _prev: FormState, formData: 
     turnoverFormula: "Formule du turnover",
     excludedExitNatures: "Sorties exclues",
     neutralizeContinuity: "Contrats continus",
-    absenceTypes: "Types d'absence",
+    absenceTypes: "Motifs d'absence retenus",
     absenceStatuses: "Statuts d'absence (au moins un)",
     dayBasis: "Base des jours",
   };

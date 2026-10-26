@@ -67,7 +67,7 @@ const rows: RowIn[] = [
     headcount: { kind: "nd", ...nd("mois non clos à la date de référence") },
     etp: { kind: "nd", ...nd("quotité absente") },
     movements: { entries: { kind: "nd", ...nd("couverture incomplète") }, exits: { kind: "nd", ...nd("couverture incomplète") } },
-    absenteeism: { kind: "nd", ...nd("types d'absence non choisis") },
+    absenteeism: { kind: "nd", ...nd("motifs d'absence non choisis") },
     previous: { month: "2025-03", etp: { kind: "exact", etp4: 48000 }, absenteeism: { kind: "nd", ...nd("absences non lues") } },
   },
 ];
@@ -152,7 +152,7 @@ describe("séries mensuelles du suivi des effectifs", () => {
     const [cur, prev] = absenteeismSeries(rows);
     expect(cur.values).toEqual([691, null, null]);
     expect(sp(cur.reasons?.[1] ?? "")).toContain("borne basse (≥ 3,13 %)");
-    expect(cur.reasons?.[2]).toBe("types d'absence non choisis");
+    expect(cur.reasons?.[2]).toBe("motifs d'absence non choisis");
     expect(prev.values).toEqual([null, 0, null]);
     expect(prev.dashed).toBe(true);
   });
@@ -186,7 +186,7 @@ describe("taux par période (turnover, absentéisme)", () => {
 describe("n.d. d'un graphique entier", () => {
   it("aucune valeur connue : les raisons (dédoublonnées) remplacent le graphique", () => {
     const [cur] = absenteeismSeries([rows[2], rows[2]]);
-    expect(ndSummary([cur])).toBe("types d'absence non choisis");
+    expect(ndSummary([cur])).toBe("motifs d'absence non choisis");
   });
   it("une seule valeur connue suffit à garder le graphique", () => {
     expect(ndSummary(headcountSeries(rows))).toBeNull();
@@ -555,8 +555,8 @@ describe("relecture du lot 10 : traçabilité de l'écart, liens du glossaire, l
     expect(html.replace(/ title="[^"]*"/g, "")).not.toMatch(/×|1079/); // rien de visible
     expect(tile()).not.toMatch(/data-testid="kpi-tile-turnover-delta"[^>]*title=|title="[^"]*"[^>]*data-testid="kpi-tile-turnover-delta"/);
   });
-  it("tuile : un bloc replié des remarques (types d'absence) reste du HTML valide, dans une division et non dans un span", () => {
-    const html = tile({ children: h("details", { className: "tile-more" }, h("summary", null, "Types d'absence")) });
+  it("tuile : un bloc replié des remarques (motifs d'absence) reste du HTML valide, dans une division et non dans un span", () => {
+    const html = tile({ children: h("details", { className: "tile-more" }, h("summary", null, "Motifs d'absence")) });
     expect(html).toContain('<div class="tile-notes">');
     expect(html).not.toContain('<span class="tile-notes">');
     expect(html.indexOf('<details class="tile-more">')).toBeGreaterThan(html.indexOf('<div class="tile-notes">'));
