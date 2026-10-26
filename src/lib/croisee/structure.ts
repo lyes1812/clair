@@ -100,10 +100,27 @@ export function maskGroups(groups: readonly MaskInput[], seuil: number, totalSho
 export const isHidden = (s: MaskStatus): boolean => s === "masked" || s === "secondary" || s === "unverifiable";
 export const maskReason = (s: MaskStatus, seuil: number): string | null => (s === "masked" || s === "secondary" ? confidentialiteReason(seuil) : s === "unverifiable" ? SEUIL_NON_VERIFIABLE : null);
 
+// --- Effectif d'un groupe en personnes distinctes -----------------------------------------------------------------------------------
+
+// Personne d'un contrat : la clé de personne du référentiel RH ; à défaut, le contrat lui-même (un contrat sans personne rattachée
+// compte pour une personne, jamais fusionné avec un autre).
+export const personOf = (c: { contractKey: string; personKey: string | null }): string => c.personKey ?? `contrat:${c.contractKey}`;
+
+// Effectif de chaque groupe en personnes distinctes : une personne qui a plusieurs contrats dans un même groupe y compte une fois.
+// C'est cette taille que reçoit le masquage (maskGroups), jamais le nombre de contrats affiché.
+export function personsByGroup(members: readonly { group: string; person: string }[]): Record<string, number> {
+  const sets = new Map<string, Set<string>>();
+  for (const m of members) {
+    let s = sets.get(m.group);
+    if (!s) sets.set(m.group, (s = new Set()));
+    s.add(m.person);
+  }
+  return Object.fromEntries([...sets].map(([g, s]) => [g, s.size]));
+}
+
 // --- Structure ---------------------------------------------------------------------------------------------------------------------
 
-// Personnes distinctes d'un groupe : un contrat sans personne rattachée compte pour une personne (jamais fusionné avec un autre).
-const persons = (list: StructureContract[]): number => new Set(list.map((c) => c.personKey ?? `contrat:${c.contractKey}`)).size;
+const persons = (list: StructureContract[]): number => new Set(list.map(personOf)).size;
 
 export function effectifStructure(p: { contracts: StructureContract[]; confidentialite: Confidentialite }): Structure {
   if (p.confidentialite.kind === "nd") return { kind: "nd", reason: p.confidentialite.reason };

@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 // Lecture en base simulée : getSettingsMeta renvoie les lignes enregistrées (clé complète → valeur), comme la table workspace_setting.
@@ -188,5 +189,27 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
     expect(s.confidentialite).toEqual({ kind: "set", value: 3, updatedAt: AT, updatedBy: "u1" });
     expect(s.seuilsEffectif).toEqual({ kind: "absent" });
     expect(s.horizonEcheances).toEqual({ kind: "invalid", raw: "90" });
+  });
+});
+
+// --- Découplage : mises en forme pures dans src/lib/croisee/settings-format.ts -----------------------------------------------------
+describe("settings-format : clés, raisons et lignes sans base de données", () => {
+  it("croisee-settings ré-exporte les fonctions de settings-format (mêmes fonctions, aucune copie)", async () => {
+    const pure = await import("@/lib/croisee/settings-format");
+    expect(pure.settingValue).toBe(settingValue);
+    expect(pure.croiseeSettingReason).toBe(croiseeSettingReason);
+    expect(pure.croiseeSettingsHref).toBe(croiseeSettingsHref);
+    expect(pure.croiseeSettingLines).toBe(croiseeSettingLines);
+    expect(pure.CROISEE_KEYS).toBe(CROISEE_KEYS);
+    expect(pure.croiseeSettingsHref("demo")).toBe("/e/demo/parametres#croisee");
+  });
+
+  it("settings-format n'importe rien ; les chapitres et src/lib/croisee n'importent en valeur ni croisee-settings ni le contexte de la page", () => {
+    expect(readFileSync("src/lib/croisee/settings-format.ts", "utf8")).not.toMatch(/^\s*import\s/m);
+    const files = [...readdirSync("src/lib/viz").filter((f) => /^croisee-.*\.ts$/.test(f)).map((f) => `src/lib/viz/${f}`), ...readdirSync("src/lib/croisee").filter((f) => f.endsWith(".ts")).map((f) => `src/lib/croisee/${f}`)];
+    expect(files.length).toBeGreaterThan(10);
+    // Une importation de valeur (pas « import type ») depuis ces deux modules tirerait le client de base de données à l'import.
+    const valueImport = /^import (?!type )[^;]*from "@\/(lib\/croisee-settings|app\/e\/\[slug\]\/studio-rh\/masse-salariale\/croisee\/context)";/m;
+    for (const f of files) expect(readFileSync(f, "utf8"), f).not.toMatch(valueImport);
   });
 });

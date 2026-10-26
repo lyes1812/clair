@@ -2,9 +2,9 @@ import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/cr
 import { NV } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
 import type { ChartSeries } from "@/components/charts/shared";
 import { journalReason } from "@/lib/croisee/format";
-import { memoByContext } from "@/lib/croisee/memo";
+import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
 import { isHidden, maskGroups, maskReason, type Confidentialite } from "@/lib/croisee/structure";
-import { croiseeSettingReason, settingValue } from "@/lib/croisee-settings";
+import { croiseeSettingReason, settingValue } from "@/lib/croisee/settings-format";
 import { evolution, windowPayroll, withService } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
 import { labelTotals, type LabelTotal } from "@/lib/payroll/lot2";

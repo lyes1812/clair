@@ -5,13 +5,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CHAPTERS, chapterDef } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/chapitres";
-import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
+import { once, type CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import {
   chapterExport,
   chapterWorkbook,
   CROISEE_EXPORTS,
+  croiseeExport,
   croiseeExportOptions,
   croiseeFilters,
+  croiseeReference,
   croiseeSources,
   CSV_BOM,
   csvCell,
@@ -22,19 +24,25 @@ import {
   KEY_FIGURES_TITLE,
   keyFiguresTable,
   LOWER_BOUND,
+  MENTION_LEVEL,
   ND_SHEET,
   ND_WITHOUT_REASON,
   periodLead,
+  REFERENCE_TITLE,
+  referenceBlock,
   screenRows,
   screenTables,
   SERVICES_EXPORT_LABEL,
   sheetName,
+  sheetNames,
   sortedTables,
   sourceUses,
   tableCsv,
   tableSheet,
   tileNumber,
   unavailableRows,
+  WATCH_SHEET,
+  watchRows,
   type ExportModel,
   type FilterCtx,
   type MenuCtx,
@@ -44,7 +52,9 @@ import { safeText } from "@/lib/export/safe-text";
 import { buildWorkbook, EMPTY_CELL_NOTE } from "@/lib/export/xlsx";
 import { glossaryEntry } from "@/lib/glossary";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
-import { cellView, croiseeHref, parseQuery, type CroiseeCell, type CroiseeTable, type TileSpec } from "@/lib/viz/croisee";
+import { windowPayroll, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
+import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
+import { cellView, croiseeHref, parseQuery, REFERENCE_TABLE_ID, referenceTable, yearMonths, type CroiseeCell, type CroiseeTable, type TileSpec } from "@/lib/viz/croisee";
 import { absencesModel } from "@/lib/viz/croisee-absences";
 import { budgetModel, effetsModel } from "@/lib/viz/croisee-budget";
 import { effectifsModel } from "@/lib/viz/croisee-effectifs";
@@ -277,13 +287,13 @@ describe("classeur Excel du chapitre", () => {
     expect(texts).toContain(`Mois non clos : mars 2026. Montants en euros. Écarts de taux en points : 0,25 point s'écrit 0,25 %. ${EMPTY_CELL_NOTE}`);
   });
 
-  it("titre trop long pour un nom de feuille : coupé à la fin d'un mot (31 caractères au plus), titre complet dans la note", () => {
-    expect(sheetName("Composantes du brut et de la masse chargée")).toBe("Composantes du brut et de la");
-    expect(sheetName("Où sont les effectifs ? Par service, fin janv. 2026")).toBe("Où sont les effectifs Par");
+  it("titre trop long pour un nom de feuille : coupé à la fin d'un mot (31 caractères au plus), sans petit mot final, titre complet dans la note", () => {
+    expect(sheetName("Composantes du brut et de la masse chargée")).toBe("Composantes du brut");
+    expect(sheetName("Où sont les effectifs ? Par service, fin janv. 2026")).toBe("Effectifs par service");
     expect(sheetName("Montants par mois")).toBe("Montants par mois");
     const t: CroiseeTable = { ...MENSUEL, title: "Composantes du brut et de la masse chargée" };
     const sheet = tableSheet(t);
-    expect(sheet.name).toBe("Composantes du brut et de la");
+    expect(sheet.name).toBe("Composantes du brut");
     expect(sheet.note).toBe("Tableau : Composantes du brut et de la masse chargée.");
   });
 
@@ -362,9 +372,18 @@ function filterCtx(o: Partial<FilterCtx> = {}): FilterCtx {
     scenario: { selected: null, explicit: false, options: [], reason: "aucun scénario ne couvre 2026" },
     openMonths: ["2026-03"],
     notices: ["paramètre ignoré : service=X (service absent du journal)"],
+    settings: ABSENT_SETTINGS,
     ...o,
   };
 }
+// Réglages de la croisée tous absents (aucune valeur par défaut) : quatre lignes n.d. avec leur raison dans « Filtres ».
+const ABSENT_SETTINGS: FilterCtx["settings"] = { confidentialite: { kind: "absent" }, seuilsEffectif: { kind: "absent" }, margeAlerte: { kind: "absent" }, horizonEcheances: { kind: "absent" } };
+const SETTINGS_ND = [
+  { label: "Seuil de confidentialité", value: "n.d. — seuil de confidentialité non défini (Paramètres)" },
+  { label: "Seuils d'effectif suivis", value: "n.d. — seuils d'effectif non définis (Paramètres)" },
+  { label: "Marge d'alerte des seuils d'effectif", value: "n.d. — marge d'alerte des seuils d'effectif non définie (Paramètres)" },
+  { label: "Horizon des échéances de contrat", value: "n.d. — horizon des échéances non défini (Paramètres)" },
+];
 
 describe("feuille « Filtres »", () => {
   it("chapitre, période, N-1, service et axe, budget et scénario retenus (n.d. avec raison), mois non clos, paramètres ignorés, limites", () => {
@@ -375,6 +394,7 @@ describe("feuille « Filtres »", () => {
       { label: "Service", value: "Tous les services (axe analytique « Service »)" },
       { label: "Budget saisi", value: "« Budget fictif » · modifié le 10/02/2026 · par défaut, le plus récent de l'année" },
       { label: "Scénario", value: "n.d. — aucun scénario ne couvre 2026" },
+      ...SETTINGS_ND,
       { label: "Mois non clos (montants provisoires)", value: "mars 2026" },
       { label: "Paramètres ignorés", value: "paramètre ignoré : service=X (service absent du journal)" },
       { label: "Limite de la lecture", value: "Limite fictive." },
@@ -382,7 +402,7 @@ describe("feuille « Filtres »", () => {
   });
   it("budget et scénario seulement pour un chapitre qui les lit ; service sans axe : raison écrite", () => {
     const f = croiseeFilters(filterCtx({ service: { axis: null, value: undefined, label: "Tous les services", options: [], reason: "aucun code analytique dans le journal PayFit" }, openMonths: [], notices: [] }), { limits: [] }, ["rh"]);
-    expect(f.map((x) => x.label)).toEqual(["Chapitre", "Période", "N-1", "Service"]);
+    expect(f.map((x) => x.label)).toEqual(["Chapitre", "Période", "N-1", "Service", ...SETTINGS_ND.map((x) => x.label)]);
     expect(f[3].value).toBe("Tous les services — ventilation par service n.d. : aucun code analytique dans le journal PayFit");
   });
 });
@@ -426,9 +446,11 @@ describe("registre : la fonction mémoïsée du chapitre, celle qu'appelle l'éc
   });
 
   it("sources lues : filtre de service et journal lu ou non (Synthèse : comptabilité et DSN traitées de même ; Effets sans scénario)", async () => {
-    const u = (id: keyof typeof CROISEE_EXPORTS, filtered: boolean, journal: boolean) => CROISEE_EXPORTS[id]!.uses({ filtered, journal });
+    const u = (id: keyof typeof CROISEE_EXPORTS, filtered: boolean, journal: boolean, period = journal) => CROISEE_EXPORTS[id]!.uses({ filtered, journal, period });
     expect(u("synthese", false, true)).toEqual(["rh", "journal", "budget", "scenario", "compta", "dsn"]);
     expect(u("synthese", false, false)).toEqual(["rh", "journal", "budget", "scenario"]);
+    // Journal lu mais un mois de la période n.d. : loadSyntheseInput ne lit ni la comptabilité ni la DSN.
+    expect(u("synthese", false, true, false)).toEqual(["rh", "journal", "budget", "scenario"]);
     expect(u("synthese", true, true)).toEqual(["journal"]);
     expect(u("effectifs", true, true)).toEqual(["rh", "journal"]);
     expect(u("absences", false, true)).toEqual(["rh"]);
@@ -542,8 +564,15 @@ const SERVICES_ROUTE_CSV = SERVICES_CSV.map((l, i) => {
 });
 
 type PayrollLoader = () => Promise<unknown>;
-// Journal « lu » par défaut (input renseigné) : le chargeur du chapitre 05 est simulé, il ne lit pas cette entrée.
-const JOURNAL_LU: PayrollLoader = async () => ({ source: "payfit", input: { lignes: "simulées" }, unavailable: null });
+// Journal « lu » par défaut : le chargeur du chapitre 05 est simulé, il ne lit pas cette entrée ; la référence annuelle N-1 (bloc
+// commun) la lit. Année 2025, chaque mois : salaires 1 000 € (641100) et cotisations 400 € (645000) du service « Atelier » ; année
+// 2025 entière : brut 12 × 1 000 € = 12 000 €, masse chargée 12 × 1 400 € = 16 800 €.
+const REF_LINES: LedgerLine[] = yearMonths(2025).flatMap((m, i) => [
+  { key: `s${i}`, month: m, accountId: "641100", accountName: null, debitCents: 100000, creditCents: null, contractId: "contrat-fictif-1", analytic: [{ type: "Service", code: "Atelier", value: "Atelier" }] },
+  { key: `c${i}`, month: m, accountId: "645000", accountName: null, debitCents: 40000, creditCents: null, contractId: null, analytic: [{ type: "Service", code: "Atelier", value: "Atelier" }] },
+]);
+const REF_JOURNAL: JournalInput = { lines: REF_LINES, months: yearMonths(2025), openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
+const JOURNAL_LU: PayrollLoader = async () => ({ source: "payfit", input: REF_JOURNAL, unavailable: null });
 
 function routeCtx(sp: Record<string, string | string[]>, payroll: PayrollLoader = JOURNAL_LU): CroiseeContext {
   const q = parseQuery(sp);
@@ -568,7 +597,8 @@ function routeCtx(sp: Record<string, string | string[]>, payroll: PayrollLoader 
     affichage: q.affichage,
     state,
     href: (patch = {}, hash?: string) => croiseeHref(BASE, { ...state, ...patch }, hash),
-    load: { payroll, compta: async () => ({ source: null, reason: "aucune source comptable retenue" }) },
+    // Lecteur mémoïsé, comme le contexte de la page (once) : le menu, le chapitre et l'export lisent le journal une fois.
+    load: { payroll: once(payroll), compta: async () => ({ source: null, reason: "aucune source comptable retenue" }) },
   } as unknown as CroiseeContext;
 }
 
@@ -607,7 +637,8 @@ describe("route d'export de la Masse salariale croisée", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-disposition")).toContain('filename="masse-salariale-croisee-services-2026-01-01.xlsx"');
     const wb = await load(Buffer.from(await res.arrayBuffer()));
-    expect(wb.worksheets.map((w) => w.name)).toEqual(["Coût par service", "Filtres", "Sources", "Définitions"]);
+    // Référence annuelle N-1 (bloc commun de la page) en dernière feuille du chapitre.
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Coût par service", "Référence annuelle 2025", "Filtres", "Sources", "Définitions"]);
     const rows = sheetRows(wb.getWorksheet("Coût par service")!, "Service", 10).map((r) => r.map((c) => c.value));
     expect(rows[0]).toEqual(["Atelier", 3000, 2500, 500, 0.2, 0.75, 1800, 200, 1000, 1500]);
     expect(rows[1].slice(0, 4)).toEqual(["'=Bureau", 1000, 1500, -500]);
@@ -620,6 +651,7 @@ describe("route d'export de la Masse salariale croisée", () => {
       ["Période", "janvier 2026"],
       ["N-1", "janvier 2025"],
       ["Service", "Tous les services (axe analytique « Service »)"],
+      ...SETTINGS_ND.map((x) => [x.label, x.value]),
       ["Tri du tableau « Coût par service »", "Coût janvier 2026, ordre décroissant (par défaut)"],
       ["Limite de la lecture", "Coût / personne-mois : contrats rémunérés chaque mois ; ce n'est pas un coût par ETP."],
     ]);
@@ -828,4 +860,224 @@ it("un n.d. du modèle reste n.d. dans l'Excel et le CSV", () => {
       expect(csvCell(r.cells[i], c, r).startsWith("n.d. (")).toBe(true);
     });
   }
+});
+
+// --- Aucun identifiant : chaque chapitre, à l'écran et dans l'export (filtre commun src/lib/croisee/public.ts) ----------------------
+
+const LEAK = /CTR-TEST|ABS-TEST|FICTIF/;
+// Raison fictive qui réunit les formes des moteurs qui nomment une absence, un contrat ou une personne.
+const RAW_ND = [
+  "2026-03 : absence ABS-TEST-1 rattachée au contrat CTR-TEST-1 inconnu du référentiel",
+  "absence ABS-TEST-2 : date de début et de fin non renseignée dans PayFit",
+  "2026-12 : Prénom FICTIF : base n.d. (aucune ligne de brut en 2026-01 pour ce contrat) — saisir une correction de base",
+  "≥ : 2 demi-journée(s) incertaine(s) (absences ABS-TEST-3, ABS-TEST-4)",
+  "sorties de 2026-03 : contrats continus non vérifiables (CTR-TEST-5 le 03/03/2026, CTR-TEST-6 le 05/03/2026) — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés",
+].join(" ; ");
+
+describe("aucun identifiant fictif ne subsiste : chaque chapitre (modèle mémoïsé de l'écran) et son export", () => {
+  beforeEach(() => {
+    mocks.services.mockReset().mockResolvedValue({ nd: { reason: RAW_ND }, data: null });
+    mocks.lastSync.mockReset().mockResolvedValue(null);
+    mocks.activeSync.mockReset().mockResolvedValue(null);
+  });
+  // Période n.d. dont la raison cite des identifiants : chaque chargeur la reprend telle quelle, le modèle mémoïsé la filtre.
+  const ndCtx = (id: string) => ({ ...routeCtx({ chapitre: id }), period: null, periodNd: RAW_ND }) as unknown as CroiseeContext;
+
+  // Chapitre 05 : la vraie fonction du chapitre (celle de ce fichier est simulée pour la route).
+  const modelOf = async (id: string) => {
+    const real = { synthese: syntheseModel, effectifs: effectifsModel, absences: absencesModel, "fixe-variable": fixeVariableModel, budget: budgetModel, "paie-compta": paieComptaModel, effets: effetsModel } as Record<string, (ctx: CroiseeContext) => Promise<unknown>>;
+    return real[id] ?? (await vi.importActual<typeof import("@/lib/viz/croisee-masse")>("@/lib/viz/croisee-masse")).servicesModel;
+  };
+  it.each(["synthese", "effectifs", "absences", "fixe-variable", "services", "budget", "paie-compta", "effets"] as const)(
+    "%s : modèle mémoïsé de l'écran sans identifiant, raison gardée sous sa forme générique ; export sans identifiant",
+    async (id) => {
+      const ctx = ndCtx(id);
+      const json = JSON.stringify(await (await modelOf(id))(ctx));
+      expect(json).not.toMatch(LEAK);
+      expect(json).toContain("1 contrat sans base de projection (détail dans Hypothèses budgétaires)");
+      expect(json).toContain("contrats continus non vérifiables en 2026-03 (sorties, détail dans KPI RH)");
+      const out = await croiseeExport(ctx, CROISEE_EXPORTS[id]!, { format: "xlsx", generatedAt: "2026-10-26T09:30:00Z" });
+      expect(JSON.stringify(out)).not.toMatch(LEAK);
+    },
+  );
+
+  it("dernier filet de l'export : un modèle qui garderait un identifiant (chapitre 05 simulé, sans filtre) sort sans identifiant", async () => {
+    const ctx = routeCtx({ chapitre: "services" });
+    expect(JSON.stringify(await CROISEE_EXPORTS.services!.model(ctx))).toMatch(LEAK); // le double ne filtre pas
+    const out = await croiseeExport(ctx, CROISEE_EXPORTS.services!, { format: "xlsx", generatedAt: "2026-10-26T09:30:00Z" });
+    expect(out).toEqual({
+      kind: "refused",
+      status: 422,
+      reason: expect.stringContaining("2026-03 : 1 absence rattachée à un contrat inconnu du référentiel (détail dans KPI RH) ; 1 absence sans date de début et de fin renseignée dans PayFit (détail dans KPI RH) ; 2026-12 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)"),
+    });
+    expect(JSON.stringify(out)).not.toMatch(LEAK);
+  });
+});
+
+// --- Feuille « À surveiller » --------------------------------------------------------------------------------------------------------
+
+const ALERTS: ExportModel["alerts"] = [
+  { id: "a", level: "defavorable", label: "Masse au-dessus du budget", text: "Écart de +1 000,00 € sur la période.", href: "#cx-budget" },
+  { id: "b", level: "a-completer", label: "DSN de contrôle non lue", text: "Aucun fichier DSN pour la période." },
+  { id: "c", level: "repere", label: "Seuil d'effectif proche", text: "À 2 salariés du seuil « Seuil fictif »." },
+];
+const MENTIONS = [{ id: "m", text: "Contrôles du journal de paie (comptabilité, DSN) : non filtrables par service." }];
+
+describe("feuille « À surveiller » : liste de l'écran et mentions", () => {
+  it("une ligne par point (niveau, point, détail), dans l'ordre de l'écran, puis les mentions", () => {
+    expect(watchRows({ alerts: ALERTS, mentions: MENTIONS })).toEqual([
+      ["Défavorable", "Masse au-dessus du budget", "Écart de +1 000,00 € sur la période."],
+      ["À compléter", "DSN de contrôle non lue", "Aucun fichier DSN pour la période."],
+      ["Repère", "Seuil d'effectif proche", "À 2 salariés du seuil « Seuil fictif »."],
+      [MENTION_LEVEL, "", "Contrôles du journal de paie (comptabilité, DSN) : non filtrables par service."],
+    ]);
+    expect(watchRows({})).toEqual([]);
+  });
+
+  it("dans le classeur : après « Chiffres clés », avant les tableaux ; entrée « À surveiller » du glossaire dans « Définitions »", async () => {
+    const { spec } = chapterWorkbook({ title: "Masse salariale croisée — 01 Synthèse", workspaceName: "Espace fictif", generatedAt: "2026-10-26T09:30:00Z", model: { ...MODEL, alerts: ALERTS, mentions: MENTIONS }, sort: null, filters: [], sources: [] });
+    const wb = await load(await buildWorkbook(spec));
+    expect(wb.worksheets.map((w) => w.name)).toEqual([KEY_FIGURES_TITLE, WATCH_SHEET, "Montants fictifs par équipe", "Montants par mois", ND_SHEET, "Filtres", "Sources", "Définitions"]);
+    const rows = sheetRows(wb.getWorksheet(WATCH_SHEET)!, "Niveau", 3).map((r) => r.map((c) => c.value));
+    expect(rows[0]).toEqual(["Défavorable", "Masse au-dessus du budget", "Écart de +1 000,00 € sur la période."]);
+    expect(rows[3]).toEqual([MENTION_LEVEL, null, "Contrôles du journal de paie (comptabilité, DSN) : non filtrables par service."]);
+    expect(spec.definitions.map((d) => d.term)).toContain(glossaryEntry(T.alertes)!.term);
+  });
+
+  it("un chapitre qui n'a qu'une liste « À surveiller » propose l'Excel ; la phrase du filtre de service va dans la note du tableau par service", () => {
+    const only: ExportModel = { chapter: "synthese", tiles: [], tables: [], charts: [], limits: [], nd: null, terms: [], alerts: ALERTS };
+    expect(exportOptions(menuCtx(null), only).map((o) => o.testid)).toEqual(["cx-export-xlsx"]);
+    const model: ExportModel = { ...MODEL, servicesNote: "Filtre Service : seul le service « Atelier » est listé.", blocks: [{ id: "services", title: "Tableau de synthèse par service", tables: ["demo-montants"], nd: [], notes: ["Note du bloc."] }] };
+    const { spec } = chapterWorkbook({ title: "T", workspaceName: "Espace fictif", generatedAt: "2026-10-26T09:30:00Z", model, sort: null, filters: [], sources: [] });
+    expect(spec.sheets.find((x) => x.name === "Montants fictifs par équipe")?.note).toBe("Mois non clos : mars 2026. Filtre Service : seul le service « Atelier » est listé. Note du bloc. Écarts de taux en points : 0,25 point s'écrit 0,25 %.");
+  });
+});
+
+// --- Référence annuelle N-1 sur douze mois (bloc commun de la page) -----------------------------------------------------------------
+
+describe("référence annuelle N-1 : même fonction que la page, dernière feuille du classeur et CSV", () => {
+  const ctxOf = (o: Partial<CroiseeContext> = {}) => ({ ...routeCtx({ chapitre: "services" }), ...o }) as CroiseeContext;
+  const pay = (input: JournalInput | null, source: "payfit" | "dsn" = "payfit") => ({ input, unavailable: null, source });
+
+  it("referenceBlock : tableau du moteur du journal (cas écrit à la main) ; n.d. avec la raison de la page sans période ou sans journal", () => {
+    const ref = referenceBlock(ctxOf(), pay(REF_JOURNAL));
+    expect(ref).toEqual({ kind: "table", table: referenceTable({ year: 2025, scope: "Tous les services", window: windowPayroll(REF_JOURNAL, yearMonths(2025)) }) });
+    // 12 × (1 000 € + 400 €) = 16 800,00 € de masse chargée ; 12 × 1 000 € = 12 000,00 € de brut.
+    expect(ref.kind === "table" && ref.table.rows.map((r) => r.cells)).toEqual([["Masse salariale chargée", 1680000], ["Rémunération brute", 1200000]]);
+    const svc = referenceBlock(ctxOf({ service: { axis: "Service", value: "Atelier", label: "Atelier", options: [], reason: null } }), pay(REF_JOURNAL));
+    expect(svc.kind === "table" && [svc.table.title, svc.table.rows[0].cells[1]]).toEqual(["Référence annuelle 2025, janvier → décembre · Atelier", 1680000]);
+    expect(referenceBlock(ctxOf({ period: null, periodNd: "Aucun mois clos" }), pay(REF_JOURNAL))).toEqual({ kind: "nd", reason: "Aucun mois clos" });
+    expect(referenceBlock(ctxOf(), null)).toEqual({ kind: "nd", reason: "journal de paie non lu" });
+    expect(referenceBlock(ctxOf(), pay(null, "dsn"))).toEqual({ kind: "nd", reason: "source RH retenue : DSN — journal de paie PayFit non lu" });
+  });
+
+  it("classeur : dernière feuille du chapitre (après « Non disponibles ») ; n.d. : une ligne dans « Non disponibles »", async () => {
+    const base = { title: "T", workspaceName: "Espace fictif", generatedAt: "2026-10-26T09:30:00Z", model: MODEL, sort: null, filters: [], sources: [] };
+    const table = await croiseeReference(routeCtx({ chapitre: "fixe-variable" }));
+    expect(table?.kind).toBe("table");
+    const wb = await load(await buildWorkbook(chapterWorkbook({ ...base, reference: table }).spec));
+    expect(wb.worksheets.map((w) => w.name)).toEqual([KEY_FIGURES_TITLE, "Montants fictifs par équipe", "Montants par mois", ND_SHEET, "Référence annuelle 2025", "Filtres", "Sources", "Définitions"]);
+    expect(sheetRows(wb.getWorksheet("Référence annuelle 2025")!, "Indicateur", 2).map((r) => [r[0].value, r[1].value])).toEqual([["Masse salariale chargée", 16800], ["Rémunération brute", 12000]]);
+    const nd = chapterWorkbook({ ...base, reference: { kind: "nd", reason: "journal de paie non lu" } }).spec;
+    expect(nd.sheets.map((x) => x.name)).not.toContain("Référence annuelle 2025");
+    expect(nd.sheets.find((x) => x.name === ND_SHEET)?.rows.at(-1)).toEqual([REFERENCE_TITLE, "", "Non disponible (n.d.)", "journal de paie non lu"]);
+  });
+
+  it("menu : « CSV · Référence annuelle N-1 sur douze mois » après les tableaux du chapitre, seulement quand la page l'affiche en tableau", async () => {
+    expect(exportOptions(menuCtx("Service"), MODEL, true).map((o) => o.testid)).toEqual(["cx-export-xlsx", "cx-export-csv-demo-montants", "cx-export-csv-demo-mensuel", `cx-export-csv-${REFERENCE_TABLE_ID}`, "cx-export-services"]);
+    expect(exportOptions(menuCtx("Service"), MODEL, true)[3]).toEqual({ label: `CSV · ${REFERENCE_TITLE}`, href: `${BASE}/export?chapitre=fixe-variable&annee=2026&de=01&a=03&format=csv&tableau=${REFERENCE_TABLE_ID}`, testid: `cx-export-csv-${REFERENCE_TABLE_ID}` });
+    mocks.services.mockReset().mockResolvedValue(SERVICES);
+    expect((await croiseeExportOptions(routeCtx({ chapitre: "services" }))).map((o) => o.testid)).toEqual(["cx-export-xlsx", "cx-export-services", `cx-export-csv-${REFERENCE_TABLE_ID}`]);
+    // Journal non lu : la page écrit n.d., le menu ne propose pas ce CSV.
+    expect((await croiseeExportOptions(routeCtx({ chapitre: "services" }, async () => ({ input: null, unavailable: null, source: "dsn" })))).map((o) => o.testid)).not.toContain(`cx-export-csv-${REFERENCE_TABLE_ID}`);
+  });
+
+  it("route : CSV du tableau (cas écrit à la main) ; n.d. : 422 avec la raison ; dans l'Excel, la feuille « Référence annuelle 2025 »", async () => {
+    mocks.services.mockReset().mockResolvedValue(SERVICES);
+    mocks.lastSync.mockReset().mockResolvedValue(null);
+    mocks.activeSync.mockReset().mockResolvedValue(null);
+    mocks.ctx.mockReset().mockImplementation(async (_slug: string, _ws: unknown, sp: Record<string, string>) => routeCtx(sp));
+    const res = await call(`chapitre=services&annee=2026&de=01&a=01&format=csv&tableau=${REFERENCE_TABLE_ID}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toContain('filename="masse-salariale-croisee-services-commun-reference-n1-2026-01-01.csv"');
+    expect(csvLines(Buffer.from(await res.arrayBuffer()).toString("utf8"))).toEqual(['"Indicateur";"2025 (douze mois)"', '"Masse salariale chargée";"16800,00"', '"Rémunération brute";"12000,00"']);
+    mocks.ctx.mockImplementation(async (_slug: string, _ws: unknown, sp: Record<string, string>) => routeCtx(sp, async () => ({ input: null, unavailable: null, source: "dsn" })));
+    const nd = await call(`chapitre=services&format=csv&tableau=${REFERENCE_TABLE_ID}`);
+    expect(nd.status).toBe(422);
+    expect(await nd.text()).toBe("n.d. — source RH retenue : DSN — journal de paie PayFit non lu");
+  });
+});
+
+// --- Noms de feuilles courts et distincts --------------------------------------------------------------------------------------------
+
+describe("noms de feuilles : courts, distincts, la partie qui distingue gardée", () => {
+  it("titres des chapitres (périodes fictives) : sans la période, l'axe ou la nature des chiffres gardés", () => {
+    const cases: [string, string][] = [
+      ["Où sont les effectifs ? Par service, fin mars 2026", "Effectifs par service"],
+      ["Où sont les effectifs ? Par catégorie de contrat, fin mars 2026", "Effectifs par catégorie"],
+      ["Où sont les effectifs ? Par statut de cadre dirigeant, fin mars 2026", "Effectifs par statut de cadre"],
+      ["Chiffres clés de la période : montants, janvier → mars 2026", "Chiffres clés — montants"],
+      ["Chiffres clés de la période : ETP et taux, janvier → mars 2026", "Chiffres clés — ETP et taux"],
+      ["Masse salariale chargée par mois, 2026 : réel, projection, budget saisi et N-1", "Masse chargée par mois"],
+      ["Composition de la masse chargée, janvier → mars 2026", "Composition de la masse chargée"],
+      ["Coût par service, janvier → mars 2026 (N-1 : janvier → mars 2025)", "Coût par service"],
+      ["Séries des cartes, mois par mois", "Séries des cartes par mois"],
+      ["Effectif moyen, année 2025 et janvier → mars 2026", "Effectif moyen"],
+      ["Écart de l'effectif moyen aux seuils d'effectif suivis", "Écart aux seuils d'effectif"],
+      ["Qui compose l'effectif salarié ? Fin mars 2026", "Qui compose l'effectif salarié"],
+      ["Mouvements comptés par mois et par nature de contrat, avr. 2025 → mars 2026", "Mouvements comptés par mois"],
+      ["Atterrissage 2026 et atterrissage retraité, scénario « Plan fictif »", "Atterrissage et retraité"],
+      ["Atterrissage 2026 face au budget saisi « Budget fictif »", "Atterrissage face au budget"],
+      ["Réalisé et budget saisi par mois, janvier → mars 2026", "Réalisé et budget saisi"],
+      ["Provision de congés payés par service, fin mars 2026", "Provision CP par service"],
+      ["Brut du journal de paie et brut déclaré (DSN, type 001)", "Brut du journal de paie et brut"],
+      ["Rapprochement par rubrique : journal de paie et comptabilité, janvier → mars 2026", "Rapprochement par rubrique"],
+      ["Référence annuelle 2025, janvier → décembre · Tous les services", "Référence annuelle 2025"],
+    ];
+    for (const [title, name] of cases) {
+      expect(sheetName(title), title).toBe(name);
+      expect(name.length).toBeLessThanOrEqual(31);
+    }
+    const axes = cases.slice(0, 3).map((c) => c[0]);
+    expect(new Set(sheetNames(axes)).size).toBe(3);
+  });
+
+  it("deux noms courts identiques : chacun garde sa précision quand elle tient ; sinon le classeur numérote", async () => {
+    expect(sheetNames(["Primes par mois, N et N-1", "Primes par mois, N face à N-1"])).toEqual(["Primes par mois, N et N-1", "Primes par mois, N face à N-1"]);
+    expect(sheetNames(["Coût par service, janvier 2026", "Coût par service, février 2026"])).toEqual(["Coût par service, janvier 2026", "Coût par service, février 2026"]);
+    expect(sheetNames(["Chiffres clés"], [KEY_FIGURES_TITLE])).toEqual(["Chiffres clés"]);
+    const sheet = (name: string) => ({ name, columns: [{ header: "A", key: "a", kind: "text" as const }], rows: [] });
+    const wb = await load(await buildWorkbook({ title: "T", workspaceName: "E", generatedAt: "2026-10-26T09:30:00Z", filters: [], sources: [], definitions: [], sheets: [sheet(KEY_FIGURES_TITLE), sheet("Chiffres clés")] }));
+    expect(wb.worksheets.map((w) => w.name).slice(0, 2)).toEqual(["Chiffres clés", "Chiffres clés (2)"]);
+  });
+});
+
+// --- « Filtres » : réglages de la Masse salariale croisée ; sources de la Synthèse ----------------------------------------------------
+
+describe("feuille « Filtres » : réglages de la croisée, valeur ou n.d. avec la raison", () => {
+  it("valeurs définies écrites comme dans « Sources et hypothèses de travail » ; illisible : n.d. et la raison", () => {
+    const at = new Date("2026-10-20T08:00:00Z");
+    const settings: FilterCtx["settings"] = {
+      confidentialite: { kind: "set", value: 3, updatedAt: at, updatedBy: null },
+      seuilsEffectif: { kind: "set", value: [{ libelle: "Seuil fictif", valeur: 11 }], updatedAt: at, updatedBy: null },
+      margeAlerte: { kind: "set", value: 0, updatedAt: at, updatedBy: null },
+      horizonEcheances: { kind: "invalid", raw: "quatre-vingt-dix" },
+    };
+    const f = croiseeFilters(filterCtx({ settings, openMonths: [], notices: [] }), { limits: [] }, ["journal"]);
+    expect(f.slice(4)).toEqual([
+      { label: "Seuil de confidentialité", value: "3 personnes" },
+      { label: "Seuils d'effectif suivis", value: "« Seuil fictif » : 11 salariés" },
+      { label: "Marge d'alerte des seuils d'effectif", value: "0 salarié" },
+      { label: "Horizon des échéances de contrat", value: "n.d. — horizon des échéances illisible : à ré-enregistrer (Paramètres)" },
+    ]);
+  });
+
+  it("Synthèse : comptabilité et DSN dans « Sources » seulement si le journal calcule tous les mois de la période (lectures réellement faites)", async () => {
+    // Journal fictif : mois lus de 2025 seulement. Période janvier 2026 : mois hors de la lecture, n.d. → ni comptabilité ni DSN.
+    const ctx = routeCtx({ chapitre: "synthese" });
+    expect(await sourceUses(ctx, CROISEE_EXPORTS.synthese!)).toEqual(["rh", "journal", "budget", "scenario"]);
+    // Période mars 2025, calculée : comptabilité et DSN lues par la Synthèse, donc citées.
+    const p2025 = { ...ctx, period: { year: 2025, from: "03", to: "03", years: [2025], last: "03", months: ["2025-03"], notices: [] } } as CroiseeContext;
+    expect(await sourceUses(p2025, CROISEE_EXPORTS.synthese!)).toEqual(["rh", "journal", "budget", "scenario", "compta", "dsn"]);
+  });
 });

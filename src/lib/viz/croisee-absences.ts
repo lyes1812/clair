@@ -14,9 +14,9 @@ import {
   type CongesAVenir,
   type CongesPris,
 } from "@/lib/croisee/conges";
-import { memoByContext } from "@/lib/croisee/memo";
+import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
 import { confidentialiteReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type MaskStatus } from "@/lib/croisee/structure";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSettings } from "@/lib/croisee-settings";
+import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSettings } from "@/lib/croisee/settings-format";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { absenteeism, absenteeismMonth, theoreticalWindow } from "@/lib/rh/kpi/absence";
 import { ABSENCE_ALL_MOTIFS_LABEL, absenceByMotif } from "@/lib/rh/kpi/absence-motifs";

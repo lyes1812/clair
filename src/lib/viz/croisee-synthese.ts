@@ -6,8 +6,8 @@ import { budgetSeries, gap, liveSeries, scenarioSeries, total, type Gap, type Po
 import { aggregate, reelVersion } from "@/lib/budget/versions";
 import { printFold, selectAlerts, type AlertesInput, type AlertMention, type ComptaCheck, type DsnCheck, type MissingSource, type SeuilInput } from "@/lib/croisee/alertes";
 import { journalReason } from "@/lib/croisee/format";
-import { memoByContext } from "@/lib/croisee/memo";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting, type SeuilEffectif } from "@/lib/croisee-settings";
+import { memoPublicModel as memoByContext, publicReason } from "@/lib/croisee/public";
+import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting, type SeuilEffectif } from "@/lib/croisee/settings-format";
 import { monthEnd, monthsBetween } from "@/lib/dates";
 import { dsnBrutWindow } from "@/lib/payroll/dsn";
 import { costPerEtp, evolution, monthPayroll, windowPayroll, withService, type JournalInput, type PayrollWindow } from "@/lib/payroll/engine";
@@ -19,7 +19,7 @@ import { compareWindows, delta as kpiDelta, etpProratedValue, type Valued } from
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { ETP_PRORATED_LABEL, etpProratedMonth, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
 import { fmtEtp4, fmtFixed, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
-import { civilWindow, countedOpts, rollingWindow } from "@/lib/rh/kpi/period";
+import { civilWindow, countedOpts, previousWindow, rollingWindow } from "@/lib/rh/kpi/period";
 import { turnover } from "@/lib/rh/kpi/turnover";
 import { kpiNd, type Delta, type DeltaUnit, type Kind, type KpiInput, type KpiNd, type Ratio, type Window } from "@/lib/rh/kpi/types";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
@@ -39,6 +39,7 @@ import {
   type TileSpec,
   type TileVariation,
 } from "@/lib/viz/croisee";
+import { publicScenario, zoomReason } from "@/lib/viz/croisee-budget";
 import { seuilAlerts } from "@/lib/viz/croisee-effectifs";
 import { buildServices, loadServicesInput, N1_NEGATIF, N1_NUL, SERVICES_IDS, type ServicesInput } from "@/lib/viz/croisee-masse";
 import { masseWaterfall, type MasseRubric } from "@/lib/viz/ecart";
@@ -55,7 +56,7 @@ import { averageTile, deltaView, eurosOfFraction, evolutionView, kpiRefusal, lan
 // - syntheseModel(ctx), mémoïsée par requête : l'écran et les exports partent de ce même modèle, calculé une fois.
 // Seul calcul nouveau de ce fichier : la moyenne, sur la période, de l'ETP contractuel proratisé (etpProratedAverage, testée).
 // Montants en centimes, ETP en dix-millièmes ou fractions exactes, taux en fractions ; un n.d. reste n.d. avec sa raison, et aucune
-// raison n'expose un identifiant de contrat ou d'absence (publicReason).
+// raison n'expose un nom ni un identifiant de contrat ou d'absence (publicScenario pour la projection, publicReason ensuite).
 
 const CHAPTER = "synthese" as const;
 
@@ -111,6 +112,7 @@ export const PRINT_REPERES_MAX = 3;
 type NdIn = { nd: { reason: string } };
 type Action = { href: string; label: string };
 export type ComparedIn<T = RatioIn> = { current: T; previous: T; delta: Delta };
+export type WindowMonths = { months: string[] };
 export type TurnoverIn = { kind: "exact"; ratio: Ratio; entries: number | null; exits: number } | ({ kind: "nd" } & NdIn);
 export type EtpProratedMonthIn = { month: string; kind: "exact" | "lower_bound"; ratio: Ratio; qualifiers: string[] } | ({ month: string; kind: "nd" } & NdIn);
 export type WindowIn =
@@ -132,7 +134,9 @@ export type SyntheseRh =
       proratedQualifier: string; // qualifieur obligatoire du moteur (etpProratedQualifier)
       absenteeism: ComparedIn;
       absenceTypes: string[]; // motifs retenus (Paramètres › Définitions des KPI)
-      turnover: ComparedIn<TurnoverIn>; // douze mois glissants qui finissent avec la période
+      // Douze mois glissants qui finissent avec la période, et les douze mois glissants qui les précèdent (N-1) : fenêtres du moteur
+      // (compareWindows), écrites dans le tableau des chiffres clés.
+      turnover: ComparedIn<TurnoverIn> & { window: WindowMonths; previousWindow: WindowMonths };
       annual: AnnualIn; // seuils d'effectif
       rolling: string[]; // douze mois glissants des mini-courbes
       sparks: { etp: EtpIn[]; absenteeism: RatioIn[]; headcount: HeadcountIn[] };
@@ -264,21 +268,8 @@ export function etpProratedAverage(list: readonly EtpProratedMonthIn[]): Prorate
 
 // --- Raisons publiques : aucun identifiant de contrat ni d'absence dans la page croisée ---------------------------------------
 
-// Les raisons n.d. du moteur des KPI qui citent un identifiant (contrats continus non vérifiables du turnover, absence rattachée à
-// un contrat inconnu, absence sans date) sont remplacées par une raison générique qui garde le mois et le nombre ; le détail
-// nominatif reste dans KPI RH, avec ses droits. Les autres raisons sont rendues telles quelles.
-const LE_DATE = / le \d{2}\/\d{2}\/\d{4}/g;
-const continuity = (_m: string, what: string, month: string, list: string) => {
-  const n = (list.match(LE_DATE) ?? []).length || list.split(", ").filter(Boolean).length || 1;
-  return `${n} ${n > 1 ? "contrats continus non vérifiables" : "contrat continu non vérifiable"} en ${month} (${what.toLowerCase()}, détail dans KPI RH)`;
-};
-export function publicReason(text: string): string {
-  return text
-    .replace(/(entrées|sorties) de (\d{4}-\d{2}) : contrats continus non vérifiables \((.*?)\) — jour voisin hors de la couverture ; sans la neutralisation \(Paramètres\), ces mouvements seraient comptés/gi, continuity)
-    .replace(/(entrées|sorties) de (\d{4}-\d{2}) : contrats continus non vérifiables \((.*?)\)/gi, continuity)
-    .replace(/absence \S+ rattachée au contrat \S+ inconnu du référentiel/gi, "1 absence rattachée à un contrat inconnu du référentiel (détail dans KPI RH)")
-    .replace(/absence \S+ : date de (\S+) non renseignée dans PayFit/gi, (_m, which: string) => `1 absence sans date de ${which} renseignée dans PayFit (détail dans KPI RH)`);
-}
+// Filtre commun de la page croisée (src/lib/croisee/public.ts), ré-exporté.
+export { publicReason } from "@/lib/croisee/public";
 
 // --- Mise en forme ------------------------------------------------------------------------------------------------------------
 
@@ -293,6 +284,12 @@ const monthsSpan = (list: string[], all: string[]): string => {
   const i = all.indexOf(list[0]);
   const run = i >= 0 && list.every((m, k) => all[i + k] === m);
   return run && list.length > 1 ? `${monthShortYear(list[0])} → ${monthShortYear(list[list.length - 1])}` : monthsText(list);
+};
+// Fenêtre de mois écrite en toutes lettres, années comprises : « avril 2024 → mars 2025 » (une fenêtre glissante chevauche deux années).
+const windowSpan = (w: WindowMonths): string => {
+  const first = w.months[0];
+  const last = w.months[w.months.length - 1];
+  return first === undefined ? "douze mois glissants précédents" : first === last ? monthLongLabel(first) : `${monthLongLabel(first)} → ${monthLongLabel(last)}`;
 };
 
 // Cellules du tableau : fraction exacte (ETP, fraction d'un pourcentage), borne basse écrite « ≥ x », n.d. avec sa raison.
@@ -850,6 +847,12 @@ export function buildSynthese(input: SyntheseInput): SyntheseModel {
     rows: montantsRows,
     terms: [T.masse, T.coutEtp, T.ecartBudget, T.atterrissage, T.evolution],
   };
+  // Chaque ligne date sa référence N-1 (colonne « Comparé à ») : les mêmes mois un an plus tôt pour l'ETP et l'absentéisme ; pour
+  // le turnover, les douze mois glissants qui précèdent sa fenêtre (fenêtres du moteur ; sans calcul, les mêmes fonctions sur le
+  // dernier mois de la période).
+  const toWin: { window: WindowMonths; previousWindow: WindowMonths } = rh.kind === "value" ? rh.turnover : { window: rollingWindow(lastMonth), previousWindow: previousWindow(rollingWindow(lastMonth)) };
+  const vsPeriod = `N-1 : ${labels.prev}`;
+  const vsTurnover = `N-1 : ${windowSpan(toWin.previousWindow)}`;
   const rhRows: CroiseeRow[] = [];
   if (rh.kind === "value") {
     const pr = prorated ?? etpProratedAverage(rh.prorated);
@@ -859,19 +862,26 @@ export function buildSynthese(input: SyntheseInput): SyntheseModel {
     const t = rh.turnover;
     const turnoverCell = (x: TurnoverIn): CroiseeCell => (x.kind === "nd" ? { nd: x.nd.reason } : { exact: x.ratio.num / x.ratio.den });
     rhRows.push(
-      { cells: ["ETP moyen", labels.period, exactCell(rh.etpAverage.current, (x) => fmtFixed(x)), exactCell(rh.etpAverage.previous, (x) => fmtFixed(x)), deltaCell(rh.etpAverage.delta)], kind: "etp" },
-      { cells: [PRORATED_AVG, labels.period, avgCell(pr), avgCell(pp), deltaCell(prDelta)], kind: "etp" },
-      { cells: ["Absentéisme", labels.period, exactCell(rh.absenteeism.current, fmtPercent), exactCell(rh.absenteeism.previous, fmtPercent), deltaCell(rh.absenteeism.delta)], kind: "pourcent" },
-      { cells: ["Turnover", capital(rolling12), turnoverCell(t.current), turnoverCell(t.previous), deltaCell(t.delta)], kind: "pourcent" },
+      { cells: ["ETP moyen", labels.period, exactCell(rh.etpAverage.current, (x) => fmtFixed(x)), vsPeriod, exactCell(rh.etpAverage.previous, (x) => fmtFixed(x)), deltaCell(rh.etpAverage.delta)], kind: "etp" },
+      { cells: [PRORATED_AVG, labels.period, avgCell(pr), vsPeriod, avgCell(pp), deltaCell(prDelta)], kind: "etp" },
+      { cells: ["Absentéisme", labels.period, exactCell(rh.absenteeism.current, fmtPercent), vsPeriod, exactCell(rh.absenteeism.previous, fmtPercent), deltaCell(rh.absenteeism.delta)], kind: "pourcent" },
+      { cells: ["Turnover", capital(rolling12), turnoverCell(t.current), vsTurnover, turnoverCell(t.previous), deltaCell(t.delta)], kind: "pourcent" },
     );
   } else {
     const r = { nd: rh.reason };
-    for (const [label, mesure, kind] of [["ETP moyen", labels.period, "etp"], [PRORATED_AVG, labels.period, "etp"], ["Absentéisme", labels.period, "pourcent"], ["Turnover", capital(rolling12), "pourcent"]] as const) rhRows.push({ cells: [label, mesure, r, r, r], kind });
+    for (const [label, mesure, vs, kind] of [["ETP moyen", labels.period, vsPeriod, "etp"], [PRORATED_AVG, labels.period, vsPeriod, "etp"], ["Absentéisme", labels.period, vsPeriod, "pourcent"], ["Turnover", capital(rolling12), vsTurnover, "pourcent"]] as const) rhRows.push({ cells: [label, mesure, r, vs, r, r], kind });
   }
   const rhTable: CroiseeTable = {
     id: ID.rh,
     title: `Chiffres clés de la période : ETP et taux, ${labels.period}`,
-    columns: [textCol("indicateur", "Indicateur"), textCol("mesure", "Mesure"), { key: "valeur", header: "Valeur", kind: "etp" }, { key: "n1", header: `N-1 (${labels.prev})`, kind: "etp", term: T.nMoinsUn }, { key: "ecart", header: "Écart", kind: "etp", signed: true, points: true }],
+    columns: [
+      textCol("indicateur", "Indicateur"),
+      textCol("mesure", "Mesure"),
+      { key: "valeur", header: "Valeur", kind: "etp" },
+      textCol("comparaison", "Comparé à"),
+      { key: "n1", header: "N-1", kind: "etp", term: T.nMoinsUn },
+      { key: "ecart", header: "Écart", kind: "etp", signed: true, points: true },
+    ],
     rows: rhRows,
     notes: ["ETP en équivalents temps plein ; taux en pourcentage, écarts de taux en points."],
     terms: [T.etpMoyen, T.etpProratise, T.absenteisme, T.turnover, T.nMoinsUn],
@@ -1157,7 +1167,17 @@ export async function loadSyntheseInput(ctx: CroiseeContext): Promise<SyntheseIn
     if (s.kind === "nd") landingIn = { kind: "nd", reason: s.reason };
     else {
       const sc = s.full.scenario;
-      landingIn = { kind: "value", scenarioName: sc.name, refMonth: s.full.base.refMonth, landing: landing(s.full.base, s.proj, String(year)), series: scenarioSeries(sc.id, `Scénario « ${sc.name} »`, s.full.base, s.proj) };
+      // Raisons n.d. de la projection sans identité (le moteur nomme le contrat : « <libellé> : base n.d. (…) »), comme le chapitre
+      // 06 ; montants identiques à ceux des Hypothèses budgétaires. La raison de l'année est regroupée par raison identique.
+      const pub = publicScenario(s.full.base, s.proj);
+      const land = landing(pub.base, pub.proj, String(year));
+      landingIn = {
+        kind: "value",
+        scenarioName: sc.name,
+        refMonth: s.full.base.refMonth,
+        landing: land.kind === "nd" ? { kind: "nd", reason: zoomReason(land.reason) } : land,
+        series: scenarioSeries(sc.id, `Scénario « ${sc.name} »`, pub.base, pub.proj),
+      };
     }
   }
 

@@ -212,11 +212,13 @@ function writeCell(cell: ExcelJS.Cell, v: ExportCell | undefined, kind: ColumnKi
     return v.nd;
   }
   if (isExact(v)) {
-    // Valeur exacte (ETP, fraction d'un pourcentage) : écrite telle quelle, sans arrondi ; le format de la colonne arrondit à l'affichage.
+    // Valeur exacte (ETP, fraction d'un pourcentage, moyenne) : écrite telle quelle, sans arrondi ; le format de la colonne arrondit à
+    // l'affichage. Dans une colonne « nombre » (entiers), une valeur exacte s'affiche au centième, comme à l'écran (cellView) : un
+    // effectif moyen de 49,6 s'écrit 49,60, jamais 50.
     if (!Number.isFinite(v.exact)) throw new RangeError(`${where} : colonne « ${header} », une valeur exacte n'est pas un nombre fini`);
     if (kind === "text" || kind === "date") throw new RangeError(`${where} : colonne « ${header} », une valeur exacte ne va pas dans une colonne texte ou date`);
     cell.value = v.exact === 0 ? 0 : v.exact;
-    cell.numFmt = NUM_FMT[kind];
+    cell.numFmt = kind === "nombre" ? NUM_FMT.etp : NUM_FMT[kind];
     return null;
   }
   if (typeof v === "string") {

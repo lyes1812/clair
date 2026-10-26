@@ -2,15 +2,15 @@ import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/cr
 import type { ChartSeries } from "@/components/charts/shared";
 import { amountGap, chargesOfWindow, type Amount, type ChargesPassage } from "@/lib/croisee/charges-personnel";
 import { journalReason } from "@/lib/croisee/format";
-import { memoByContext } from "@/lib/croisee/memo";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting } from "@/lib/croisee-settings";
+import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
+import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting } from "@/lib/croisee/settings-format";
 import { formatMonth } from "@/lib/dates";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { MASSE_TERMS as M } from "@/lib/glossary/masse";
 import { dsnBrutWindow, type DsnWindow } from "@/lib/payroll/dsn";
-import { monthPayroll, servicesOf, windowPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
-import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
-import { comptaGap, operatingRevenue, provisionMonth, reconcile, type ProvisionMonth, type Reconciliation } from "@/lib/payroll/lot2";
+import { monthPayroll, serviceOf, servicesOf, windowPayroll, withService, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
+import { classify, gridRubrics, RUBRICS, type RubricId } from "@/lib/payroll/grid";
+import { comptaGap, operatingRevenue, PROVISION_MARKER, provisionMonth, reconcile, type ProvisionMonth, type Reconciliation } from "@/lib/payroll/lot2";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import { costVariation, plainVariation, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeRow, type CroiseeTable, type TileSpec } from "@/lib/viz/croisee";
 import { capital, COLORS, dsnPoint, euros, eurosSigned, monthLongLabel, monthsAxis, monthShortYear, ndGroups, ndLines, noPeriod, pluriel, provisionParts, provisionTotals, reasonText, reconMonthSeries, reconRubricChart } from "@/lib/viz/masse";
@@ -114,9 +114,14 @@ export const NON_FILTRABLE_DSN = "non filtrable par service : la DSN ne porte pa
 export const SANS_PRODUITS = "aucun produit d'exploitation (comptes 70 à 75) sur la période";
 export const SEUIL_NON_VERIFIABLE = "effectif du service non dénombré : seuil de confidentialité non vérifiable";
 export const SEUIL_ABSENT = "seuil de confidentialité non défini (Paramètres)";
-// Raison d'une valeur masquée, la MÊME pour le masquage principal et le masquage secondaire : deux raisons différentes diraient
-// lequel des services masqués compte moins de contrats que le seuil.
-export const sousSeuil = (seuil: number): string => `non affiché (seuil de confidentialité : ${seuil} ${seuil > 1 ? "contrats rémunérés" : "contrat rémunéré"} par service et par mois)`;
+// Limites de la lecture : comment le seuil compte un service (tableau par service, puis service retenu dans les filtres).
+export const PROVISION_SERVICES_LIMITE =
+  "Provision par service : seuil de confidentialité compté à chaque fin de mois en contrats qui portent une ligne de dotation de la provision ; une provision non nulle sans contrat rattaché est masquée ; masquage secondaire compris ; la ligne « Toute l'entreprise » reste complète.";
+export const SERVICE_RETENU_LIMITE =
+  "Service retenu : seuil de confidentialité compté chaque mois en contrats qui portent une ligne de charges de personnel (passage) ou de dotation de la provision (provision) ; une valeur non nulle sans contrat rattaché est masquée ; le passage, qui contient les provisions, est masqué quand la provision l'est ; masquage secondaire avec les autres services.";
+// Raison d'une valeur masquée, la MÊME pour le masquage principal, le masquage secondaire et un service sans contrat rattaché : des
+// raisons différentes diraient lequel des services masqués compte moins de contrats que le seuil.
+export const sousSeuil = (seuil: number): string => `non affiché (seuil de confidentialité : ${seuil} ${seuil > 1 ? "contrats" : "contrat"} par service et par mois)`;
 
 // Blocs du chapitre que Clair ne calcule pas (matrice 4.7) : « Prévu », sans valeur reconstituée.
 export const PREVU_PAIE: PrevuItem[] = [
@@ -142,33 +147,104 @@ export const PREVU_PAIE: PrevuItem[] = [
 
 // --- Seuil de confidentialité par service (calcul pur, testé) ---------------------------------------------------------------------
 
-// Un groupe = un service à une fin de mois : size = contrats rémunérés du service ce mois (contrats portant une ligne de brut dans le
-// journal de paie ; null s'il n'est pas dénombré) ; order = montant qui ordonne le masquage secondaire (le plus petit d'abord ; null :
-// montant n.d., masqué en premier). Statuts : shown (affiché), masked (1 à seuil − 1 contrats), secondary (masqué pour protéger un
-// autre service), unverifiable (effectif non dénombré).
+// Un groupe = un service à une fin de mois, pour UNE valeur affichée : la provision de congés payés, ou le passage vers les charges de
+// personnel. size = contrats distincts qui portent au moins une ligne de cette valeur dans le journal de paie (provisionContracts,
+// passageContracts) ; null : effectif non dénombré (mois n.d.). contracts = ces contrats : les groupes masqués sont comptés en contrats
+// DISTINCTS, car un même contrat peut porter des lignes de deux services (une ligne sans code analytique, par exemple) ; sans cette
+// liste, les tailles sont additionnées. order = montant qui ordonne le masquage secondaire (le plus petit d'abord ; null : montant
+// n.d., masqué en premier). nonZero = la valeur affichée du groupe n'est pas nulle ; absent, il se lit sur order (0 : nulle ; n.d. :
+// traitée comme non nulle). Statuts : shown (affiché), masked (1 à seuil − 1 contrats, ou valeur non nulle sans contrat rattaché),
+// secondary (masqué pour protéger un autre service), unverifiable (effectif non dénombré).
 export type MaskStatus = "shown" | "masked" | "secondary" | "unverifiable";
-export type MaskGroup = { size: number | null; order: number | null };
+export type MaskGroup = { size: number | null; order: number | null; nonZero?: boolean; contracts?: readonly string[] };
 
-// Règle : un service de 1 à (seuil − 1) contrats rémunérés est masqué ; un service à 0 contrat (lignes « Non ventilé », par exemple)
-// n'est pas un groupe de personnes et n'est pas masqué au premier tour. Le total de toute l'entreprise restant affiché, les services
-// masqués doivent totaliser AU MOINS le seuil de contrats : sinon le plus petit service affiché est masqué aussi, et ainsi de suite.
-// Un service à 0 contrat masqué de la sorte n'ajoute rien au total : il ne suffit jamais à protéger un petit service. Ainsi, la
-// différence entre le total de l'entreprise et les services affichés décrit toujours un groupe d'au moins « seuil » contrats.
+// Règle : un service de 1 à (seuil − 1) contrats est masqué. Un service sans contrat rattaché dont la valeur n'est pas nulle (lignes
+// sans contrat, souvent « Non ventilé ») ne peut pas être vérifié : il est masqué de même, avec la même raison (dès que le seuil est
+// au moins 2). Un service sans contrat et de valeur nulle ne décrit personne : il n'est pas masqué au premier tour. Le total de toute
+// l'entreprise restant affiché, les services masqués doivent compter AU MOINS « seuil » contrats distincts : sinon le plus petit
+// service affiché est masqué aussi, et ainsi de suite. Un service sans contrat n'ajoute aucun contrat : il ne suffit jamais à
+// protéger un autre service. Ainsi, la différence entre le total de l'entreprise et les services affichés décrit toujours au moins
+// « seuil » contrats distincts.
 export function maskServices(groups: readonly MaskGroup[], seuil: number): MaskStatus[] {
-  const out = groups.map((g): MaskStatus => (g.size === null ? "unverifiable" : g.size >= 1 && g.size < seuil ? "masked" : "shown"));
+  const out = groups.map((g): MaskStatus => {
+    if (g.size === null) return "unverifiable";
+    if (g.size >= 1 && g.size < seuil) return "masked";
+    if (g.size === 0 && seuil > 1 && (g.nonZero ?? g.order !== 0)) return "masked";
+    return "shown";
+  });
   if (out.every((s) => s === "shown")) return out;
   const rank = (g: MaskGroup) => (g.order === null ? Number.NEGATIVE_INFINITY : g.order);
-  let hidden = groups.reduce((s, g, i) => s + (out[i] === "masked" ? (g.size ?? 0) : 0), 0);
-  while (hidden < seuil) {
+  // Contrats distincts des services masqués (liste fournie), plus la taille de ceux qui n'en donnent pas.
+  const hidden = () => {
+    const ids = new Set<string>();
+    let others = 0;
+    groups.forEach((g, i) => {
+      if (out[i] === "shown") return;
+      if (g.contracts) for (const c of g.contracts) ids.add(c);
+      else others += g.size ?? 0;
+    });
+    return ids.size + others;
+  };
+  while (hidden() < seuil) {
     let pick = -1;
     out.forEach((s, i) => {
       if (s === "shown" && (pick < 0 || rank(groups[i]) < rank(groups[pick]))) pick = i;
     });
     if (pick < 0) break; // tous les services sont masqués : seul le total de l'entreprise reste affiché
     out[pick] = "secondary";
-    hidden += groups[pick].size ?? 0;
   }
   return out;
+}
+
+// Contrats d'un service (input.serviceFilter ; toute l'entreprise sans filtre) qui portent, dans le mois, une ligne de la valeur
+// affichée. Provision : lignes de dotation « Mois courant » de la rubrique Provisions de congés payés, celles que provisionMonth
+// additionne. Passage : toute ligne de charges de personnel (rubrique de la grille ou compte 63/64 non classé), celles que
+// monthPayroll additionne. Une ligne sans contrat ne compte pas : un service qui n'a que de telles lignes est « sans contrat rattaché ».
+const nameKey = (s: string | null) => (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(); // comme lot2.ts
+function contractsOf(input: JournalInput, month: string, pick: (l: LedgerLine) => boolean): string[] {
+  const f = input.serviceFilter;
+  const ids = new Set<string>();
+  for (const l of input.lines) {
+    if (l.month !== month || !l.contractId || !pick(l)) continue;
+    if (f && serviceOf(l, input.serviceAxis) !== f.value) continue;
+    ids.add(l.contractId);
+  }
+  return [...ids].sort();
+}
+export function provisionContracts(input: JournalInput, month: string): string[] {
+  const rubrics = gridRubrics(input.grid);
+  return contractsOf(input, month, (l) => classify(l.accountId, rubrics).rubric?.id === "provisions-cp" && nameKey(l.accountName).includes(PROVISION_MARKER));
+}
+export function passageContracts(input: JournalInput, month: string): string[] {
+  const rubrics = gridRubrics(input.grid);
+  return contractsOf(input, month, (l) => {
+    const c = classify(l.accountId, rubrics);
+    return c.rubric !== null || c.payroll;
+  });
+}
+
+// Statut du passage d'un service retenu dans les filtres : le passage contient la rubrique Provisions de congés payés (dotations et
+// reprises du mois) ; il est donc masqué aussi quand la provision du service est masquée (principal ou secondaire), sinon sa ligne
+// « Provisions de congés payés » redonnerait ce que le bloc Provision masque. Pour chaque valeur, les services masqués contiennent
+// ceux de son propre masquage, qui comptent au moins « seuil » contrats : rien ne se retrouve par différence. Une provision n.d.
+// (« non vérifiable ») ne masque pas le passage : le bloc Provision n'affiche alors rien.
+export const passageStatus = (passage: MaskStatus, provision: MaskStatus): MaskStatus =>
+  passage === "shown" && (provision === "masked" || provision === "secondary") ? provision : passage;
+
+// Groupes du seuil pour un service et un mois (journal restreint au service) : provision de fin de mois, passage du mois.
+export function provisionGroup(input: JournalInput, month: string): MaskGroup {
+  const x = provisionMonth(input, month);
+  if (x.kind === "nd") return { size: null, order: null };
+  const contracts = provisionContracts(input, month);
+  return { size: contracts.length, contracts, order: x.total, nonZero: (x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0 };
+}
+export function passageGroup(input: JournalInput, month: string): MaskGroup {
+  const r = monthPayroll(input, month);
+  if (r.kind === "nd") return { size: null, order: null };
+  const contracts = passageContracts(input, month);
+  const rubrics = Object.values(r.byRubric);
+  const amounts = [...rubrics, ...r.unclassified.map((a) => a.balanceCents)];
+  return { size: contracts.length, contracts, order: rubrics.reduce((s, v) => s + v, 0), nonZero: amounts.some((v) => v !== 0) };
 }
 
 const maskReason = (s: Exclude<MaskStatus, "shown">, seuil: number) => (s === "unverifiable" ? SEUIL_NON_VERIFIABLE : sousSeuil(seuil));
@@ -193,9 +269,11 @@ export function maskedWindow(w: WindowIn, statusAt: (month: string) => MaskStatu
   return masked ? { kind: "nd", nd: { reason: sousSeuil(seuil) }, months } : w;
 }
 
-// Seuil appliqué à un seul service, sans autre service pour un masquage secondaire (forme courte de maskServices + maskedProvision).
-export function guardProvision(x: ProvisionMonth, persons: number | null, seuil: number): { total: Amount; conges: Amount; charges: Amount } {
-  const y = maskedProvision(x, maskServices([{ size: persons, order: null }], seuil)[0], seuil);
+// Seuil appliqué à un seul service, sans autre service pour un masquage secondaire (forme courte de maskServices + maskedProvision) ;
+// contracts : contrats qui portent une ligne de dotation de la provision du service.
+export function guardProvision(x: ProvisionMonth, contracts: number | null, seuil: number): { total: Amount; conges: Amount; charges: Amount } {
+  const nonZero = x.kind === "nd" || (x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0;
+  const y = maskedProvision(x, maskServices([{ size: contracts, order: null, nonZero }], seuil)[0], seuil);
   return provisionAmounts(y, y);
 }
 
@@ -516,8 +594,9 @@ export function buildPaieCompta(input: PaieInput): PaieModel {
       terms: [M.provision, T.confidentialite],
     });
     provBlock.tables.push(ID.provisionServices);
-    limits.push("Provision par service : seuil de confidentialité compté en contrats rémunérés du mois, masquage secondaire compris ; la ligne « Toute l'entreprise » reste complète.");
+    limits.push(PROVISION_SERVICES_LIMITE);
   }
+  if (d.service && !serviceNd) limits.push(SERVICE_RETENU_LIMITE);
   blocks.push(provBlock);
 
   // --- Cartes : charges de personnel, écarts journal − comptabilité et journal − DSN, provision de fin de mois, ratio sur produits.
@@ -629,31 +708,26 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
   const conf = confidentialiteOf(ctx.settings.confidentialite);
 
   // Services du journal entier sur la période et N-1 (plus le service retenu s'il n'y figure pas) : une entrée filtrée par service,
-  // créée une fois (le moteur mémoïse ses mois par entrée). Statuts du seuil par fin de mois, calculés une fois par mois et partagés
-  // par le tableau par service et par la vue filtrée : un service masqué dans l'un l'est dans l'autre.
+  // créée une fois (le moteur mémoïse ses mois par entrée). Statuts du seuil par mois, calculés une fois par mois et pour chaque valeur
+  // affichée : la provision (contrats portant une ligne de dotation), partagée par le tableau par service et par la vue filtrée (un
+  // service masqué dans l'un l'est dans l'autre), et le passage vers les charges de personnel (contrats portant une ligne de charges
+  // de personnel), calculé sur tous les services puisque chacun se lit sous son filtre et que le total de l'entreprise est affiché.
   const groups = (() => {
     if (!filtered && !(ctx.service.axis && full.serviceAxis)) return [];
     const list = servicesOf(full, scope);
     if (filtered && !list.includes(svc)) list.push(svc);
     return list.map((value) => ({ value, input: withService(full, value) }));
   })();
-  const paidCount = (si: JournalInput, m: string) => {
-    const r = monthPayroll(si, m);
-    return r.kind === "value" ? r.paidContracts.length : null;
-  };
-  const provisionOrder = (x: ProvisionMonth) => (x.kind === "value" ? x.total : null);
-  const masks = new Map<string, MaskStatus[]>();
-  const maskAt = (m: string, seuil: number): MaskStatus[] => {
+  const masks = new Map<string, { provision: MaskStatus[]; passage: MaskStatus[] }>();
+  const masksAt = (m: string, seuil: number) => {
     let s = masks.get(m);
     if (!s) {
       // Journal réduit aux lignes du mois (le moteur ne lit que celles-là pour ce mois : mêmes résultats, sans relire toute l'année
       // pour chaque service).
       const month: JournalInput = { ...full, lines: full.lines.filter((l) => l.month === m) };
-      const sized = groups.map((g) => {
-        const si = withService(month, g.value);
-        return { size: paidCount(si, m), order: provisionOrder(provisionMonth(si, m)) };
-      });
-      masks.set(m, (s = maskServices(sized, seuil)));
+      const inputs = groups.map((g) => withService(month, g.value));
+      s = { provision: maskServices(inputs.map((si) => provisionGroup(si, m)), seuil), passage: maskServices(inputs.map((si) => passageGroup(si, m)), seuil) };
+      masks.set(m, s);
     }
     return s;
   };
@@ -684,11 +758,12 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
     } else {
       const seuil = conf.value;
       service = { label: ctx.service.label, seuilNd: null };
-      const statusAt = (m: string) => maskAt(m, seuil)[gi];
-      cur = maskedWindow(windowPayroll(input, months), statusAt, seuil);
-      prev = maskedWindow(windowPayroll(input, prevMonths), statusAt, seuil);
-      provCur = months.map((m) => maskedProvision(provisionMonth(input, m), statusAt(m), seuil));
-      provPrev = prevMonths.map((m) => maskedProvision(provisionMonth(input, m), statusAt(m), seuil));
+      const passageAt = (m: string) => passageStatus(masksAt(m, seuil).passage[gi], masksAt(m, seuil).provision[gi]);
+      const provisionAt = (m: string) => masksAt(m, seuil).provision[gi];
+      cur = maskedWindow(windowPayroll(input, months), passageAt, seuil);
+      prev = maskedWindow(windowPayroll(input, prevMonths), passageAt, seuil);
+      provCur = months.map((m) => maskedProvision(provisionMonth(input, m), provisionAt(m), seuil));
+      provPrev = prevMonths.map((m) => maskedProvision(provisionMonth(input, m), provisionAt(m), seuil));
     }
   }
 
@@ -708,7 +783,7 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
             rows: shown.map((s) => {
               const gi = groups.findIndex((g) => g.value === s);
               const si = groups[gi].input;
-              return { value: s, cur: maskedProvision(provisionMonth(si, last), maskAt(last, seuil)[gi], seuil), prev: maskedProvision(provisionMonth(si, lastPrev), maskAt(lastPrev, seuil)[gi], seuil) };
+              return { value: s, cur: maskedProvision(provisionMonth(si, last), masksAt(last, seuil).provision[gi], seuil), prev: maskedProvision(provisionMonth(si, lastPrev), masksAt(lastPrev, seuil).provision[gi], seuil) };
             }),
             total: { cur: provisionMonth(full, last), prev: provisionMonth(full, lastPrev) },
           };

@@ -7,7 +7,7 @@ import { STEP_LABELS, type Cascade } from "@/lib/budget/cascade";
 import { landing, project, type Landing } from "@/lib/budget/engine";
 import type { Retraite } from "@/lib/budget/lot3";
 import { bridge, budgetSeries, type Layer, type Point, type Series } from "@/lib/budget/series";
-import type { BaseContract, BaseSnapshot } from "@/lib/budget/types";
+import type { BaseContract, BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 import { aggregate, alignedSeries, reelVersion, val } from "@/lib/budget/versions";
 import { glossaryEntry } from "@/lib/glossary";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
@@ -74,6 +74,10 @@ const ret: Retraite = {
   total: 230_000,
   retraite: 13_000_000,
 };
+// Contributeurs fictifs des éléments non récurrents : 1 hypothèse « réalisé » (prime), 1 contrat (coûts de sortie).
+const NR1 = { realised: 1, projected: 1 };
+type ScenarioIn = Extract<Extract<BudgetChapterInput, { kind: "value" }>["scenario"], { kind: "value" }>;
+const scenarioOf = (over: Partial<ScenarioIn> = {}): ScenarioIn => ({ kind: "value", name: "Scénario test", refMonth: "2026-03", series: scen, landing: land, retraite: ret, contributors: NR1, ...over });
 const HREFS = { hypotheses: "/e/demo/studio-rh/hypotheses", comparaison: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=resultat&sous=comparaison&annee=2026", atterrissage: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=resultat&sous=atterrissage", postes: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=postes", embauches: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=embauches", parametres: "/e/demo/parametres#croisee" };
 // Seuil de confidentialité 1 : aucun groupe n'est sous le seuil (cas de base) ; les cas de masquage sont plus bas.
 const SEUIL_1 = { kind: "set" as const, value: 1 };
@@ -88,7 +92,7 @@ function budgetInput(over: Partial<Extract<BudgetChapterInput, { kind: "value" }
     hrefs: HREFS,
     live: { kind: "value", series: live },
     budget: { kind: "value", name: "Budget test", series: budget },
-    scenario: { kind: "value", name: "Scénario test", refMonth: "2026-03", series: scen, landing: land, retraite: ret },
+    scenario: scenarioOf(),
     // Partition écrite à la main (voir croisee-cohortes.test.ts) : 1 seulement N-1, 2 seulement N, 2 dans les deux, lignes sans contrat.
     cohorts: {
       kind: "value",
@@ -118,13 +122,50 @@ describe("buildBudget — réalisé, budget et écart sur la période", () => {
     expect(tile(m, "budget").note).toBe("Comparé sur 2 mois ; sans montant de budget, exclus : févr. 2026");
   });
 
+  it("mois exclus : « Budget des 2 mois avec budget » porte le réalisé de janvier et mars (10 000 + 11 000 = 21 000,00 €) ; 21 000 − 20 700 = +300,00 € = carte Écart", () => {
+    const b = tile(m, "budget");
+    expect(b.label).toBe("Budget des 2 mois avec budget");
+    expect(b.variations!.map((v) => [v.label, sp(v.text!), v.tone])).toEqual([["Réalisé des mois comparés", "21 000,00 €", "flat"]]);
+    // Valeur − Référence = Écart, sur les mêmes mois : 2 100 000 − 2 070 000 = 30 000 centimes.
+    expect(sp(tile(m, "ecart").value.text)).toBe("+300,00 €");
+    // La carte « Réalisé » couvre toute la période (31 500,00 €) : elle garde son libellé.
+    expect(tile(m, "realise").label).toBe("Réalisé");
+    // Un seul endroit pour le réalisé des mois comparés : la carte du budget.
+    expect(tile(m, "ecart").variations!.map((v) => v.label)).toEqual(["Écart (%)"]);
+  });
+
+  it("aucun mois exclu : « Budget de la période », sans ligne de réalisé (la carte « Réalisé » porte sur les mêmes mois)", () => {
+    const full = budgetSeries("budget-b1", "Budget saisi « Budget test »", "2026", Object.fromEntries(Y26.map((x) => [x, 1_000_000])));
+    const f = buildBudget(budgetInput({ budget: { kind: "value", name: "Budget test", series: full } }));
+    // Budget 3 × 10 000,00 € = 30 000,00 € ; écart 31 500 − 30 000 = +1 500,00 €.
+    expect(tile(f, "budget").label).toBe("Budget de la période");
+    expect(tile(f, "budget").variations).toBeUndefined();
+    expect(sp(tile(f, "budget").value.text)).toBe("30 000,00 €");
+    expect(sp(tile(f, "ecart").value.text)).toBe("+1 500,00 €");
+  });
+
+  it("un seul mois avec budget (janvier) : « Budget du mois avec budget » 10 200,00 €, réalisé de janvier 10 000,00 €, écart −200,00 €", () => {
+    const jan = budgetSeries("budget-b1", "Budget saisi « Budget test »", "2026", { "2026-01": 1_020_000 });
+    const one = buildBudget(budgetInput({ budget: { kind: "value", name: "Budget test", series: jan } }));
+    expect(tile(one, "budget").label).toBe("Budget du mois avec budget");
+    expect(sp(tile(one, "budget").value.text)).toBe("10 200,00 €");
+    expect(tile(one, "budget").variations!.map((v) => [v.label, sp(v.text!)])).toEqual([["Réalisé des mois comparés", "10 000,00 €"]]);
+    expect(sp(tile(one, "ecart").value.text)).toBe("−200,00 €");
+    expect(table(one, BUDGET_TABLE_IDS.mensuel).foot?.cells).toEqual(["Total du mois avec budget", 1_000_000, 1_020_000, -20_000]);
+  });
+
+  it("mois exclus et réalisé n.d. d'un mois comparé : la ligne est n.d. avec la raison, jamais 0", () => {
+    const r = series("reel", "Réalisé", { "2026-01": 1_000_000, "2026-02": 1_050_000, "2026-03": "paie non clôturée à la lecture" });
+    const n = buildBudget(budgetInput({ live: { kind: "value", series: r } }));
+    expect(tile(n, "budget").label).toBe("Budget des 2 mois avec budget");
+    expect(tile(n, "budget").variations).toEqual([{ label: "Réalisé des mois comparés", text: null, reason: "paie non clôturée à la lecture (mars 2026)", tone: "flat" }]);
+  });
+
   it("écart sur janvier et mars : (10 000 + 11 000) − 20 700 = +300,00 € ; 300 ÷ 20 700 = +1,45 % ; défavorable, en rouge", () => {
     const t = tile(m, "ecart");
     expect(sp(t.value.text)).toBe("+300,00 €");
     expect(t.valueTone).toBe("bad");
     expect(sp(t.variations![0].text!)).toBe("+1,45 % · défavorable");
-    expect(t.variations![1]).toMatchObject({ label: "Réalisé des mois comparés" });
-    expect(sp(t.variations![1].text!)).toBe("21 000,00 €");
     // Mini-courbe : écart de janvier −200,00 €, février sans budget (null, jamais 0), mars +500,00 €.
     expect(t.spark?.values).toEqual([-20_000, null, 50_000]);
     expect(m.trend).toBe(true);
@@ -213,7 +254,7 @@ describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", 
   });
 
   it("sans élément non récurrent : lignes à 0 (jamais « −0 »), pas de cascade du retraité, mention écrite", () => {
-    const z = buildBudget(budgetInput({ scenario: { kind: "value", name: "Scénario test", refMonth: "2026-03", series: scen, landing: land, retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [], realised: 0, projected: 0, total: 0, retraite: 13_230_000 } } }));
+    const z = buildBudget(budgetInput({ scenario: scenarioOf({ retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [], realised: 0, projected: 0, total: 0, retraite: 13_230_000 }, contributors: { realised: 0, projected: 0 } }) }));
     const t = table(z, BUDGET_TABLE_IDS.atterrissage);
     expect(Object.is(t.rows[3].cells[1], 0)).toBe(true);
     expect(Object.is(t.rows[4].cells[1], 0)).toBe(true);
@@ -223,21 +264,21 @@ describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", 
   });
 
   it("des lignes non récurrentes à 0 : même phrase (cascade « vide »), pas de cascade du retraité", () => {
-    const z = buildBudget(budgetInput({ scenario: { kind: "value", name: "Scénario test", refMonth: "2026-03", series: scen, landing: land, retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [{ label: "Saisie annulée", realised: 0, projected: 0 }], realised: 0, projected: 0, total: 0, retraite: 13_230_000 } } }));
+    const z = buildBudget(budgetInput({ scenario: scenarioOf({ retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [{ label: "Saisie annulée", realised: 0, projected: 0 }], realised: 0, projected: 0, total: 0, retraite: 13_230_000 }, contributors: { realised: 0, projected: 0 } }) }));
     expect(z.charts.some((c) => c.id === BUDGET_CHART_IDS.retraite)).toBe(false);
     expect(z.blocks.find((b) => b.id === "atterrissage")!.notes).toEqual(["Aucun élément non récurrent : l'atterrissage retraité 2026 égale l'atterrissage."]);
   });
 
   it("atterrissage entièrement réel : la cascade n'est pas tracée et la phrase le dit", () => {
     const real: Landing = { kind: "value", year: "2026", actual: 13_230_000, prior: 0, projected: 0, actualMonths: Y26, priorMonths: [], projectedMonths: [], total: 13_230_000 };
-    const z = buildBudget(budgetInput({ scenario: { kind: "value", name: "Scénario test", refMonth: "2026-12", series: scen, landing: real, retraite: ret } }));
+    const z = buildBudget(budgetInput({ scenario: scenarioOf({ refMonth: "2026-12", landing: real }) }));
     expect(z.charts.some((c) => c.id === BUDGET_CHART_IDS.atterrissage)).toBe(false);
     expect(z.blocks.find((b) => b.id === "atterrissage")!.notes).toEqual(["L'atterrissage 2026 est entièrement réel : une cascade n'apporterait rien de plus que le total."]);
   });
 
   it("atterrissage n.d. : les deux cascades le sont pour la même raison, une seule mention n.d. du bloc", () => {
     const why = "2026-11 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)";
-    const z = buildBudget(budgetInput({ scenario: { kind: "value", name: "Scénario test", refMonth: "2026-03", series: scen, landing: { kind: "nd", year: "2026", reason: why }, retraite: { kind: "nd", year: "2026", reason: why } } }));
+    const z = buildBudget(budgetInput({ scenario: scenarioOf({ landing: { kind: "nd", year: "2026", reason: why }, retraite: { kind: "nd", year: "2026", reason: why } }) }));
     expect(z.charts.filter((c) => c.kind === "cascade")).toHaveLength(0);
     expect(z.blocks.find((b) => b.id === "atterrissage")!.nd).toEqual([{ label: "Cascades de l'atterrissage et du retraité", reason: "novembre 2026 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)" }]);
     expect(tile(z, "atterrissage").value.reason).toBe("novembre 2026 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)");
@@ -349,6 +390,98 @@ describe("buildBudget — seuil de confidentialité", () => {
   it("sans filtre : le réalisé de toute l'entreprise n'est jamais masqué", () => {
     const m = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 50 } }));
     expect(table(m, BUDGET_TABLE_IDS.mensuel).rows.map((r) => r.cells[1])).toEqual([1_000_000, 1_050_000, 1_100_000]);
+  });
+});
+
+// Éléments non récurrents : déjà comptabilisés 800,00 € (ret.realised), prévus 1 500,00 € (ret.projected), somme 2 300,00 €,
+// retraité 130 000,00 €. Seuls les contributeurs changent d'un cas à l'autre.
+describe("buildBudget — seuil de confidentialité des éléments non récurrents", () => {
+  const ND2 = "non affiché (seuil de confidentialité : 2 personnes)";
+  const ND3 = "non affiché (seuil de confidentialité : 3 personnes)";
+  const lines = (m: ReturnType<typeof buildBudget>) => tile(m, "retraite").variations!.map((v) => [v.label, v.text === null ? null : sp(v.text), v.reason ?? null]);
+  const nrRows = (m: ReturnType<typeof buildBudget>) => table(m, BUDGET_TABLE_IDS.atterrissage).rows.slice(3).map((r) => r.cells);
+  const att = (m: ReturnType<typeof buildBudget>) => m.blocks.find((b) => b.id === "atterrissage")!;
+
+  it("seuil 2, 1 hypothèse « réalisé » et 1 contrat aux coûts prévus : les deux totaux n.d. ; somme et retraité affichés ; cascade du retraité non tracée", () => {
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 } }));
+    expect(lines(m)).toEqual([
+      ["Non récurrents retirés", "2 300,00 €", null],
+      ["Déjà comptabilisés", null, ND2],
+      ["Prévus", null, ND2],
+    ]);
+    expect(sp(tile(m, "retraite").value.text)).toBe("130 000,00 €");
+    expect(m.tileNd).toContain(`Déjà comptabilisés, Prévus : ${ND2}`);
+    // Tableau exact : les deux lignes n.d. avec la même raison ; atterrissage et retraité inchangés.
+    expect(nrRows(m)).toEqual([
+      ["Éléments non récurrents déjà comptabilisés", { nd: ND2 }],
+      ["Éléments non récurrents prévus (hypothèses)", { nd: ND2 }],
+    ]);
+    expect(table(m, BUDGET_TABLE_IDS.atterrissage).foot?.cells).toEqual(["Atterrissage retraité 2026", 13_000_000]);
+    expect(m.charts.some((c) => c.id === BUDGET_CHART_IDS.retraite)).toBe(false);
+    expect(m.charts.some((c) => c.id === BUDGET_CHART_IDS.atterrissage)).toBe(true);
+    expect(att(m).nd).toEqual([{ label: "Éléments non récurrents déjà comptabilisés et prévus, cascade du retraité", reason: ND2 }]);
+  });
+
+  it("seuil 3, 2 hypothèses « réalisé » et 4 contrats : « Déjà comptabilisés » sous le seuil, « Prévus » masqué en second (sinon 2 300 − 1 500 = 800)", () => {
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 3 }, scenario: scenarioOf({ contributors: { realised: 2, projected: 4 } }) }));
+    expect(lines(m).slice(1)).toEqual([
+      ["Déjà comptabilisés", null, ND3],
+      ["Prévus", null, ND3],
+    ]);
+  });
+
+  it("seuil 2, 2 hypothèses et 3 contrats : rien n'est masqué, la cascade du retraité est tracée", () => {
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 }, scenario: scenarioOf({ contributors: { realised: 2, projected: 3 } }) }));
+    expect(lines(m)).toEqual([
+      ["Non récurrents retirés", "2 300,00 €", null],
+      ["Déjà comptabilisés", "800,00 €", null],
+      ["Prévus", "1 500,00 €", null],
+    ]);
+    expect(nrRows(m)).toEqual([
+      ["Éléments non récurrents déjà comptabilisés", -80_000],
+      ["Éléments non récurrents prévus (hypothèses)", -150_000],
+    ]);
+    expect(m.charts.some((c) => c.id === BUDGET_CHART_IDS.retraite)).toBe(true);
+    expect(att(m).nd).toEqual([]);
+  });
+
+  it("seuil non défini : les deux totaux n.d. avec la raison, une mention du bloc avec le lien vers les Paramètres", () => {
+    const why = "seuil de confidentialité non défini (Paramètres)";
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "nd", reason: why } }));
+    expect(lines(m).slice(1)).toEqual([
+      ["Déjà comptabilisés", null, why],
+      ["Prévus", null, why],
+    ]);
+    expect(nrRows(m).map((r) => r[1])).toEqual([{ nd: why }, { nd: why }]);
+    expect(att(m).nd).toEqual([{ label: "Éléments non récurrents déjà comptabilisés et prévus, cascade du retraité", reason: why, action: { href: "/e/demo/parametres#croisee", label: "Paramètres" } }]);
+    expect(m.charts.some((c) => c.id === BUDGET_CHART_IDS.retraite)).toBe(false);
+  });
+
+  it("seuil 3, contributeurs qui se compensent (2 hypothèses, somme 0) et aucun prévu : n.d. sans la phrase « Aucun élément non récurrent », qui dirait 0", () => {
+    const zero: Retraite = { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [], realised: 0, projected: 0, total: 0, retraite: 13_230_000 };
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 3 }, scenario: scenarioOf({ retraite: zero, contributors: { realised: 2, projected: 0 } }) }));
+    expect(lines(m).slice(1)).toEqual([
+      ["Déjà comptabilisés", null, ND3],
+      ["Prévus", null, ND3],
+    ]);
+    expect(att(m).notes).toEqual([]);
+    expect(att(m).nd).toEqual([{ label: "Éléments non récurrents déjà comptabilisés et prévus", reason: ND3 }]);
+  });
+
+  it("contributeurs des prévus non dénombrés : « Prévus » non vérifiable, « Déjà comptabilisés » masqué en second", () => {
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 }, scenario: scenarioOf({ contributors: { realised: 5, projected: null } }) }));
+    expect(lines(m).slice(1)).toEqual([
+      ["Déjà comptabilisés", null, ND2],
+      ["Prévus", null, "effectif du groupe non dénombré : seuil de confidentialité non vérifiable"],
+    ]);
+  });
+
+  it("rendu : la mention n.d. du bloc Atterrissage et le lien vers les Paramètres sont écrits", () => {
+    const out = sp(renderToStaticMarkup(h(BlocksChapter, { model: buildBudget(budgetInput({ confidentialite: { kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" } })), slug: "demo", affichage: "tout", tableauHref: "/x" })));
+    expect(out).toContain('data-testid="cx-budget-atterrissage-nd"');
+    expect(out).toContain("Éléments non récurrents déjà comptabilisés et prévus, cascade du retraité");
+    expect(out).toContain('href="/e/demo/parametres#croisee"');
+    expect(out).not.toContain('data-testid="cx-chart-budget-retraite-cascade"');
   });
 });
 
@@ -573,11 +706,11 @@ const proj = project(baseSnap, "2026-03", "2026-12", [], { prorata: "calendaire"
 
 // kpiInput : référentiel RH simulé ; non nul seulement pour les versions filtrées par service (ETP du service lu par pay.etp).
 // seuil : seuil de confidentialité de l'espace (null : non défini) ; etp : ETP du service par mois ; scénario : base, projection, début.
-type FakeOpts = { seuil?: number | null; etp?: (months: string[]) => { month: string; etp4: number | null; reason: string | null }[]; base?: BaseSnapshot; firstMonth?: string };
+type FakeOpts = { seuil?: number | null; etp?: (months: string[]) => { month: string; etp4: number | null; reason: string | null }[]; base?: BaseSnapshot; firstMonth?: string; hyps?: Hypothesis[] };
 function fakeCtx(service: string | undefined, kpiInput: unknown = null, o: FakeOpts = {}): CroiseeContext {
   const b = o.base ?? baseSnap;
-  const pr = o.base ? project(b, "2026-03", "2026-12", [], { prorata: "calendaire" }) : proj;
-  const scenario: ScenarioLoad = { kind: "value", full: { scenario: { id: "s1", name: "Scénario test", firstMonth: o.firstMonth ?? "2026-03", lastMonth: "2026-12" }, base: b, baseHash: "h", hypotheses: [] } as never, proj: pr };
+  const pr = o.base || o.hyps ? project(b, "2026-03", "2026-12", o.hyps ?? [], { prorata: "calendaire" }) : proj;
+  const scenario: ScenarioLoad = { kind: "value", full: { scenario: { id: "s1", name: "Scénario test", firstMonth: o.firstMonth ?? "2026-03", lastMonth: "2026-12" }, base: b, baseHash: "h", hypotheses: o.hyps ?? [] } as never, proj: pr };
   const seuil = o.seuil === undefined ? 2 : o.seuil;
   return {
     slug: "demo",
@@ -696,6 +829,38 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
     const m = buildBudget(input);
     expect(table(m, BUDGET_TABLE_IDS.douzeMois).rows[2].cells[2]).toEqual({ nd: "1 contrat sans base de projection (détail dans Hypothèses budgétaires)" });
     expect(JSON.stringify(m)).not.toMatch(/Camille|Exemple|payfit:y/);
+  });
+
+  it("éléments non récurrents du scénario : contributeurs comptés (contrat, à défaut hypothèse) ; seuil 2 : les deux totaux n.d. ; seuil 1 : affichés", async () => {
+    // Hypothèses fictives : prime déjà comptabilisée en janvier 2026, 1 200,00 € ; départ du contrat payfit:x fin juin 2026 avec
+    // 5 000,00 € de coûts de sortie et ponctuel non récurrent de 300,00 € en mai sur le même contrat (un seul contributeur) ;
+    // enveloppe non récurrente de 200,00 € en avril, sans contrat (contributeur : l'hypothèse).
+    const hyps: Hypothesis[] = [
+      { id: "h-real", kind: "realise", label: "Saisie fictive", category: "Prime fictive", month: "2026-01", costCents: 120_000 },
+      { id: "h-dep", kind: "depart", label: "Départ fictif", contractKey: "payfit:x", lastPaidDate: "2026-06-30", exitCost: { mode: "charge", costCents: 500_000 }, motif: "Motif fictif" },
+      { id: "h-pon", kind: "ponctuel", label: "Ponctuel fictif", month: "2026-05", amount: { mode: "charge", costCents: 30_000 }, service: null, nonRecurring: true, contractKey: "payfit:x" },
+      { id: "h-env", kind: "enveloppe", label: "Enveloppe fictive", axis: "rubrique", target: "Divers", monthly: { "2026-04": 20_000 }, chargesBps: null, nonRecurring: true },
+    ];
+    const input = await loadBudgetInput(fakeCtx(undefined, null, { hyps }));
+    if (input.kind !== "value" || input.scenario.kind !== "value") throw new Error("scénario attendu");
+    // Déjà comptabilisés : 1 hypothèse, 1 200,00 €. Prévus : payfit:x (5 000 + 300) et l'enveloppe (200) → 2 contributeurs, 5 500,00 €.
+    expect(input.scenario.contributors).toEqual({ realised: 1, projected: 2 });
+    expect(input.scenario.retraite).toMatchObject({ kind: "value", realised: 120_000, projected: 550_000, total: 670_000 });
+    // Seuil 2 : « Déjà comptabilisés » (1) masqué ; « Prévus » (2) masqué en second, sinon 6 700 − 5 500 = 1 200.
+    const m = buildBudget(input);
+    const nd2 = "non affiché (seuil de confidentialité : 2 personnes)";
+    expect(tile(m, "retraite").variations!.map((v) => [v.label, v.text === null ? null : sp(v.text), v.reason ?? null])).toEqual([
+      ["Non récurrents retirés", "6 700,00 €", null],
+      ["Déjà comptabilisés", null, nd2],
+      ["Prévus", null, nd2],
+    ]);
+    expect(JSON.stringify(m)).not.toMatch(/Prime fictive|Motif fictif|payfit:x|h-env/);
+    const m1 = buildBudget(await loadBudgetInput(fakeCtx(undefined, null, { hyps, seuil: 1 })));
+    expect(tile(m1, "retraite").variations!.map((v) => [v.label, sp(v.text!)])).toEqual([
+      ["Non récurrents retirés", "6 700,00 €"],
+      ["Déjà comptabilisés", "1 200,00 €"],
+      ["Prévus", "5 500,00 €"],
+    ]);
   });
 
   it("publicProjectionReasons : décompte des raisons nominatives et des autres raisons, sans aucun texte du moteur", () => {

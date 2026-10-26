@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { confidentialiteReason, effectifStructure, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type StructureContract } from "@/lib/croisee/structure";
+import { confidentialiteReason, effectifStructure, maskGroups, maskReason, personOf, personsByGroup, SEUIL_NON_VERIFIABLE, type StructureContract } from "@/lib/croisee/structure";
 
 // Structure de l'effectif (chapitre 02) : cas de référence écrits à la main, valeurs fictives. Six contrats de cinq personnes (la
 // personne p1 a deux contrats) :
@@ -79,6 +79,30 @@ describe("maskGroups : seuil de confidentialité et masquage secondaire (cas éc
     expect(confidentialiteReason(1)).toBe("non affiché (seuil de confidentialité : 1 personne)");
     expect(maskReason("unverifiable", 2)).toBe(SEUIL_NON_VERIFIABLE);
     expect(maskReason("shown", 2)).toBeNull();
+  });
+});
+
+describe("personsByGroup : effectif d'un groupe en personnes distinctes (cas écrits à la main)", () => {
+  it("une personne avec deux contrats simultanés dans un groupe y compte une fois ; un contrat sans personne compte pour une personne", () => {
+    // Groupe A : contrats a1 et a2 de la personne q1, contrat a3 de q2 → 3 contrats, 2 personnes.
+    // Groupe B : contrat b1 de q1 (déjà comptée dans A : elle compte aussi dans B), contrats b2 et b3 sans personne → 3 personnes.
+    // Groupe C : contrats c1 et c2 de la personne q3 → 2 contrats, 1 personne.
+    const members = [
+      { group: "A", person: personOf({ contractKey: "a1", personKey: "q1" }) },
+      { group: "A", person: personOf({ contractKey: "a2", personKey: "q1" }) },
+      { group: "A", person: personOf({ contractKey: "a3", personKey: "q2" }) },
+      { group: "B", person: personOf({ contractKey: "b1", personKey: "q1" }) },
+      { group: "B", person: personOf({ contractKey: "b2", personKey: null }) },
+      { group: "B", person: personOf({ contractKey: "b3", personKey: null }) },
+      { group: "C", person: personOf({ contractKey: "c1", personKey: "q3" }) },
+      { group: "C", person: personOf({ contractKey: "c2", personKey: "q3" }) },
+    ];
+    expect(personsByGroup(members)).toEqual({ A: 2, B: 3, C: 1 });
+    expect(personOf({ contractKey: "b2", personKey: null })).toBe("contrat:b2");
+    expect(personsByGroup([])).toEqual({});
+    // Seuil 2 : C (2 contrats, 1 personne) est masqué ; A (2 personnes, plus petite cellule affichée) l'est en secondaire.
+    const sizes = personsByGroup(members);
+    expect(maskGroups([{ size: sizes.A, value: 3 }, { size: sizes.B, value: 3 }, { size: sizes.C, value: 2 }], 2, true)).toEqual(["secondary", "shown", "masked"]);
   });
 });
 

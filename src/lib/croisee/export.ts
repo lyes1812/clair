@@ -3,22 +3,31 @@ import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/cr
 import type { ExportOption } from "@/components/ExportMenu";
 import type { SourceId } from "@/lib/connectors/types";
 import { dateFmt, journalReason, openMonthsText } from "@/lib/croisee/format";
+import { scrubModel } from "@/lib/croisee/public";
+import { croiseeSettingLines } from "@/lib/croisee/settings-format";
 import { monthEnd } from "@/lib/dates";
 import { safeText } from "@/lib/export/safe-text";
 import { loadSourceInputs, sourceRows, type SourceInput, type SourceRequest } from "@/lib/export/sources";
-import { definitionsFor, SHEET_NAME_MAX, type ColumnKind, type ExactCell, type ExportCell, type FilterSpec, type SheetSpec, type SourceSpec, type WorkbookSpec } from "@/lib/export/xlsx";
+import { definitionsFor, FIXED_SHEETS, SHEET_NAME_MAX, type ColumnKind, type ExactCell, type ExportCell, type FilterSpec, type SheetSpec, type SourceSpec, type WorkbookSpec } from "@/lib/export/xlsx";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
+import type { PayrollContext } from "@/lib/payroll/context";
+import { windowPayroll, withService } from "@/lib/payroll/engine";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 import {
+  ALERT_LEVEL_LABELS,
   cellKind,
   cellView,
   croiseeHref,
   DEFAULT_CHAPTER,
   isChapterId,
+  REFERENCE_TABLE_ID,
+  referenceTable,
   roundDecimal,
   shownValue,
   sortRows,
   sortState,
+  yearMonths,
+  type AlertSpec,
   type ChapterId,
   type ChapterModel,
   type CroiseeCell,
@@ -36,18 +45,19 @@ import { fixeVariableModel, SERVICES_DEFAULT_SORT, SERVICES_IDS, servicesModel }
 import { paieComptaModel } from "@/lib/viz/croisee-paie";
 import { syntheseModel } from "@/lib/viz/croisee-synthese";
 
-// Exports de la Masse salariale croisée : Excel du chapitre (« Chiffres clés » des cartes, une feuille par tableau de l'écran, puis
-// « Non disponibles », « Filtres », « Sources » et « Définitions ») et CSV d'un tableau. Ils partent du MÊME modèle que l'écran : la
-// fonction <chapitre>Model de src/lib/viz/croisee-<chapitre>.ts, mémoïsée par contexte de requête, que le composant du chapitre
-// appelle aussi (un seul calcul par affichage). Aucun calcul nouveau : mise en forme de valeurs déjà calculées. Un n.d. reste n.d.
-// avec sa raison, jamais zéro ; une cellule vide est sans objet ; un texte passe par safeText (jamais pris pour une formule), un
-// nombre jamais. Code serveur seulement.
+// Exports de la Masse salariale croisée : Excel du chapitre (« Chiffres clés » des cartes, « À surveiller », une feuille par tableau
+// de l'écran, « Non disponibles », la référence annuelle N-1, puis « Filtres », « Sources » et « Définitions ») et CSV d'un tableau.
+// Ils partent du MÊME modèle que l'écran : la fonction <chapitre>Model de src/lib/viz/croisee-<chapitre>.ts, mémoïsée par contexte de
+// requête, que le composant du chapitre appelle aussi (un seul calcul par affichage). Aucun calcul nouveau : mise en forme de valeurs
+// déjà calculées. Un n.d. reste n.d. avec sa raison, jamais zéro ; une cellule vide est sans objet ; un texte passe par safeText
+// (jamais pris pour une formule), un nombre jamais ; aucune raison n'expose un identifiant (scrubModel, en dernier filet). Code serveur
+// seulement.
 
 // --- Modèle exportable --------------------------------------------------------------------------------------------------------------
 
 // Ce que l'export lit d'un modèle de chapitre : le contrat commun, plus les blocs (tableaux affichés, n.d., lignes courtes), les
-// mentions « Prévu » et les raisons des n.d. des cartes que la plupart des chapitres ajoutent. Les modèles des chapitres y sont
-// assignables tels quels.
+// mentions « Prévu », les raisons des n.d. des cartes que la plupart des chapitres ajoutent, la liste « À surveiller » et ses mentions,
+// et la phrase de filtre du tableau par service (Synthèse). Les modèles des chapitres y sont assignables tels quels.
 type NdLike = { label?: string; reason: string };
 type PrevuLike = { label: string; reason: string };
 export type ExportBlock = { id: string; title: string; tables: string[]; charts?: string[]; nd: NdLike[]; notes?: string[]; prevu?: PrevuLike[] };
@@ -56,12 +66,16 @@ export type ExportModel = Pick<ChapterModel, "chapter" | "tiles" | "tables" | "l
   blocks?: ExportBlock[];
   prevu?: PrevuLike[];
   tileNd?: string[]; // raisons des n.d. des lignes de cartes, écrites une fois sous les cartes
+  alerts?: AlertSpec[]; // liste « À surveiller » de l'écran
+  mentions?: { id: string; text: string }[]; // mentions écrites sous la liste (réglage absent, contrôle non filtrable…)
+  servicesNote?: string | null; // phrase écrite au-dessus du tableau par service (filtre de service)
 };
 
 // Sources lues par un chapitre (feuille « Sources ») ; budget et scénario sont des saisies de Clair.
 export type SourceUse = "rh" | "journal" | "compta" | "dsn" | "budget" | "scenario";
-// Ce dont dépendent les lectures d'un chapitre : un service retenu dans les filtres, et le journal de paie réellement lu.
-export type UsesIn = { filtered: boolean; journal: boolean };
+// Ce dont dépendent les lectures d'un chapitre : un service retenu dans les filtres, le journal de paie réellement lu, et les mois de
+// la période tous calculés par le journal (sans service) : la Synthèse ne lit la comptabilité et la DSN qu'à cette condition.
+export type UsesIn = { filtered: boolean; journal: boolean; period: boolean };
 export type DefaultSort = { table: string; key: string; dir: SortDir };
 
 export type ChapterExport = {
@@ -75,8 +89,9 @@ export type ChapterExport = {
 // chapitres « Prévu » (09, 10) n'y figurent pas : ils n'ont aucun tableau. `uses` suit les lectures de load<Chapitre>Input.
 export const CROISEE_EXPORTS: Readonly<Partial<Record<ChapterId, ChapterExport>>> = {
   // Sous un filtre de service, seul le journal (restreint au service) est lu : référentiel RH, budget et scénario, globaux, sont
-  // « non filtrables ». Sans filtre, la comptabilité et la DSN ne servent qu'aux contrôles du journal : lues seulement avec lui.
-  synthese: { model: syntheseModel, sorted: false, uses: (u) => (u.filtered ? ["journal"] : ["rh", "journal", "budget", "scenario", ...(u.journal ? (["compta", "dsn"] as const) : [])]) },
+  // « non filtrables ». Sans filtre, la comptabilité et la DSN ne servent qu'aux contrôles du journal : lues seulement quand le journal
+  // est lu et que tous les mois de la période y sont calculés (même condition que loadSyntheseInput).
+  synthese: { model: syntheseModel, sorted: false, uses: (u) => (u.filtered ? ["journal"] : ["rh", "journal", "budget", "scenario", ...(u.journal && u.period ? (["compta", "dsn"] as const) : [])]) },
   effectifs: { model: effectifsModel, sorted: false, uses: () => ["rh", "journal"] },
   // Sous un filtre de service, rien n'est lu (chaque bloc est « non filtrable par service »).
   absences: { model: absencesModel, sorted: false, uses: (u) => (u.filtered ? [] : ["rh"]) },
@@ -103,11 +118,36 @@ export function chapterExport(raw: string | null | undefined): ExportLookup {
   return { kind: "ok", id, entry: found };
 }
 
-// Sources du chapitre pour ce contexte : filtre de service de l'adresse et journal de paie lu ou non (lecteur mémoïsé du contexte,
-// déjà chargé par la page et par le chapitre).
-export async function sourceUses(ctx: Pick<CroiseeContext, "service" | "load">, entry: Pick<ChapterExport, "uses">): Promise<SourceUse[]> {
+// Sources du chapitre pour ce contexte : filtre de service de l'adresse, journal de paie lu ou non, mois de la période calculés ou non
+// (lecteur mémoïsé du contexte, déjà chargé par la page et par le chapitre ; windowPayroll est mémoïsé par mois sur la même entrée).
+export async function sourceUses(ctx: Pick<CroiseeContext, "service" | "load" | "period">, entry: Pick<ChapterExport, "uses">): Promise<SourceUse[]> {
   const pay = await ctx.load.payroll();
-  return entry.uses({ filtered: ctx.service.value !== undefined, journal: journalReason(pay) === null });
+  const journal = journalReason(pay) === null;
+  const period = journal && pay.input !== null && ctx.period !== null && windowPayroll(pay.input, ctx.period.months).kind === "value";
+  return entry.uses({ filtered: ctx.service.value !== undefined, journal, period });
+}
+
+// --- Référence annuelle N-1 sur douze mois (bloc commun de la page) -----------------------------------------------------------------
+
+export const REFERENCE_TITLE = "Référence annuelle N-1 sur douze mois";
+export type ReferenceBlock = { kind: "table"; table: CroiseeTable } | { kind: "nd"; reason: string };
+
+// Tableau « Référence annuelle N-1 sur douze mois » : masse chargée et brut des douze mois de l'année qui précède la période, par le
+// moteur du journal de paie (windowPayroll), pour le service retenu. La page (CommonReference) et les exports l'obtiennent par cette
+// seule fonction, raisons passées par le filtre commun (scrubModel) ; n.d. avec la raison de la page quand la période ou le journal
+// manque. pay : null quand le journal n'est pas lu.
+export function referenceBlock(ctx: Pick<CroiseeContext, "period" | "periodNd" | "service">, pay: Pick<PayrollContext, "input" | "unavailable" | "source"> | null): ReferenceBlock {
+  const p = ctx.period;
+  if (!p) return scrubModel({ kind: "nd", reason: ctx.periodNd ?? "aucun mois disponible" });
+  if (!pay?.input) return scrubModel({ kind: "nd", reason: pay ? (journalReason(pay) ?? "journal de paie indisponible") : "journal de paie non lu" });
+  const input = ctx.service.value === undefined ? pay.input : withService(pay.input, ctx.service.value);
+  return scrubModel({ kind: "table", table: referenceTable({ year: p.year - 1, scope: ctx.service.label, window: windowPayroll(input, yearMonths(p.year - 1)) }) });
+}
+
+// Référence du contexte, comme la page : lue seulement pour un chapitre à filtres (le journal y est lu).
+export async function croiseeReference(ctx: Pick<CroiseeContext, "chapter" | "period" | "periodNd" | "service" | "load">): Promise<ReferenceBlock | null> {
+  if (!ctx.chapter.filtres) return null;
+  return referenceBlock(ctx, await ctx.load.payroll());
 }
 
 // --- Tableaux de l'écran ---------------------------------------------------------------------------------------------------------
@@ -305,26 +345,111 @@ export function keyFiguresTable(tiles: readonly TileSpec[]): CroiseeTable | null
 // --- Classeur ----------------------------------------------------------------------------------------------------------------------
 
 export const ND_SHEET = "Non disponibles";
+export const WATCH_SHEET = "À surveiller";
 const FORBIDDEN_IN_SHEET_NAME = /[\\/?*[\]:]/g;
 const POINTS_NOTE = "Écarts de taux en points : 0,25 point s'écrit 0,25 %.";
 const ND_STATE = "Non disponible (n.d.)";
 const unique = (list: string[]) => [...new Set(list.filter((s) => s.trim() !== ""))];
 
-// Nom de feuille (31 caractères au plus, sans \ / ? * [ ] :) tiré du titre du tableau, coupé à la fin d'un mot.
+// --- Noms de feuilles --------------------------------------------------------------------------------------------------------------
+
+// Repère de période dans un titre (année, N, N-1, intervalle) : la période est écrite dans la ligne « Filtres » de chaque feuille et
+// le titre complet dans sa note, le nom de feuille peut s'en passer.
+const PERIOD_MARK = /\d{4}|N-1|→|\bN\b/;
+const CLAUSE_SEPARATORS = [", ", " : ", " ? "];
+// Formes courtes, appliquées seulement quand le nom dépasse 31 caractères.
+const SHORTER: [string, string][] = [
+  ["Masse salariale chargée", "Masse chargée"],
+  ["masse salariale chargée", "masse chargée"],
+  ["Où sont les effectifs", "Effectifs"],
+  ["Chiffres clés de la période", "Chiffres clés"],
+  [" de congés payés", " CP"],
+  ["atterrissage retraité", "retraité"],
+  ["de l'effectif moyen aux seuils", "aux seuils"],
+  [", mois par mois", " par mois"],
+];
+// Mots qui ne terminent pas un nom de feuille coupé.
+const TRAILING_WORDS = new Set(["de", "du", "des", "la", "le", "les", "et", "à", "au", "aux", "en", "par", "sur", "face", "ou", "pour", "avec"]);
+const TRAILING_PUNCT = /[\s,;.·:—–-]+$/;
+
+const cleanName = (s: string) => s.replace(FORBIDDEN_IN_SHEET_NAME, " ").replace(/\s+/g, " ").trim();
+
+// Coupe le titre avant la première proposition (hors parenthèses) qui porte un repère de période : « Effectif moyen, année 2025 et
+// janvier → mars 2026 » → « Effectif moyen ». La première proposition est toujours gardée.
+function withoutPeriodClause(s: string): string {
+  const cuts: { at: number; len: number }[] = [];
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      const sep = CLAUSE_SEPARATORS.find((x) => s.startsWith(x, i));
+      if (sep) cuts.push({ at: i, len: sep.length });
+    }
+  }
+  for (let k = 0; k < cuts.length; k++) {
+    if (PERIOD_MARK.test(s.slice(cuts[k].at + cuts[k].len, cuts[k + 1]?.at ?? s.length))) return s.slice(0, cuts[k].at);
+  }
+  return s;
+}
+
+// Titre sans les noms saisis entre guillemets (budget, scénario), sans les repères de période entre parenthèses, puis (sauf `keep`)
+// sans la proposition de période ; « ? » et « : » (interdits dans un nom de feuille) deviennent une espace et un tiret.
+function shortTitle(title: string, keep = false): string {
+  let s = title.replace(/\s*«[^»]*»/g, "").replace(/\s*\(([^()]*)\)/g, (m, inner: string) => (PERIOD_MARK.test(inner) ? "" : m));
+  if (!keep) s = withoutPeriodClause(s);
+  s = s.replace(/ \? (\S)/g, (_m, c: string) => ` ${c.toLowerCase()}`).replace(/ : /g, " — ");
+  return cleanName(s);
+}
+
+// Coupe à 31 caractères à la fin d'un mot (un mot de 12 caractères au moins reste entier), sans ponctuation ni petit mot final.
+function cutAtWord(s: string): string {
+  let out = s;
+  if (out.length > SHEET_NAME_MAX) {
+    const cut = out.slice(0, SHEET_NAME_MAX);
+    const space = cut.lastIndexOf(" ");
+    out = out[SHEET_NAME_MAX] === " " || space < 12 ? cut : cut.slice(0, space);
+  }
+  out = out.replace(TRAILING_PUNCT, "");
+  for (let space = out.lastIndexOf(" "); space > 0 && TRAILING_WORDS.has(out.slice(space + 1).toLowerCase()); space = out.lastIndexOf(" ")) {
+    out = out.slice(0, space).replace(TRAILING_PUNCT, "");
+  }
+  return out;
+}
+
+function fitName(s: string): string {
+  let out = s;
+  if (out.length > SHEET_NAME_MAX) out = SHORTER.reduce((t, [long, short]) => t.split(long).join(short), out);
+  if (out.length > SHEET_NAME_MAX) out = cleanName(out.replace(/(^|\s)\d{4}(?=\s|,|$)/g, "$1"));
+  return cutAtWord(out);
+}
+
+// Nom de feuille (31 caractères au plus, sans \ / ? * [ ] :) tiré du titre du tableau : sans la période (écrite dans « Filtres ») ni
+// les noms saisis, en forme courte s'il le faut, coupé à la fin d'un mot. La partie qui distingue les tableaux d'un même bloc (l'axe,
+// la nature des chiffres) est gardée : « Où sont les effectifs ? Par service, fin janv. 2026 » → « Effectifs par service ».
 export function sheetName(title: string): string {
-  const clean = title.replace(FORBIDDEN_IN_SHEET_NAME, " ").replace(/\s+/g, " ").trim();
-  if (clean.length <= SHEET_NAME_MAX) return clean;
-  const cut = clean.slice(0, SHEET_NAME_MAX);
-  const space = cut.lastIndexOf(" ");
-  return (space >= 12 ? cut.slice(0, space) : cut).replace(/[\s,;.·–-]+$/, "");
+  return fitName(shortTitle(title)) || fitName(cleanName(title)) || "Tableau";
+}
+
+// Noms des feuilles d'un classeur, dans l'ordre : deux tableaux dont les noms courts se confondent (casse comprise) gardent leur
+// précision (« Primes par mois, N et N-1 » et « Primes par mois, N face à N-1 ») quand elle tient en 31 caractères ; sinon le
+// classeur les numérote (« (2) »). reserved : noms des autres feuilles du classeur.
+export function sheetNames(titles: readonly string[], reserved: readonly string[] = []): string[] {
+  const key = (s: string) => s.toLowerCase();
+  const names = titles.map(sheetName);
+  const seen = new Map<string, number>();
+  for (const n of [...names, ...reserved]) seen.set(key(n), (seen.get(key(n)) ?? 0) + 1);
+  const precise = names.map((n, i) => ((seen.get(key(n)) ?? 0) > 1 ? fitName(shortTitle(titles[i], true)) : n));
+  const final = new Map<string, number>();
+  for (const n of [...precise, ...reserved]) final.set(key(n), (final.get(key(n)) ?? 0) + 1);
+  return precise.map((n, i) => (n && (final.get(key(n)) ?? 0) === 1 ? n : names[i]));
 }
 
 // Feuille d'un tableau : mêmes colonnes, mêmes lignes (dans l'ordre de l'écran) et même total que l'écran ; unité propre à chaque
 // ligne pour les tableaux à unités mêlées. Note : titre complet s'il ne tient pas dans le nom de feuille, lignes courtes du tableau
 // et de son bloc.
-export function tableSheet(t: CroiseeTable, rows: CroiseeRow[] = t.rows, blockNotes: string[] = []): SheetSpec {
+export function tableSheet(t: CroiseeTable, rows: CroiseeRow[] = t.rows, blockNotes: string[] = [], name: string = sheetName(t.title)): SheetSpec {
   const all = allRows(t, rows);
-  const name = sheetName(t.title);
   const note = unique([name !== t.title ? `Tableau : ${t.title}.` : "", ...(t.notes ?? []), ...blockNotes, t.columns.some((c) => c.points) ? POINTS_NOTE : ""]).join(" ");
   return {
     name,
@@ -373,6 +498,7 @@ export function exportTermIds(model: ExportModel, tables: CroiseeTable[] = scree
     ...tables.flatMap((t) => [...(t.terms ?? []), ...t.columns.flatMap((c) => (c.term ? [c.term] : []))]),
     ...model.tiles.flatMap((t) => (t.term ? [t.term] : [])),
     ...model.terms,
+    ...(model.alerts?.length || model.mentions?.length ? [T.alertes] : []),
     T.vueEnsemble,
     T.periodeFiltres,
     T.unites,
@@ -380,6 +506,18 @@ export function exportTermIds(model: ExportModel, tables: CroiseeTable[] = scree
     ...(model.prevu?.length || model.blocks?.some((b) => b.prevu?.length) ? [T.prevu] : []),
     T.export,
   ]);
+}
+
+// Feuille « À surveiller » : la liste de l'écran (niveau, point, détail), dans l'ordre de l'écran, puis les mentions écrites sous la
+// liste. Aucune ligne sans liste ni mention.
+const WATCH_COLUMNS: CroiseeColumn[] = [
+  { key: "niveau", header: "Niveau", kind: "text", width: 16 },
+  { key: "point", header: "Point", kind: "text", width: 40 },
+  { key: "detail", header: "Détail", kind: "text", width: 90 },
+];
+export const MENTION_LEVEL = "Mention";
+export function watchRows(model: Pick<ExportModel, "alerts" | "mentions">): string[][] {
+  return [...(model.alerts ?? []).map((a) => [ALERT_LEVEL_LABELS[a.level], a.label, a.text]), ...(model.mentions ?? []).map((m) => [MENTION_LEVEL, "", m.text])];
 }
 
 export type WorkbookIn = {
@@ -390,21 +528,35 @@ export type WorkbookIn = {
   sort: SortQuery | null;
   filters: FilterSpec[];
   sources: SourceSpec[];
+  reference?: ReferenceBlock | null; // bloc commun « Référence annuelle N-1 sur douze mois » de la page (null : non affiché)
 };
 
-// Description du classeur (pure) : « Chiffres clés » (cartes), une feuille par tableau de l'écran, « Non disponibles » s'il y a lieu,
-// puis les feuilles fixes de buildWorkbook. Renvoie aussi les identifiants de glossaire inconnus.
+// Description du classeur (pure), dans l'ordre de l'écran : « Chiffres clés » (cartes), « À surveiller » (liste et mentions), une
+// feuille par tableau de l'écran, « Non disponibles » s'il y a lieu, la référence annuelle N-1 (dernière feuille du chapitre), puis
+// les feuilles fixes de buildWorkbook. Noms de feuilles courts et distincts (sheetNames). Renvoie aussi les identifiants de glossaire
+// inconnus.
 export function chapterWorkbook(x: WorkbookIn): { spec: WorkbookSpec; unknownTerms: string[] } {
   const tables = screenTables(x.model);
   const key = keyFiguresTable(x.model.tiles);
+  const watch = watchRows(x.model);
+  const ref = x.reference ?? null;
+  const refTable = ref?.kind === "table" ? ref.table : null;
+  const named = [...tables, ...(refTable ? [refTable] : [])];
+  const reserved = [...(key ? [key.title] : []), ...(watch.length ? [WATCH_SHEET] : []), ND_SHEET, ...Object.values(FIXED_SHEETS)];
+  const names = sheetNames(named.map((t) => t.title), reserved);
+  const blockNotes = (t: CroiseeTable) =>
+    (x.model.blocks ?? [])
+      .filter((b) => b.tables.includes(t.id) || x.model.charts.some((c) => c.tableId === t.id && (b.charts ?? []).includes(c.id)))
+      .flatMap((b) => [...(b.id === "services" && x.model.servicesNote ? [x.model.servicesNote] : []), ...(b.notes ?? [])]);
   const sheets: SheetSpec[] = [
     ...(key ? [tableSheet(key)] : []),
-    ...tables.map((t) => {
-      const notes = (x.model.blocks ?? []).filter((b) => b.tables.includes(t.id) || x.model.charts.some((c) => c.tableId === t.id && (b.charts ?? []).includes(c.id))).flatMap((b) => b.notes ?? []);
-      return tableSheet(t, screenRows(t, x.sort).rows, notes);
-    }),
+    ...(watch.length
+      ? [{ name: WATCH_SHEET, columns: WATCH_COLUMNS.map((c) => ({ header: c.header, key: c.key, kind: c.kind, width: c.width })), rows: watch, note: "Points à surveiller de l'écran, du plus défavorable au simple repère, puis les mentions." }]
+      : []),
+    ...tables.map((t, i) => tableSheet(t, screenRows(t, x.sort).rows, blockNotes(t), names[i])),
   ];
   const nd = unavailableRows(x.model);
+  if (ref?.kind === "nd") nd.push([REFERENCE_TITLE, "", ND_STATE, ref.reason]);
   if (nd.length > 0) {
     sheets.push({
       name: ND_SHEET,
@@ -418,13 +570,14 @@ export function chapterWorkbook(x: WorkbookIn): { spec: WorkbookSpec; unknownTer
       note: "Blocs non calculés, raisons des n.d. des cartes et indicateurs « Prévu » du chapitre.",
     });
   }
-  const { definitions, unknown } = definitionsFor(exportTermIds(x.model, tables));
+  if (refTable) sheets.push(tableSheet(refTable, refTable.rows, [`${REFERENCE_TITLE} : bloc commun de la page, sous le chapitre.`], names[named.length - 1]));
+  const { definitions, unknown } = definitionsFor(exportTermIds(x.model, named));
   return { spec: { title: x.title, workspaceName: x.workspaceName, generatedAt: x.generatedAt, filters: x.filters, sheets, sources: x.sources, definitions }, unknownTerms: unknown };
 }
 
 // --- Filtres -----------------------------------------------------------------------------------------------------------------------
 
-export type FilterCtx = Pick<CroiseeContext, "chapter" | "period" | "periodNd" | "labels" | "service" | "budget" | "scenario" | "openMonths" | "notices">;
+export type FilterCtx = Pick<CroiseeContext, "chapter" | "period" | "periodNd" | "labels" | "service" | "budget" | "scenario" | "openMonths" | "notices" | "settings">;
 const ndValue = (reason: string | null, fallback: string) => `n.d. — ${reason ?? fallback}`;
 
 // Ligne « Service » : le service retenu et son axe ; au chapitre 05, qui montre tous les services quel que soit le filtre, le service
@@ -435,8 +588,10 @@ function serviceValue(ctx: Pick<FilterCtx, "chapter" | "service">): string {
   return s.axis ? `${s.label} (axe analytique « ${s.axis} »)` : s.reason ? `${s.label} — ventilation par service n.d. : ${s.reason}` : s.label;
 }
 
-// Feuille « Filtres » : chapitre, période, N-1, service (et son axe), budget et scénario quand le chapitre les lit, mois non clos,
-// paramètres d'adresse écartés, tri des tableaux, limites de la lecture du chapitre (une ligne chacune).
+// Feuille « Filtres » : chapitre, période, N-1, service (et son axe), budget et scénario quand le chapitre les lit, réglages de la
+// Masse salariale croisée (valeur ou n.d. avec la raison, comme « Sources et hypothèses de travail » de la page : ils expliquent les
+// n.d. « seuil de confidentialité » du classeur), mois non clos, paramètres d'adresse écartés, tri des tableaux, limites de la lecture
+// du chapitre (une ligne chacune).
 export function croiseeFilters(ctx: FilterCtx, model: Pick<ExportModel, "limits">, uses: SourceUse[], sorted: SortedTable[] = []): FilterSpec[] {
   const out: FilterSpec[] = [{ label: "Chapitre", value: `${ctx.chapter.num} · ${ctx.chapter.title}` }];
   if (ctx.period) out.push({ label: "Période", value: ctx.labels.period }, { label: "N-1", value: ctx.labels.prev });
@@ -450,6 +605,7 @@ export function croiseeFilters(ctx: FilterCtx, model: Pick<ExportModel, "limits"
     const sc = ctx.scenario.selected?.scenario;
     out.push({ label: "Scénario", value: sc ? `« ${sc.name} » · ${sc.status === "fige" ? "figé" : "brouillon"} · ${ctx.scenario.explicit ? "choisi dans les filtres" : "par défaut, le plus récent qui couvre l'année"}` : ndValue(ctx.scenario.reason, "aucun scénario") });
   }
+  for (const l of croiseeSettingLines(ctx.settings)) out.push({ label: l.label, value: l.text ?? ndValue(l.reason, "paramètre non défini (Paramètres)") });
   if (ctx.openMonths.length > 0) out.push({ label: "Mois non clos (montants provisoires)", value: openMonthsText(ctx) });
   if (ctx.notices.length > 0) out.push({ label: "Paramètres ignorés", value: ctx.notices.join(" ; ") });
   for (const x of sorted) {
@@ -510,20 +666,23 @@ export function exportHref(ctx: HrefCtx, patch: QueryState, extra: Record<string
 export const SERVICES_EXPORT_LABEL = "Exporter les services (CSV)";
 export type MenuCtx = HrefCtx & Pick<CroiseeContext, "chapter" | "service" | "period">;
 
-// Options du menu « Exporter » : l'Excel du chapitre en premier (cartes et tableaux de l'écran), puis le CSV de chaque tableau de
-// l'écran ; rien de cela pour un modèle n.d. ou absent (échec du calcul). « Exporter les services » (CSV du tableau par service,
-// chapitre 05) est proposé dans chaque chapitre dès qu'un axe de service est retenu et qu'une période existe, quel que soit l'état
-// du modèle du chapitre courant (il est calculé par la route, sur le chapitre 05).
-export function exportOptions(ctx: MenuCtx, model: ExportModel | null): ExportOption[] {
+// Options du menu « Exporter » : l'Excel du chapitre en premier (cartes, liste « À surveiller » et tableaux de l'écran), puis le CSV
+// de chaque tableau de l'écran ; rien de cela pour un modèle n.d. ou absent (échec du calcul). Le CSV de la référence annuelle N-1
+// (bloc commun, sous chaque chapitre) suit dès que la page l'affiche en tableau (reference), quel que soit l'état du modèle du
+// chapitre. « Exporter les services » (CSV du tableau par service, chapitre 05) est proposé dans chaque chapitre dès qu'un axe de
+// service est retenu et qu'une période existe, quel que soit l'état du modèle du chapitre courant (il est calculé par la route, sur
+// le chapitre 05).
+export function exportOptions(ctx: MenuCtx, model: ExportModel | null, reference = false): ExportOption[] {
   const out: ExportOption[] = [];
   if (model && !model.nd) {
     const tables = screenTables(model);
-    if (tables.length > 0 || model.tiles.length > 0) out.push({ label: "Excel du chapitre (.xlsx)", href: exportHref(ctx, {}, { format: "xlsx" }), testid: "cx-export-xlsx" });
+    if (tables.length > 0 || model.tiles.length > 0 || watchRows(model).length > 0) out.push({ label: "Excel du chapitre (.xlsx)", href: exportHref(ctx, {}, { format: "xlsx" }), testid: "cx-export-xlsx" });
     for (const t of tables) {
       const services = model.chapter === "services" && t.id === SERVICES_IDS.table;
       out.push({ label: services ? SERVICES_EXPORT_LABEL : `CSV · ${t.title}`, href: exportHref(ctx, {}, { format: "csv", tableau: t.id }), testid: services ? "cx-export-services" : `cx-export-csv-${t.id}` });
     }
   }
+  if (reference && ctx.period) out.push({ label: `CSV · ${REFERENCE_TITLE}`, href: exportHref(ctx, {}, { format: "csv", tableau: REFERENCE_TABLE_ID }), testid: `cx-export-csv-${REFERENCE_TABLE_ID}` });
   if (ctx.chapter.id !== "services" && ctx.service.axis && ctx.period) {
     out.push({ label: SERVICES_EXPORT_LABEL, href: exportHref(ctx, { chapitre: "services", tri: null, sens: null }, { format: "csv", tableau: SERVICES_IDS.table }), testid: "cx-export-services" });
   }
@@ -537,7 +696,8 @@ export async function croiseeExportOptions(ctx: CroiseeContext): Promise<ExportO
   const found = chapterExport(ctx.chapter.id);
   if (found.kind !== "ok" || !ctx.period) return [];
   const model = await found.entry.model(ctx).catch(() => null);
-  return exportOptions(ctx, model);
+  const ref = await croiseeReference(ctx);
+  return exportOptions(ctx, model, ref?.kind === "table");
 }
 
 // Nom de fichier : « masse-salariale-croisee-<chapitre ou tableau>-<année>-<premier mois>-<dernier mois> ».
@@ -556,10 +716,18 @@ export type ExportResult =
   | { kind: "refused"; status: 404 | 422; reason: string };
 
 // Classeur du chapitre ou CSV d'un tableau, depuis le modèle du chapitre (même fonction mémoïsée, mêmes paramètres d'adresse que
-// l'écran). Chapitre non calculable : refus 422 avec la raison ; tableau absent de l'écran : 404 ; forme exportable d'un bloc n.d. :
-// 422. Le CSV des services porte en plus le début et la fin de la période.
+// l'écran), passé une dernière fois par scrubModel (aucun identifiant). Chapitre non calculable : refus 422 avec la raison ; tableau
+// absent de l'écran : 404 ; forme exportable d'un bloc n.d. : 422. Le CSV des services porte en plus le début et la fin de la
+// période. La référence annuelle N-1 (bloc commun de la page) a son CSV (tableau=commun-reference-n1, n.d. : 422 avec la raison) et
+// la dernière feuille du classeur ; n.d., sa raison va dans « Non disponibles ».
 export async function croiseeExport(ctx: CroiseeContext, found: ChapterExport, req: { format: "xlsx" | "csv"; tableau?: string; generatedAt: string }): Promise<ExportResult> {
-  const model = await found.model(ctx);
+  if (req.format === "csv" && req.tableau === REFERENCE_TABLE_ID) {
+    const ref = await croiseeReference(ctx);
+    if (!ref) return { kind: "refused", status: 404, reason: `Tableau introuvable dans ce chapitre : ${shownValue(req.tableau)}.` };
+    if (ref.kind === "nd") return { kind: "refused", status: 422, reason: `n.d. — ${ref.reason}` };
+    return { kind: "csv", body: tableCsv(ref.table), file: exportFileName(ctx, REFERENCE_TABLE_ID) };
+  }
+  const model = scrubModel(await found.model(ctx));
   if (model.nd) return { kind: "refused", status: 422, reason: `n.d. — ${model.nd.reason}` };
   const sort: SortQuery | null = found.sorted ? { tri: ctx.query.tri, sens: ctx.query.sens } : null;
   if (req.format === "csv") {
@@ -581,6 +749,7 @@ export async function croiseeExport(ctx: CroiseeContext, found: ChapterExport, r
     sort,
     filters: croiseeFilters(ctx, model, uses, sortedTables(model, sort, found.defaultSort ?? null)),
     sources: await croiseeSources(ctx, uses),
+    reference: await croiseeReference(ctx),
   });
   return { kind: "xlsx", spec, file: exportFileName(ctx), unknownTerms };
 }

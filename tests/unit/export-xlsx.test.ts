@@ -12,6 +12,7 @@ import { loadSourceInputs, sourceRows } from "@/lib/export/sources";
 import { buildWorkbook, definitionsFor, EMPTY_CELL_NOTE, exactRatio, formatParis, NUM_FMT, percentCell, rationalCell, roundedRatio, type WorkbookSpec } from "@/lib/export/xlsx";
 import { glossaryEntry } from "@/lib/glossary";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
+import { cellView } from "@/lib/viz/croisee";
 import type { Loaded } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
 import type { PersonAbsent, PersonInfo } from "@/app/e/[slug]/studio-rh/masse-salariale/people-index";
 
@@ -398,6 +399,24 @@ describe("buildWorkbook : classeur relu avec exceljs", () => {
     const eurIn = (v: number) => buildWorkbook({ ...BASE, sheets: [{ name: "T", columns: [{ header: "A", key: "a", kind: "eur" }], rows: [[{ exact: v }]] }] });
     await expect(eurIn(Number.NaN)).rejects.toThrow(/nombre fini/);
     await expect(eurIn(Number.POSITIVE_INFINITY)).rejects.toThrow(/nombre fini/);
+  });
+
+  it("valeur exacte dans une colonne « nombre » : au centième, comme à l'écran (49,6 → 49,60 ; −0,4 → −0,40), jamais arrondie à l'entier", async () => {
+    // Effectif moyen 49,6 face au seuil 50 : écart −0,4 (cas écrit à la main). Le format entier « #,##0 » afficherait 50 et −0.
+    const wb = await load(
+      await buildWorkbook({
+        ...BASE,
+        sheets: [{ name: "Seuils", columns: [{ header: "Mesure", key: "m", kind: "text" }, { header: "Valeur", key: "v", kind: "nombre" }], rows: [["Effectif moyen", { exact: 49.6 }], ["Écart au seuil", { exact: -0.4 }], ["Entrées", 3]] }],
+      }),
+    );
+    const ws = wb.getWorksheet("Seuils")!;
+    expect([ws.getCell("B6").value, ws.getCell("B7").value, ws.getCell("B8").value]).toEqual([49.6, -0.4, 3]);
+    expect([ws.getCell("B6").numFmt, ws.getCell("B7").numFmt]).toEqual(["#,##0.00", "#,##0.00"]);
+    expect(ws.getCell("B8").numFmt).toBe(NUM_FMT.nombre); // un entier garde le format entier
+    expect([shownEtp(ws.getCell("B6").value), shownEtp(ws.getCell("B7").value)]).toEqual(["49,60", "−0,40"]);
+    // Même texte à l'écran (cellView) pour les mêmes cellules.
+    const col = { key: "v", header: "Valeur", kind: "nombre" as const };
+    expect([cellView({ exact: 49.6 }, col).text, cellView({ exact: -0.4 }, col).text]).toEqual(["49,60", "−0,40"]);
   });
 
   it("texte : jamais pris pour une formule (apostrophe) ; un nombre, négatif compris, reste un nombre", async () => {

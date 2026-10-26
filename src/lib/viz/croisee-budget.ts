@@ -7,11 +7,11 @@ import { bridge, budgetSeries, gap, liveSeries, scenarioSeries, total, type Brid
 import type { BaseSnapshot, Projection } from "@/lib/budget/types";
 import { aggregate, alignedSeries, diff, nd as ndCell, reelVersion, val, type Agg, type ServiceFilter } from "@/lib/budget/versions";
 import { HORS_SALARIE, zoomOf } from "@/lib/budget/zoom";
-import { maskCohorts, partitionCohorts, type CohortPartition, type CohortRowId } from "@/lib/croisee/cohortes";
+import { maskCohorts, maskNonRecurring, nonRecurringContributors, partitionCohorts, type CohortPartition, type CohortRowId, type NonRecurringContributors } from "@/lib/croisee/cohortes";
 import { journalReason } from "@/lib/croisee/format";
-import { memoByContext } from "@/lib/croisee/memo";
+import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
 import { confidentialiteReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type Confidentialite, type MaskStatus } from "@/lib/croisee/structure";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue } from "@/lib/croisee-settings";
+import { croiseeSettingReason, croiseeSettingsHref, settingValue } from "@/lib/croisee/settings-format";
 import { monthPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { costTone } from "@/lib/trend";
@@ -35,7 +35,8 @@ import { landingView, nd, type TileValue } from "@/lib/viz/synthese";
 // (le détail reste dans Hypothèses budgétaires).
 //
 // Seuil de confidentialité (rh.croisee.confidentialite ; absent ou illisible : bloc n.d. avec le lien vers les Paramètres) : il
-// s'applique aux groupes de contrats observés (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres d'un
+// s'applique aux groupes de contrats observés et aux totaux des éléments non récurrents déjà comptabilisés et prévus, comptés en
+// contributeurs (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres d'un
 // service retenu par le filtre (réalisé, contrats observés, pont et ETP) quand ce service compte de 1 à (seuil − 1) contrats
 // rémunérés. Masquage secondaire par la fonction partagée maskGroups (structure.ts) : aucune valeur masquée ne se retrouve par
 // différence. Les totaux de toute l'entreprise ne sont jamais masqués.
@@ -126,6 +127,8 @@ const cascadeChart = (id: string, title: string, unit: "eur" | "etp", start: { l
 const nf = new Intl.NumberFormat("fr-FR");
 const plural = (n: number, one: string, many: string) => `${nf.format(n)} ${n > 1 ? many : one}`;
 const monthsText = (list: string[]) => list.map(monthShortYear).join(", ");
+// « des 2 mois avec budget », « du mois avec budget » : libellés de la carte du budget et du total du tableau mensuel.
+const withBudgetText = (n: number) => (n === 1 ? "du mois avec budget" : `des ${nf.format(n)} mois avec budget`);
 const pointOf = (s: Series, m: string): Point => s.points.get(m) ?? { month: m, kind: "nd", reason: "mois non couvert" };
 // Cellule d'une lecture pour un mois (même règle que la Comparaison des Hypothèses budgétaires) : montant, ou n.d. avec sa raison.
 const readingCell = (s: Series, m: string): CroiseeCell => {
@@ -199,7 +202,8 @@ export function publicScenario(base: BaseSnapshot, proj: Projection): { base: Ba
 
 export type BudgetReading = { kind: "value"; name: string; series: Series } | { kind: "absent" | "na"; reason: string };
 export type LiveReading = { kind: "value"; series: Series } | { kind: "nd"; reason: string };
-export type ScenarioReading = { kind: "value"; name: string; refMonth: string; series: Series; landing: Landing; retraite: Retraite } | { kind: "nd" | "na"; reason: string };
+// contributors : contributeurs des éléments non récurrents de l'année (déjà comptabilisés, prévus), pour le seuil de confidentialité.
+export type ScenarioReading = { kind: "value"; name: string; refMonth: string; series: Series; landing: Landing; retraite: Retraite; contributors: NonRecurringContributors } | { kind: "nd" | "na"; reason: string };
 export type CohortReading = CohortPartition;
 // atterrissage : null quand l'écran Hypothèses › Atterrissage montrerait une autre année que celle de la période (il prend la première
 // année du scénario) : le lien n'est alors pas proposé.
@@ -297,7 +301,23 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     gapTile = { ...budgetBase, id: "ecart", label: "Écart au budget", sub: `Réalisé − budget saisi « ${budget.name} »`, value: nd(r) };
   } else {
     const b = total(budget.series, withBudget);
-    budgetTile = { ...budgetBase, id: "budget", label: "Budget de la période", term: T.budgetSaisi, sub: `Budget saisi « ${budget.name} »`, value: b.kind === "value" ? money(b.cost) : nd(frDates(b.reason)), note: exclNote };
+    // Mois exclus : la carte nomme le budget des mois comparés et porte le réalisé de ces mêmes mois, pour que réalisé des mois
+    // comparés − budget de ces mois = écart se lise sur les mêmes mois (la carte « Réalisé » couvre toute la période).
+    const partial = excluded.length > 0;
+    const cmpLabel = "Réalisé des mois comparés";
+    const realCmp = live.kind === "value" ? total(live.series, withBudget) : ({ kind: "nd", reason: live.reason } as const);
+    // n.d. : la carte « Réalisé » l'est aussi (ses mois contiennent les mois comparés) et en écrit la raison.
+    const cmpLine = realGuard ? plainVariation(cmpLabel, null, realGuard) : realCmp.kind === "value" ? plainVariation(cmpLabel, euros(realCmp.cost)) : plainVariation(cmpLabel, null, frDates(realCmp.reason));
+    budgetTile = {
+      ...budgetBase,
+      id: "budget",
+      label: partial ? `Budget ${withBudgetText(withBudget.length)}` : "Budget de la période",
+      term: T.budgetSaisi,
+      sub: `Budget saisi « ${budget.name} »`,
+      value: b.kind === "value" ? money(b.cost) : nd(frDates(b.reason)),
+      ...(partial ? { variations: [cmpLine] } : {}),
+      note: exclNote,
+    };
     const sub = `Réalisé − budget saisi « ${budget.name} »`;
     if (!g || g.kind === "nd") gapTile = { ...budgetBase, id: "ecart", label: "Écart au budget", sub, value: nd(frDates(g?.reason ?? "valeur absente")), note: exclNote };
     else {
@@ -310,7 +330,6 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
         valueTone: costTone(g.delta),
         variations: [
           costVariation("Écart (%)", g.pct === null ? null : g.delta, g.pct === null ? null : `${pctText(g.pct)} · ${word(g.delta)}`, g.pct === null ? "budget saisi nul ou négatif : pourcentage non défini" : null),
-          ...(excluded.length ? [plainVariation("Réalisé des mois comparés", euros(g.a))] : []),
         ],
         note: exclNote,
         spark: {
@@ -338,7 +357,7 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
   });
   // Pied : total des mois comparés au budget (de la période entière sans montant de budget) ; l'écart n'existe que si les deux le sont.
   const footMonths = withBudget.length ? withBudget : months;
-  const footLabel = excluded.length && withBudget.length ? `Total des ${plural(withBudget.length, "mois", "mois")} avec budget` : "Total de la période";
+  const footLabel = excluded.length && withBudget.length ? `Total ${withBudgetText(withBudget.length)}` : "Total de la période";
   const noAmount = budget.kind === "value" ? `aucun montant de budget saisi « ${budget.name} » sur la période` : budget.reason;
   const footReal = live.kind === "value" ? total(live.series, footMonths) : ({ kind: "nd", reason: live.reason } as const);
   const footBudget = budget.kind === "value" && withBudget.length ? total(budget.series, withBudget) : ({ kind: "nd", reason: noAmount } as const);
@@ -483,6 +502,24 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       };
       if (gapIn.pct === null) why.push({ label: "Écart annuel (%)", reason: "budget saisi nul ou négatif : pourcentage non défini" });
     }
+    // Éléments non récurrents déjà comptabilisés et prévus : chaque total décrit ses contributeurs (contrats, à défaut hypothèses) et
+    // suit le seuil de confidentialité, avec le masquage secondaire de l'autre total (leur somme est affichée). Réglage absent : n.d.
+    // avec le lien vers les Paramètres. La somme (« Non récurrents retirés ») et l'atterrissage retraité, totaux de l'entreprise, restent
+    // affichés.
+    const nrHidden = { realised: null as string | null, projected: null as string | null };
+    if (r.kind === "value") {
+      if (conf.kind === "nd") nrHidden.realised = nrHidden.projected = conf.reason;
+      else {
+        const st = maskNonRecurring(scenario.contributors, r, conf.value);
+        nrHidden.realised = maskReason(st.realised, conf.value);
+        nrHidden.projected = maskReason(st.projected, conf.value);
+      }
+    }
+    const nrLine = (label: string, cents: number, hidden: string | null): TileVariation => {
+      if (hidden === null) return plainVariation(label, euros(cents));
+      why.push({ label, reason: hidden });
+      return plainVariation(label, null, hidden);
+    };
     retraiteTile =
       r.kind === "value"
         ? {
@@ -492,7 +529,7 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
             sub: "Hors éléments non récurrents",
             value: money(r.retraite),
             cost: true,
-            variations: [plainVariation("Non récurrents retirés", euros(r.total)), plainVariation("Déjà comptabilisés", euros(r.realised)), plainVariation("Prévus", euros(r.projected))],
+            variations: [plainVariation("Non récurrents retirés", euros(r.total)), nrLine("Déjà comptabilisés", r.realised, nrHidden.realised), nrLine("Prévus", r.projected, nrHidden.projected)],
           }
         : { id: "retraite", label: `Atterrissage retraité ${yearKey}`, term: T.retraite, sub: "Hors éléments non récurrents", value: nd(frDates(r.reason)), cost: true };
 
@@ -504,8 +541,9 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       attRows.push({ cells: [`Atterrissage ${yearKey}`, land.total], style: "subtotal" });
     } else attRows.push({ cells: [`Atterrissage ${yearKey}`, ndIn(frDates(land.reason))], style: "subtotal" });
     if (r.kind === "value") {
-      attRows.push({ cells: ["Éléments non récurrents déjà comptabilisés", 0 - r.realised], style: "child" }); // 0 − x : jamais « −0 »
-      attRows.push({ cells: ["Éléments non récurrents prévus (hypothèses)", 0 - r.projected], style: "child" });
+      // 0 − x : jamais « −0 ».
+      attRows.push({ cells: ["Éléments non récurrents déjà comptabilisés", nrHidden.realised ? ndIn(nrHidden.realised) : 0 - r.realised], style: "child" });
+      attRows.push({ cells: ["Éléments non récurrents prévus (hypothèses)", nrHidden.projected ? ndIn(nrHidden.projected) : 0 - r.projected], style: "child" });
     }
     tables.push({
       id: BUDGET_TABLE_IDS.atterrissage,
@@ -530,7 +568,14 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       else ndCharts.push({ label, reason: frDates(w.reason) });
     };
     wf(BUDGET_CHART_IDS.atterrissage, `Atterrissage ${yearKey} : réel puis projection`, "Cascade de l'atterrissage", landingWaterfall(land));
-    wf(BUDGET_CHART_IDS.retraite, `De l'atterrissage ${yearKey} à l'atterrissage retraité`, "Cascade du retraité", r.kind === "value" ? retraiteWaterfall(r) : { kind: "nd", reason: r.reason });
+    // Un total non récurrent masqué : la cascade du retraité n'est pas tracée (ni sa phrase « vide », qui dirait les totaux nuls) ;
+    // une seule mention n.d. pour les deux totaux et la cascade, avec le lien vers les Paramètres quand le seuil n'est pas défini.
+    const rw: WaterfallIn = r.kind === "value" ? retraiteWaterfall(r) : { kind: "nd", reason: r.reason };
+    const nrReason = nrHidden.realised ?? nrHidden.projected;
+    if (nrReason) {
+      const label = `Éléments non récurrents déjà comptabilisés et prévus${rw.kind === "value" ? ", cascade du retraité" : ""}`;
+      att.nd.push({ label, reason: nrReason, ...(conf.kind === "nd" ? { action: paramLink } : {}) });
+    } else wf(BUDGET_CHART_IDS.retraite, `De l'atterrissage ${yearKey} à l'atterrissage retraité`, "Cascade du retraité", rw);
     const byReason = new Map<string, string[]>();
     for (const x of ndCharts) byReason.set(x.reason, [...(byReason.get(x.reason) ?? []), x.label]);
     for (const [reason, ls] of byReason) att.nd.push({ label: ls.length > 1 ? "Cascades de l'atterrissage et du retraité" : ls[0], reason });
@@ -692,6 +737,7 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
         // Raison n.d. de l'année (« AAAA-MM : raison » par mois) regroupée par raison identique.
         landing: land.kind === "nd" ? { ...land, reason: zoomReason(land.reason) } : land,
         retraite: ret.kind === "nd" ? { ...ret, reason: zoomReason(ret.reason) } : ret,
+        contributors: nonRecurringContributors(pub.base, pub.proj, s.full.hypotheses, String(year)),
       };
     }
   }

@@ -8,14 +8,13 @@ import { SearchableSelect } from "@/components/SearchableSelect";
 import { SourceBadge } from "@/components/SourceBadge";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { dateTimeFmt } from "@/lib/connectors/labels";
-import { croiseeExportOptions } from "@/lib/croisee/export";
+import { croiseeExportOptions, referenceBlock } from "@/lib/croisee/export";
 import { croiseeSettingLines, croiseeSettingsHref } from "@/lib/croisee-settings";
 import { glossaryEntry, glossaryHref } from "@/lib/glossary";
 import type { PayrollContext } from "@/lib/payroll/context";
-import { windowPayroll, withService } from "@/lib/payroll/engine";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
-import { referenceTable, yearMonths, type ChapterId } from "@/lib/viz/croisee";
+import type { ChapterId } from "@/lib/viz/croisee";
 import { monthShortYear } from "@/lib/viz/masse";
 import { MM, MONTH_NAMES, presets } from "@/lib/viz/synthese";
 import { requireWorkspace } from "@/lib/workspace";
@@ -261,17 +260,11 @@ function CommonSources({ ctx }: { ctx: CroiseeContext }) {
 }
 
 // « Référence annuelle N-1 sur douze mois » : masse chargée et brut des douze mois de l'année qui précède la période, calculés par le
-// moteur du journal de paie (windowPayroll, comme la Synthèse de la Masse salariale), pour le service retenu.
+// moteur du journal de paie (windowPayroll, comme la Synthèse de la Masse salariale), pour le service retenu. Même fonction que
+// l'export (referenceBlock) : le classeur et le CSV reprennent ce tableau.
 function CommonReference({ ctx, pay }: { ctx: CroiseeContext; pay: PayrollContext | null }) {
-  const p = ctx.period;
-  const nd = (reason: string) => <NdNote label="Référence annuelle" reason={reason} testid="cx-commun-reference-nd" />;
-  let body: ReactNode;
-  if (!p) body = nd(ctx.periodNd ?? "aucun mois disponible");
-  else if (!pay?.input) body = nd(pay ? (journalReason(pay) ?? "journal de paie indisponible") : "journal de paie non lu");
-  else {
-    const input = ctx.service.value === undefined ? pay.input : withService(pay.input, ctx.service.value);
-    body = <ModelTable slug={ctx.slug} table={referenceTable({ year: p.year - 1, scope: ctx.service.label, window: windowPayroll(input, yearMonths(p.year - 1)) })} />;
-  }
+  const ref = referenceBlock(ctx, pay);
+  const body: ReactNode = ref.kind === "nd" ? <NdNote label="Référence annuelle" reason={ref.reason} testid="cx-commun-reference-nd" /> : <ModelTable slug={ctx.slug} table={ref.table} />;
   return (
     <Pliant title="Référence annuelle N-1 sur douze mois" id="cx-commun-reference" testid="cx-commun-reference" term={T.vueEnsemble} slug={ctx.slug}>
       {body}

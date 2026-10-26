@@ -7,7 +7,7 @@ import type { Affichage } from "@/app/e/[slug]/studio-rh/masse-salariale/compone
 import type { CroiseeSetting } from "@/lib/croisee-settings";
 import { glossaryEntry } from "@/lib/glossary";
 import type { DsnMonth } from "@/lib/payroll/dsn";
-import { windowPayroll, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
+import { monthPayroll, windowPayroll, withService, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 import { provisionMonth, reconcile, type ComptaLine } from "@/lib/payroll/lot2";
 import { cellView, croiseeHref, type CroiseeCell, type CroiseeTable } from "@/lib/viz/croisee";
@@ -23,10 +23,17 @@ import {
   PAIE_CX_TERMS,
   PAIE_IDS as ID,
   paieComptaModel,
+  passageContracts,
+  passageGroup,
+  passageStatus,
   PREVU_PAIE,
+  PROVISION_SERVICES_LIMITE,
+  provisionContracts,
+  provisionGroup,
   ratioOf,
   SANS_DSN,
   SANS_PRODUITS,
+  SERVICE_RETENU_LIMITE,
   SEUIL_NON_VERIFIABLE,
   sousSeuil,
   TOTAL_PERIODE,
@@ -122,49 +129,72 @@ const LINES: LedgerLine[] = [
 ];
 const JOURNAL: JournalInput = { lines: LINES, months: ["2025-01", "2026-01"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
 
-// --- Journal fictif du seuil de confidentialité (seuil 2) : A = 3 contrats rémunérés, B = 1, « Non ventilé » = 0 --------------------
-// 2026-01 · A : salaires 3 × 1 000 € (contrat-fictif-a1, a2, a3) ; cotisations 1 200 € ; provision « Mois courant » 90 € (6412) + 30 €
-//           (6485) = 120 €.
-//         · B : salaires 800 € (contrat-fictif-b1) ; cotisations 320 € ; provision 40 € (6412) + 10 € (6485) = 50 €.
-//         · sans code (« Non ventilé ») : titres-restaurant 60 € (6476), aucun contrat rémunéré, aucune ligne de provision (0 €).
+// --- Journal fictif du seuil de confidentialité (seuil 2) : A = 3 contrats, B = 1, « Non ventilé » sans contrat -----------------------
+// Comme dans PayFit, chaque ligne de dotation de la provision porte son contrat (dot : une ligne par contrat) ; les lignes de
+// cotisations de ces fixtures n'en portent pas. Taille d'un groupe : provision = contrats des lignes de dotation ; passage = contrats
+// de toute ligne de charges de personnel.
+// 2026-01 · A : salaires 3 × 1 000 € (contrat-fictif-a1, a2, a3) ; cotisations 1 200 € ; provision « Mois courant » 3 × 30 € (6412)
+//           + 3 × 10 € (6485) = 120 € (contrats a1, a2, a3). Passage : 3 000 + 1 200 + 120 = 4 320 €.
+//         · B : salaires 800 € (contrat-fictif-b1) ; cotisations 320 € ; provision 40 € (6412) + 10 € (6485) = 50 € (b1). Passage
+//           1 170 €.
+//         · sans code (« Non ventilé ») : titres-restaurant 60 € (6476) sans contrat ; aucune ligne de provision (0 €, 0 contrat).
 //         Toute l'entreprise : provision 130 € (congés payés) + 40 € (charges sociales) = 170 €.
-// 2025-01 · A : salaires 2 × 1 000 € (a1, a2) ; cotisations 800 € ; provision 70 € (6412) + 20 € (6485) = 90 €.
-//         · B : salaires 2 × 700 € (b1, b2) ; cotisations 560 € ; provision 52 € (6412) + 13 € (6485) = 65 €.
+// 2025-01 · A : salaires 2 × 1 000 € (a1, a2) ; cotisations 800 € ; provision 2 × 35 € (6412) + 2 × 10 € (6485) = 90 € (a1, a2).
+//         · B : salaires 2 × 700 € (b1, b2) ; cotisations 560 € ; provision 2 × 26 € (6412) + 2 × 6,50 € (6485) = 65 € (b1, b2).
 //         Toute l'entreprise : provision 122 € + 33 € = 155 €.
+// Lignes de dotation « Mois courant » d'un service, une par contrat : [contrat, montant en centimes] (null : ligne sans contrat).
+const dot = (key: string, month: string, accountId: string, svc: string | undefined, parts: [string | null, number][]): LedgerLine[] =>
+  parts.map(([contract, cents], i) => ln(`${key}-${i + 1}`, month, accountId, cents, { contract: contract ?? undefined, svc, name: accountId.startsWith("6412") ? COURANT : CHARGES_COURANT }));
 const SEUIL_LINES: LedgerLine[] = [
   ln("s1", "2026-01", "641100", 100000, { contract: "contrat-fictif-a1", svc: "A" }),
   ln("s2", "2026-01", "641100", 100000, { contract: "contrat-fictif-a2", svc: "A" }),
   ln("s3", "2026-01", "641100", 100000, { contract: "contrat-fictif-a3", svc: "A" }),
   ln("s4", "2026-01", "645000", 120000, { svc: "A" }),
-  ln("s5", "2026-01", "641200", 9000, { svc: "A", name: COURANT }),
-  ln("s6", "2026-01", "648500", 3000, { svc: "A", name: CHARGES_COURANT }),
+  ...dot("s5", "2026-01", "641200", "A", [["contrat-fictif-a1", 3000], ["contrat-fictif-a2", 3000], ["contrat-fictif-a3", 3000]]),
+  ...dot("s6", "2026-01", "648500", "A", [["contrat-fictif-a1", 1000], ["contrat-fictif-a2", 1000], ["contrat-fictif-a3", 1000]]),
   ln("s7", "2026-01", "641100", 80000, { contract: "contrat-fictif-b1", svc: "B" }),
   ln("s8", "2026-01", "645000", 32000, { svc: "B" }),
-  ln("s9", "2026-01", "641200", 4000, { svc: "B", name: COURANT }),
-  ln("s10", "2026-01", "648500", 1000, { svc: "B", name: CHARGES_COURANT }),
+  ...dot("s9", "2026-01", "641200", "B", [["contrat-fictif-b1", 4000]]),
+  ...dot("s10", "2026-01", "648500", "B", [["contrat-fictif-b1", 1000]]),
   ln("s11", "2026-01", "647600", 6000),
   ln("t1", "2025-01", "641100", 100000, { contract: "contrat-fictif-a1", svc: "A" }),
   ln("t2", "2025-01", "641100", 100000, { contract: "contrat-fictif-a2", svc: "A" }),
   ln("t3", "2025-01", "645000", 80000, { svc: "A" }),
-  ln("t4", "2025-01", "641200", 7000, { svc: "A", name: COURANT }),
-  ln("t5", "2025-01", "648500", 2000, { svc: "A", name: CHARGES_COURANT }),
+  ...dot("t4", "2025-01", "641200", "A", [["contrat-fictif-a1", 3500], ["contrat-fictif-a2", 3500]]),
+  ...dot("t5", "2025-01", "648500", "A", [["contrat-fictif-a1", 1000], ["contrat-fictif-a2", 1000]]),
   ln("t6", "2025-01", "641100", 70000, { contract: "contrat-fictif-b1", svc: "B" }),
   ln("t7", "2025-01", "641100", 70000, { contract: "contrat-fictif-b2", svc: "B" }),
   ln("t8", "2025-01", "645000", 56000, { svc: "B" }),
-  ln("t9", "2025-01", "641200", 5200, { svc: "B", name: COURANT }),
-  ln("t10", "2025-01", "648500", 1300, { svc: "B", name: CHARGES_COURANT }),
+  ...dot("t9", "2025-01", "641200", "B", [["contrat-fictif-b1", 2600], ["contrat-fictif-b2", 2600]]),
+  ...dot("t10", "2025-01", "648500", "B", [["contrat-fictif-b1", 650], ["contrat-fictif-b2", 650]]),
 ];
 const JOURNAL_SEUIL: JournalInput = { ...JOURNAL, lines: SEUIL_LINES };
-// Variante : un service C de 2 contrats (c1, c2) en 2026-01, salaires 2 × 1 000 €, cotisations 800 €, provision 150 € + 50 € = 200 €.
-// Toute l'entreprise 2026-01 : provision 280 € + 90 € = 370 €.
+// Variante : un service C de 2 contrats (c1, c2) en 2026-01, salaires 2 × 1 000 €, cotisations 800 €, provision 2 × 75 € + 2 × 25 € =
+// 200 € (c1, c2) ; passage 2 000 + 800 + 200 = 3 000 €. Toute l'entreprise 2026-01 : provision 280 € + 90 € = 370 €.
 const C_LINES: LedgerLine[] = [
   ln("c1", "2026-01", "641100", 100000, { contract: "contrat-fictif-c1", svc: "C" }),
   ln("c2", "2026-01", "641100", 100000, { contract: "contrat-fictif-c2", svc: "C" }),
   ln("c3", "2026-01", "645000", 80000, { svc: "C" }),
-  ln("c4", "2026-01", "641200", 15000, { svc: "C", name: COURANT }),
-  ln("c5", "2026-01", "648500", 5000, { svc: "C", name: CHARGES_COURANT }),
+  ...dot("c4", "2026-01", "641200", "C", [["contrat-fictif-c1", 7500], ["contrat-fictif-c2", 7500]]),
+  ...dot("c5", "2026-01", "648500", "C", [["contrat-fictif-c1", 2500], ["contrat-fictif-c2", 2500]]),
 ];
 const JOURNAL_SEUIL_C: JournalInput = { ...JOURNAL, lines: [...SEUIL_LINES, ...C_LINES] };
+// Cas de la relecture (seuil 3) : A = 3 contrats payés ; B = 1 contrat SANS brut (congé non rémunéré, par exemple) qui porte sa
+// dotation « Mois courant » : 150 € (6412) + 60 € (6485) = 210 € (contrat-fictif-b9). Seul janvier 2026 est lu.
+// 2026-01 · A : salaires 3 × 1 000 € ; cotisations 1 200 € ; provision 3 × 30 € + 3 × 10 € = 120 €. Passage A 4 320 €, B 210 €.
+//         Toute l'entreprise : provision 120 + 210 = 330 € (congés payés 90 + 150 = 240 € ; charges sociales 30 + 60 = 90 €).
+// Avec la taille comptée sur le brut, B comptait 0 contrat et sa provision (celle d'une seule personne) restait affichée.
+const SANS_BRUT_A: LedgerLine[] = SEUIL_LINES.filter((l) => l.month === "2026-01" && l.analytic?.some((a) => a.code === "A"));
+const JOURNAL_SANS_BRUT: JournalInput = {
+  ...JOURNAL,
+  months: ["2026-01"],
+  lines: [...SANS_BRUT_A, ...dot("u1", "2026-01", "641200", "B", [["contrat-fictif-b9", 15000]]), ...dot("u2", "2026-01", "648500", "B", [["contrat-fictif-b9", 6000]])],
+};
+// Variante : les mêmes lignes de B, sans contrat rattaché (taille 0, provision non nulle).
+const JOURNAL_SANS_CONTRAT: JournalInput = {
+  ...JOURNAL_SANS_BRUT,
+  lines: [...SANS_BRUT_A, ...dot("u1", "2026-01", "641200", "B", [[null, 15000]]), ...dot("u2", "2026-01", "648500", "B", [[null, 6000]])],
+};
 
 // Comptabilité fictive (API Pennylane) : 2026-01 cotisations 590 € (10 € de moins que le journal), le reste identique ; produits
 // d'exploitation (706000) 10 000 €. 2025-01 identique au journal ; produits 9 000 €.
@@ -495,16 +525,88 @@ describe("seuil de confidentialité : maskServices (cas de référence écrits �
     expect(maskServices([g(1, 500)], 2)).toEqual<MaskStatus[]>(["masked"]);
   });
 
-  it("guardProvision (un service seul) : 1 à seuil − 1 contrats ⇒ n.d. ; 0 contrat ou au moins le seuil ⇒ valeurs ; effectif inconnu ⇒ non vérifiable", () => {
+  it("valeur non nulle sans contrat rattaché (taille 0) : non vérifiable, masquée comme sous le seuil ; nulle, elle reste affichée", () => {
+    // Seuil 2 : A = 3 contrats (432 €), « Non ventilé » = 0 contrat et 60 € → masqué ; il n'ajoute aucun contrat (0 < 2) : A l'est donc
+    // aussi, sinon « Non ventilé » se lirait comme total − A.
+    expect(maskServices([{ size: 3, order: 43200, nonZero: true }, { size: 0, order: 6000, nonZero: true }], 2)).toEqual<MaskStatus[]>(["secondary", "masked"]);
+    // 0 contrat et valeur nulle : rien à protéger.
+    expect(maskServices([{ size: 3, order: 43200, nonZero: true }, { size: 0, order: 0, nonZero: false }], 2)).toEqual<MaskStatus[]>(["shown", "shown"]);
+    // nonZero absent : lu sur le montant (0 € : nul ; montant n.d. : traité comme non nul).
+    expect(maskServices([g(3, 43200), g(0, 6000)], 2)).toEqual<MaskStatus[]>(["secondary", "masked"]);
+    expect(maskServices([g(3, 43200), g(0, null)], 2)).toEqual<MaskStatus[]>(["secondary", "masked"]);
+    // Seuil 1 : aucun groupe n'est masqué, même sans contrat rattaché.
+    expect(maskServices([g(3, 43200), g(0, 6000)], 1)).toEqual<MaskStatus[]>(["shown", "shown"]);
+  });
+
+  it("services masqués comptés en contrats DISTINCTS : un contrat présent dans deux services masqués ne compte qu'une fois", () => {
+    // Seuil 2 : B = {b1} masqué ; « Non ventilé » = {b1} (une ligne de b1 sans code analytique) masqué ; ensemble, ils ne décrivent
+    // qu'un contrat (1 < 2) : C (300 €, plus petit que A à 432 €) est masqué aussi → {b1, c1, c2} = 3 ≥ 2. Additionner les tailles
+    // (1 + 1 = 2) laisserait A et C affichés, et B + « Non ventilé » (un seul contrat) se lirait par différence.
+    const A = { size: 3, order: 43200, contracts: ["a1", "a2", "a3"] };
+    const B = { size: 1, order: 11700, contracts: ["b1"] };
+    const NV = { size: 1, order: 600, contracts: ["b1"] };
+    const C = { size: 2, order: 30000, contracts: ["c1", "c2"] };
+    expect(maskServices([A, B, C, NV], 2)).toEqual<MaskStatus[]>(["shown", "masked", "secondary", "masked"]);
+    // Deux contrats différents (b1 et n1) : 2 ≥ 2, A et C restent affichés.
+    expect(maskServices([A, B, C, { ...NV, contracts: ["n1"] }], 2)).toEqual<MaskStatus[]>(["shown", "masked", "shown", "masked"]);
+  });
+
+  it("passageStatus : le passage d'un service est masqué quand sa provision l'est (principal ou secondaire), pas quand elle est n.d.", () => {
+    expect(passageStatus("shown", "shown")).toBe("shown");
+    expect(passageStatus("shown", "masked")).toBe("masked");
+    expect(passageStatus("shown", "secondary")).toBe("secondary");
+    expect(passageStatus("shown", "unverifiable")).toBe("shown");
+    expect(passageStatus("secondary", "shown")).toBe("secondary");
+    expect(passageStatus("unverifiable", "masked")).toBe("unverifiable");
+  });
+
+  it("guardProvision (un service seul) : 1 à seuil − 1 contrats ⇒ n.d. ; aucun contrat et provision non nulle ⇒ n.d. ; au moins le seuil ⇒ valeurs", () => {
     const v = provisionMonth(JOURNAL, "2026-01");
     expect(guardProvision(v, 2, 3).total).toEqual({ nd: sousSeuil(3) });
     expect(guardProvision(v, 2, 3).conges).toEqual({ nd: sousSeuil(3) });
     expect(guardProvision(v, 3, 3).total).toBe(16500);
-    expect(guardProvision(v, 0, 3).total).toBe(16500);
+    // 0 contrat rattaché et 165 € de provision : non vérifiable, même raison que le seuil.
+    expect(guardProvision(v, 0, 3).total).toEqual({ nd: sousSeuil(3) });
+    expect(guardProvision(v, 0, 1).total).toBe(16500);
+    // 0 contrat et provision nulle (0 € + 0 €) : affichée.
+    expect(guardProvision({ month: "2026-01", kind: "value", conges: 0, charges: 0, total: 0, missing: [] }, 0, 3).total).toBe(0);
     expect(guardProvision(v, null, 3).total).toEqual({ nd: SEUIL_NON_VERIFIABLE });
     expect(guardProvision({ month: "2024-01", kind: "nd", reason: "mois hors lecture" }, null, 3).total).toEqual({ nd: "mois hors lecture" });
-    expect(sousSeuil(2)).toBe("non affiché (seuil de confidentialité : 2 contrats rémunérés par service et par mois)");
-    expect(sousSeuil(1)).toBe("non affiché (seuil de confidentialité : 1 contrat rémunéré par service et par mois)");
+    expect(sousSeuil(2)).toBe("non affiché (seuil de confidentialité : 2 contrats par service et par mois)");
+    expect(sousSeuil(1)).toBe("non affiché (seuil de confidentialité : 1 contrat par service et par mois)");
+  });
+
+  it("taille d'un groupe : contrats des lignes de dotation (provision) ; contrats de toute ligne de charges de personnel (passage)", () => {
+    const a = withService(JOURNAL_SEUIL, "A");
+    const b = withService(JOURNAL_SANS_BRUT, "B");
+    const nv = withService(JOURNAL_SEUIL, null);
+    expect(provisionContracts(a, "2026-01")).toEqual(["contrat-fictif-a1", "contrat-fictif-a2", "contrat-fictif-a3"]);
+    expect(passageContracts(a, "2026-01")).toEqual(["contrat-fictif-a1", "contrat-fictif-a2", "contrat-fictif-a3"]);
+    // B sans brut : sa dotation porte son contrat ; aucun contrat rémunéré (ligne de brut) dans le moteur.
+    expect(provisionContracts(b, "2026-01")).toEqual(["contrat-fictif-b9"]);
+    expect(passageContracts(b, "2026-01")).toEqual(["contrat-fictif-b9"]);
+    const mb = monthPayroll(b, "2026-01");
+    expect(mb.kind === "value" && mb.paidContracts).toEqual([]);
+    // « Non ventilé » : titres-restaurant 60 € sans contrat ; aucune ligne de provision.
+    expect(provisionContracts(nv, "2026-01")).toEqual([]);
+    expect(passageContracts(nv, "2026-01")).toEqual([]);
+    expect(passageGroup(nv, "2026-01")).toEqual({ size: 0, contracts: [], order: 6000, nonZero: true });
+    expect(provisionGroup(nv, "2026-01")).toEqual({ size: 0, contracts: [], order: 0, nonZero: false });
+    // Provision de B (150 € + 60 €) et passage (provisions 210 €).
+    expect(provisionGroup(b, "2026-01")).toEqual({ size: 1, contracts: ["contrat-fictif-b9"], order: 21000, nonZero: true });
+    expect(passageGroup(b, "2026-01")).toEqual({ size: 1, contracts: ["contrat-fictif-b9"], order: 21000, nonZero: true });
+    // Une reprise « Mois précédent » (contrat sorti, sans dotation) et une contrepartie 428 ne font pas partie du stock affiché : leur
+    // contrat ne compte pas pour la provision ; la reprise compte pour le passage (ligne de charges de personnel).
+    const extra: JournalInput = {
+      ...JOURNAL_SEUIL,
+      lines: [
+        ...JOURNAL_SEUIL.lines,
+        ln("r1", "2026-01", "641200", null, { credit: 2500, contract: "contrat-fictif-a8", svc: "A", name: "Provision congés payés - Mois précédent" }),
+        ln("r2", "2026-01", "428200", null, { credit: 3000, contract: "contrat-fictif-a9", svc: "A", name: COURANT }),
+      ],
+    };
+    expect(provisionContracts(withService(extra, "A"), "2026-01")).toEqual(["contrat-fictif-a1", "contrat-fictif-a2", "contrat-fictif-a3"]);
+    expect(passageContracts(withService(extra, "A"), "2026-01")).toEqual(["contrat-fictif-a1", "contrat-fictif-a2", "contrat-fictif-a3", "contrat-fictif-a8"]);
   });
 
   it("maskedWindow : un mois masqué rend la fenêtre n.d. (raison du seuil pour ce mois) ; tous affichés, la fenêtre est inchangée", () => {
@@ -538,7 +640,85 @@ describe("provision par service : seuil de confidentialité et masquage secondai
     // Aucune valeur de B (50 €, 40 €, 10 €) ni de A (120 €, 90 €, 30 €) de janvier 2026 dans le tableau.
     const nums = [...t.rows.flatMap((r) => r.cells)].filter((c): c is number => typeof c === "number");
     for (const v of [5000, 4000, 1000, 12000, 3000]) expect(nums).not.toContain(v);
-    expect(m.limits).toContain("Provision par service : seuil de confidentialité compté en contrats rémunérés du mois, masquage secondaire compris ; la ligne « Toute l'entreprise » reste complète.");
+    expect(m.limits).toContain(PROVISION_SERVICES_LIMITE);
+    expect(m.limits).not.toContain(SERVICE_RETENU_LIMITE);
+  });
+
+  it("cas de la relecture, seuil 3 : B (1 contrat sans brut, dotation 210 €) n.d. ; A (3 contrats) masqué en secondaire ; B non reconstituable", async () => {
+    const m = await model({ pay: pay(JOURNAL_SANS_BRUT), seuil: SEUIL(3) });
+    const t = table(m, ID.provisionServices);
+    expect(t.rows.map((r) => r.cells[0])).toEqual(["A", "B"]);
+    // B : 1 contrat porte la dotation (taille 1 < 3) → masqué. Masqués : {b9} = 1 contrat < 3 → A (120 €) masqué aussi : {b9, a1, a2,
+    // a3} = 4 ≥ 3. Même raison sur les deux lignes.
+    for (const r of [0, 1]) for (const k of ["total", "conges", "charges"]) expect(raw(t, r, k)).toEqual({ nd: sousSeuil(3) });
+    // Toute l'entreprise : 330 € (240 € + 90 €) ; total − A ne se calcule pas, A étant n.d. : 210 € n'apparaît nulle part.
+    expect(raw(t, "foot", "total")).toBe(33000);
+    expect(raw(t, "foot", "conges")).toBe(24000);
+    expect(raw(t, "foot", "charges")).toBe(9000);
+    const pub = published(m);
+    // Valeurs de B (210 €, 150 €, 60 €) et de A (120 €, 30 € de charges sociales) ; 90 € n'est pas vérifiable ici (pied : 30 + 60 €).
+    for (const v of [21000, 15000, 6000, 12000, 3000]) expect(pub.numbers).not.toContain(v);
+    // Sous le filtre B : provision et passage n.d. (B porte 210 € de provisions, 1 contrat) ; sous le filtre A, n.d. aussi.
+    const fb = await model({ pay: pay(JOURNAL_SANS_BRUT), seuil: SEUIL(3), service: "B" });
+    expect(tile(fb, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(3) });
+    expect(raw(table(fb, ID.provisionMois), 0, "total")).toEqual({ nd: sousSeuil(3) });
+    expect(raw(table(fb, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(3)}` });
+    expect(published(fb).numbers).not.toContain(21000);
+    expect(fb.limits).toContain(SERVICE_RETENU_LIMITE);
+    const fa = await model({ pay: pay(JOURNAL_SANS_BRUT), seuil: SEUIL(3), service: "A" });
+    expect(tile(fa, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(3) });
+    expect(raw(table(fa, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(3)}` });
+  });
+
+  it("même cas, dotation de B sans contrat rattaché : taille 0 et 210 € → non vérifiable, n.d. avec la raison du seuil ; A masqué en secondaire", async () => {
+    const m = await model({ pay: pay(JOURNAL_SANS_CONTRAT), seuil: SEUIL(3) });
+    const t = table(m, ID.provisionServices);
+    for (const r of [0, 1]) for (const k of ["total", "conges", "charges"]) expect(raw(t, r, k)).toEqual({ nd: sousSeuil(3) });
+    expect(raw(t, "foot", "total")).toBe(33000);
+    expect(published(m).numbers).not.toContain(21000);
+    expect(published(m).numbers).not.toContain(12000);
+  });
+
+  it("cas inverse, seuil 3 : E = 3 contrats payés mais 1 seul porte la dotation (deux stagiaires sans provision) → provision de E n.d.", async () => {
+    // 2026-01 · A : comme ci-dessus (3 contrats, provision 120 €, passage 4 320 €).
+    //         · E : salaires 1 000 € (contrat-fictif-e1), gratifications de stage 2 × 600 € (e2, e3), cotisations 400 € ; dotation de
+    //           e1 seul : 40 € (6412) + 10 € (6485) = 50 €. Passage E : 1 000 + 1 200 + 400 + 50 = 2 650 € (3 contrats).
+    // Provision : A = 3, E = {e1} = 1 < 3 → masqué ; {e1} = 1 < 3 → A masqué en secondaire. Compter le brut donnerait E = 3 contrats et
+    // publierait les 50 € d'une seule personne.
+    const e: LedgerLine[] = [
+      ln("e1", "2026-01", "641100", 100000, { contract: "contrat-fictif-e1", svc: "E" }),
+      ln("e2", "2026-01", "641370", 60000, { contract: "contrat-fictif-e2", svc: "E" }),
+      ln("e3", "2026-01", "641370", 60000, { contract: "contrat-fictif-e3", svc: "E" }),
+      ln("e4", "2026-01", "645000", 40000, { svc: "E" }),
+      ...dot("e5", "2026-01", "641200", "E", [["contrat-fictif-e1", 4000]]),
+      ...dot("e6", "2026-01", "648500", "E", [["contrat-fictif-e1", 1000]]),
+    ];
+    const journal: JournalInput = { ...JOURNAL_SANS_BRUT, lines: [...SANS_BRUT_A, ...e] };
+    const t = table(await model({ pay: pay(journal), seuil: SEUIL(3) }), ID.provisionServices);
+    expect(t.rows.map((r) => r.cells[0])).toEqual(["A", "E"]);
+    for (const r of [0, 1]) expect(raw(t, r, "total")).toEqual({ nd: sousSeuil(3) });
+    expect(raw(t, "foot", "total")).toBe(17000);
+    // Sous le filtre E : le passage (3 contrats) passerait le seuil, mais sa ligne « Provisions de congés payés » vaudrait les 50 € de
+    // e1 : il est masqué avec la provision. Aucun montant de E n'est publié (50 €, 40 €, 10 €, 2 650 €).
+    const fe = await model({ pay: pay(journal), seuil: SEUIL(3), service: "E" });
+    expect(tile(fe, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(3) });
+    expect(raw(table(fe, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(3)}` });
+    const pub = published(fe);
+    for (const v of [5000, 4000, 1000, 265000]) expect(pub.numbers).not.toContain(v);
+  });
+
+  it("« Non ventilé » peut devenir n.d. : dotation de 12 € sans contrat ni code ; A (3 contrats, 120 €) masqué en secondaire, C (2, 200 €) affiché", async () => {
+    // Seuil 2, fin janvier 2026, sans B : A = 3 contrats (120 €), C = 2 (200 €), « Non ventilé » = 0 contrat et 12 € (6412) → masqué.
+    // Masqués : 0 contrat < 2 → A, plus petit que C, masqué : 3 ≥ 2. Total 120 + 200 + 12 = 332 € ; 332 − 200 = 132 € = A + Non ventilé.
+    const lines = [...SANS_BRUT_A, ...C_LINES, ...dot("v1", "2026-01", "641200", undefined, [[null, 1200]])];
+    const m = await model({ pay: pay({ ...JOURNAL_SANS_BRUT, lines }) });
+    const t = table(m, ID.provisionServices);
+    expect(t.rows.map((r) => r.cells[0])).toEqual(["A", "C", "Non ventilé"]);
+    expect(raw(t, 2, "total")).toEqual({ nd: sousSeuil(2) });
+    expect(raw(t, 0, "total")).toEqual({ nd: sousSeuil(2) });
+    expect(raw(t, 1, "total")).toBe(20000);
+    expect(raw(t, "foot", "total")).toBe(33200);
+    expect(published(m).numbers).not.toContain(1200);
   });
 
   it("avec un service C de 2 contrats : C affiché (200 €), A, B et « Non ventilé » masqués ; total − C = 170 € décrit 4 contrats", async () => {
@@ -612,30 +792,46 @@ describe("filtre de service : chiffres du service soumis au même seuil (carte, 
     expect(tile(nv, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(2) });
   });
 
-  it("service C (affiché dans le tableau par service) : chiffré sous le filtre, avec les mêmes valeurs que sa ligne", async () => {
+  it("service C : provision chiffrée comme sa ligne (200 €) ; passage n.d., car « Non ventilé » (60 € sans contrat) doit être protégé", async () => {
     const m = await model({ pay: pay(JOURNAL_SEUIL_C), service: "C" });
-    // C, 2026-01 : provision 200 € (150 + 50) ; passage : salaires 2 000 € + cotisations 800 € + provisions 200 € = 3 000 €.
+    // Provision fin janvier 2026 : C (2 contrats) affiché dans le tableau par service, donc sous le filtre : 150 + 50 = 200 €.
     expect(sp(tile(m, "provision").value.text)).toBe("200,00 €");
     expect(raw(table(m, ID.provisionMois), 0, "total")).toBe(20000);
-    expect(raw(table(m, ID.charges), "foot", "n")).toBe(300000);
+    // Passage de janvier 2026 (taille : contrats de toute ligne de charges de personnel) : A = 3 (4 320 €), B = 1 (1 170 €) masqué,
+    // C = 2 (3 000 €), « Non ventilé » = 0 contrat et 60 € → masqué. Masqués : {b1} = 1 < 2 → C, plus petit que A, masqué en
+    // secondaire : {b1, c1, c2} = 3 ≥ 2. Sans cela, B + « Non ventilé » (1 contrat) se lirait comme total − A − C.
+    expect(raw(table(m, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(2)}` });
+    // N-1 (janvier 2025) : aucune ligne de C, 0 € lu, affiché.
     expect(raw(table(m, ID.charges), "foot", "n1")).toBe(0);
   });
 
+  it("service C, ligne de « Non ventilé » rattachée à un contrat sans service (n1) : masqués {b1, n1} = 2 ≥ 2, passage de C chiffré", async () => {
+    const lines = JOURNAL_SEUIL_C.lines.map((l) => (l.key === "s11" ? { ...l, contractId: "contrat-fictif-n1" } : l));
+    const m = await model({ pay: pay({ ...JOURNAL_SEUIL_C, lines }), service: "C" });
+    // C, 2026-01 : salaires 2 000 € + cotisations 800 € + provisions 200 € = 3 000 €.
+    expect(raw(table(m, ID.charges), "foot", "n")).toBe(300000);
+    // La même ligne rattachée à b1 (contrat déjà masqué dans B) n'ajoute aucun contrat : {b1} = 1 < 2, C reste masqué.
+    const same = JOURNAL_SEUIL_C.lines.map((l) => (l.key === "s11" ? { ...l, contractId: "contrat-fictif-b1" } : l));
+    const ms = await model({ pay: pay({ ...JOURNAL_SEUIL_C, lines: same }), service: "C" });
+    expect(raw(table(ms, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(2)}` });
+  });
+
   it("période de deux mois : B masqué en janvier (1 contrat), affiché en février (2) ; le passage de la période est n.d.", async () => {
-    // 2026-01 : A = 3 contrats (provision 120 €), B = 1 (50 €). 2026-02 : A = 3 (provision 95 € + 31 € = 126 €), B = 2 (b1, b2 ;
-    // salaires 800 € + 600 €, cotisations 560 €, provision 60 € + 18 € = 78 €). Aucun « Non ventilé ». N-1 non lu.
+    // 2026-01 : A = 3 contrats (provision 120 €), B = 1 (50 €). 2026-02 : A = 3 (provision 32 + 32 + 31 = 95 € et 11 + 10 + 10 =
+    // 31 €, soit 126 €), B = 2 (b1, b2 ; salaires 800 € + 600 €, cotisations 560 €, provision 2 × 30 € + 2 × 9 € = 78 €). Aucun
+    // « Non ventilé ». N-1 non lu.
     const feb: LedgerLine[] = [
       ln("f1", "2026-02", "641100", 100000, { contract: "contrat-fictif-a1", svc: "A" }),
       ln("f2", "2026-02", "641100", 100000, { contract: "contrat-fictif-a2", svc: "A" }),
       ln("f3", "2026-02", "641100", 100000, { contract: "contrat-fictif-a3", svc: "A" }),
       ln("f4", "2026-02", "645000", 120000, { svc: "A" }),
-      ln("f5", "2026-02", "641200", 9500, { svc: "A", name: COURANT }),
-      ln("f6", "2026-02", "648500", 3100, { svc: "A", name: CHARGES_COURANT }),
+      ...dot("f5", "2026-02", "641200", "A", [["contrat-fictif-a1", 3200], ["contrat-fictif-a2", 3200], ["contrat-fictif-a3", 3100]]),
+      ...dot("f6", "2026-02", "648500", "A", [["contrat-fictif-a1", 1100], ["contrat-fictif-a2", 1000], ["contrat-fictif-a3", 1000]]),
       ln("f7", "2026-02", "641100", 80000, { contract: "contrat-fictif-b1", svc: "B" }),
       ln("f8", "2026-02", "641100", 60000, { contract: "contrat-fictif-b2", svc: "B" }),
       ln("f9", "2026-02", "645000", 56000, { svc: "B" }),
-      ln("f10", "2026-02", "641200", 6000, { svc: "B", name: COURANT }),
-      ln("f11", "2026-02", "648500", 1800, { svc: "B", name: CHARGES_COURANT }),
+      ...dot("f10", "2026-02", "641200", "B", [["contrat-fictif-b1", 3000], ["contrat-fictif-b2", 3000]]),
+      ...dot("f11", "2026-02", "648500", "B", [["contrat-fictif-b1", 900], ["contrat-fictif-b2", 900]]),
     ];
     const jan = SEUIL_LINES.filter((l) => l.month === "2026-01" && l.key !== "s11");
     const journal: JournalInput = { lines: [...jan, ...feb], months: ["2026-01", "2026-02"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };

@@ -1,5 +1,5 @@
-// Masse salariale croisée, chapitre 06 · Budget & prévisions : partition des personnes observées sur deux périodes (N-1 et N).
-// Fonction pure. L'entrée est le détail par clé d'observation que calcule déjà zoomOf (src/lib/budget/zoom.ts) sur chaque période :
+// Masse salariale croisée, chapitre 06 · Budget & prévisions : partition des personnes observées sur deux périodes (N-1 et N), et
+// contributeurs des éléments non récurrents de l'atterrissage retraité (fin du fichier). Fonctions pures. L'entrée est le détail par clé d'observation que calcule déjà zoomOf (src/lib/budget/zoom.ts) sur chaque période :
 // clé = contrat de paie du journal, valeur = montant de la période en centimes. La sortie ne contient que des nombres et des montants,
 // jamais une clé : aucune identité ne sort de cette fonction.
 //
@@ -8,7 +8,8 @@
 // journal sans contrat) ne sont pas des personnes : elles forment une ligne à part, pour que la somme des contributions soit égale
 // à l'écart total. Contribution d'un groupe = montant N − montant N-1 (un groupe absent d'une période n'y a aucune ligne).
 
-import { maskGroups } from "./structure";
+import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
+import { maskGroups, type MaskStatus } from "./structure";
 
 export type CohortGroup = { count: number; prev: number; cur: number; delta: number };
 export type CohortOutside = { prev: number | null; cur: number | null; delta: number }; // null : aucune ligne sans clé dans la période
@@ -103,4 +104,51 @@ export function maskCohorts(p: Extract<CohortPartition, { kind: "value" }>, seui
     }
   }
   return st;
+}
+
+// --- Éléments non récurrents de l'atterrissage retraité : contributeurs et seuil de confidentialité --------------------------------
+//
+// Mêmes éléments que retraite (src/lib/budget/lot3.ts), sans recalcul des montants : « déjà comptabilisés » = hypothèses « réalisé »
+// de l'année jusqu'au mois de bascule de la base ; « prévus » = parts non récurrentes des contributions des mois projetés de l'année
+// (coûts de sortie, tuilages, ponctuels et enveloppes marqués non récurrents). Contributeur : le contrat que porte la contribution
+// (salarié, ou embauche prévue) ; à défaut, l'hypothèse. Plusieurs hypothèses sur un même contrat comptent pour un contributeur. Un
+// contributeur dont la somme de l'année est nulle n'entre pas dans le total : il n'est pas compté. null : contribution sans contrat
+// ni hypothèse (effectif non dénombré, seuil non vérifiable). Aucune clé ne sort de la fonction.
+export type NonRecurringContributors = { realised: number | null; projected: number | null };
+
+export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth">, proj: Projection, hyps: readonly Hypothesis[], year: string): NonRecurringContributors {
+  const add = (m: Map<string, number>, key: string, cents: number) => m.set(key, (m.get(key) ?? 0) + cents);
+  const count = (m: Map<string, number>) => [...m.values()].filter((v) => v !== 0).length;
+  const realised = new Map<string, number>();
+  for (const h of hyps) if (h.kind === "realise" && h.month.startsWith(year) && h.month <= base.refMonth) add(realised, `hypothese:${h.id}`, h.costCents);
+  const projected = new Map<string, number>();
+  let unknown = false;
+  if (proj.kind === "value") {
+    for (const m of proj.months) {
+      if (!m.month.startsWith(year) || m.kind !== "value") continue;
+      for (const c of m.contributions) {
+        if (!c.nonRecurringCents) continue;
+        const key = c.contractKey ? `contrat:${c.contractKey}` : c.hypothesisId ? `hypothese:${c.hypothesisId}` : null;
+        if (key === null) unknown = true;
+        else add(projected, key, c.nonRecurringCents);
+      }
+    }
+  }
+  return { realised: count(realised), projected: unknown ? null : count(projected) };
+}
+
+// Les deux totaux forment un ensemble dont la somme est affichée (« Non récurrents retirés », atterrissage − retraité) : masquage
+// principal d'un total de 1 à (seuil − 1) contributeurs, ou non dénombré ; l'autre total est alors masqué aussi (maskGroups), sinon
+// le premier se lirait par différence. Un total sans contributeur (0) n'est masqué qu'à ce titre.
+export type NonRecurringMask = { realised: MaskStatus; projected: MaskStatus };
+export function maskNonRecurring(sizes: NonRecurringContributors, amounts: { realised: number; projected: number }, seuil: number): NonRecurringMask {
+  const [realised, projected] = maskGroups(
+    [
+      { size: sizes.realised, value: Math.abs(amounts.realised) },
+      { size: sizes.projected, value: Math.abs(amounts.projected) },
+    ],
+    seuil,
+    true,
+  );
+  return { realised, projected };
 }

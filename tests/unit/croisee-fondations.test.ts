@@ -205,7 +205,7 @@ describe("glossaire de la Masse salariale croisée", () => {
     // Provision par service (seuil 3) : 1 contrat masqué ; le service sans contrat (provision la plus faible) ne suffit pas, le suivant
     // est masqué aussi.
     expect(maskServices([{ size: 1, order: 100 }, { size: 0, order: 0 }, { size: 5, order: 500 }, { size: 8, order: 800 }], 3)).toEqual(["masked", "secondary", "secondary", "shown"]);
-    expect(conf).toContain("un service sans contrat rémunéré (« Non ventilé », par exemple) ne suffit jamais à en protéger un autre");
+    expect(conf).toContain("un service sans contrat rattaché (« Non ventilé », par exemple) ne suffit jamais à en protéger un autre");
     expect(conf).toContain("zéro compris");
   });
 

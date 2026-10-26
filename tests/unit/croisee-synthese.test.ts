@@ -111,7 +111,14 @@ function input(over: Partial<Extract<SyntheseInput, { kind: "value" }>> = {}): S
       // 9 demi-journées d'absence sur 400 théoriques : 2,25 % ; N-1 6/400 = 1,50 % ; écart + 0,75 point.
       absenteeism: { current: { kind: "exact", ratio: { num: 9, den: 400 } }, previous: { kind: "exact", ratio: { num: 6, den: 400 } }, delta: { kind: "exact", unit: "points", value: { num: 3, den: 4 } } },
       absenceTypes: ["motif_test"],
-      turnover: { current: { kind: "exact", ratio: { num: 3, den: 25 }, entries: 2, exits: 4 }, previous: { kind: "nd", nd: { reason: "historique insuffisant" } }, delta: { kind: "nd", nd: { code: "previous-nd", reason: "N-1 : historique insuffisant" } } },
+      // Fenêtres du moteur : avril 2025 → mars 2026, et N-1 avril 2024 → mars 2025 (pas janvier → mars 2025).
+      turnover: {
+        current: { kind: "exact", ratio: { num: 3, den: 25 }, entries: 2, exits: 4 },
+        previous: { kind: "nd", nd: { reason: "historique insuffisant" } },
+        delta: { kind: "nd", nd: { code: "previous-nd", reason: "N-1 : historique insuffisant" } },
+        window: { months: Y25.slice(3).concat(["2026-01", "2026-02", "2026-03"]) },
+        previousWindow: { months: yearMonths(2024).slice(3).concat(["2025-01", "2025-02", "2025-03"]) },
+      },
       // Effectif moyen 2025 : 97/2 = 48,5 ; 2026 à date (janvier → mars) : 49.
       annual: { prevYear: 2025, prev: { kind: "exact", ratio: { num: 97, den: 2 } }, curMonths: ["2026-01", "2026-02", "2026-03"], cur: { kind: "exact", ratio: { num: 49, den: 1 } } },
       rolling: Y25.slice(3).concat(["2026-01", "2026-02", "2026-03"]),
@@ -207,7 +214,7 @@ describe("publicReason : raisons du moteur sans identifiant de contrat ni d'abse
   it("buildSynthese : une raison de turnover qui cite des contrats est réécrite partout (carte, tableau)", () => {
     const rh = value().rh;
     if (rh.kind !== "value") throw new Error("entrée attendue");
-    const m = buildSynthese(input({ rh: { ...rh, turnover: { current: { kind: "nd", nd: { reason: `2026-03 : ${CONT}` } }, previous: { kind: "nd", nd: { reason: "historique insuffisant" } }, delta: { kind: "nd", nd: { code: "current-not-exact", reason: `valeur n.d. — 2026-03 : ${CONT}` } } } } }));
+    const m = buildSynthese(input({ rh: { ...rh, turnover: { ...rh.turnover, current: { kind: "nd", nd: { reason: `2026-03 : ${CONT}` } }, previous: { kind: "nd", nd: { reason: "historique insuffisant" } }, delta: { kind: "nd", nd: { code: "current-not-exact", reason: `valeur n.d. — 2026-03 : ${CONT}` } } } } }));
     const json = JSON.stringify(m);
     expect(json).not.toContain("CTR-TEST");
     expect(tile(m, "turnover").value.reason).toBe("2026-03 : 2 contrats continus non vérifiables en 2026-03 (sorties, détail dans KPI RH)");
@@ -485,14 +492,44 @@ describe("buildSynthese : graphique principal (réel et projection distincts) et
     ]);
     for (const r of t.rows) if (typeof r.cells[2] === "number" && typeof r.cells[4] === "number") expect(r.cells[2] - r.cells[4]).toBe(r.cells[5]);
     const rh = tableOf(m, ID.rh);
-    expect(rh.columns.map((c) => c.header)).toEqual(["Indicateur", "Mesure", "Valeur", "N-1 (janvier → mars 2025)", "Écart"]);
+    // En-tête neutre « N-1 » ; chaque ligne date sa référence. Turnover : douze mois glissants à fin mars 2026 (avril 2025 → mars
+    // 2026), comparés aux douze mois glissants qui précèdent, avril 2024 → mars 2025, et non à janvier → mars 2025.
+    expect(rh.columns.map((c) => c.header)).toEqual(["Indicateur", "Mesure", "Valeur", "Comparé à", "N-1", "Écart"]);
     expect(texts(rh)).toEqual([
-      ["ETP moyen", "janvier → mars 2026", "12,25", "11,50", "+0,75"],
-      ["ETP contractuel proratisé — quotité actuelle, moyenne des mois", "janvier → mars 2026", "12,33", "11,67", "+0,67"],
-      ["Absentéisme", "janvier → mars 2026", "2,25 %", "1,50 %", "+0,75 pts"],
-      ["Turnover", "Douze mois glissants à fin mars 2026", "12,00 %", "n.d.", "n.d."],
+      ["ETP moyen", "janvier → mars 2026", "12,25", "N-1 : janvier → mars 2025", "11,50", "+0,75"],
+      ["ETP contractuel proratisé — quotité actuelle, moyenne des mois", "janvier → mars 2026", "12,33", "N-1 : janvier → mars 2025", "11,67", "+0,67"],
+      ["Absentéisme", "janvier → mars 2026", "2,25 %", "N-1 : janvier → mars 2025", "1,50 %", "+0,75 pts"],
+      ["Turnover", "Douze mois glissants à fin mars 2026", "12,00 %", "N-1 : avril 2024 → mars 2025", "n.d.", "n.d."],
     ]);
+    expect(rh.columns.find((c) => c.key === "n1")?.term).toBe("previous-period");
     for (const r of rh.rows) for (let i = 0; i < r.cells.length; i++) expect(cellView(r.cells[i], rh.columns[i], r).tone).toBe("flat");
+  });
+  it("chiffres clés, turnover : la référence suit la fenêtre N-1 du moteur ; sans indicateurs RH, mêmes dates et cellules n.d.", () => {
+    const rh = value().rh;
+    if (rh.kind !== "value") throw new Error("entrée attendue");
+    // Période janvier → juin 2026 (fin juin) : fenêtre juillet 2025 → juin 2026, N-1 juillet 2024 → juin 2025 (mois écrits à la main).
+    const prevWin = ["2024-07", "2024-08", "2024-09", "2024-10", "2024-11", "2024-12", "2025-01", "2025-02", "2025-03", "2025-04", "2025-05", "2025-06"];
+    const curWin = ["2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"];
+    const six = buildSynthese(
+      input({
+        months: Y26.slice(0, 6),
+        prevMonths: Y25.slice(0, 6),
+        labels: { period: "janvier → juin 2026", prev: "janvier → juin 2025" },
+        rh: { ...rh, turnover: { ...rh.turnover, window: { months: curWin }, previousWindow: { months: prevWin } } },
+      }),
+    );
+    const row = texts(tableOf(six, ID.rh))[3];
+    expect(row.slice(0, 4)).toEqual(["Turnover", "Douze mois glissants à fin juin 2026", "12,00 %", "N-1 : juillet 2024 → juin 2025"]);
+    expect(texts(tableOf(six, ID.rh))[0][3]).toBe("N-1 : janvier → juin 2025");
+    // Filtre de service : indicateurs RH sans objet ; les références restent datées (fenêtres recalculées sur le dernier mois).
+    const na = buildSynthese(input({ filtered: true, rh: { kind: "na", reason: "référentiel RH : non filtrable par service" } }));
+    expect(texts(tableOf(na, ID.rh)).map((r) => [r[0], r[3], r[2], r[4], r[5]])).toEqual([
+      ["ETP moyen", "N-1 : janvier → mars 2025", "n.d.", "n.d.", "n.d."],
+      ["ETP contractuel proratisé — quotité actuelle, moyenne des mois", "N-1 : janvier → mars 2025", "n.d.", "n.d.", "n.d."],
+      ["Absentéisme", "N-1 : janvier → mars 2025", "n.d.", "n.d.", "n.d."],
+      ["Turnover", "N-1 : avril 2024 → mars 2025", "n.d.", "n.d.", "n.d."],
+    ]);
+    expect(tableOf(na, ID.rh).rows[3].cells[4]).toEqual({ nd: "référentiel RH : non filtrable par service" });
   });
   it("séries des cartes : valeurs des mini-courbes mois par mois, « — » hors de la mini-courbe, n.d. avec sa raison", () => {
     const t = tableOf(m, ID.series);
@@ -672,7 +709,7 @@ const JOURNAL: JournalInput = {
 
 describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources absentes", () => {
   const calls = { scenario: 0, compta: 0 };
-  const fakeCtx = (over: Record<string, unknown> = {}, journal: JournalInput | null = null) => {
+  const fakeCtx = (over: Record<string, unknown> = {}, journal: JournalInput | null = null, scenario: unknown = { kind: "nd", reason: "aucun scénario ne couvre 2026" }) => {
     calls.scenario = 0;
     calls.compta = 0;
     const jan = journal !== null;
@@ -705,7 +742,7 @@ describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources a
       load: {
         payroll: async () => pay,
         compta: async () => (calls.compta++, { source: null, reason: "aucune source comptable retenue", lines: [], months: [], nd: {}, error: false }),
-        scenario: async () => (calls.scenario++, { kind: "nd", reason: "aucun scénario ne couvre 2026" }),
+        scenario: async () => (calls.scenario++, scenario),
       },
       ...over,
     } as unknown as CroiseeContext;
@@ -799,5 +836,64 @@ describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources a
     const p1 = syntheseModel(ctx);
     expect(syntheseModel(ctx)).toBe(p1);
     expect((await p1).tables.map((t) => t.id)).toEqual(m.tables.map((t) => t.id));
+  });
+
+  it("scénario dont le moteur nomme des contrats (« <libellé> : base n.d. (…) ») : aucun nom dans l'entrée, le modèle ni le rendu ; décompte à la place", async () => {
+    // Scénario fictif, bascule après mars 2026 : réel figé janvier et février (11 000 €), mars repris d'un scénario parent n.d. ; projection
+    // avril → octobre à 12 000 €, novembre n.d. (un contrat sans base), décembre n.d. (deux contrats sans base). Libellés fictifs.
+    const why = (who: string) => `${who} : base n.d. (aucun salaire au mois de référence) — saisir une correction de base`;
+    const actual = (month: string) => ({ month, kind: "value", brut: 800_000, cotisations: 300_000, masse: 1_100_000, headcount: 10, etp4: 100_000, etpNd: null });
+    const projected = (month: string) => ({ month, kind: "value", brut: null, charges: null, cost: 1_200_000, headcount: 10, etp4: null, etpNd: "ETP non projeté", contributions: [] });
+    const scen = {
+      kind: "value",
+      full: {
+        scenario: { id: "scen-fictif-0001", name: "Scénario fictif" },
+        base: {
+          currency: "EUR",
+          refMonth: "2026-03",
+          syncId: "sync-fictif",
+          readAt: "2026-04-02",
+          contracts: [],
+          actuals: [actual("2026-01"), actual("2026-02")],
+          prior: [{ month: "2026-03", kind: "nd", reason: why("Prénom FICTIF"), source: "Scénario parent fictif" }],
+          refMasse: 1_100_000,
+          refBaseCost: null,
+          etpNote: null,
+        },
+      },
+      proj: {
+        kind: "value",
+        months: [
+          ...Y26.slice(3, 10).map(projected),
+          { month: "2026-11", kind: "nd", reasons: [why("Prénom FICTIF")] },
+          { month: "2026-12", kind: "nd", reasons: [why("Prénom FICTIF"), why("Autre FICTIF")] },
+        ],
+      },
+    };
+    const r = await loadSyntheseInput(fakeCtx({}, null, scen));
+    if (r.kind !== "value" || r.landing.kind !== "value") throw new Error("entrée attendue");
+    const ONE = "1 contrat sans base de projection (détail dans Hypothèses budgétaires)";
+    const TWO = "2 contrats sans base de projection (détail dans Hypothèses budgétaires)";
+    // Montants inchangés : janvier et février réels, avril → octobre projetés ; raisons remplacées par leur décompte.
+    const pts = [...r.landing.series.points.values()];
+    expect(pts.filter((p) => p.kind === "value").map((p) => p.month)).toEqual(["2026-01", "2026-02", ...Y26.slice(3, 10)]);
+    expect(r.landing.series.points.get("2026-03")).toEqual({ month: "2026-03", kind: "nd", reason: ONE });
+    expect(r.landing.series.points.get("2026-11")).toEqual({ month: "2026-11", kind: "nd", reason: ONE });
+    expect(r.landing.series.points.get("2026-12")).toEqual({ month: "2026-12", kind: "nd", reason: TWO });
+    // Raison de l'année regroupée par raison identique (comme le chapitre 06) : mars et novembre, puis décembre.
+    const landingWhy = `mars 2026, nov. 2026 : ${ONE} ; déc. 2026 : ${TWO}`;
+    expect(r.landing.landing).toEqual({ kind: "nd", reason: landingWhy });
+    expect(JSON.stringify({ ...r, landing: { ...r.landing, series: pts } })).not.toMatch(/FICTIF|Prénom/);
+
+    const m = buildSynthese(r);
+    expect(tile(m, "atterrissage").value).toEqual({ text: "n.d.", kind: "nd", reason: landingWhy });
+    expect(m.alerts.find((a) => a.id === "atterrissage-nd")?.text).toBe(`Mars 2026, nov. 2026 : ${ONE} ; déc. 2026 : ${TWO}.`);
+    expect(m.charts.find((c) => c.id === ID.mensuel)!.series[1].reasons![11]).toBe(`projection : ${TWO}`);
+    expect(tableOf(m, ID.series).rows.find((x) => x.cells[0] === "Décembre 2026")!.cells[6]).toEqual({ nd: TWO });
+    expect(JSON.stringify(m)).not.toMatch(/FICTIF|Prénom/);
+    for (const affichage of ["tout", "graphique", "tableau"] as const) {
+      const out = renderToStaticMarkup(h(SyntheseView, { model: m, slug: "demo", affichage }));
+      expect(out, affichage).not.toMatch(/FICTIF|Prénom/);
+    }
   });
 });
