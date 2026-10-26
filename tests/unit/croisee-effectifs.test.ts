@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { monthRange } from "@/lib/connectors/months";
+import { contractEcheances } from "@/lib/croisee/echeances";
 import type { PayrollContext } from "@/lib/payroll/context";
 import { fixtureAbsences, kpiInput, DSN_ABSENCES } from "./helpers/kpi";
 import { dsnFixtureBuild, payfitFixtureBuild } from "./helpers/rh";
@@ -98,6 +99,8 @@ const grid = (values: Record<string, Record<string, number>>, nd: Record<string,
 };
 const SERVICE_ND = "effectif et mouvements par service non historisés pour les mois réalisés (le service est un code analytique des lignes de paie)";
 const SERVICE_INSCRITS = { cur: { kind: "nd" as const, reason: SERVICE_ND }, prev: { kind: "nd" as const, reason: SERVICE_ND } };
+// Jetons de personne fictifs d'un groupe : P("a", 3) = ["a1", "a2", "a3"] (groupes disjoints sauf mention contraire).
+const P = (prefix: string, n: number): string[] => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
 // Effectif de chaque groupe en personnes distinctes (taille passée au seuil). Service (personnes qui portent l'ETP de fin de mois) :
 // Atelier 6, Bureau 5, Non ventilé 1 ; N-1 : 5 et 4. Catégorie : autant de personnes que de contrats. Statut, fin septembre 2026 :
 // « Cadre dirigeant » compte 2 contrats simultanés d'une seule personne (1,00 + 0,50 ETP) → un groupe d'une personne.
@@ -106,19 +109,19 @@ const GRIDS: EffectifsData["grids"] = [
     axis: "service",
     inscrit: SERVICE_INSCRITS,
     etp: { cur: grid({ "2026-09": { Atelier: 60000, Bureau: 50000, "Non ventilé": 5000 } }), prev: grid({ "2025-09": { Atelier: 55000, Bureau: 45000 } }) },
-    sizes: { cur: { Atelier: 6, Bureau: 5, "Non ventilé": 1 }, prev: { Atelier: 5, Bureau: 4 } },
+    sizes: { cur: { Atelier: P("a", 6), Bureau: P("b", 5), "Non ventilé": P("n", 1) }, prev: { Atelier: P("a", 5), Bureau: P("b", 4) } },
   },
   {
     axis: "categorie",
     inscrit: { cur: grid({ "2026-09": { CDI: 10, CDD: 2 } }), prev: grid({ "2025-09": { CDI: 9, CDD: 1 } }) },
     etp: { cur: grid({ "2026-09": { CDI: 100000, CDD: 15000 } }), prev: grid({ "2025-09": {} }, { "2025-09": "mois hors couverture" }) },
-    sizes: { cur: { CDI: 10, CDD: 2 }, prev: { CDI: 9, CDD: 1 } },
+    sizes: { cur: { CDI: P("i", 10), CDD: P("d", 2) }, prev: { CDI: P("i", 9), CDD: P("d", 1) } },
   },
   {
     axis: "statut",
     inscrit: { cur: grid({ "2026-09": { "Cadre dirigeant": 2, "Hors cadre dirigeant": 10 } }), prev: grid({ "2025-09": { "Cadre dirigeant": 1, "Hors cadre dirigeant": 9 } }) },
     etp: { cur: grid({ "2026-09": { "Cadre dirigeant": 15000, "Hors cadre dirigeant": 100000 } }), prev: grid({ "2025-09": { "Cadre dirigeant": 10000, "Hors cadre dirigeant": 90000 } }) },
-    sizes: { cur: { "Cadre dirigeant": 1, "Hors cadre dirigeant": 10 }, prev: { "Cadre dirigeant": 1, "Hors cadre dirigeant": 9 } },
+    sizes: { cur: { "Cadre dirigeant": P("c", 1), "Hors cadre dirigeant": P("h", 10) }, prev: { "Cadre dirigeant": P("c", 1), "Hors cadre dirigeant": P("h", 9) } },
   },
 ];
 
@@ -398,7 +401,7 @@ describe("Où sont les effectifs ? seuil de confidentialité, masquage secondair
       { id: "d", person: "q3" },
       { id: "e", person: "q4" },
     ];
-    expect(serviceSizes(list, (id) => svc[id] ?? null)).toEqual({ Atelier: 1, "Non ventilé": 2, Bureau: 1 });
+    expect(serviceSizes(list, (id) => svc[id] ?? null)).toEqual({ Atelier: ["q1"], "Non ventilé": ["q2", "q4"], Bureau: ["q3"] });
   });
 
   it("maskedAxis : une personne avec deux contrats simultanés reste un groupe d'une personne ; groupe sans personne dénombrée non vérifiable", () => {
@@ -409,7 +412,7 @@ describe("Où sont les effectifs ? seuil de confidentialité, masquage secondair
       axis: "statut" as const,
       inscrit: { cur: grid({ "2026-09": { A: 2, B: 3, C: 4 } }), prev: grid({ "2025-09": { B: 3, C: 4 } }) },
       etp: { cur: grid({ "2026-09": { A: 20000, B: 30000, C: 40000 } }), prev: grid({ "2025-09": { B: 30000, C: 40000 } }) },
-      sizes: { cur: { A: 1, B: 3, C: 4 }, prev: { B: 3, C: 4 } },
+      sizes: { cur: { A: ["p1"], B: P("b", 3), C: P("c", 4) }, prev: { B: P("b", 3), C: P("c", 4) } },
     };
     const R = { nd: confidentialiteReason(2) };
     expect(maskedAxis(g, ["A", "B", "C"], "2026-09", "2025-09", 2)).toEqual({
@@ -421,12 +424,64 @@ describe("Où sont les effectifs ? seuil de confidentialité, masquage secondair
       foot: [9, 7, 2, 90000, 70000, 20000],
     });
     // Le même axe compté en contrats aurait affiché A (2 ≥ 2) : la taille vient bien des personnes.
-    expect(maskedAxis({ ...g, sizes: { cur: { A: 2, B: 3, C: 4 }, prev: g.sizes.prev } }, ["A", "B", "C"], "2026-09", "2025-09", 2).rows[0].cells[0]).toBe(2);
+    expect(maskedAxis({ ...g, sizes: { cur: { A: ["p1", "p2"], B: P("b", 3), C: P("c", 4) }, prev: g.sizes.prev } }, ["A", "B", "C"], "2026-09", "2025-09", 2).rows[0].cells[0]).toBe(2);
     // A porte 2 inscrits sans aucune personne dénombrée (rattachements divergents) : non vérifiable, et B masqué en secondaire.
-    const u = maskedAxis({ ...g, sizes: { cur: { B: 3, C: 4 }, prev: g.sizes.prev } }, ["A", "B", "C"], "2026-09", "2025-09", 2);
+    const u = maskedAxis({ ...g, sizes: { cur: { B: P("b", 3), C: P("c", 4) }, prev: g.sizes.prev } }, ["A", "B", "C"], "2026-09", "2025-09", 2);
     expect(u.rows.map((r) => r.cells[0])).toEqual([{ nd: SEUIL_NON_VERIFIABLE }, R, 4]);
     // Effectif non dénombré pour toute la fin de mois (sizes null) : chaque groupe non vide est non vérifiable.
     expect(maskedAxis({ ...g, sizes: { cur: null, prev: g.sizes.prev } }, ["A", "B", "C"], "2026-09", "2025-09", 2).rows.map((r) => r.cells[3])).toEqual([{ nd: SEUIL_NON_VERIFIABLE }, { nd: SEUIL_NON_VERIFIABLE }, { nd: SEUIL_NON_VERIFIABLE }]);
+  });
+
+  it("maskedAxis : une personne présente dans deux groupes masqués n'y compte qu'une fois (jetons de personne)", () => {
+    // Fin septembre 2026, seuil 3. A : 2 inscrits, personnes p1 et p2 ; B : 2 inscrits, p1 (second contrat simultané) et p3 ; C : 10
+    // inscrits, 10 autres personnes. A et B (2 personnes chacun) masqués ; ensemble ils ne décrivent que 3 personnes distinctes (p1, p2,
+    // p3), assez pour le seuil 3 : C reste affiché.
+    const g = {
+      axis: "statut" as const,
+      inscrit: { cur: grid({ "2026-09": { A: 2, B: 2, C: 10 } }), prev: grid({ "2025-09": { C: 10 } }) },
+      etp: { cur: grid({ "2026-09": { A: 20000, B: 20000, C: 100000 } }), prev: grid({ "2025-09": { C: 100000 } }) },
+      sizes: { cur: { A: ["p1", "p2"], B: ["p1", "p3"], C: P("c", 10) }, prev: { C: P("c", 10) } },
+    };
+    const R3 = { nd: confidentialiteReason(3) };
+    expect(maskedAxis(g, ["A", "B", "C"], "2026-09", "2025-09", 3).rows.map((r) => r.cells[0])).toEqual([R3, R3, 10]);
+    // B porté par p1 et p2, comme A : A et B masqués ne décrivent que 2 personnes distinctes (< 3) ; C affiché donnerait A + B =
+    // 14 − 10 = 4 inscrits pour 2 personnes → C masqué en second. Additionner les tailles (2 + 2 = 4 ≥ 3) l'aurait laissé affiché.
+    const same = maskedAxis({ ...g, sizes: { cur: { A: ["p1", "p2"], B: ["p1", "p2"], C: P("c", 10) }, prev: g.sizes.prev } }, ["A", "B", "C"], "2026-09", "2025-09", 3);
+    expect(same.rows.map((r) => r.cells[0])).toEqual([R3, R3, R3]);
+    expect(same.rows.map((r) => r.cells[3])).toEqual([R3, R3, R3]);
+    expect(same.foot[0]).toBe(14);
+  });
+
+  it("échéances : une personne dont deux contrats de natures différentes finissent le même mois n'y compte qu'une fois", () => {
+    // Lecture du 30/09/2026, horizon 90 jours, seuil 3. Fins de novembre : personne-1 sur un CDD (02) et sur un apprentissage (07),
+    // personne-2 sur un apprentissage (07), personnes 3 à 5 sur un CDI (01). CDD (1 personne) et apprentissage (2 personnes) sont
+    // sous le seuil ; ensemble ils ne décrivent que 2 personnes distinctes (et non 3) : le CDI (3 personnes) est masqué en second.
+    const C = (person: string, nature: string) => ({ person, startDate: "2025-01-01", endDate: "2026-11-20", nature });
+    const ech = contractEcheances({ referenceDate: "2026-09-30", horizonDays: 90, natures: ["01", "02", "07"], contracts: [C("personne-1", "02"), C("personne-1", "07"), C("personne-2", "07"), C("personne-3", "01"), C("personne-4", "01"), C("personne-5", "01")] });
+    expect(ech.kind).toBe("value");
+    if (ech.kind !== "value") return;
+    const counts = Object.fromEntries(ech.lines.filter((l) => l.month === "2026-11").map((l) => [l.nature, { contracts: l.fins, persons: l.finsPersons, members: l.finsMembers }]));
+    const cells = natureCells(counts, ["01", "02", "07"], 6, 3);
+    expect(cells.every((c) => typeof c === "object" && c !== null && "nd" in c)).toBe(true);
+  });
+  it("natureCells : une personne entrée sous deux natures dans le même mois n'y compte qu'une fois (jetons du journal)", () => {
+    // Mars 2027 (fictif), seuil 3 : CDI (01) 2 entrées, personnes j1 et j2 ; CDD (02) 2 entrées, j1 (second contrat) et j2 ; apprentissage
+    // (07) 4 entrées, j3 à j6. CDI et CDD (2 personnes chacun) masqués ; ensemble 2 personnes distinctes (< 3) → apprentissage masqué en
+    // second (total du mois : 8 entrées, affiché).
+    const evs: JournalEventIn[] = [
+      ev("2027-03", "entry", "01", "j1"),
+      ev("2027-03", "entry", "01", "j2"),
+      ev("2027-03", "entry", "02", "j1"),
+      ev("2027-03", "entry", "02", "j2"),
+      ...["j3", "j4", "j5", "j6"].map((j) => ev("2027-03", "entry", "07", j)),
+    ];
+    const counts = countByNature(evs, "2027-03", "entry");
+    expect(counts).toEqual({ "01": { contracts: 2, persons: 2, members: ["j1", "j2"] }, "02": { contracts: 2, persons: 2, members: ["j1", "j2"] }, "07": { contracts: 4, persons: 4, members: ["j3", "j4", "j5", "j6"] } });
+    const R3 = { nd: confidentialiteReason(3) };
+    expect(natureCells(counts, ["01", "02", "07"], ex(8), 3)).toEqual([R3, R3, R3]);
+    // CDD porté par j1 et une autre personne j7 : CDI et CDD masqués décrivent 3 personnes distinctes ; apprentissage reste affiché.
+    const other = countByNature([...evs.filter((e) => !(e.nature === "02" && e.person === "j2")), ev("2027-03", "entry", "02", "j7")], "2027-03", "entry");
+    expect(natureCells(other, ["01", "02", "07"], ex(8), 3)).toEqual([R3, R3, 4]);
   });
 
   it("axisGroup : même rangement que la grille des effectifs mensuels (catégorie de la table, correction par contrat ; statut)", () => {
@@ -473,8 +528,8 @@ describe("Journal agrégé et motifs de sortie : aucune date exacte, aucun servi
   });
 
   it("countByNature et natureCells : agrégation (contrats et personnes) et masquage d'un mois sur les personnes (cas à la main)", () => {
-    expect(countByNature(EVENTS, "2026-03", "entry")).toEqual({ "01": { contracts: 2, persons: 2 }, "02": { contracts: 2, persons: 1 } });
-    expect(countByNature(EVENTS, "2025-11", "entry")).toEqual({ "01": { contracts: 2, persons: 2 }, "02": { contracts: 1, persons: 1 } });
+    expect(countByNature(EVENTS, "2026-03", "entry")).toEqual({ "01": { contracts: 2, persons: 2, members: ["j4", "j5"] }, "02": { contracts: 2, persons: 1, members: ["j6"] } });
+    expect(countByNature(EVENTS, "2025-11", "entry")).toEqual({ "01": { contracts: 2, persons: 2, members: ["j1", "j2"] }, "02": { contracts: 1, persons: 1, members: ["j3"] } });
     expect(countByNature(EVENTS, "2026-03", "exit")).toEqual({});
     const n = (contracts: number, persons = contracts) => ({ contracts, persons });
     const R = { nd: confidentialiteReason(2) };
@@ -794,7 +849,7 @@ describe("buildEffectifs : filtre de service", () => {
     // L'ETP par service d'un mois lu vaut 4,00 ; l'ancien calcul direct aurait donné 0 pour un mois sans ligne.
     const real = { kpi: {}, journal, natures: {}, overrides: {}, etpService: () => val(40000) } as unknown as RealSource;
     const etp = { cur: monthlyGrid({ measure: "etp", axis: "service", year: "2026", real, scenario: null }), prev: monthlyGrid({ measure: "etp", axis: "service", year: "2025", real, scenario: null }) };
-    const grids = [{ axis: "service" as const, inscrit: SERVICE_INSCRITS, etp, sizes: { cur: { Atelier: 3 }, prev: null } }, ...GRIDS.slice(1)];
+    const grids = [{ axis: "service" as const, inscrit: SERVICE_INSCRITS, etp, sizes: { cur: { Atelier: P("a", 3) }, prev: null } }, ...GRIDS.slice(1)];
     const n = buildEffectifs(input({ service: svc("Atelier"), data: { ...DATA, grids } }));
     const t = tile(n, "etp-fin");
     const reason = "aucune ligne de paie lue pour 2025-09 : ETP par service indisponible";
@@ -979,7 +1034,8 @@ describe("loadEffectifsInput puis buildEffectifs : référentiels fictifs", () =
         const sizes = g.sizes[which];
         const ins = g.inscrit[which];
         if (!sizes || ins.kind !== "value") continue;
-        for (const [group, n] of Object.entries(sizes)) {
+        for (const [group, list] of Object.entries(sizes)) {
+          const n = list.length;
           const c = ins.cell(group, m);
           expect(ins.groups, `${g.axis} ${group}`).toContain(group);
           expect(c.kind).toBe("value");
@@ -990,7 +1046,7 @@ describe("loadEffectifsInput puis buildEffectifs : référentiels fictifs", () =
         // Chaque groupe non vide de la grille a un effectif en personnes.
         for (const group of ins.groups) {
           const c = ins.cell(group, m);
-          if (c.kind === "value" && c.v > 0) expect(sizes[group], `${g.axis} ${group}`).toBeGreaterThan(0);
+          if (c.kind === "value" && c.v > 0) expect(sizes[group]?.length, `${g.axis} ${group}`).toBeGreaterThan(0);
         }
       }
     }
@@ -999,6 +1055,8 @@ describe("loadEffectifsInput puis buildEffectifs : référentiels fictifs", () =
     const keys = new Set([...data.persons.map((p) => p.personKey), ...data.contracts.map((c) => c.contractKey)]);
     for (const e of inp.data!.journal.events) expect(keys.has(e.person)).toBe(false);
     for (const c of inp.data!.contracts) expect(c.person).toMatch(/^personne-\d+$/);
+    // Effectif des groupes de la grille : jetons de personne, aucune clé de la source.
+    for (const g of inp.data!.grids) for (const side of [g.sizes.cur, g.sizes.prev]) for (const list of Object.values(side ?? {})) for (const t of list) expect(t).toMatch(/^personne-\d+$/);
   });
 
   it("DSN fictives (janvier → septembre 2026) : aucune trace des identifiants de contrat (contrats continus non vérifiables en N-1)", async () => {

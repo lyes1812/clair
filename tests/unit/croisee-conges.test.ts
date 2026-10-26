@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { monthRange } from "@/lib/connectors/months";
-import { absencesEnCause, allMotifsInput, aVenirStatut, congesAVenir, congesPris, issueReason, motifInput, personTokens, publicMonthReason, publicWindowReason, type CongesAVenir } from "@/lib/croisee/conges";
+import { absencesEnCause, allMotifsInput, aVenirStatut, congesAVenir, congeSize, congesPris, issueReason, motifInput, personTokens, publicMonthReason, publicWindowReason, type CongeCell, type CongesAVenir, type CongeValue } from "@/lib/croisee/conges";
 import { absenteeism, absenteeismMonth } from "@/lib/rh/kpi/absence";
 import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import type { Window } from "@/lib/rh/kpi/types";
@@ -107,6 +107,26 @@ describe("congesPris : jours pris par motif et par mois (moteur de l'absentéism
     const sick = c.lines.find((l) => l.type === "test_sickness")!;
     expect(sick.months[1]).toEqual({ kind: "lower_bound", half: 4, persons: 1, who: [2] });
     expect(sick.total).toEqual({ kind: "lower_bound", half: 4, persons: 1, who: [2] });
+  });
+
+  it("motif dont toutes les demi-journées sont incertaines (statut non renseigné) : borne basse sans personne comptée, effectif non dénombré", () => {
+    // x1 : C-2, test_maternity, lun. 13 → mar. 14/04, statut non renseigné : les 4 demi-journées sont incertaines, aucune n'est
+    // comptée. Avril : « ≥ 0 » demi-journée et 0 personne comptée ; mai : aucune absence (zéro réel).
+    const x1 = full("x1", "C-2", "2026-04-13", "2026-04-14", "test_maternity", null);
+    const c = congesPris(kpiInput(data, readAbsences([...ROWS, x1]), { absenceTypes: ["test_sickness"] }), AVRIL_MAI);
+    const mat = c.lines.find((l) => l.type === "test_maternity")!;
+    expect(mat.months).toEqual([
+      { kind: "lower_bound", half: 0, persons: 0, who: [] },
+      { kind: "exact", half: 0, persons: 0, who: [] },
+    ]);
+    expect(mat.total).toEqual({ kind: "lower_bound", half: 0, persons: 0, who: [] });
+    // Effectif pour le seuil : non dénombré (null) pour la borne basse sans personne comptée ; 0 pour le mois vide ; le nombre compté
+    // sinon (borne basse comprise).
+    const size = (x: CongeCell) => (x.kind === "nd" ? "n.d." : congeSize(x));
+    expect(mat.months.map(size)).toEqual([null, 0]);
+    expect(size(mat.total)).toBeNull();
+    expect(congeSize({ kind: "lower_bound", half: 4, persons: 1, who: [2] } satisfies CongeValue)).toBe(1);
+    expect(congeSize({ kind: "exact", half: 0, persons: 0, who: [] } satisfies CongeValue)).toBe(0);
   });
 
   it("mois hors des mois lus : n.d. avec la raison du moteur, jamais zéro ; le total de la fenêtre devient n.d.", () => {
@@ -285,6 +305,19 @@ describe("congesAVenir : congés posés et demandes en attente, en jours par moi
     // Le 19 est incertain (non compté) ; le 20 compte 2 demi-journées : octobre 12 + 2 = 14, deux personnes.
     expect(pose.months[0]).toEqual({ kind: "lower_bound", half: 14, persons: 2, who: [0, 1] });
     expect(pose.total).toEqual({ kind: "lower_bound", half: 20, persons: 3, who: [0, 1, 2] });
+  });
+
+  it("absence à venir d'un jour sans moment de début ni de fin : borne basse sans personne comptée, effectif non dénombré", () => {
+    // b10 : C-2, test_rtt, le 21/10, posée, sans moment : le jour est incertain, aucune demi-journée comptée ; novembre : rien.
+    const b10 = absence("b10", "C-2", "2026-10-21", null, "2026-10-21", null, { type: "test_rtt" });
+    const r = value(congesAVenir(kpiInput(data, readAbsences([...FUTURE, b10], READ_NOV)), "2026-09"));
+    const rtt = r.lines.find((l) => l.type === "test_rtt" && l.statut === "pose")!;
+    expect(rtt.months).toEqual([
+      { kind: "lower_bound", half: 0, persons: 0, who: [] },
+      { kind: "exact", half: 0, persons: 0, who: [] },
+    ]);
+    expect(rtt.total).toEqual({ kind: "lower_bound", half: 0, persons: 0, who: [] });
+    expect(rtt.months.map((x) => (x.kind === "nd" ? "n.d." : congeSize(x)))).toEqual([null, 0]);
   });
 
   it("mois non lu entre deux mois lus : n.d. avec la raison, et le total de la ligne est n.d.", () => {

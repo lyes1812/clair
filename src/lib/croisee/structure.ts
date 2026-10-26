@@ -211,16 +211,22 @@ export const maskReason = (s: MaskStatus, seuil: number, unite: SeuilUnite = "pe
 // compte pour une personne, jamais fusionné avec un autre).
 export const personOf = (c: { contractKey: string; personKey: string | null }): string => c.personKey ?? `contrat:${c.contractKey}`;
 
-// Effectif de chaque groupe en personnes distinctes : une personne qui a plusieurs contrats dans un même groupe y compte une fois.
-// C'est cette taille que reçoit le masquage (maskGroups), jamais le nombre de contrats affiché.
-export function personsByGroup(members: readonly { group: string; person: string }[]): Record<string, number> {
+// Personnes de chaque groupe (jetons distincts, triés) : une personne qui a plusieurs contrats dans un même groupe y figure une fois.
+// Passées en members au masquage, elles font compter une fois une personne présente dans deux groupes masqués.
+export function membersByGroup(members: readonly { group: string; person: string }[]): Record<string, string[]> {
   const sets = new Map<string, Set<string>>();
   for (const m of members) {
     let s = sets.get(m.group);
     if (!s) sets.set(m.group, (s = new Set()));
     s.add(m.person);
   }
-  return Object.fromEntries([...sets].map(([g, s]) => [g, s.size]));
+  return Object.fromEntries([...sets].map(([g, s]) => [g, [...s].sort()]));
+}
+
+// Effectif de chaque groupe en personnes distinctes (membersByGroup). C'est cette taille que reçoit le masquage (maskGroups), jamais
+// le nombre de contrats affiché.
+export function personsByGroup(members: readonly { group: string; person: string }[]): Record<string, number> {
+  return Object.fromEntries(Object.entries(membersByGroup(members)).map(([g, list]) => [g, list.length]));
 }
 
 // --- Structure ---------------------------------------------------------------------------------------------------------------------

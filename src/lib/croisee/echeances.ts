@@ -20,7 +20,9 @@ import { addDays, isIsoDate, monthOf } from "@/lib/dates";
 
 export type EcheanceContract = { person: string; startDate: string | null; endDate: string | null; nature: string | null; endUnknown?: boolean };
 // fins, entrees : contrats ; finsPersons, entreesPersons : personnes distinctes de ces contrats (taille du groupe pour le seuil).
-export type EcheanceLine = { month: string; nature: string; fins: number; entrees: number; finsPersons: number; entreesPersons: number };
+// finsMembers, entreesMembers : jetons de personne triés (sans clé source), pour que le masquage compte une personne une seule fois
+// quand elle a plusieurs contrats de natures différentes dans le même mois.
+export type EcheanceLine = { month: string; nature: string; fins: number; entrees: number; finsPersons: number; entreesPersons: number; finsMembers: string[]; entreesMembers: string[] };
 export type Echeances =
   | {
       kind: "value";
@@ -86,7 +88,7 @@ export function contractEcheances(p: { referenceDate: string | null; horizonDays
   }
   const lines: EcheanceLine[] = [...byKey.values()]
     .sort((a, b) => a.month.localeCompare(b.month) || a.nature.localeCompare(b.nature))
-    .map((l) => ({ month: l.month, nature: l.nature, fins: l.fins, entrees: l.entrees, finsPersons: l.finsP.size, entreesPersons: l.entreesP.size }));
+    .map((l) => ({ month: l.month, nature: l.nature, fins: l.fins, entrees: l.entrees, finsPersons: l.finsP.size, entreesPersons: l.entreesP.size, finsMembers: [...l.finsP].sort(), entreesMembers: [...l.entreesP].sort() }));
   return {
     kind: "value",
     from,

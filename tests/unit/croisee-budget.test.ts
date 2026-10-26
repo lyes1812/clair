@@ -334,17 +334,35 @@ describe("buildBudget — contrats observés et blocs Prévu", () => {
   const m = buildBudget(budgetInput());
 
   it("tableau : trois groupes de contrats, lignes sans contrat, total ; colonne N vide (sans objet) pour « seulement N-1 »", () => {
-    const t = table(m, BUDGET_TABLE_IDS.personnes);
+    // Sans lignes sans contrat : au seuil 1, rien n'est masqué.
+    const t = table(buildBudget(budgetInput({ cohorts: { kind: "value", onlyPrev: { count: 1, prev: 100_000, cur: 0, delta: -100_000 }, onlyCur: { count: 2, prev: 0, cur: 150_000, delta: 150_000 }, both: { count: 2, prev: 250_000, cur: 255_000, delta: 5_000 }, outside: null, total: { count: 5, prev: 350_000, cur: 405_000, delta: 55_000 } } })), BUDGET_TABLE_IDS.personnes);
     expect(t.title).toBe("Écart de masse lié aux contrats observés, janvier → mars 2026 face à janvier → mars 2025");
     expect(t.columns.map((c) => c.header)).toEqual(["Groupe", "Contrats", "Coût N-1 (janvier → mars 2025)", "Coût N (janvier → mars 2026)", "Contribution à l'écart"]);
     expect(t.rows.map((r) => r.cells)).toEqual([
       ["Contrats observés seulement en N-1", 1, 100_000, "", -100_000],
       ["Contrats observés seulement en N", 2, "", 150_000, 150_000],
       ["Contrats observés dans les deux périodes", 2, 250_000, 255_000, 5_000],
-      ["Lignes du journal sans contrat", "", 1_000, 2_500, 1_500],
+    ]);
+    expect(t.foot?.cells).toEqual(["Total", 5, 350_000, 405_000, 55_000]);
+    expect(cellView(t.rows[0].cells[3], t.columns[3]).text).toBe("—");
+  });
+
+  it("lignes du journal sans contrat d'un montant non nul : « non vérifiable », même au seuil 1, avec masquage secondaire dans chaque colonne", () => {
+    // Lignes sans contrat : 10,00 € en N-1, 25,00 € en N (aucun contrat dénombré). Seuil 1. Coût N-1 : seules, elles se liraient par
+    // 3 510,00 − 1 000,00 − 2 500,00 → la plus petite ligne qui compte un contrat, « seulement N-1 » (1 000,00 €), est masquée en second
+    // (en bloc : nombre et contribution aussi). Coût N : « seulement N » (1 500,00 € < 2 550,00 €) masqué en second. Contrats et
+    // contribution : déjà deux lignes masquées, 3 contrats. « Les deux » reste affiché ; le total n'est jamais masqué.
+    const t = table(m, BUDGET_TABLE_IDS.personnes);
+    const N1 = { nd: "non affiché (seuil de confidentialité : 1 contrat)" };
+    const NV = { nd: "effectif du groupe non dénombré : seuil de confidentialité non vérifiable" };
+    expect(t.rows.map((r) => r.cells)).toEqual([
+      ["Contrats observés seulement en N-1", N1, N1, "", N1],
+      ["Contrats observés seulement en N", N1, "", N1, N1],
+      ["Contrats observés dans les deux périodes", 2, 250_000, 255_000, 5_000],
+      ["Lignes du journal sans contrat", "", NV, NV, NV],
     ]);
     expect(t.foot?.cells).toEqual(["Total", 5, 351_000, 407_500, 56_500]);
-    expect(cellView(t.rows[0].cells[3], t.columns[3]).text).toBe("—");
+    for (const j of [1, 2, 3, 4]) expect(t.rows.filter((r) => typeof r.cells[j] === "object").length, `colonne ${j}`).not.toBe(1);
   });
 
   it("plan de départs, noria, coût d'intégration : « Prévu » avec raison et renvoi vers Hypothèses budgétaires", () => {
@@ -357,7 +375,8 @@ describe("buildBudget — contrats observés et blocs Prévu", () => {
 });
 
 describe("buildBudget — seuil de confidentialité", () => {
-  const ND2 = { nd: "non affiché (seuil de confidentialité : 2 personnes)" };
+  const ND2 = { nd: "non affiché (seuil de confidentialité : 2 contrats)" };
+  const NV2 = { nd: "effectif du groupe non dénombré : seuil de confidentialité non vérifiable" };
 
   it("seuil non défini : bloc des contrats observés n.d. avec la raison et le lien vers les Paramètres ; le reste du chapitre est affiché", () => {
     const m = buildBudget(budgetInput({ confidentialite: { kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" } }));
@@ -368,14 +387,14 @@ describe("buildBudget — seuil de confidentialité", () => {
 
   it("seuil 2 : « seulement N-1 » (1 contrat) masqué ; masquage secondaire jusqu'à deux contrats masqués par colonne, les lignes sans contrat ne protégeant personne ; total inchangé", () => {
     const t = table(buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 } })), BUDGET_TABLE_IDS.personnes);
-    // Contrats : « seulement N » (2) masqué en second. Coût N-1 : les lignes sans contrat ne protègent personne → « les deux » masqué.
-    // Coût N : « seulement N » et « les deux » arrivent comme lignes déjà masquées (maskCohorts les passe en effectif non dénombré) :
-    // aucune personne comptée, les lignes sans contrat ne peuvent pas les protéger → toute la colonne est masquée.
+    // Lignes sans contrat (montants non nuls) : non vérifiables. Contrats : « seulement N » (2, premier des plus petits) masqué en second
+    // (1 + 2 = 3 contrats). Coût N-1 : « seulement N-1 » (1 contrat) et les lignes sans contrat (aucun) ne comptent qu'un contrat →
+    // « les deux » masqué (3 contrats). Coût N et contribution : déjà trois lignes masquées, 4 et 5 contrats.
     expect(t.rows.map((r) => r.cells)).toEqual([
       ["Contrats observés seulement en N-1", ND2, ND2, "", ND2],
       ["Contrats observés seulement en N", ND2, "", ND2, ND2],
       ["Contrats observés dans les deux périodes", ND2, ND2, ND2, ND2],
-      ["Lignes du journal sans contrat", "", ND2, ND2, ND2],
+      ["Lignes du journal sans contrat", "", NV2, NV2, NV2],
     ]);
     // Le total n'est jamais masqué ; aucune valeur masquée ne se retrouve par différence d'une colonne (au moins deux n.d. par colonne).
     expect(t.foot?.cells).toEqual(["Total", 5, 351_000, 407_500, 56_500]);
@@ -385,15 +404,32 @@ describe("buildBudget — seuil de confidentialité", () => {
   it("filtre de service : un mois de 1 contrat masqué, le plus petit autre mois aussi ; total de la période affiché", () => {
     // Service : 3 contrats en janvier, 1 en février, 3 en mars, 4 distincts sur la période ; seuil 2. Février masqué ; secondaire :
     // janvier (10 000,00 €, plus petit que mars 11 000,00 €). Réalisé de la période : 31 500,00 €.
-    const m = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [3, 1, 3], period: 4 } }));
+    const m = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [[0, 1, 2], [0], [0, 1, 3]], period: 4 } }));
     const t = table(m, BUDGET_TABLE_IDS.mensuel);
     expect(t.rows.map((r) => r.cells[1])).toEqual([ND2, ND2, 1_100_000]);
     expect(t.foot?.cells[1]).toBe(3_150_000);
     expect(sp(tile(m, "realise").value.text)).toBe("31 500,00 €");
     // Service de 1 contrat sur la période : carte et tableau n.d.
-    const one = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [1, 1, 1], period: 1 } }));
+    const one = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [[0], [0], [0]], period: 1 } }));
     expect(tile(one, "realise").value.reason).toBe("non affiché : service de moins de 2 contrats observés (seuil de confidentialité)");
     expect(table(one, BUDGET_TABLE_IDS.mensuel).foot?.cells[1]).toEqual({ nd: "non affiché : service de moins de 2 contrats observés (seuil de confidentialité)" });
+  });
+
+  it("filtre de service : un contrat présent dans deux mois masqués n'y compte qu'une fois (contrats distincts)", () => {
+    // Seuil 3. Service : janvier et février portés par les deux mêmes contrats (jetons 0 et 1), mars par 5 contrats (0 à 4) ; 5
+    // contrats distincts sur la période. Janvier et février (2 contrats chacun) masqués ; ensemble ils ne décrivent que 2 contrats
+    // distincts (< 3) : mars affiché donnerait janvier + février = 31 500,00 − 11 000,00 = 20 500,00 € par différence → mars masqué en
+    // second (5 contrats distincts au total). Additionner les tailles (2 + 2 = 4 ≥ 3) aurait laissé mars affiché.
+    const ND3 = { nd: "non affiché (seuil de confidentialité : 3 contrats)" };
+    const m = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 3 }, serviceSizes: { months: [[0, 1], [0, 1], [0, 1, 2, 3, 4]], period: 5 } }));
+    const t = table(m, BUDGET_TABLE_IDS.mensuel);
+    expect(t.rows.map((r) => r.cells[1])).toEqual([ND3, ND3, ND3]);
+    expect(t.foot?.cells[1]).toBe(3_150_000);
+    expect(sp(tile(m, "realise").value.text)).toBe("31 500,00 €");
+    // Mars porté par 3 nouveaux contrats seulement (2 à 4) : janvier et février masqués décrivent 2 contrats distincts, mars 3 ; mars
+    // est tout de même masqué en second (le seul autre mois).
+    const other = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 3 }, serviceSizes: { months: [[0, 1], [0, 1], [2, 3, 4]], period: 5 } }));
+    expect(table(other, BUDGET_TABLE_IDS.mensuel).rows.map((r) => r.cells[1])).toEqual([ND3, ND3, ND3]);
   });
 
   it("filtre de service : un mois sans aucun contrat pour une masse non nulle est « non vérifiable », avec masquage secondaire ; une période sans contrat est n.d., même au seuil 1", () => {
@@ -401,16 +437,16 @@ describe("buildBudget — seuil de confidentialité", () => {
     const svc = { filtered: true, budget: { kind: "na" as const, reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na" as const, reason: "scénario global : non filtrable par service" } };
     // Service : 3 contrats en janvier, aucun en février pour 10 500,00 € (lignes sans contrat), 3 en mars ; seuil 2. Février : non
     // vérifiable ; secondaire : janvier (10 000,00 € < 11 000,00 €), sinon 31 500 − 11 000 − 10 000 redonnerait février. Total affiché.
-    const m = buildBudget(budgetInput({ ...svc, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [3, 0, 3], period: 3 } }));
+    const m = buildBudget(budgetInput({ ...svc, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [[0, 1, 2], [], [0, 1, 2]], period: 3 } }));
     expect(table(m, BUDGET_TABLE_IDS.mensuel).rows.map((r) => r.cells[1])).toEqual([ND2, { nd: NV }, 1_100_000]);
     expect(sp(tile(m, "realise").value.text)).toBe("31 500,00 €");
     // Aucun contrat sur toute la période pour 31 500,00 € : réalisé n.d. « non vérifiable », chaque mois aussi, même au seuil 1.
-    const z = buildBudget(budgetInput({ ...svc, confidentialite: { kind: "set", value: 1 }, serviceSizes: { months: [0, 0, 0], period: 0 } }));
+    const z = buildBudget(budgetInput({ ...svc, confidentialite: { kind: "set", value: 1 }, serviceSizes: { months: [[], [], []], period: 0 } }));
     expect(tile(z, "realise").value).toEqual({ text: "n.d.", kind: "nd", reason: NV });
     expect(table(z, BUDGET_TABLE_IDS.mensuel).rows.map((r) => r.cells[1])).toEqual([{ nd: NV }, { nd: NV }, { nd: NV }]);
     expect(table(z, BUDGET_TABLE_IDS.mensuel).foot?.cells[1]).toEqual({ nd: NV });
     // Service vide (aucun contrat, masse nulle chaque mois) : il ne désigne personne, les zéros restent affichés.
-    const empty = buildBudget(budgetInput({ ...svc, live: { kind: "value", series: series("reel", "Réalisé", { "2026-01": 0, "2026-02": 0, "2026-03": 0 }) }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [0, 0, 0], period: 0 } }));
+    const empty = buildBudget(budgetInput({ ...svc, live: { kind: "value", series: series("reel", "Réalisé", { "2026-01": 0, "2026-02": 0, "2026-03": 0 }) }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [[], [], []], period: 0 } }));
     expect(table(empty, BUDGET_TABLE_IDS.mensuel).rows.map((r) => r.cells[1])).toEqual([0, 0, 0]);
     expect(sp(tile(empty, "realise").value.text)).toBe("0,00 €");
   });
@@ -425,11 +461,11 @@ describe("buildBudget — seuil de confidentialité", () => {
       outside: { prev: 1_000, cur: 0, delta: -1_000 },
       total: { count: 2, prev: 1_000, cur: 150_000, delta: 149_000 },
     };
-    const m = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, cohorts, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [2, 2, 2], period: 2 } }));
+    const m = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, cohorts, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [[0, 1], [0, 1], [0, 1]], period: 2 } }));
     expect(m.blocks.find((b) => b.id === "personnes")!.nd).toEqual([{ label: "Contrats observés", reason: "effectif du groupe non dénombré : seuil de confidentialité non vérifiable" }]);
     expect(m.tables.some((t) => t.id === BUDGET_TABLE_IDS.personnes)).toBe(false);
     // Sans lignes sans contrat en N-1 (coût N-1 nul) : groupe vide, le tableau est affiché.
-    const ok = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, cohorts: { ...cohorts, outside: null, total: { count: 2, prev: 0, cur: 150_000, delta: 150_000 } }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [2, 2, 2], period: 2 } }));
+    const ok = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, cohorts: { ...cohorts, outside: null, total: { count: 2, prev: 0, cur: 150_000, delta: 150_000 } }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [[0, 1], [0, 1], [0, 1]], period: 2 } }));
     expect(ok.tables.some((t) => t.id === BUDGET_TABLE_IDS.personnes)).toBe(true);
   });
 
@@ -442,8 +478,8 @@ describe("buildBudget — seuil de confidentialité", () => {
 // Éléments non récurrents : déjà comptabilisés 800,00 € (ret.realised), prévus 1 500,00 € (ret.projected), somme 2 300,00 €,
 // retraité 130 000,00 €. Seuls les contributeurs changent d'un cas à l'autre.
 describe("buildBudget — seuil de confidentialité des éléments non récurrents", () => {
-  const ND2 = "non affiché (seuil de confidentialité : 2 personnes)";
-  const ND3 = "non affiché (seuil de confidentialité : 3 personnes)";
+  const ND2 = "non affiché (seuil de confidentialité : 2 contrats)";
+  const ND3 = "non affiché (seuil de confidentialité : 3 contrats)";
   const lines = (m: ReturnType<typeof buildBudget>) => tile(m, "retraite").variations!.map((v) => [v.label, v.text === null ? null : sp(v.text), v.reason ?? null]);
   const nrRows = (m: ReturnType<typeof buildBudget>) => table(m, BUDGET_TABLE_IDS.atterrissage).rows.slice(3).map((r) => r.cells);
   const att = (m: ReturnType<typeof buildBudget>) => m.blocks.find((b) => b.id === "atterrissage")!;
@@ -560,7 +596,7 @@ describe("buildBudget — un n.d. reste n.d. jusqu'au tableau et au graphique", 
   });
 
   it("filtre de service : budget et scénario globaux n.d. « non filtrable par service », limite écrite", () => {
-    const f = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, serviceSizes: { months: [3, 3, 3], period: 3 } }));
+    const f = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, serviceSizes: { months: [[0, 1, 2], [0, 1, 2], [0, 1, 2]], period: 3 } }));
     expect(tile(f, "budget").value.reason).toBe("budget saisi global : non filtrable par service");
     expect(tile(f, "atterrissage").value.reason).toBe("scénario global : non filtrable par service");
     expect(f.blocks.find((b) => b.id === "prevision")!.nd[0].reason).toBe("scénario global : non filtrable par service");
@@ -707,7 +743,7 @@ describe("buildEffets — seuil de confidentialité sur la cascade d'ETP", () =>
     ],
     residual: 0,
   };
-  const N2 = { nd: "non affiché (seuil de confidentialité : 2 personnes)" };
+  const N2 = { nd: "non affiché (seuil de confidentialité : 2 contrats)" };
 
   it("seuil 2 : « entrées nouvelles » (1 contrat) masqué ; secondaire : le plus petit palier qui compte des contrats (« sorties », 3 contrats ; un palier vide ne protège pas) ; graphique non tracé", () => {
     const m = buildEffets(effetsInput({ cascade: C3, confidentialite: { kind: "set", value: 2 } }));
@@ -715,9 +751,36 @@ describe("buildEffets — seuil de confidentialité sur la cascade d'ETP", () =>
     expect(t.rows.map((r) => r.cells[2])).toEqual(["", N2, 0, N2, 0, 2_500, { exact: 0 }, { exact: 0.5 }]);
     expect(t.foot?.cells).toEqual(["ETP moyen N (janvier → février 2026)", { exact: 1.5 }, ""]);
     expect(m.charts.some((c) => c.id === EFFETS_CHART_IDS.etp)).toBe(false);
-    expect(m.blocks.find((b) => b.id === "etp")!.nd).toEqual([{ label: "Graphique de la cascade d'ETP", reason: "non affiché (seuil de confidentialité : 2 personnes)" }]);
+    expect(m.blocks.find((b) => b.id === "etp")!.nd).toEqual([{ label: "Graphique de la cascade d'ETP", reason: "non affiché (seuil de confidentialité : 2 contrats)" }]);
     // Aucune clé de contrat dans le modèle.
     expect(JSON.stringify(m)).not.toMatch(/"k\d"/);
+  });
+
+  it("un contrat présent dans deux paliers masqués n'y compte qu'une fois : seuil 3, report {k1}, sorties {k3…k6}, changement {k1, k2}", () => {
+    // Départ 2,00 ETP (40 000 ÷ 20 000), arrivée 1,80 ETP (36 000 ÷ 20 000), sur 2 mois. Paliers : effet report +0,10 ETP (k1),
+    // sorties −0,50 ETP (k3 à k6, 4 contrats), changement d'ETP +0,20 ETP (k1 et k2) ; 2,00 + 0,10 − 0,50 + 0,20 = 1,80.
+    // Seuil 3 : report (1 contrat) et changement (2 contrats) masqués ; ensemble ils ne décrivent que 2 contrats distincts (k1, k2) :
+    // sorties affichées donneraient report + changement = −0,20 − (−0,50) − 0 = +0,30 ETP pour 2 contrats → sorties masquées en second
+    // (6 contrats distincts). Additionner les tailles (1 + 2 = 3) aurait laissé les sorties affichées.
+    const twice: Cascade = {
+      kind: "value",
+      months: 2,
+      start: 20_000,
+      end: 18_000,
+      steps: [
+        { id: "entrees-new", label: STEP_LABELS["entrees-new"], etp4: 0, people: [] },
+        { id: "entrees-report", label: STEP_LABELS["entrees-report"], etp4: 1_000, people: [{ key: "k1", etp4: 1_000 }] },
+        { id: "sorties", label: STEP_LABELS.sorties, etp4: -5_000, people: ["k3", "k4", "k5", "k6"].map((key) => ({ key, etp4: -1_250 })) },
+        { id: "sorties-deport", label: STEP_LABELS["sorties-deport"], etp4: 0, people: [] },
+        { id: "etp-change", label: STEP_LABELS["etp-change"], etp4: 2_000, people: [{ key: "k1", etp4: 1_000 }, { key: "k2", etp4: 1_000 }] },
+      ],
+      residual: 0,
+    };
+    const N3 = { nd: "non affiché (seuil de confidentialité : 3 contrats)" };
+    const m = buildEffets(effetsInput({ cascade: twice, etp: { cur: { kind: "value", num: 36_000, den: 20_000 }, prev: { kind: "value", num: 40_000, den: 20_000 } }, confidentialite: { kind: "set", value: 3 } }));
+    const t = table(m, EFFETS_TABLE_IDS.etp);
+    expect(t.rows.map((r) => r.cells[2])).toEqual(["", 0, N3, N3, 0, N3, { exact: 0 }, { exact: -0.2 }]);
+    expect(m.charts.some((c) => c.id === EFFETS_CHART_IDS.etp)).toBe(false);
   });
 
   it("seuil 1 : rien n'est masqué, la cascade est tracée ; seuil non défini : bloc n.d. avec le lien vers les Paramètres", () => {
@@ -915,7 +978,7 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
     expect(input.budget).toEqual({ kind: "na", reason: "budget saisi global : non filtrable par service" });
     expect(input.scenario).toEqual({ kind: "na", reason: "scénario global : non filtrable par service" });
     // Effectif du service : alpha et gamma payés en janvier et en février 2026 → 2, 2 ; 2 contrats distincts sur la période.
-    expect(input.serviceSizes).toEqual({ months: [2, 2], period: 2 });
+    expect(input.serviceSizes).toEqual({ months: [[0, 1], [0, 1]], period: 2 });
     const m = buildBudget(input);
     // TECH, N : alpha 2 × 2 940 + gamma 2 × 1 400 = 8 680,00 € (2 contrats ≥ seuil 2 : affiché).
     expect(sp(tile(m, "realise").value.text)).toBe("8 680,00 €");
@@ -935,11 +998,11 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
 
   it("observedSizes : contrats qui portent une ligne de masse, par mois et contrats distincts sur la période ; mois hors lecture → null", () => {
     // Toute l'entreprise, 2025 : alpha, beta → 2 par mois, 2 distincts. TECH 2026 : alpha, gamma. TECH 2025 : alpha seul.
-    expect(observedSizes(journal, ["2025-01", "2025-02"])).toEqual({ months: [2, 2], period: 2 });
+    expect(observedSizes(journal, ["2025-01", "2025-02"])).toEqual({ months: [[0, 1], [0, 1]], period: 2 });
     const tech = { ...journal, serviceFilter: { value: "TECH" } };
-    expect(observedSizes(tech, ["2026-01", "2026-02"])).toEqual({ months: [2, 2], period: 2 });
-    expect(observedSizes(tech, ["2025-01", "2025-02"])).toEqual({ months: [1, 1], period: 1 });
-    expect(observedSizes(journal, ["2024-12", "2025-01"])).toEqual({ months: [null, 2], period: null });
+    expect(observedSizes(tech, ["2026-01", "2026-02"])).toEqual({ months: [[0, 1], [0, 1]], period: 2 });
+    expect(observedSizes(tech, ["2025-01", "2025-02"])).toEqual({ months: [[0], [0]], period: 1 });
+    expect(observedSizes(journal, ["2024-12", "2025-01"])).toEqual({ months: [null, [0, 1]], period: null });
   });
 
   it("masseContracts : toute ligne de masse compte (brut, cotisations, taxes), pas les provisions ni les lignes sans contrat", () => {
@@ -958,7 +1021,7 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
     expect(masseContracts(ops, "2026-01")).toEqual({ contracts: ["c1", "c2", "c3"], nonZero: true });
     expect(masseContracts(ops, "2026-02")).toEqual({ contracts: [], nonZero: true });
     expect(masseContracts(ops, "2026-03")).toBeNull();
-    expect(observedSizes(ops, ["2026-01", "2026-02"])).toEqual({ months: [3, 0], period: 3 });
+    expect(observedSizes(ops, ["2026-01", "2026-02"])).toEqual({ months: [[0, 1, 2], []], period: 3 });
     // Un autre service : aucune ligne, aucun montant (mois vide, pas « non vérifiable »).
     expect(masseContracts({ ...ops, serviceFilter: { value: "AUTRE" } }, "2026-01")).toEqual({ contracts: [], nonZero: false });
   });
@@ -1003,7 +1066,7 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
     expect(input.scenario.retraite).toMatchObject({ kind: "value", realised: 120_000, projected: 550_000, total: 670_000 });
     // Seuil 2 : « Déjà comptabilisés » (1) masqué ; « Prévus » (2) masqué en second, sinon 6 700 − 5 500 = 1 200.
     const m = buildBudget(input);
-    const nd2 = "non affiché (seuil de confidentialité : 2 personnes)";
+    const nd2 = "non affiché (seuil de confidentialité : 2 contrats)";
     expect(tile(m, "retraite").variations!.map((v) => [v.label, v.text === null ? null : sp(v.text), v.reason ?? null])).toEqual([
       ["Non récurrents retirés", "6 700,00 €", null],
       ["Déjà comptabilisés", null, nd2],
@@ -1163,7 +1226,7 @@ describe("rendu du chapitre", () => {
     expect(out).not.toContain('data-testid="cx-table-budget-personnes"');
     const masked = render(buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 } })));
     expect(masked).toContain('data-testid="cx-table-budget-personnes"');
-    expect(masked).toContain("non affiché (seuil de confidentialité : 2 personnes)");
+    expect(masked).toContain("non affiché (seuil de confidentialité : 2 contrats)");
   });
 
   it("chapitre n.d. : une seule mention avec la raison et l'action", () => {

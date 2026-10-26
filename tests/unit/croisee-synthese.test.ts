@@ -212,7 +212,8 @@ describe("publicReason : raisons du moteur sans identifiant de contrat ni d'abse
   it("contrats continus non vérifiables : le nombre et le mois restent, les identifiants partent", () => {
     expect(publicReason(CONT)).toBe("2 contrats continus non vérifiables en 2026-03 (sorties, détail dans KPI RH)");
     expect(publicReason(`2026-03 : ${CONT}`)).toBe("2026-03 : 2 contrats continus non vérifiables en 2026-03 (sorties, détail dans KPI RH)");
-    expect(publicReason("Entrées de 2026-02 : contrats continus non vérifiables (CTR-TEST-3 le 02/02/2026)")).toBe("1 contrat continu non vérifiable en 2026-02 (entrées, détail dans KPI RH)");
+    // Sans le suffixe du moteur, la fin de la liste n'est pas reconnaissable : retirée jusqu'à la fin du texte, sans nombre.
+    expect(publicReason("Entrées de 2026-02 : contrats continus non vérifiables (CTR-TEST-3 le 02/02/2026)")).toBe("Entrées de 2026-02 : contrats continus non vérifiables (détail dans KPI RH)");
   });
   it("absence rattachée à un contrat inconnu, absence sans date : raison générique ; autre raison inchangée", () => {
     expect(publicReason("2026-03 : absence ABS-TEST-9 rattachée au contrat CTR-TEST-4 inconnu du référentiel")).toBe("2026-03 : 1 absence rattachée à un contrat inconnu du référentiel (détail dans KPI RH)");

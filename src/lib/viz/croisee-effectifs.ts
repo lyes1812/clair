@@ -6,7 +6,7 @@ import { CATEGORY_LABELS } from "@/lib/budget/types";
 import { nd as ndCell, val } from "@/lib/budget/versions";
 import { contractEcheances, type EcheanceContract } from "@/lib/croisee/echeances";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { effectifStructure, isHidden, maskGroups, maskReason, personOf, personsByGroup, type Confidentialite, type StructureContract } from "@/lib/croisee/structure";
+import { effectifStructure, isHidden, maskGroups, maskReason, membersByGroup, personOf, type Confidentialite, type StructureContract } from "@/lib/croisee/structure";
 import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting, type CroiseeSettingKey, type CroiseeSettings, type CroiseeSettingValues, type SeuilEffectif } from "@/lib/croisee/settings-format";
 import { formatDate, monthEnd, monthsBetween } from "@/lib/dates";
 import { contractNatureLabel, endReasonLabel } from "@/lib/dsn/labels";
@@ -55,9 +55,11 @@ export type MovementIn = { kind: "exact" | "lower_bound"; value: number } | { ki
 export type JournalEventIn = { month: string; kind: "entry" | "exit"; nature: string | null; endReason: string | null; person: string };
 export type JournalMonthIn = { month: string; entries: CountIn; exits: CountIn };
 export type GridAxis = Extract<Axis, "service" | "categorie" | "statut">;
-// sizes : effectif de chaque groupe à la fin du mois, en personnes distinctes (clé de personne du référentiel RH, à défaut le
-// contrat), taille passée au seuil de confidentialité ; null : effectif non dénombré (seuil non vérifiable).
-export type GroupSizes = { cur: Record<string, number> | null; prev: Record<string, number> | null };
+// sizes : personnes de chaque groupe à la fin du mois (jetons de personne propres à la lecture, distincts : une personne par clé de
+// personne du référentiel RH, à défaut par contrat ; aucune clé de la source). Leur nombre est la taille passée au seuil de
+// confidentialité ; les jetons font compter une fois une personne présente dans deux groupes masqués. null : effectif non dénombré
+// (seuil non vérifiable).
+export type GroupSizes = { cur: Record<string, readonly string[]> | null; prev: Record<string, readonly string[]> | null };
 export type GridsIn = { axis: GridAxis; inscrit: { cur: Grid; prev: Grid }; etp: { cur: Grid; prev: Grid }; sizes: GroupSizes };
 // Raison du moteur qui cite des identifiants (texte exact) et son remplacement générique (mois et nombre seulement).
 export type ReasonSwap = { raw: string; text: string };
@@ -283,14 +285,14 @@ export function seuilAlerts(list: { id: string; label: string; avg: AverageIn }[
 
 // --- Répartitions masquées (seuil de confidentialité) -------------------------------------------------------------------------------
 
-// Contrat compté à une fin de mois, vu par sa personne : jeton de personne (personOf) et identifiant du contrat dans la source.
+// Contrat compté à une fin de mois, vu par sa personne : jeton de personne et identifiant du contrat dans la source.
 export type CountedContract = { id: string; person: string };
 
-// Effectif de chaque service à une fin de mois, en personnes distinctes : contrats qui portent l'ETP de fin de mois, rangés par le
-// service de leurs lignes de paie du mois (règle de l'ETP par service), sans ligne : « Non ventilé » ; une personne qui a deux contrats
-// dans un même service y compte une fois.
-export function serviceSizes(contracts: readonly CountedContract[], serviceOf: (contractId: string) => string | null): Record<string, number> {
-  return personsByGroup(contracts.map((c) => ({ group: serviceOf(c.id) ?? NON_VENTILE, person: c.person })));
+// Personnes de chaque service à une fin de mois (jetons distincts) : contrats qui portent l'ETP de fin de mois, rangés par le service
+// de leurs lignes de paie du mois (règle de l'ETP par service), sans ligne : « Non ventilé » ; une personne qui a deux contrats dans un
+// même service y figure une fois.
+export function serviceSizes(contracts: readonly CountedContract[], serviceOf: (contractId: string) => string | null): Record<string, string[]> {
+  return membersByGroup(contracts.map((c) => ({ group: serviceOf(c.id) ?? NON_VENTILE, person: c.person })));
 }
 
 // Groupe d'un contrat sur l'axe catégorie ou statut : même règle que la grille des effectifs mensuels (budget/monthly.ts) —
@@ -315,15 +317,17 @@ export function maskedAxis(g: GridsIn, groups: readonly string[], to: string, pr
     const ins = groups.map((grp) => gridCell(g.inscrit[which], grp, m));
     const etp = groups.map((grp) => gridCell(g.etp[which], grp, m));
     const sizes = g.sizes[which];
+    const members = (i: number): readonly string[] => sizes?.[groups[i]] ?? [];
     const size = (i: number): number | null => {
       if (!sizes) return null;
-      const n = sizes[groups[i]] ?? 0;
+      const n = members(i).length;
       return n === 0 && [ins[i], etp[i]].some((c) => isNum(c) && c !== 0) ? null : n;
     };
     const totIns = gridCell(g.inscrit[which], null, m);
     const totEtp = gridCell(g.etp[which], null, m);
+    // members : jetons des personnes du groupe ; une personne qui a deux contrats dans deux groupes masqués n'y compte qu'une fois.
     const status = maskGroups(
-      groups.map((_, i) => ({ size: size(i), value: isNum(ins[i]) ? (ins[i] as number) : isNum(etp[i]) ? (etp[i] as number) : null })),
+      groups.map((_, i) => ({ size: size(i), value: isNum(ins[i]) ? (ins[i] as number) : isNum(etp[i]) ? (etp[i] as number) : null, members: members(i) })),
       seuil,
       isNum(totIns) || isNum(totEtp),
     );
@@ -337,8 +341,10 @@ export function maskedAxis(g: GridsIn, groups: readonly string[], to: string, pr
   return { rows, foot: [cur.totIns, prev.totIns, gapCell(cur.totIns, prev.totIns), cur.totEtp, prev.totEtp, gapCell(cur.totEtp, prev.totEtp)] };
 }
 
-// Effectif d'une nature dans un mois : contrats concernés (valeur affichée) et personnes distinctes (taille passée au seuil).
-export type NatureCount = { contracts: number; persons: number };
+// Effectif d'une nature dans un mois : contrats concernés (valeur affichée) et personnes distinctes (taille passée au seuil) ; members :
+// jetons de ces personnes, quand l'entrée les fournit (une personne présente dans deux natures masquées y compte alors une fois ;
+// sans eux, les tailles des natures masquées sont additionnées).
+export type NatureCount = { contracts: number; persons: number; members?: readonly string[] };
 
 // Cellules « dont <nature> » d'un total du mois : une cellule par nature comptée, le nombre de contrats, masquée quand elle concerne
 // de 1 à (seuil − 1) personnes distinctes (masquage secondaire dans le mois, dont le total est affiché). Total n.d. : la même
@@ -346,9 +352,9 @@ export type NatureCount = { contracts: number; persons: number };
 export function natureCells(counts: Readonly<Record<string, NatureCount>>, natures: readonly string[], total: CountIn | MovementIn | number, seuil: number): CroiseeCell[] {
   if (typeof total !== "number" && total.kind === "nd") return natures.map(() => ({ nd: total.nd.reason }));
   if (typeof total !== "number" && total.kind === "lower_bound") return natures.map(() => ({ nd: REPARTITION_BORNE }));
-  const vals = natures.map((n) => counts[n] ?? { contracts: 0, persons: 0 });
+  const vals: NatureCount[] = natures.map((n) => counts[n] ?? { contracts: 0, persons: 0, members: [] });
   const st = maskGroups(
-    vals.map((v) => ({ size: v.persons, value: v.contracts })),
+    vals.map((v) => ({ size: v.persons, value: v.contracts, ...(v.members ? { members: v.members } : {}) })),
     seuil,
     true,
   );
@@ -358,9 +364,9 @@ export function natureCells(counts: Readonly<Record<string, NatureCount>>, natur
 // Mouvements comptés d'un mois par nature (agrégation du journal : aucune date exacte, aucun service) : contrats et personnes.
 export function countByNature(events: readonly JournalEventIn[], month: string, kind: "entry" | "exit"): Record<string, NatureCount> {
   const list = events.filter((e): e is JournalEventIn & { nature: string } => e.month === month && e.kind === kind && e.nature !== null);
-  const persons = personsByGroup(list.map((e) => ({ group: e.nature, person: e.person })));
+  const who = membersByGroup(list.map((e) => ({ group: e.nature, person: e.person })));
   const out: Record<string, NatureCount> = {};
-  for (const e of list) out[e.nature] = { contracts: (out[e.nature]?.contracts ?? 0) + 1, persons: persons[e.nature] };
+  for (const e of list) out[e.nature] = { contracts: (out[e.nature]?.contracts ?? 0) + 1, persons: who[e.nature].length, members: who[e.nature] };
   return out;
 }
 
@@ -371,15 +377,16 @@ export function exitMotifRows(events: readonly JournalEventIn[], seuil: number):
   const exits = events.filter((e) => e.kind === "exit").map((e) => ({ code: e.endReason ?? "", person: e.person }));
   const by = new Map<string, number>();
   for (const e of exits) by.set(e.code, (by.get(e.code) ?? 0) + 1);
-  const persons = personsByGroup(exits.map((e) => ({ group: e.code, person: e.person })));
+  const who = membersByGroup(exits.map((e) => ({ group: e.code, person: e.person })));
   const label = (code: string) => (code === "" ? "Motif non déclaré" : endReasonLabel(code));
-  const big = [...by].filter(([code]) => persons[code] >= seuil).map(([code, n]) => ({ label: label(code), n, persons: persons[code] })).sort((a, b) => a.label.localeCompare(b.label, "fr"));
-  const small = [...by].filter(([code]) => persons[code] < seuil);
+  const big = [...by].filter(([code]) => who[code].length >= seuil).map(([code, n]) => ({ label: label(code), n, members: who[code] })).sort((a, b) => a.label.localeCompare(b.label, "fr"));
+  const small = [...by].filter(([code]) => who[code].length < seuil);
   const smallCodes = new Set(small.map(([code]) => code));
-  const others = { label: `Autres motifs (${plural(small.length, "motif", "motifs")})`, n: small.reduce((s, [, n]) => s + n, 0), persons: new Set(exits.filter((e) => smallCodes.has(e.code)).map((e) => e.person)).size };
+  const others = { label: `Autres motifs (${plural(small.length, "motif", "motifs")})`, n: small.reduce((s, [, n]) => s + n, 0), members: [...new Set(exits.filter((e) => smallCodes.has(e.code)).map((e) => e.person))] };
   const groups = [...big, ...(small.length ? [others] : [])];
+  // members : une personne sortie deux fois, sous deux motifs masqués, n'y compte qu'une fois.
   const st = maskGroups(
-    groups.map((x) => ({ size: x.persons, value: x.n })),
+    groups.map((x) => ({ size: x.members.length, value: x.n, members: x.members })),
     seuil,
     true,
   );
@@ -759,7 +766,7 @@ function buildChapter(input: EffectifsInput, d: EffectifsData, p: NonNullable<Ef
       const split = d.natures.length > 1;
       // Détail par nature : contrats affichés, personnes distinctes passées au seuil.
       const counts = (m: string, pick: "fins" | "entrees"): Record<string, NatureCount> =>
-        Object.fromEntries(ech.lines.filter((l) => l.month === m).map((l) => [l.nature, { contracts: l[pick], persons: pick === "fins" ? l.finsPersons : l.entreesPersons }]));
+        Object.fromEntries(ech.lines.filter((l) => l.month === m).map((l) => [l.nature, { contracts: l[pick], persons: pick === "fins" ? l.finsPersons : l.entreesPersons, members: pick === "fins" ? l.finsMembers : l.entreesMembers }]));
       const sum = (m: string, pick: "fins" | "entrees") => ech.lines.filter((l) => l.month === m).reduce((t, l) => t + l[pick], 0);
       const dont = (m: string, pick: "fins" | "entrees") => (split ? natureCells(counts(m, pick), d.natures, sum(m, pick), s) : []);
       const blanks = split ? d.natures.map((): CroiseeCell => "") : [];
@@ -948,23 +955,23 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
   const real: RealSource = { kpi: input, journal: pay.input, natures: categoryNatures, overrides, etpService: etpServiceCell };
   const grid = (measure: "inscrit" | "etp", axis: GridAxis, y: string) => monthlyGrid({ measure, axis, year: y, real, scenario: null });
   const serviceMap = pay.input && pay.service.axis ? buildContractServiceMap(pay.input.lines, pay.input.grid, pay.service.axis) : null;
-  const sizesAt = (m: string, axis: GridAxis): Record<string, number> | null => {
+  const sizesAt = (m: string, axis: GridAxis): Record<string, string[]> | null => {
     if (axis === "service") {
       if (!serviceMap) return null;
       const e = etpMonthEnd(input, m);
       if (e.kind !== "exact") return null;
       return serviceSizes(
-        e.contributions.map((c) => ({ id: c.externalId, person: personOf(c) })),
+        e.contributions.map((c) => ({ id: c.externalId, person: token(c) })),
         (id) => serviceMap.get(`${m}|${id}`) ?? null,
       );
     }
     // Effectif en borne basse ou n.d. : la grille l'est aussi ; l'effectif du groupe n'est pas dénombré.
     const h = headcountAt(input.data, monthEnd(m), countedOpts(input));
     if (h.kind !== "exact") return null;
-    return personsByGroup(
+    return membersByGroup(
       h.contractKeys.flatMap((k) => {
         const c = byKey.get(k);
-        return c ? [{ group: axisGroup(c, axis, categoryNatures, overrides), person: personOf(c) }] : [];
+        return c ? [{ group: axisGroup(c, axis, categoryNatures, overrides), person: token(c) }] : [];
       }),
     );
   };

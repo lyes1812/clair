@@ -29,28 +29,34 @@ const listCount = (list: string): number => (list.match(LE_DATE) ?? []).length |
 
 // Contrats continus non vérifiables (turnover.ts) : « <sens> de AAAA-MM : contrats continus non vérifiables (<id> le JJ/MM/AAAA, …)
 // — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés ». L'identifiant est un
-// texte libre (numéro de contrat DSN : jusqu'à 128 caractères, parenthèses, virgules et noms compris) : la fin de la liste n'est jamais
-// cherchée par une classe de caractères. Elle est ancrée, par une correspondance paresseuse, d'abord sur le suffixe fixe du moteur
-// (« ) — jour voisin hors de la couverture »), puis, pour un texte sans ce suffixe, sur la date qui termine le dernier élément suivie
-// d'une fin de phrase (« le JJ/MM/AAAA) » puis fin du texte, « ; », « . », « , », « — » ou « ) ») ; une liste qu'aucune de ces formes
-// ne termine (liste coupée, texte inattendu) est retirée jusqu'à la fin du texte. Une passe par forme, dans cet ordre : une date entre
-// parenthèses à l'intérieur d'un identifiant ne coupe jamais une liste qui porte le suffixe. Les formes déjà publiques
-// (« (détail dans KPI RH) », « (N contrats, détail dans KPI RH) ») sont exclues : le filtre reste idempotent.
+// texte libre (numéro de contrat DSN : jusqu'à 128 caractères, parenthèses, virgules, dates et noms compris) : la fin de la liste n'est
+// jamais cherchée par une classe de caractères ni par une date (« le JJ/MM/AAAA) » peut figurer dans un identifiant). Elle n'est
+// reconnue que par le suffixe fixe du moteur (« ) — jour voisin hors de la couverture »), par une correspondance paresseuse : le
+// nombre de contrats est alors gardé. Sans ce suffixe (autre tournure, liste coupée, texte inattendu), la liste est retirée jusqu'à la
+// fin du texte, sans nombre. Une passe par forme, dans cet ordre. Les formes déjà publiques (« (détail dans KPI RH) », « (N contrats,
+// détail dans KPI RH) ») sont exclues : le filtre reste idempotent.
 const CONTINUITY = /(entrées|sorties) de (\d{4}-\d{2}) : contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+?)\) — jour voisin hors de la couverture(?: ; sans la neutralisation \(Paramètres\), ces mouvements seraient comptés)?/gis;
-const CONTINUITY_DATED = /(entrées|sorties) de (\d{4}-\d{2}) : contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+? le \d{2}\/\d{2}\/\d{4})\)(?=\s*(?:$|[;.,—)]))/gis;
 const CONTINUITY_LIST = /contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+?)\)(?= — jour voisin hors de la couverture)/gs;
-const CONTINUITY_LIST_DATED = /contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+? le \d{2}\/\d{2}\/\d{4})\)(?=\s*(?:$|[;.,—)]))/gs;
 const CONTINUITY_LIST_CUT = /contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\)).*$/s;
 const ABSENCE_UNKNOWN_CONTRACT = /absence (?:(?!absence )[^;()])+? rattachée au contrat [^;()]+? inconnu du référentiel/g;
 const ABSENCE_DATE = /absence (?:(?!absence | : )[^;()])+? : date de (début et de fin|début|fin) non renseignée dans PayFit/g;
 const UNCERTAIN_LIST = /incertaine\(s\) \(absences ([^()]*)(\)|$)/g;
 const ID_LIST = /(^|\s)\(absences ([^\s,()]*\d[^\s,()]*(?:, [^\s,()]*\d[^\s,()]*)*)\)/g;
-const BASE_ND = /(^|; |: |— )([^;:—]+?) : base n\.d\. \(.*?\) — saisir une correction de base/g;
+// « <libellé> : base n.d. (…) — saisir une correction de base » : le libellé (nom de la personne, texte libre : « : », « — »,
+// parenthèses compris) n'est jamais délimité par une classe de caractères ; tout le segment de raison est remplacé, du début du texte
+// ou du séparateur de raisons (« ; ») jusqu'à « — saisir une correction de base ». Seuls sont gardés en tête du segment un mois
+// (« AAAA-MM : », « avr. 2026 : ») et le nom du scénario (« Scénario « … » : »), qui ne nomment personne.
+const BASE_KEEP = String.raw`(?:\d{4}-\d{2} : |[a-zéû]{3,5}\.? \d{4} : |Scénario « [^«»]* » : )*`;
+const BASE_ND = new RegExp(String.raw`(^|; )(${BASE_KEEP})(?:(?!; ).)+? : base n\.d\. \(.*?\) — saisir une correction de base`, "gs");
 const NO_BASE = `1 contrat sans base de projection (${HYP})`;
 const NO_BASE_RUN = new RegExp(`${NO_BASE.replace(/[()]/g, "\\$&")}(?: ; ${NO_BASE.replace(/[()]/g, "\\$&")})+`, "g");
 const OTHER_CONTRACT = /sous le contrat (?!précédent |suivant )\S+ (de la même personne|déjà comptée)/g;
 const NOT_RETURNED = /contrat (?!non )\S+ non renvoyé par PayFit/g;
-const NEUTRALIZED = /contrat continu neutralisé \(avec \S+ le (\d{2}\/\d{2}\/\d{4})\)/g;
+// Identifiant en texte libre (espaces, parenthèses, « — », « : », dates compris) : correspondance paresseuse jusqu'à « le JJ/MM/AAAA) »
+// suivi de la fin du texte ou d'une fin de raison (« ; », « . », « — », « ) ») ; une date entre parenthèses dans l'identifiant (« CDD
+// (fin le 01/02/2026) Nom ») ne termine donc pas le libellé. Sans une telle fin, le libellé est retiré jusqu'à la fin du texte.
+const NEUTRALIZED = /contrat continu neutralisé \(avec .+? le (\d{2}\/\d{2}\/\d{4})\)(?=\s*(?:$|[;.—)]))/gs;
+const NEUTRALIZED_CUT = /contrat continu neutralisé \(avec (?!un autre contrat(?: le \d{2}\/\d{2}\/\d{4}|, détail dans KPI RH)\)).*$/s;
 
 const absencesText = (list: string) => `${many(listCount(list), "absence", "absences")}, ${KPI}`;
 const continuity = (_m: string, what: string, month: string, list: string) => `${many(listCount(list), "contrat continu non vérifiable", "contrats continus non vérifiables")} en ${month} (${what.toLowerCase()}, ${KPI})`;
@@ -59,19 +65,18 @@ const continuityList = (_m: string, list: string) => `contrats continus non vér
 export function publicReason(text: string): string {
   return text
     .replace(CONTINUITY, continuity)
-    .replace(CONTINUITY_DATED, continuity)
     .replace(CONTINUITY_LIST, continuityList)
-    .replace(CONTINUITY_LIST_DATED, continuityList)
     .replace(CONTINUITY_LIST_CUT, `contrats continus non vérifiables (${KPI})`)
     .replace(ABSENCE_UNKNOWN_CONTRACT, `1 absence rattachée à un contrat inconnu du référentiel (${KPI})`)
     .replace(ABSENCE_DATE, (_m, which: string) => `1 absence sans date de ${which} renseignée dans PayFit (${KPI})`)
     .replace(UNCERTAIN_LIST, (_m, list: string, close: string) => `incertaine(s) (${close === ")" ? absencesText(list) : KPI})`)
     .replace(ID_LIST, (_m, before: string, list: string) => `${before}(${absencesText(list)})`)
-    .replace(BASE_ND, (_m, before: string) => `${before}${NO_BASE}`)
+    .replace(BASE_ND, (_m, before: string, keep: string) => `${before}${keep}${NO_BASE}`)
     .replace(NO_BASE_RUN, (run: string) => `${many(run.split(" ; ").length, "contrat", "contrats")} sans base de projection (${HYP})`)
     .replace(OTHER_CONTRACT, "sous un autre contrat $1")
     .replace(NOT_RETURNED, "contrat non renvoyé par PayFit")
-    .replace(NEUTRALIZED, "contrat continu neutralisé (avec un autre contrat le $1)");
+    .replace(NEUTRALIZED, "contrat continu neutralisé (avec un autre contrat le $1)")
+    .replace(NEUTRALIZED_CUT, "contrat continu neutralisé (avec un autre contrat, détail dans KPI RH)");
 }
 
 // Chaque chaîne d'un modèle de chapitre (raisons n.d. des cellules, des cartes et des blocs, notes, tuiles, alertes, mentions,

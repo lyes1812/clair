@@ -37,6 +37,7 @@ import {
   type MotifLineK,
   type RateK,
 } from "@/lib/viz/croisee-absences";
+import { absenceTypeText } from "@/lib/viz/kpi";
 import { periodLabel } from "@/lib/viz/synthese";
 import { absence, DSN_ABSENCES, kpiInput, readAbsences } from "./helpers/kpi";
 import { dsnFixtureBuild, payfitEdgeBuild } from "./helpers/rh";
@@ -569,6 +570,74 @@ describe("masquage : fonctions pures (cas écrits à la main, seuil 3)", () => {
       published: { months: [true], retainedCur: true, allCur: true, retainedPrev: true, allPrev: true },
     };
     expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"], allCur: "secondary", allPrev: "shown" });
+  });
+});
+
+// Borne basse sans aucune demi-journée comptée (seulement des demi-journées incertaines) : l'effectif n'est pas dénombré. La cellule est
+// « non vérifiable » (jamais « ≥ 0 », qui dirait qu'au moins une personne a une absence de ce motif ce mois-là), avec masquage
+// secondaire. Cas écrits à la main.
+describe("seuil de confidentialité : borne basse sans personne comptée (demi-journées seulement incertaines)", () => {
+  const lb0: CongeCell = { kind: "lower_bound", half: 0, persons: 0, who: [] };
+  const NV = { nd: SEUIL_NON_VERIFIABLE };
+
+  it("masked : n.d. « non vérifiable », quel que soit le seuil ; une borne basse avec des personnes comptées garde la règle du seuil", () => {
+    expect(masked(lb0, 3)).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
+    expect(masked(lb0, 1)).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
+    expect(masked({ kind: "lower_bound", half: 4, persons: 1 }, 3)).toEqual({ kind: "nd", reason: SOUS_SEUIL(3) });
+  });
+
+  it("aVenirMask : le mois en borne basse sans personne est non vérifiable ; l'autre mois de la ligne (total affiché) est masqué en second", () => {
+    // Ligne : octobre ≥ 0 (aucune personne comptée), novembre 6 demi-journées (4 personnes) ; total ≥ 6 (4 personnes), affiché. Seuil 3 :
+    // octobre seul masqué se lirait par différence (total − novembre) → novembre masqué en second (4 personnes ≥ 3).
+    expect(aVenirMask([{ months: [lb0, v(6, 4)], total: { kind: "lower_bound", half: 6, persons: 4 } }], 3)).toEqual({ months: [["unverifiable", "secondary"]], total: ["shown"] });
+    // Ligne entièrement incertaine : mois et total non vérifiables.
+    expect(aVenirMask([{ months: [lb0], total: lb0 }], 3)).toEqual({ months: [["unverifiable"]], total: ["unverifiable"] });
+  });
+
+  it("congesMask : motif non retenu en borne basse sans personne ; l'autre motif non retenu est masqué en second dans la période, puis un de ses mois", () => {
+    // Seuil 3. Ligne 0 (non retenue) : juillet ≥ 0 (aucune personne), août 0 ; période ≥ 0 ; N-1 0. Ligne 1 (non retenue) : juillet 20
+    // (4 personnes), août 7 (4) ; période 27 (4) ; N-1 30 (4). Ligne 2 : seul motif retenu, exempté. Taux tous motifs publié.
+    // Période, autres motifs (total : tous motifs − tuile) : ligne 0 non vérifiable, seule masquée → ligne 1 (4 personnes) masquée en
+    // second. Ligne 1 : total masqué, ses deux mois affichés le redonneraient → le plus petit, août (7), masqué.
+    const g = {
+      lines: [
+        { chosen: false, months: [lb0, v(0, 0)], total: lb0, prev: v(0, 0) },
+        { chosen: false, months: [v(20, 4), v(7, 4)], total: v(27, 4), prev: v(30, 4) },
+        { chosen: true, months: [v(0, 0), v(4, 1)], total: v(4, 1), prev: v(2, 1) },
+      ],
+      exempt: 2,
+      published: { months: [true, true], retainedCur: true, allCur: true, retainedPrev: true, allPrev: true },
+    };
+    expect(congesMask(g, 3)).toEqual({
+      months: [
+        ["unverifiable", "shown"],
+        ["shown", "secondary"],
+        ["shown", "shown"],
+      ],
+      cur: ["unverifiable", "secondary", "shown"],
+      prev: ["shown", "shown", "shown"],
+      allCur: "shown",
+      allPrev: "shown",
+    });
+  });
+
+  it("buildAbsences : aucune cellule « ≥ 0 » ; la ligne incertaine est n.d. « non vérifiable » dans le tableau par motif, les demi-journées prises et les absences à venir", () => {
+    // test_rare (non retenu) : seulement des demi-journées incertaines en juillet (≥ 0, aucune personne), rien en août ni en septembre.
+    const conges: CongesPris = { ...CONGES, lines: CONGES.lines.map((l) => (l.type === "test_rare" ? { ...l, months: [lb0, v(0, 0), v(0, 0)], total: lb0 } : l)) };
+    const motifs = {
+      ...data().motifs,
+      current: { ...data().motifs.current, lines: data().motifs.current.lines.map((l): MotifLineK => (l.type === "test_rare" ? { type: "test_rare", chosen: false, kind: "lower_bound", half: 0, ratio: { num: 0, den: 1820 } } : l)) },
+    };
+    const aVenir = { kind: "value" as const, after: "2026-09", months: ["2026-10"], lines: [{ type: "test_rtt", statut: "pose" as const, months: [lb0], total: lb0 }], nonRattachees: 0 };
+    const m = buildAbsences(input({}, { conges: { current: conges, previous: CONGES_N1 }, motifs, aVenir }));
+    const json = JSON.stringify(m);
+    expect(json).not.toMatch(/≥ 0(?![\d,])/);
+    expect(json).not.toContain("≥ 0,00");
+    const rare = (id: string) => m.tables.find((t) => t.id === id)!.rows.find((r) => r.cells[0] === absenceTypeText("test_rare"))!;
+    expect(rare(TABLE_IDS.conges).cells[1]).toEqual(NV);
+    expect(rare(TABLE_IDS.conges).cells[4]).toEqual(NV);
+    expect(rare(TABLE_IDS.motifs).cells.slice(2, 4)).toEqual([NV, NV]);
+    expect(m.tables.find((t) => t.id === TABLE_IDS.aVenir)!.rows[0].cells.slice(2)).toEqual([NV, NV]);
   });
 });
 

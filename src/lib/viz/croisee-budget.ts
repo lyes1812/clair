@@ -42,8 +42,10 @@ import { landingView, nd, type TileValue } from "@/lib/viz/synthese";
 // contributeurs (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres d'un
 // service retenu par le filtre (réalisé, contrats observés, pont et ETP) quand ce service compte de 1 à (seuil − 1) contrats
 // observés (contrats qui portent une ligne de la masse affichée : masseContracts), ou aucun contrat pour une valeur non nulle
-// (seuil non vérifiable). Masquage secondaire par la fonction partagée maskGroups (structure.ts) : aucune valeur masquée ne se
-// retrouve par différence. Les totaux de toute l'entreprise ne sont jamais masqués.
+// (seuil non vérifiable ; de même pour les lignes du journal sans contrat d'un montant non nul, maskCohorts). Masquage secondaire par
+// les fonctions partagées (structure.ts), contrats distincts comptés une fois d'un groupe masqué à l'autre (mois, paliers) : aucune
+// valeur masquée ne se retrouve par différence. Raison : « non affiché (seuil de confidentialité : N contrats) », tous ces groupes
+// étant comptés en contrats. Les totaux de toute l'entreprise ne sont jamais masqués.
 
 // Identifiants du glossaire vers lesquels renvoient les deux chapitres (un test vérifie que chacun existe).
 export const BUDGET_CX_TERMS = {

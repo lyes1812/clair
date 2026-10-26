@@ -107,12 +107,12 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     expect(maskNonRecurring({ realised: 2, projected: null }, { realised: 5_000, projected: 3_000 }, 2).projected).toBe("unverifiable");
   });
 
-  it("contrats observés : la ligne des lignes sans contrat n'est masquée qu'au masquage secondaire", () => {
-    expect(def(T.confidentialite)).toContain("La ligne « Lignes du journal sans contrat » des contrats observés ne décrit aucune personne : elle n'est masquée qu'au masquage secondaire.");
+  it("contrats observés : les lignes sans contrat d'un montant non nul sont « non vérifiables », avec masquage secondaire", () => {
+    expect(def(T.confidentialite)).toContain("La ligne « Lignes du journal sans contrat » des contrats observés ne décrit aucun contrat dénombré : d'un montant non nul, elle est n.d. « seuil de confidentialité non vérifiable », quel que soit le seuil, avec masquage secondaire dans chaque colonne.");
     // N-1 : a = 100 (N-1 seulement), b = 200 et d = 50 (les deux), x = 10 (sans contrat) ; N : b = 250, d = 60, c = 80 (N seulement),
-    // x = 30. Seuil 2 : « N-1 seulement » et « N seulement » (1 contrat chacun) masqués ; dans la colonne N-1, la ligne sans contrat
-    // (10) ne protège personne : « les deux » (2 contrats) est masqué. Colonne N : « N seulement » et « les deux » (masqué en second,
-    // passé en effectif non dénombré) ne comptent qu'un contrat → la ligne sans contrat est masquée en second.
+    // x = 30. Seuil 2 : « N-1 seulement » et « N seulement » (1 contrat chacun) masqués ; la ligne sans contrat (10 et 30) n'est pas
+    // vérifiable. Colonne N-1 : « N-1 seulement » (1 contrat) et la ligne sans contrat (aucun contrat compté) → « les deux » (2 contrats)
+    // masqué en second.
     const p = partitionCohorts(
       new Map([
         ["a", 100],
@@ -130,9 +130,10 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     );
     expect(p.kind).toBe("value");
     if (p.kind !== "value") return;
-    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "secondary" });
-    // Sans groupe masqué, la ligne sans contrat (valeur non nulle, aucun contrat) reste affichée.
-    expect(maskCohorts(p, 1)).toEqual({ onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" });
+    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "unverifiable" });
+    // Seuil 1 : la ligne sans contrat reste non vérifiable ; colonne N-1 : « N-1 seulement » (100 < 250) masqué en second ; colonne N :
+    // « N seulement » (80 < 310). « Les deux » reste affiché.
+    expect(maskCohorts(p, 1)).toEqual({ onlyPrev: "secondary", onlyCur: "secondary", both: "shown", outside: "unverifiable" });
   });
 
   it("atterrissage : une raison de projection qui nomme un contrat devient un nombre, et l'écart avec la carte du Studio RH est écrit", () => {

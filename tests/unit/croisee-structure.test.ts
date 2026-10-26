@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { maskCohorts, partitionCohorts, type CohortPartition } from "@/lib/croisee/cohortes";
-import { confidentialiteReason, effectifStructure, maskGroups, maskReason, maskRelations, personOf, personsByGroup, SEUIL_NON_VERIFIABLE, type MaskCell, type StructureContract } from "@/lib/croisee/structure";
+import { confidentialiteReason, effectifStructure, maskGroups, maskReason, maskRelations, membersByGroup, personOf, personsByGroup, SEUIL_NON_VERIFIABLE, type MaskCell, type StructureContract } from "@/lib/croisee/structure";
 
 // Structure de l'effectif (chapitre 02) : cas de référence écrits à la main, valeurs fictives. Six contrats de cinq personnes (la
 // personne p1 a deux contrats) :
@@ -146,7 +146,10 @@ describe("maskRelations : plusieurs relations, total masquable, lignes en bloc (
     // Coût N : « les deux » serait la seule ligne masquée ; « N seulement » et les lignes sans contrat ne décrivent personne →
     // protection impossible : toute la colonne est masquée, et chaque ligne l'est en bloc. Seul le total reste affiché.
     expect(rowStatus(COLUMNS, SIZE, 3)).toEqual({ sortie: "masked", entree: "secondary", deux: "secondary", hors: "secondary" });
-    // Même résultat par maskCohorts (contrats observés du chapitre 06), sur la partition construite à la main.
+    // Par maskCohorts (contrats observés du chapitre 06), sur la partition construite à la main : les lignes sans contrat, d'un montant
+    // non nul, ne sont pas vérifiables (masquées d'emblée, aucun contrat compté). Contrats : « les deux » (20) masqué en second. Coût N :
+    // « les deux » et les lignes sans contrat masqués, deux lignes qui décrivent quelqu'un, 20 contrats ≥ 3 : « N seulement » (vide,
+    // 0,00 €) reste affiché, il ne désigne personne.
     const prev = new Map<string, number>([["S", 300_000], ["hors", 50_000]]);
     const cur = new Map<string, number>([["hors", 70_000]]);
     for (let i = 1; i <= 20; i++) {
@@ -155,7 +158,7 @@ describe("maskRelations : plusieurs relations, total masquable, lignes en bloc (
     }
     const p = partitionCohorts(prev, cur, "hors") as Extract<CohortPartition, { kind: "value" }>;
     expect([p.onlyPrev.count, p.onlyCur.count, p.both.count, p.onlyPrev.prev, p.both.prev, p.both.cur]).toEqual([1, 0, 20, 300_000, 6_000_000, 6_300_000]);
-    expect(maskCohorts(p, 3)).toEqual({ onlyPrev: "masked", onlyCur: "secondary", both: "secondary", outside: "secondary" });
+    expect(maskCohorts(p, 3)).toEqual({ onlyPrev: "masked", onlyCur: "shown", both: "secondary", outside: "unverifiable" });
   });
 
   it("avec une entrée de 3 contrats : la sortie est protégée par la plus petite ligne qui compte des contrats, les lignes sans contrat restent", () => {
@@ -219,6 +222,18 @@ describe("personsByGroup : effectif d'un groupe en personnes distinctes (cas éc
     // Seuil 2 : C (2 contrats, 1 personne) est masqué ; A (2 personnes, plus petite cellule affichée) l'est en secondaire.
     const sizes = personsByGroup(members);
     expect(maskGroups([{ size: sizes.A, value: 3 }, { size: sizes.B, value: 3 }, { size: sizes.C, value: 2 }], 2, true)).toEqual(["secondary", "shown", "masked"]);
+    // membersByGroup : les mêmes personnes, distinctes et triées, par groupe (q1 figure dans A et dans B).
+    expect(membersByGroup(members)).toEqual({ A: ["q1", "q2"], B: ["contrat:b2", "contrat:b3", "q1"], C: ["q3"] });
+  });
+
+  it("members : une personne présente dans deux groupes masqués n'y compte qu'une fois (maskGroups)", () => {
+    // Seuil 3, total affiché. A : p1, p2 (2 personnes) ; B : p1, p3 (2) ; C : 10 personnes. Avec les membres, A et B masqués décrivent
+    // p1, p2, p3 (3 ≥ 3) : C reste affiché. B porté par p1 et p2 : A et B ne décrivent que 2 personnes → C masqué en second. Sans les
+    // membres, 2 + 2 = 4 ≥ 3 aurait laissé C affiché.
+    const C = Array.from({ length: 10 }, (_, i) => `c${i + 1}`);
+    expect(maskGroups([{ size: 2, value: 2, members: ["p1", "p2"] }, { size: 2, value: 2, members: ["p1", "p3"] }, { size: 10, value: 10, members: C }], 3, true)).toEqual(["masked", "masked", "shown"]);
+    expect(maskGroups([{ size: 2, value: 2, members: ["p1", "p2"] }, { size: 2, value: 2, members: ["p1", "p2"] }, { size: 10, value: 10, members: C }], 3, true)).toEqual(["masked", "masked", "secondary"]);
+    expect(maskGroups([{ size: 2, value: 2 }, { size: 2, value: 2 }, { size: 10, value: 10 }], 3, true)).toEqual(["masked", "masked", "shown"]);
   });
 });
 

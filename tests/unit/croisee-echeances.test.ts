@@ -37,7 +37,7 @@ const CONTRATS: EcheanceContract[] = [
   { person: "pk", startDate: "2026-11-15", endDate: null, nature: "02", endUnknown: true },
   { person: "pn", startDate: "2027-02-01", endDate: null, nature: "02", endUnknown: true },
 ];
-const L = (month: string, nature: string, fins: number, entrees: number, finsPersons: number, entreesPersons: number) => ({ month, nature, fins, entrees, finsPersons, entreesPersons });
+const L = (month: string, nature: string, fins: number, entrees: number, finsPersons: number, entreesPersons: number, finsMembers: string[] = [], entreesMembers: string[] = []) => ({ month, nature, fins, entrees, finsPersons, entreesPersons, finsMembers, entreesMembers });
 
 describe("contractEcheances : cas de référence", () => {
   it("fins de contrat et entrées dans l'horizon, par mois et par nature, depuis la date de lecture ; fins non datées à part", () => {
@@ -47,7 +47,7 @@ describe("contractEcheances : cas de référence", () => {
       to: "2026-12-29",
       horizon: 90,
       months: ["2026-10", "2026-11", "2026-12"],
-      lines: [L("2026-10", "02", 1, 1, 1, 1), L("2026-11", "01", 0, 1, 0, 1), L("2026-11", "02", 0, 1, 0, 1), L("2026-12", "02", 1, 0, 1, 0)],
+      lines: [L("2026-10", "02", 1, 1, 1, 1, ["pa"], ["pc"]), L("2026-11", "01", 0, 1, 0, 1, [], ["pb"]), L("2026-11", "02", 0, 1, 0, 1, [], ["pk"]), L("2026-12", "02", 1, 0, 1, 0, ["pc"], [])],
       fins: 2,
       entrees: 3,
       undated: 2,
@@ -64,7 +64,7 @@ describe("contractEcheances : cas de référence", () => {
 
   it("horizon plus court : seules les échéances jusqu'au 15/10/2026 (15 jours) restent ; le CDD qui entre le 15/11 est hors horizon", () => {
     const e = contractEcheances({ referenceDate: "2026-09-30", horizonDays: 15, natures: ["01", "02"], contracts: CONTRATS });
-    expect(e.kind === "value" && [e.months, e.lines, e.endUndated, e.endUndatedPersons]).toEqual([["2026-10"], [L("2026-10", "02", 1, 1, 1, 1)], 1, 1]);
+    expect(e.kind === "value" && [e.months, e.lines, e.endUndated, e.endUndatedPersons]).toEqual([["2026-10"], [L("2026-10", "02", 1, 1, 1, 1, ["pa"], ["pc"])], 1, 1]);
   });
 
   it("aucune échéance : liste vide, totaux à 0 (connus), jamais n.d.", () => {
@@ -89,7 +89,7 @@ describe("contractEcheances : cas de référence", () => {
         { person: "w", startDate: "2026-05-01", endDate: null, nature: "02", endUnknown: true },
       ],
     });
-    expect(e).toMatchObject({ kind: "value", lines: [L("2026-10", "02", 3, 0, 2, 0)], fins: 3, undated: 2, undatedPersons: 1, endUndated: 2, endUndatedPersons: 1 });
+    expect(e).toMatchObject({ kind: "value", lines: [L("2026-10", "02", 3, 0, 2, 0, ["x", "y"], [])], fins: 3, undated: 2, undatedPersons: 1, endUndated: 2, endUndatedPersons: 1 });
   });
 
   it("sans date de lecture ou avec un horizon illisible : n.d. avec la raison", () => {

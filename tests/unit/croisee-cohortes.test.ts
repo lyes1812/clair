@@ -73,48 +73,60 @@ describe("partitionCohorts — cas limites", () => {
   });
 });
 
-// Seuil de confidentialité : chaque ligne (nombre et montants) est masquée d'un bloc ; masquage secondaire dans chaque colonne dont le
-// total est affiché (fonction partagée maskGroups), jusqu'à ce que plus rien ne change. Cas calculés à la main.
+// Seuil de confidentialité : chaque ligne (nombre et montants) est masquée d'un bloc ; les lignes du journal sans contrat d'un montant
+// non nul ne sont pas vérifiables (aucun contrat dénombré) ; masquage secondaire dans chaque colonne dont le total est affiché (fonction
+// partagée maskRelations, les trois groupes étant disjoints), jusqu'à ce que plus rien ne change. Cas calculés à la main.
 describe("maskCohorts — seuil de confidentialité", () => {
+  // Seulement N-1 : A (1 contrat, 1 000,00 €) ; seulement N : D, E (2 contrats, 1 500,00 €) ; les deux : B, C (2 contrats, 2 500,00 €
+  // en N-1, 2 550,00 € en N) ; lignes sans contrat : 10,00 € en N-1, 25,00 € en N.
   const ref = partitionCohorts(map({ A: 100_000, B: 200_000, C: 50_000, [HORS]: 1_000 }), map({ B: 210_000, C: 45_000, D: 120_000, E: 30_000, [HORS]: 2_500 }), HORS) as Extract<CohortPartition, { kind: "value" }>;
 
-  it("seuil 1 : aucun groupe n'est sous le seuil, rien n'est masqué", () => {
-    expect(maskCohorts(ref, 1)).toEqual({ onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" });
+  it("seuil 1 : lignes sans contrat non vérifiables ; la plus petite ligne qui compte un contrat est masquée en second dans les colonnes N-1 et N", () => {
+    // Coût N-1 : lignes sans contrat seules masquées, elles se liraient par 3 510,00 − 1 000,00 − 2 500,00 → « seulement N-1 »
+    // (1 000,00 € < 2 500,00 €) masqué en second. Coût N : « seulement N » (1 500,00 € < 2 550,00 €). Contrats et contribution : deux
+    // lignes masquées ou plus, 3 contrats ≥ 1. « Les deux » reste affiché.
+    expect(maskCohorts(ref, 1)).toEqual({ onlyPrev: "secondary", onlyCur: "secondary", both: "shown", outside: "unverifiable" });
+    // Sans lignes sans contrat : rien n'est masqué.
+    const clean = partitionCohorts(map({ A: 100_000, B: 200_000, C: 50_000 }), map({ B: 210_000, C: 45_000, D: 120_000, E: 30_000 }), HORS) as Extract<CohortPartition, { kind: "value" }>;
+    expect(maskCohorts(clean, 1)).toEqual({ onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" });
+    // Lignes sans contrat qui se compensent (0,00 € en N-1 et en N) : elles ne désignent personne, rien n'est masqué.
+    const zero = partitionCohorts(map({ A: 100_000, B: 200_000, [HORS]: 0 }), map({ B: 210_000, D: 120_000, [HORS]: 0 }), HORS) as Extract<CohortPartition, { kind: "value" }>;
+    expect(zero.outside).toEqual({ prev: 0, cur: 0, delta: 0 });
+    expect(maskCohorts(zero, 1)).toEqual({ onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" });
   });
 
   it("seuil 2 : « seulement N-1 » (1 contrat) masqué ; colonne Contrats → « seulement N » (2, premier des plus petits) ; colonne N-1 → « les deux » (les lignes sans contrat ne protègent personne)", () => {
     // Colonne Contrats : 1 masqué ; plus petit affiché qui compte des contrats : « seulement N » (2) avant « les deux » (2) → 1 + 2 ≥ 2.
-    // Colonne Coût N-1 : « seulement N-1 » masqué ; les lignes sans contrat (10,00 €) ne décrivent personne → « les deux » secondaire.
-    // Colonne Coût N : « seulement N » et « les deux » arrivent masqués en second (passés en effectif non dénombré : aucune personne
-    // comptée) ; les lignes sans contrat ne peuvent pas les protéger → protection impossible, toute la colonne est masquée.
-    expect(maskCohorts(ref, 2)).toEqual({ onlyPrev: "masked", onlyCur: "secondary", both: "secondary", outside: "secondary" });
+    // Colonne Coût N-1 : « seulement N-1 » (1 contrat) et lignes sans contrat (aucun contrat dénombré) → « les deux » secondaire.
+    // Colonnes Coût N et contribution : toutes les lignes sont déjà masquées.
+    expect(maskCohorts(ref, 2)).toEqual({ onlyPrev: "masked", onlyCur: "secondary", both: "secondary", outside: "unverifiable" });
   });
 
-  it("seuil 3 : les trois groupes (1, 2, 2 contrats) masqués ; chaque colonne a déjà deux lignes masquées, les lignes sans contrat restent", () => {
-    expect(maskCohorts(ref, 3)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "masked", outside: "shown" });
+  it("seuil 3 : les trois groupes (1, 2, 2 contrats) masqués ; lignes sans contrat non vérifiables", () => {
+    expect(maskCohorts(ref, 3)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "masked", outside: "unverifiable" });
   });
 
   it("sans lignes sans contrat : un groupe masqué entraîne l'autre groupe de sa colonne", () => {
     // N-1 : A 1 000,00 € ; N : A 1 100,00 €, B 900,00 €. Seulement N : B (1 contrat) ; les deux : A (1 contrat). Seuil 2 : les deux
-    // groupes sont sous le seuil. Colonne Contrats : deux masqués. Colonne Coût N-1 : « les deux » masqué, seul ; « seulement N-1 »
-    // (0,00 €, vide) affiché donnerait N-1 des « deux » par différence → secondaire.
+    // groupes sont sous le seuil. Colonne Contrats : deux masqués, 2 contrats. Colonne Coût N-1 : « les deux » masqué, seul ;
+    // « seulement N-1 » (0,00 €, vide) ne décrit personne : protection impossible, il est masqué aussi (sinon N-1 des « deux » se lirait
+    // par différence).
     const p = partitionCohorts(map({ A: 100_000 }), map({ A: 110_000, B: 90_000 })) as Extract<CohortPartition, { kind: "value" }>;
     expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "secondary", onlyCur: "masked", both: "masked", outside: "shown" });
-    // Seulement N : B (1) ; les deux : A, C, D (3). Seuil 2 : B masqué. Colonne Contrats : plus petit affiché = « seulement N-1 »
-    // (0) → secondaire. Colonne Coût N : B masqué, seul → « les deux » secondaire (seule autre ligne). Colonne N-1 : « seulement
-    // N-1 » (secondaire) et « les deux » (secondaire) → deux lignes masquées. Tout est masqué, sauf le total.
+    // Seulement N : B (1) ; les deux : A, C, D (3). Seuil 2 : B masqué. Colonne Contrats : « seulement N-1 » (vide) ne protège pas →
+    // « les deux » (3) secondaire. Colonne Coût N-1 : « les deux » masqué, seule ligne qui décrit quelqu'un → « seulement N-1 » masqué
+    // aussi. Tout est masqué, sauf le total.
     const q = partitionCohorts(map({ A: 1_000, C: 1_000, D: 1_000 }), map({ A: 1_000, B: 5_000, C: 1_000, D: 1_000 })) as Extract<CohortPartition, { kind: "value" }>;
     expect(maskCohorts(q, 2)).toEqual({ onlyPrev: "secondary", onlyCur: "masked", both: "secondary", outside: "shown" });
   });
 
-  it("le masquage secondaire choisit la plus petite valeur absolue (une contribution négative n'est pas « la plus petite »)", () => {
+  it("contribution négative et lignes sans contrat négatives : masquées en bloc ; lignes sans contrat non vérifiables", () => {
     // N-1 : A 5 000,00 € (sort), B, C, D 1 000,00 € chacun ; N : B, C, D 1 000,00 € ; E 800,00 € (entre) ; sans contrat −20,00 € en N.
-    // Seuil 2 : « seulement N-1 » (A) et « seulement N » (E) masqués. Colonne Contrats : 2 masqués (2 contrats). Colonne N-1 : A
-    // masqué, seul ; affichés : les deux 3 000,00 € ; → les deux secondaire. Colonne N : E (1 contrat) et les deux (masqués en second,
-    // passés en effectif non dénombré) ne comptent qu'un contrat ; les lignes sans contrat (−20,00 €) ne protègent personne →
-    // protection impossible, elles sont masquées aussi.
+    // Seuil 2 : « seulement N-1 » (A) et « seulement N » (E) masqués ; lignes sans contrat (−20,00 €) non vérifiables. Colonne
+    // Contrats : 2 masqués (2 contrats). Colonne N-1 : A masqué, seul ; affichés : les deux 3 000,00 € → les deux secondaire (4 contrats).
+    // Colonne N et contribution : déjà trois lignes masquées.
     const p = partitionCohorts(map({ A: 500_000, B: 100_000, C: 100_000, D: 100_000 }), map({ B: 100_000, C: 100_000, D: 100_000, E: 80_000, [HORS]: -2_000 }), HORS) as Extract<CohortPartition, { kind: "value" }>;
-    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "secondary" });
+    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "unverifiable" });
   });
 });
 
