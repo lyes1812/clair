@@ -29,6 +29,12 @@ import type { AbsenceRow } from "@/lib/rh/referential/types";
 
 export type CongeValue = { kind: Kind; half: number; persons: number; who?: readonly number[] };
 export type CongeCell = CongeValue | { kind: "nd"; reason: string };
+
+// Effectif d'une cellule pour le seuil de confidentialité : les personnes des demi-journées comptées. Une borne basse sans aucune
+// demi-journée comptée (seulement des demi-journées incertaines : statut non renseigné, moment de début ou de fin absent, jours hors
+// contrat) décrit au moins une absence sans personne dénombrée : son effectif n'est pas dénombré (null, seuil non vérifiable), jamais
+// « 0 personne ». Une borne basse avec des personnes comptées garde ce nombre (borne basse de l'effectif).
+export const congeSize = (c: CongeValue): number | null => (c.kind === "lower_bound" && c.persons === 0 ? null : c.persons);
 export type CongeLine = { type: string; chosen: boolean; months: CongeCell[]; total: CongeCell };
 export type CongesPris = { window: Window; lines: CongeLine[]; emptyReason: string | null };
 

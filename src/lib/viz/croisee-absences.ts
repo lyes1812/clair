@@ -3,6 +3,7 @@ import type { ChartSeries } from "@/components/charts/shared";
 import {
   allMotifsInput,
   congesAVenir,
+  congeSize,
   congesPris,
   motifInput,
   publicMonth,
@@ -178,11 +179,14 @@ export function dayGapCell(cur: CongeCell, prev: CongeCell): CroiseeCell {
 }
 
 // Masquage principal d'une seule cellule : de 1 à (seuil − 1) personnes ⇒ n.d. (aucune personne : rien à protéger) ; personnes non
-// dénombrées ⇒ n.d. Le n.d. du moteur garde sa raison. Le masquage secondaire est fait par maskCells.
+// dénombrées (borne basse sans demi-journée comptée : congeSize) ⇒ n.d. Le n.d. du moteur garde sa raison. Le masquage secondaire est
+// fait par maskCells.
 export function masked(c: CongeCell | undefined, seuil: number): CongeCell {
   if (!c) return { kind: "nd", reason: SEUIL_NON_VERIFIABLE };
   if (c.kind === "nd") return c;
-  return c.persons > 0 && c.persons < seuil ? { kind: "nd", reason: SOUS_SEUIL(seuil) } : c;
+  const n = congeSize(c);
+  if (n === null) return { kind: "nd", reason: SEUIL_NON_VERIFIABLE };
+  return n > 0 && n < seuil ? { kind: "nd", reason: SOUS_SEUIL(seuil) } : c;
 }
 
 const bpsOf = (r: RateK): number | null => (r.kind === "exact" && r.ratio.den > 0 ? ratioBps(r.ratio) : null);
@@ -223,8 +227,10 @@ export function maskCells(cells: readonly MaskCell[], relations: readonly (reado
   );
 }
 
+// Taille d'une cellule : congeSize (une borne basse sans demi-journée comptée n'a pas d'effectif dénombré : non vérifiable, avec
+// masquage secondaire ; jamais « ≥ 0 » affiché).
 const maskCellOf = (c: CongeCell | undefined, exempt = false): MaskCell =>
-  !c ? { size: null, value: 0 } : c.kind === "nd" ? { size: null, value: null } : { size: c.persons, value: c.half, exempt, ...(c.who ? { members: c.who } : {}) };
+  !c ? { size: null, value: 0 } : c.kind === "nd" ? { size: null, value: null } : { size: congeSize(c), value: c.half, exempt, ...(c.who ? { members: c.who } : {}) };
 
 // Grille « pris par motif » : pour chaque motif, les mois de la période, le total de la période et celui de N-1 (ce sont aussi les
 // colonnes du tableau par motif). published : totaux affichés ailleurs dans le chapitre (tableau mensuel des motifs retenus, tuile

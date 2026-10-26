@@ -9,7 +9,7 @@
 // à l'écart total. Contribution d'un groupe = montant N − montant N-1 (un groupe absent d'une période n'y a aucune ligne).
 
 import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
-import { maskGroups, type MaskStatus } from "./structure";
+import { maskGroups, maskRelations, type MaskCell, type MaskStatus } from "./structure";
 
 export type CohortGroup = { count: number; prev: number; cur: number; delta: number };
 export type CohortOutside = { prev: number | null; cur: number | null; delta: number }; // null : aucune ligne sans clé dans la période
@@ -64,46 +64,38 @@ export function partitionCohorts(prev: ReadonlyMap<string, number>, cur: Readonl
 //
 // Chaque ligne de la partition est masquée d'un bloc (nombre et montants) : une ligne dont le nombre et deux montants sont connus
 // donne le troisième (contribution = coût N − coût N-1). Masquage principal : un groupe de 1 à (seuil − 1) contrats. La ligne des
-// lignes sans contrat ne décrit aucune personne : jamais masquée au premier tour, elle peut l'être au masquage secondaire. Le total
-// (toute la population lue) n'est jamais masqué. Masquage secondaire : chaque colonne dont le total est affiché est un ensemble de
-// lignes ; la fonction partagée maskGroups (structure.ts) y désigne la plus petite ligne affichée (en valeur absolue) quand une seule
-// est masquée, jusqu'à ce que plus rien ne change. Aucune valeur masquée ne se retrouve par différence d'une colonne.
+// lignes sans contrat ne décrit aucun contrat dénombré : avec un montant non nul (N-1, N ou contribution), son effectif n'est pas
+// vérifiable (taille null : n.d. « seuil de confidentialité non vérifiable », quel que soit le seuil) ; avec des montants nuls, elle
+// ne désigne personne (taille 0). Le total (toute la population lue) n'est jamais masqué. Masquage secondaire : chaque colonne dont le
+// total est affiché est une relation de la fonction partagée maskRelations (structure.ts), chaque ligne un bloc ; les trois groupes
+// sont disjoints par construction (un contrat n'appartient qu'à un groupe), leurs tailles s'additionnent. L'ensemble masqué de chaque
+// colonne compte au moins « seuil » contrats et deux lignes qui décrivent quelqu'un ; aucune valeur masquée ne se retrouve par
+// différence d'une colonne.
 export type CohortRowId = "onlyPrev" | "onlyCur" | "both" | "outside";
-export type CohortRowStatus = "shown" | "masked" | "secondary";
+export type CohortRowStatus = "shown" | "masked" | "secondary" | "unverifiable";
 export type CohortMask = Record<CohortRowId, CohortRowStatus>;
 export const COHORT_ROWS: readonly CohortRowId[] = ["onlyPrev", "onlyCur", "both", "outside"];
 
 export function maskCohorts(p: Extract<CohortPartition, { kind: "value" }>, seuil: number): CohortMask {
-  const size = (id: CohortRowId): number => (id === "outside" ? 0 : p[id].count);
-  const st: CohortMask = { onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" };
-  for (const id of COHORT_ROWS) if (size(id) > 0 && size(id) < seuil) st[id] = "masked";
-  // Colonnes : lignes qui y ont une cellule (une ligne vide par construction n'y figure pas) et leur valeur dans la colonne.
   const o = p.outside;
+  const outsideSize = o && [o.prev, o.cur, o.delta].some((v) => v !== null && v !== 0) ? null : 0;
+  const size = (id: CohortRowId): number | null => (id === "outside" ? outsideSize : p[id].count);
+  // Colonnes : lignes qui y ont une cellule (une ligne vide par construction n'y figure pas) et leur valeur dans la colonne.
   const columns: [CohortRowId, number][][] = [
     [["onlyPrev", p.onlyPrev.count], ["onlyCur", p.onlyCur.count], ["both", p.both.count]],
     [["onlyPrev", p.onlyPrev.prev], ["both", p.both.prev], ...(o && o.prev !== null ? [["outside", o.prev] as [CohortRowId, number]] : [])],
     [["onlyCur", p.onlyCur.cur], ["both", p.both.cur], ...(o && o.cur !== null ? [["outside", o.cur] as [CohortRowId, number]] : [])],
     [["onlyPrev", p.onlyPrev.delta], ["onlyCur", p.onlyCur.delta], ["both", p.both.delta], ...(o ? [["outside", o.delta] as [CohortRowId, number]] : [])],
   ];
-  for (let changed = true; changed; ) {
-    changed = false;
-    for (const col of columns) {
-      // Une ligne masquée au masquage secondaire compte comme une ligne à protéger (effectif « non vérifiable » pour maskGroups).
-      const out = maskGroups(
-        col.map(([id, v]) => ({ size: st[id] === "secondary" ? null : size(id), value: Math.abs(v) })),
-        seuil,
-        true,
-      );
-      out.forEach((s, k) => {
-        const id = col[k][0];
-        if (s === "secondary" && st[id] === "shown") {
-          st[id] = "secondary";
-          changed = true;
-        }
-      });
-    }
-  }
-  return st;
+  const cells: (MaskCell & { row: CohortRowId })[] = [];
+  const relations = columns.map((col) => ({ cells: col.map(([row, v]) => cells.push({ row, size: size(row), value: Math.abs(v), block: row }) - 1) }));
+  const st = maskRelations(cells, relations, seuil);
+  // Statut d'une ligne : celui de ses cellules (masquées en bloc) ; une ligne sans cellule reste affichée.
+  const out: CohortMask = { onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" };
+  cells.forEach((c, i) => {
+    if (out[c.row] === "shown" && st[i] !== "shown" && st[i] !== "nd") out[c.row] = st[i] as CohortRowStatus;
+  });
+  return out;
 }
 
 // --- Éléments non récurrents de l'atterrissage retraité : contributeurs et seuil de confidentialité --------------------------------

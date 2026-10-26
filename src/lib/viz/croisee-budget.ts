@@ -186,21 +186,17 @@ export function masseContracts(input: JournalInput, month: string): MasseMonthGr
 }
 
 // Effectif d'un service : contrats observés (masseContracts) du journal restreint au service, par mois et sur l'ensemble des mois
-// (contrats distincts). null : mois n.d. (effectif non dénombré, seuil non vérifiable).
-export type ServiceSizes = { months: (number | null)[]; period: number | null };
+// (contrats distincts). Chaque mois donne ses contrats sous forme de jetons (rang du contrat parmi les contrats observés de la
+// période, clés triées), sans identifiant : le masquage secondaire compte ainsi un contrat une seule fois d'un mois masqué à l'autre.
+// null : mois n.d. (effectif non dénombré, seuil non vérifiable).
+export type ServiceSizes = { months: (readonly number[] | null)[]; period: number | null };
 export function observedSizes(journal: JournalInput, months: readonly string[]): ServiceSizes {
-  const all = new Set<string>();
-  let known = true;
-  const list = months.map((m) => {
-    const g = masseContracts(journal, m);
-    if (!g) {
-      known = false;
-      return null;
-    }
-    for (const k of g.contracts) all.add(k);
-    return g.contracts.length;
-  });
-  return { months: list, period: known ? all.size : null };
+  const groups = months.map((m) => masseContracts(journal, m));
+  const rank = new Map([...new Set(groups.flatMap((g) => g?.contracts ?? []))].sort().map((k, i) => [k, i] as const));
+  return {
+    months: groups.map((g) => (g ? g.contracts.map((k) => rank.get(k)!) : null)),
+    period: groups.every((g) => g !== null) ? rank.size : null,
+  };
 }
 
 // --- Aucune identité : raisons n.d. de la projection -----------------------------------------------------------------------------
@@ -295,11 +291,14 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     if (conf.kind === "nd") realGuard = conf.reason;
     else if (sz && sizeUnder(sz.period, conf.value)) realGuard = serviceSousSeuil(conf.value);
     else if (live.kind === "value") {
+      // Taille d'un mois : ses contrats observés ; members : les mêmes contrats sous forme de jetons, pour qu'un contrat présent dans
+      // deux mois masqués n'y compte qu'une fois.
       monthMask = maskGroups(
         months.map((m, i) => {
           const p = live.series.points.get(m);
           const v = p && p.kind === "value" ? p.cost : null;
-          return { size: sz ? checkedSize(sz.months[i], v) : null, value: v === null ? null : Math.abs(v) };
+          const ks = sz ? sz.months[i] : null;
+          return { size: ks ? checkedSize(ks.length, v) : null, value: v === null ? null : Math.abs(v), ...(ks ? { members: ks } : {}) };
         }),
         conf.value,
         real.kind === "value",
@@ -310,7 +309,7 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     }
   }
   const seuil = conf.kind === "set" ? conf.value : 0;
-  const monthHidden = (i: number): string | null => (monthMask && isHidden(monthMask[i]) ? maskReason(monthMask[i], seuil) : null);
+  const monthHidden = (i: number): string | null => (monthMask && isHidden(monthMask[i]) ? maskReason(monthMask[i], seuil, "contrats") : null);
 
   // --- 1. Réalisé, budget saisi et écart sur la période : seuls les mois qui ont un montant de budget sont comparés.
   const realTile: TileSpec = {
@@ -548,8 +547,8 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       if (conf.kind === "nd") nrHidden.realised = nrHidden.projected = conf.reason;
       else {
         const st = maskNonRecurring(scenario.contributors, r, conf.value);
-        nrHidden.realised = maskReason(st.realised, conf.value);
-        nrHidden.projected = maskReason(st.projected, conf.value);
+        nrHidden.realised = maskReason(st.realised, conf.value, "contrats");
+        nrHidden.projected = maskReason(st.projected, conf.value, "contrats");
       }
     }
     const nrLine = (label: string, cents: number, hidden: string | null): TileVariation => {
@@ -665,10 +664,9 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     else if (input.filtered && (checkedSize(nCur, c.total.cur) === null || checkedSize(nPrev, c.total.prev) === null)) pers.nd.push({ label: persLabel, reason: SEUIL_NON_VERIFIABLE });
     else {
       const mask = maskCohorts(c, s);
-      const hiddenReason = confidentialiteReason(s);
-      // Ligne masquée : chaque cellule chiffrée devient n.d. avec la même raison (masquage principal ou secondaire, indiscernables) ;
-      // une cellule sans objet par construction (« — ») le reste.
-      const cell = (id: CohortRowId, v: number | "" | null): CroiseeCell => (v === "" || v === null ? "" : mask[id] === "shown" ? v : ndIn(hiddenReason));
+      // Ligne masquée : chaque cellule chiffrée devient n.d. avec la même raison (masquage principal ou secondaire, indiscernables ;
+      // lignes sans contrat d'un montant non nul : seuil non vérifiable) ; une cellule sans objet par construction (« — ») le reste.
+      const cell = (id: CohortRowId, v: number | "" | null): CroiseeCell => (v === "" || v === null ? "" : mask[id] === "shown" ? v : ndIn(maskReason(mask[id], s, "contrats")!));
       const rows: CroiseeRow[] = [
         { cells: [COHORT_LABELS.onlyPrev, cell("onlyPrev", c.onlyPrev.count), cell("onlyPrev", c.onlyPrev.prev), "", cell("onlyPrev", c.onlyPrev.delta)] },
         { cells: [COHORT_LABELS.onlyCur, cell("onlyCur", c.onlyCur.count), "", cell("onlyCur", c.onlyCur.cur), cell("onlyCur", c.onlyCur.delta)] },
@@ -981,8 +979,10 @@ export function buildEffets(input: EffetsInput): EffetsModel {
   else if (conf.kind === "nd") etpBlock.nd.push({ label: "Cascade d'ETP", reason: conf.reason, action: paramLink });
   else {
     const seuil = conf.value;
+    // Taille d'un palier : ses contrats ; members : leurs clés, pour qu'un contrat présent dans deux paliers masqués (effet report et
+    // changement d'ETP, par exemple) n'y compte qu'une fois.
     const status = maskGroups(
-      cascade.steps.map((s) => ({ size: s.people.length, value: Math.abs(s.etp4) })),
+      cascade.steps.map((s) => ({ size: s.people.length, value: Math.abs(s.etp4), members: s.people.map((p) => p.key) })),
       seuil,
       true,
     );
@@ -999,7 +999,7 @@ export function buildEffets(input: EffetsInput): EffetsModel {
     const exactOf = (e: CascadeEnd): CroiseeCell => (e.kind === "value" ? { exact: e.num / den } : ndIn(e.reason));
     // Arrivée exacte − départ exact (écart total), puis − somme des paliers arrondis (résiduel), en n × dix-millièmes sur n × 10 000.
     const gapOf = (f: (x: { a: number; b: number }) => number): CroiseeCell => (both ? { exact: f(both) / den } : ndIn(bothNd));
-    if (hidden) etpBlock.nd.push({ label: "Graphique de la cascade d'ETP", reason: confidentialiteReason(seuil) });
+    if (hidden) etpBlock.nd.push({ label: "Graphique de la cascade d'ETP", reason: confidentialiteReason(seuil, "contrats") });
     else if (!both) etpBlock.nd.push({ label: "Graphique de la cascade d'ETP", reason: bothNd });
     else {
       // Graphique en dix-millièmes entiers : départ et arrivée écrits au centième comme la carte (plotEtp4), paliers arrondis, et le
@@ -1022,7 +1022,7 @@ export function buildEffets(input: EffetsInput): EffetsModel {
       ],
       rows: [
         { cells: [`ETP moyen ${startLabel}`, exactOf(A), ""], style: "subtotal" },
-        ...cascade.steps.map((s, i): CroiseeRow => ({ cells: [STEP_LABELS[s.id], "", isHidden(status[i]) ? ndIn(maskReason(status[i], seuil)!) : s.etp4], style: "child" })),
+        ...cascade.steps.map((s, i): CroiseeRow => ({ cells: [STEP_LABELS[s.id], "", isHidden(status[i]) ? ndIn(maskReason(status[i], seuil, "contrats")!) : s.etp4], style: "child" })),
         { cells: ["Résiduel d'arrondi", "", gapOf((x) => x.b - x.a - n * paliers)], style: "child" },
         { cells: ["Écart total", "", gapOf((x) => x.b - x.a)], style: "subtotal" },
       ],
