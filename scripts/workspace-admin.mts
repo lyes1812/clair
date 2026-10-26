@@ -19,6 +19,7 @@ import {
   probeKpis,
   probeServiceEtp,
   rebuildDecision,
+  rebuildOutcome,
   removalRefusal,
   removedCollections,
   renderAbsenceTypes,
@@ -29,8 +30,6 @@ import {
   resolveOldValue,
   RH_CURRENT_ANNOUNCE,
   RH_REBUILD_ANNOUNCE,
-  RH_REBUILT_DONE,
-  RH_UP_TO_DATE_DONE,
   syncCounterLines,
   USAGE,
   waitBudget,
@@ -107,9 +106,9 @@ async function rhSourceNote(wsId: string) {
 async function absenceTypes(w: Workspace): Promise<number> {
   const read = await activeAbsenceRead(w.id);
   const settings = await getKpiSettings(w.id);
-  log("Lecture PayFit active : types d'absence présents (codes seulement, aucun compteur).");
+  log("Lecture PayFit active : motifs d'absence présents (codes seulement, aucun compteur).");
   await rhSourceNote(w.id);
-  if (settings.origins.absenceTypes.origin === "invalid") log("Attention : le réglage des types d'absence retenus est illisible ; aucun code n'est retenu tant qu'il n'est pas réécrit.");
+  if (settings.origins.absenceTypes.origin === "invalid") log("Attention : le réglage des motifs d'absence retenus est illisible ; aucun code n'est retenu tant qu'il n'est pas réécrit.");
   const retained = settings.origins.absenceTypes.origin === "invalid" ? [] : settings.values.absenceTypes;
   // Les compteurs de la lecture ne sont pas transmis : ils ne doivent jamais sortir (situations individuelles).
   for (const line of renderAbsenceTypes(absenceTypeRows(read.types.map((t) => ({ type: t.type })), retained))) log(line);
@@ -252,8 +251,9 @@ async function pennylaneSync(w: Workspace, a: Args<"pennylane-sync">): Promise<n
 // --- probe
 
 // État du référentiel Collaborateurs sans rien écrire : même empreinte que ensureRhBuild (sonde et « à jour » de
-// src/lib/rh/referential/store.ts : lectures appliquées, version des règles). « current » : le build courant est à jour.
-type Peek = { kind: "current"; build: RhBuildRow } | { kind: "stale"; currentId: string | null };
+// src/lib/rh/referential/store.ts : lectures appliquées, version des règles). « current » : le build courant est à jour ;
+// « none » : aucune lecture appliquée pour la source (ensureRhBuild n'écrirait rien).
+type Peek = { kind: "current"; build: RhBuildRow } | { kind: "stale"; currentId: string | null } | { kind: "none" };
 async function peekRhBuild(wsId: string, source: RhSource): Promise<Peek> {
   return withWorkspace(wsId, async (tx): Promise<Peek> => {
     const [current] = await tx.select().from(rhBuild).where(and(eq(rhBuild.source, source), eq(rhBuild.status, "current"))).limit(1);
@@ -266,11 +266,11 @@ async function peekRhBuild(wsId: string, source: RhSource): Promise<Peek> {
         .where(and(eq(sourceSync.provider, "payfit"), eq(sourceSync.status, "applied")))
         .orderBy(desc(sourceSync.decidedAt))
         .limit(1);
-      if (!sync) return stale;
+      if (!sync) return { kind: "none" };
       hash = rhInputsHash({ source, syncs: [{ id: sync.id, contentHash: sync.contentHash }] });
     } else {
       const syncs = await tx.select({ id: sourceSync.id, contentHash: sourceSync.contentHash }).from(sourceSync).where(and(eq(sourceSync.provider, "dsn"), eq(sourceSync.status, "applied")));
-      if (!syncs.length) return stale;
+      if (!syncs.length) return { kind: "none" };
       const coverage = await dsnCoverageIn(tx);
       const selected = coverage.flatMap((r) => (r.status === "blocked" ? [] : r.selected.map((d) => ({ syncId: d.sourceId, key: d.key }))));
       hash = rhInputsHash({ source, syncs, selected });
@@ -288,7 +288,7 @@ async function loadKpiInput(w: Workspace, noRebuild: boolean): Promise<{ input: 
   if (!chosen) return { refusal: "aucune source RH retenue" };
   const peek = await peekRhBuild(w.id, chosen);
   const current = peek.kind === "current" ? peek.build : null;
-  const decision = rebuildDecision({ current: current !== null, noRebuild, hasAdmin: w.adminId !== null });
+  const decision = rebuildDecision({ current: current !== null, noRebuild, hasAdmin: w.adminId !== null, noRead: peek.kind === "none" });
   if (decision.action === "refuse") return { refusal: decision.reason };
   let build: RhBuildRow;
   if (current && decision.action === "use-current") {
@@ -298,9 +298,10 @@ async function loadKpiInput(w: Workspace, noRebuild: boolean): Promise<{ input: 
   } else {
     log(RH_REBUILD_ANNOUNCE);
     const state = await ensureRhBuild(w.id, chosen, w.adminId);
-    log(peek.kind === "stale" && state.kind !== "none" && state.build.id === peek.currentId ? RH_UP_TO_DATE_DONE : RH_REBUILT_DONE);
-    if (state.kind !== "ready") return { refusal: `référentiel Collaborateurs indisponible (${state.kind})` };
-    build = state.build;
+    const outcome = rebuildOutcome(peek.kind === "stale" ? peek.currentId : null, state);
+    if (outcome.done) log(outcome.done);
+    if (outcome.refusal !== null) return { refusal: outcome.refusal };
+    build = outcome.build;
   }
   const stored = await loadRhBuild(w.id, build.id);
   let data: RhBuildData & { build: RhBuildRow } = stored;

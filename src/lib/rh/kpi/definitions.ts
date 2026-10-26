@@ -1,62 +1,7 @@
 import { PAYFIT_ARCHIVED_RETENTION_MONTHS } from "@/lib/rh/referential/build-payfit";
 
-// Définitions des KPI écrites dans l'app (règle 6), ancres #def-<id> ; mêmes textes partout où un chiffre est affiché.
-export const KPI_DEFINITIONS: { id: string; title: string; text: string }[] = [
-  {
-    id: "etp-contract",
-    title: "Quotité (ETP) d'un contrat pour un mois",
-    text:
-      "Part d'un temps plein prévue au contrat, pour un contrat de nature comptée présent le dernier jour du mois. Source DSN : quotité du contrat (S21.G00.40.013) ÷ quotité de référence de l'établissement (S21.G00.40.012), déclarées pour ce mois, dans leur unité (S21.G00.40.011 : heures, journées, forfait jours, forfait heures). Source PayFit : indicateur « temps plein » (isFullTime) ou ETP de la fiche (fullTimeEquivalent), lus à la date de lecture ; PayFit n'historise pas les quotités : la même valeur sert pour tous les mois. Règles de l'espace (Paramètres) : un temps plein vaut 1 quelle que soit sa durée (39 h = 1, forfait jours à temps plein = 1 ; DSN : modalité S21.G00.40.014 = 10) ; un rapport supérieur à 1 est ramené à 1 et signalé ; PayFit : un contrat au forfait jours sans quotité ni indicateur « temps plein » renseignés vaut 1 (défaut validé le 22/10/2026, signalé dans le détail ; un indicateur « temps plein » à non reste n.d.) ; la quotité est arrondie au nombre de décimales choisi avant d'être additionnée. Les absences ne sont pas déduites : c'est un ETP contractuel, ni payé ni travaillé. Quotité absente, référence nulle ou unité non interprétée : le contrat est n.d.",
-  },
-  {
-    id: "etp-month-end",
-    title: "ETP contractuel fin de mois",
-    text:
-      "Somme des quotités des contrats comptés présents le dernier jour du mois, soit les mêmes contrats que l'effectif fin de mois en contrats. Si un contrat présent a une quotité n.d., le total est une borne basse « ≥ x » et le contrat est listé ; si aucune quotité n'est lisible, le total est n.d. Date en borne basse (PayFit, historique en mode signalé) : « ≥ x » ; en mode brut (défaut), valeur calculée sur ce que l'API renvoie. Mois non couvert, bloqué ou postérieur à la date de référence : n.d.",
-  },
-  {
-    id: "etp-average",
-    title: "ETP moyen sur une période",
-    text:
-      "Moyenne arithmétique des ETP contractuels fin de mois de la période (somme ÷ nombre de mois). Tous les mois doivent être exacts : un mois n.d. ou en borne basse (PayFit, historique en mode signalé) rend la moyenne n.d., et les mois en cause sont nommés. Le prorata journalier des entrées et sorties en cours de mois n'est pas appliqué (prévu en V2).",
-  },
-  {
-    id: "headcount-average",
-    title: "Effectif moyen sur une période",
-    text: "Moyenne arithmétique des effectifs fin de mois en personnes (définition « Effectif (personnes) à une date »), aux mêmes conditions que l'ETP moyen.",
-  },
-  {
-    id: "turnover",
-    title: "Turnover",
-    text:
-      "Sur 12 mois glissants ou une année civile close : ((entrées + sorties) ÷ 2) ÷ effectif moyen de la période. Variante (Paramètres) : sorties ÷ effectif en personnes au premier jour de la période. Entrées et sorties : définition « Entrées et sorties d'un mois », natures comptées, connues à la date de référence, jamais déduites d'une différence d'effectifs ; elles sont comptées en contrats, l'effectif en personnes. Options (Paramètres) : sorties non comptées pour certaines natures (ex. fins de CDD, nature 02 ; le motif DSN n'est pas utilisé, PayFit ne le fournissant pas) ; contrats continus neutralisés (fin le jour J et nouveau contrat de la même personne le jour J+1, les deux de natures comptées : ni sortie, ni entrée ; une sortie ne neutralise qu'une entrée, de nature comptée en priorité ; la neutralisation exige que le jour voisin soit connu dans tous les établissements). Quand la neutralisation est active et que le jour voisin d'un mouvement (veille d'une entrée, lendemain d'une sortie) n'est pas couvert par la source (DSN : mois non déposé ou incomplet pour l'un des établissements connus ; PayFit, historique en mode signalé : avant la date de lecture moins 12 mois), on ne peut pas savoir s'il s'agit d'un contrat continu : le mois est n.d. ; sans la neutralisation, ces mouvements sont comptés. Si un mois a des entrées ou des sorties non exactes (PayFit, historique en mode signalé : sorties d'un mois commencé avant la limite de conservation), ou un effectif non exact, le turnover est n.d. Historique PayFit en mode brut (défaut, Paramètres) : les mois antérieurs à la limite sont calculés sur ce que l'API renvoie, sans n.d. ; les salariés dont le contrat n'est plus renvoyé n'y figurent pas et le turnover peut en être faussé dans un sens ou dans l'autre ; la limite est dite une fois en tête d'écran.",
-  },
-  {
-    id: "absenteeism",
-    title: "Absentéisme",
-    text:
-      "Jours d'absence ÷ jours théoriques, sur un mois ou sur une période. Sur une période, on divise la somme des jours d'absence par la somme des jours théoriques ; ce n'est jamais une moyenne de taux mensuels. Jours théoriques d'un contrat compté pour un mois : jours du mois compris entre son début et sa fin, bornes incluses, en jours calendaires ou du lundi au vendredi (Paramètres). Aucun jour férié n'est connu, au numérateur comme au dénominateur. La quotité n'intervient pas. Jours d'absence : absences PayFit des types choisis et des statuts retenus (Paramètres), bornées au mois et à la période du contrat, comptées par demi-journées. Un début « mi-journée » ne compte que l'après-midi du premier jour, une fin « mi-journée » que le matin du dernier. Une demi-journée couverte par deux absences du même contrat compte une fois. Quand une borne a un moment absent ou non interprétable, ou quand une absence n'a pas de statut, la partie incertaine n'est pas comptée et le taux devient « ≥ x ». Une absence sans date de début ou de fin rend le mois n.d., sauf si aucune demi-journée qu'elle pourrait couvrir dans la période du contrat n'est comptée ou si toutes sont déjà comptées par d'autres absences ; sans statut, elle ne fait qu'ajouter des demi-journées incertaines. Une absence rattachée à un contrat inconnu rend le mois n.d., sauf en historique PayFit brut si elle se termine avant la limite de conservation : son contrat archivé n'est plus renvoyé, elle n'est pas comptée (ni lui dans les jours théoriques) et elle est listée dans le détail. Des jours d'absence qui tombent sous un autre contrat compté de la même personne (ex. fin d'un CDD et début d'un CDI pendant l'absence) ne sont pas rattachés par PayFit à ce contrat : ils sont incertains et le taux devient « ≥ x » ; de même pour les jours hors contrat d'une absence rattachée à un contrat sans collaborateur ou sans date de début. Types comptés par défaut : maladie ordinaire (fr_maladie_ordinaire, défaut validé le 22/10/2026) ; un type compté absent de la lecture est signalé sous la tuile. Tant qu'aucun type n'est choisi : n.d. Source DSN : n.d., les arrêts de travail ne sont pas extraits. Mois hors des mois lus par la lecture PayFit, ou en borne basse (historique PayFit en mode signalé) : n.d. Un mois sans absence des types choisis vaut 0 % : c'est un fait de la lecture.",
-  },
-  {
-    id: "closed-period",
-    title: "Période close et fenêtres",
-    text:
-      "Un mois est clos si son dernier jour est antérieur ou égal à la date de référence (PayFit : jour de la lecture ; DSN : fin du dernier mois complet). « 12 mois glissants » : les 12 mois finissant au mois choisi (par défaut, le dernier mois clos). « Année civile » : janvier à décembre d'une année dont décembre est clos (par défaut, la dernière). Une période qui dépasse le dernier mois clos est n.d. L'horloge du jour n'est jamais utilisée. Source PayFit : un mois dont la paie n'est pas clôturée à la date de lecture (statut de paie PayFit) n'est pas clos ; une saisie faite après la lecture n'est connue qu'à la lecture suivante. Source DSN : une DSN déposée est définitive pour son mois (règle validée le 22/10/2026) ; seule une DSN « annule et remplace » du même mois et du même établissement la corrige, et les chiffres du mois sont alors recalculés. Un contrat sans date de fin est en cours, comme un CDI. Une rupture déclarée reste acquise : un contrat redéclaré sans fin dans une DSN suivante correspond à un versement après départ ; il reste hors effectif et il est listé à part. Anomalies signalées dans Collaborateurs : une fin ou une embauche déclarée seulement dans la DSN d'un mois suivant, ou un établissement qui n'a encore jamais déposé, corrigent les chiffres du mois concerné au dépôt de cette DSN.",
-  },
-  {
-    id: "previous-period",
-    title: "Comparaison N-1 et écart",
-    text:
-      "Même définition, mêmes paramètres, même référentiel, période décalée de 12 mois. L'écart vaut valeur − N-1, en ETP, en personnes ou en points de pourcentage ; ce n'est jamais un pourcentage de pourcentage. Si l'une des deux valeurs est n.d. ou en borne basse, l'écart est n.d. et la raison est affichée. Aucune comparaison entre PayFit et DSN : leurs identifiants sont distincts. PayFit : les quotités de N-1 sont celles de la date de lecture.",
-  },
-  {
-    id: "rounding",
-    title: "Arrondis",
-    text:
-      "Quotité de chaque contrat arrondie au nombre de décimales choisi (Paramètres) avant la somme. Sommes exactes en dix-millièmes d'ETP, jours en demi-journées. Moyennes, taux et écarts conservés en fraction exacte et affichés à deux décimales (au plus proche, demi vers le haut). La fraction exacte est visible au survol et dans le détail.",
-  },
-];
-
+// Raisons des n.d. des KPI et écarts entre PayFit et DSN, rendus par le glossaire (entrées kpi-nd-raisons et
+// kpi-ecarts-sources). Les définitions des indicateurs sont au glossaire (src/lib/glossary/kpi.ts), ancres #def-<id>.
 export const KPI_ND_EXPLANATIONS: [string, string][] = [
   ["Période non close", "la période dépasse le dernier mois clos à la date de référence : aucun KPI de période n'est calculé."],
   ["Mois postérieur à la date de référence", "aucun chiffre n'est projeté : c'est le rôle des Hypothèses budgétaires."],
@@ -66,7 +11,7 @@ export const KPI_ND_EXPLANATIONS: [string, string][] = [
     `historique PayFit en mode « signalé » (Paramètres) : contrats archivés depuis plus de ${PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois non renvoyés : effectif et ETP « ≥ » avant la date de lecture moins ${PAYFIT_ARCHIVED_RETENTION_MONTHS ?? "n.d."} mois, entrées « ≥ », sorties n.d. et absentéisme n.d. pour les mois qui commencent avant cette date. En mode « brut » (défaut), ces mois sont calculés sur ce que l'API renvoie et la limite est dite une fois en tête d'écran.`,
   ],
   ["Quotité n.d.", "le contrat est listé et l'ETP fin de mois devient « ≥ x » ; sans aucune quotité lisible, l'ETP est n.d., jamais « ≥ 0 »."],
-  ["Absences", "DSN : arrêts non extraits ; PayFit : collection non lue, mois hors des mois lus, types non choisis, absence sans date ou d'un contrat inconnu : n.d. ; moment ou statut absent : « ≥ x »."],
+  ["Absences", "DSN : arrêts non extraits ; PayFit : collection non lue, mois hors des mois lus, motifs non choisis, absence sans date ou d'un contrat inconnu : n.d. ; moment ou statut absent : « ≥ x »."],
   ["Contrat continu non vérifiable", "neutralisation active et veille d'une entrée ou lendemain d'une sortie hors de la couverture : mouvements du mois n.d. (désactiver la neutralisation dans Paramètres pour les compter)."],
   ["Écart N-1", "n.d. dès que l'une des deux valeurs n'est pas exacte ; les deux valeurs restent affichées."],
 ];
@@ -75,7 +20,7 @@ export const SOURCE_GAPS: [string, string, string][] = [
   ["Quotités", "à la date de lecture, non historisées", "déclarées pour chaque mois (S21.G00.40.012 / .013)"],
   ["Date de référence", "jour de la lecture", "fin du dernier mois complet"],
   ["Historique", "contrats archivés depuis plus de 12 mois non renvoyés : chiffres bruts et mention en tête d'écran (ou « ≥ » / n.d. en mode signalé)", "aucune limite ; mois manquant, incomplet ou bloqué n.d."],
-  ["Absences", "lues, par type et statut, avec moments", "arrêts non extraits : absentéisme n.d."],
+  ["Absences", "lues, par motif et statut, avec moments", "arrêts non extraits : absentéisme n.d."],
   ["Présence", "par dates de contrat", "par déclaration du mois"],
   ["Établissement", "une société par espace", "SIRET déclarant, plusieurs possibles"],
   ["Motif de sortie", "non exposé", "S21.G00.62.002 (non utilisé par les KPI)"],

@@ -32,6 +32,9 @@ import { ParamLayout } from "@/components/ParamLayout";
 import { absenceTypeLabel } from "@/lib/viz/kpi";
 import { defaultsNote, PageHead, Pill, type OriginKind, type Tone } from "../donnees/ui";
 import { NavDisclosure } from "./NavDisclosure";
+import { CROISEE_KEYS, croiseeSettingReason, getCroiseeSettings, LIBELLE_MAX, SEUILS_MAX, settingValue, type CroiseeSettingKey } from "@/lib/croisee-settings";
+import { CROISEE_TERMS } from "@/lib/glossary/croisee";
+import { CroiseeForm, type CroiseeOrigin } from "./CroiseeForm";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +78,17 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const categories = await getCategoryNatures(workspace.id);
   const overrides = await getContractCategories(workspace.id);
   const collab = await loadCollabContext(slug);
+  // Masse salariale croisée : quatre réglages sans valeur par défaut ; défini (avec sa date), illisible, ou non défini (rien
+  // d'enregistré, ou liste de seuils vide).
+  const croisee = await getCroiseeSettings(workspace.id);
+  const croiseeOrigins = Object.fromEntries(
+    (Object.keys(CROISEE_KEYS) as CroiseeSettingKey[]).map((k): [CroiseeSettingKey, CroiseeOrigin] => {
+      const st = croisee[k];
+      if (st.kind === "set" && croiseeSettingReason(k, st) === null) return [k, { kind: "set", at: st.updatedAt ? dateTimeFmt.format(st.updatedAt) : null }];
+      return [k, st.kind === "invalid" ? { kind: "invalid" } : { kind: "absent" }];
+    }),
+  ) as Record<CroiseeSettingKey, CroiseeOrigin>;
+  const croiseeKinds = Object.values(croiseeOrigins).map((o) => o.kind);
   const ref = collab.data?.build.referenceDate ?? null;
   const persons = new Map((collab.data?.persons ?? []).map((p) => [p.personKey, p]));
   const contractRows = (collab.data?.contracts ?? [])
@@ -97,6 +111,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
     { id: "payfit-historique", label: "Historique PayFit", state: stateOf(history.origin) },
     { id: "kpi", label: "Définitions des KPI", state: kpi.invalid.length > 0 ? { text: "À corriger", tone: "failed" } : stateOf(kpiOrigins.includes("setting") ? "setting" : "default") },
     { id: "masse-salariale", label: "Masse salariale : grille de comptes", state: stateOf(payroll.origin) },
+    { id: "croisee", label: "Masse salariale croisée", state: croiseeKinds.includes("invalid") ? { text: "À corriger", tone: "failed" } : croiseeKinds.includes("absent") ? { text: "À renseigner", tone: "preview" } : null },
     { id: "projection", label: "Projection : conventions de calcul", state: projection ? null : { text: "À renseigner", tone: "failed" } },
   ];
   const navItem = (id: string) => nav.find((n) => n.id === id)!;
@@ -214,6 +229,30 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
               </p>
               <ServiceAxisForm slug={slug} axes={axes} current={serviceAxis.axis} disabled={!isAdmin} />
             </div>
+          </section>
+
+          <section className="panel pm-panel" data-testid="setting-croisee" id="croisee">
+            <div className="pm-panel-head">
+              <h3>Masse salariale croisée<GlossaryLink slug={slug} term={CROISEE_TERMS.vueEnsemble} /></h3>
+              {stateTag("croisee")}
+            </div>
+            <CroiseeForm
+              slug={slug}
+              values={{
+                confidentialite: settingValue(croisee.confidentialite),
+                seuilsEffectif: settingValue(croisee.seuilsEffectif) ?? [],
+                margeAlerte: settingValue(croisee.margeAlerte),
+                horizonEcheances: settingValue(croisee.horizonEcheances),
+              }}
+              origins={croiseeOrigins}
+              limits={{ seuilsMax: SEUILS_MAX, libelleMax: LIBELLE_MAX }}
+              disabled={!isAdmin}
+              helps={{
+                confidentialite: <GlossaryLink slug={slug} term={CROISEE_TERMS.confidentialite} />,
+                seuilsEffectif: <GlossaryLink slug={slug} term={CROISEE_TERMS.seuilsEffectif} />,
+                horizonEcheances: <GlossaryLink slug={slug} term={CROISEE_TERMS.echeancesContrat} />,
+              }}
+            />
           </section>
         </section>
 

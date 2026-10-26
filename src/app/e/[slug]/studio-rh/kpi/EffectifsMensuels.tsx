@@ -3,21 +3,16 @@ import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { CalendarDays, ListChecks, PieChart } from "lucide-react";
 import { BarChart, DonutChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
+import { ExportMenu } from "@/components/ExportMenu";
 import { ParamLayout, ParamSection } from "@/components/ParamLayout";
-import { monthRange } from "@/lib/connectors/months";
-import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
-import { project } from "@/lib/budget/engine";
-import { AXES, MEASURES, monthlyGrid, UNAVAILABLE_AXES, type Axis, type Measure, type RealSource } from "@/lib/budget/monthly";
-import { getScenario, KIND_LABELS, listScenarios } from "@/lib/budget/store";
-import { nd, val } from "@/lib/budget/versions";
+import { AXES, MEASURES, UNAVAILABLE_AXES } from "@/lib/budget/monthly";
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { formatEuros } from "@/lib/money";
-import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
-import { selectableYears } from "@/lib/rh/kpi/period";
 import type { KpiInput } from "@/lib/rh/kpi/types";
-import { barNote, donutNote, gridSeries, groupColor, monthAxis, monthShortLabel, repartition, splitAxisLabel, unitLabel } from "@/lib/viz/kpi";
+import { barNote, donutNote, gridSeries, groupColor, monthAxis, monthShortLabel, splitAxisLabel, unitLabel } from "@/lib/viz/kpi";
 import { PanelTitle } from "./components";
+import { effectifsShare, loadEffectifs } from "./effectifs-data";
 
 type Unit = "etp" | "nombre" | "eur";
 // Part d'un groupe : sans total positif, elle n'est pas définie (n.d. avec sa raison, jamais 0 %).
@@ -29,34 +24,12 @@ const text = (v: number, unit: Unit) => (unit === "eur" ? formatEuros(v) : unit 
 // le panneau « Graphiques » (anneau de répartition et barres par mois), la répartition et le tableau mensuel exact.
 // Aucune explication sur l'écran : rubriques, ventilation, versions, répartition et graphiques sont au glossaire (« ? »).
 export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { slug: string; workspaceId: string; kpi: KpiInput | null; search: { mesure: string; axe: string; version: string; annee: string } }) {
-  const pay = await loadPayrollContext(slug);
-  const [{ natures }, overrides, rows] = await Promise.all([getCategoryNatures(workspaceId), getContractCategories(workspaceId), listScenarios(workspaceId)]);
-  const measure: Measure = (MEASURES.some((m) => m.key === search.mesure) ? search.mesure : "etp") as Measure;
-  const axis: Axis = (AXES.some((a) => a.key === search.axe) ? search.axe : "categorie") as Axis;
-  const mdef = MEASURES.find((m) => m.key === measure)!;
-  const versions = [{ value: "reel", label: "Réel PayFit" }, ...rows.map((r) => ({ value: `scenario:${r.scenario.id}`, label: `Scénario « ${r.scenario.name} » (${KIND_LABELS[r.scenario.kind]}, ${r.scenario.status === "fige" ? "figé" : "brouillon"})` }))];
-  const version = versions.some((v) => v.value === search.version) ? search.version : "reel";
-  const full = version.startsWith("scenario:") ? await getScenario(workspaceId, version.slice(9)) : null;
-  const years = full
-    ? [...new Set([full.base.refMonth.slice(0, 4), ...monthRange(full.scenario.firstMonth, full.scenario.lastMonth).map((m) => m.slice(0, 4))])].sort()
-    : kpi ? selectableYears(kpi.data, kpi.openMonths ?? []).map((y) => String(y.year)) : [];
-  const year = years.includes(search.annee) ? search.annee : (full ? full.scenario.firstMonth.slice(0, 4) : years.at(-1) ?? String(new Date().getFullYear()));
-  const etpService = (m: string, f: { value: string | null }) => {
-    const [e] = pay.etp([m], f);
-    return e.etp4 === null ? nd(e.reason ?? "ETP par service n.d.") : val(e.etp4);
-  };
-  const real: RealSource = { kpi, journal: pay.input, natures, overrides, etpService };
-  const grid = monthlyGrid({ measure, axis, year, real, scenario: full ? { base: full.base, hyps: full.hypotheses, proj: project(full.base, full.scenario.firstMonth, full.scenario.lastMonth, full.hypotheses, full.scenario.conventions) } : null });
-  const unit = mdef.unit;
-  const stock = measure === "etp" || measure === "inscrit";
+  // Chargement commun avec l'export Excel (mêmes paramètres d'adresse, même grille).
+  const { measure, axis, mdef, versions, version, versionLabel, full, years, year, grid, unit, stock } = await loadEffectifs(slug, workspaceId, kpi, search);
   const axisParts = splitAxisLabel(AXES.find((a) => a.key === axis)!.label);
   const axisLabel = axisParts.name.toLowerCase();
-  const versionLabel = versions.find((v) => v.value === version)!.label;
   // Répartition : stocks au dernier mois connu, flux sur le cumul des mois connus.
-  const repart = grid.kind === "value" ? repartition(grid, stock) : null;
-  const basis = repart && grid.kind === "value"
-    ? stock ? (repart.used[0] ? `fin ${monthShortLabel(repart.used[0])} ${year}` : "aucun mois connu") : `cumul des ${repart.used.length} mois connus (${repart.known.length < 12 ? `${12 - repart.known.length} mois n.d. non comptés` : "année complète"})`
-    : "";
+  const { repart, basis } = effectifsShare(grid, stock, year);
   const ndReasons = grid.kind === "value" ? [...new Set(grid.months.flatMap((m) => { const t = grid.total(m); return t.kind === "nd" ? [`${m} : ${t.reason}`] : []; }))] : [];
   const base = `/e/${slug}/studio-rh/kpi`;
 
@@ -209,6 +182,7 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
         <section className="panel" data-testid="em-monthly-panel">
           <div className="panel-head">
             <PanelTitle slug={slug} term={KPI_TERMS.effectifsBreakdown} label="Ventilation par axe et tableau de référence">Répartition mensuelle</PanelTitle>
+            <ExportMenu testid="em-export" options={[{ label: "Excel (.xlsx)", href: `${base}/export?${new URLSearchParams({ vue: "effectifs", mesure: measure, axe: axis, version, annee: year, format: "xlsx" }).toString()}`, testid: "em-export-xlsx" }]} />
           </div>
           <p className="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite.</p>
           <div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Répartition mensuelle, tableau défilant">

@@ -1,4 +1,5 @@
-import { createElement as h } from "react";
+import { readFileSync } from "node:fs";
+import { createElement as h, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +44,22 @@ vi.mock("@/lib/payroll/engine", async (orig) => ({
   monthPayroll: (_i: unknown, month: string) => ({ kind: "value", month }),
   servicesOf: () => ["Atelier", "Bureau", null],
 }));
+// Les dix chapitres sont remplacés par un composant simulé : le gabarit de la page est testé sans dépendre du contenu des chapitres
+// (que leurs agents remplacent). Les vrais modules sont lus avec vi.importActual dans le bloc « composants des chapitres ».
+const stub = vi.hoisted(() => async (id: string) => {
+  const { createElement } = await import("react");
+  return { default: ({ ctx }: { ctx: { chapter: { id: string } } }) => createElement("section", { "data-testid": `cx-stub-${id}`, "data-ctx": ctx.chapter.id }, "Chapitre simulé") };
+});
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChSynthese", () => stub("synthese"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChEffectifs", () => stub("effectifs"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChAbsences", () => stub("absences"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChFixeVariable", () => stub("fixe-variable"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChServices", () => stub("services"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChBudget", () => stub("budget"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChPaieCompta", () => stub("paie-compta"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChEffets", () => stub("effets"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChRestructuration", () => stub("restructuration"));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChJuridique", () => stub("juridique"));
 
 import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
 import { CROISEE_TERMS, GLOSSARY_CROISEE } from "@/lib/glossary/croisee";
@@ -51,7 +68,12 @@ import {
   CHAPTER_IDS,
   cellView,
   croiseeHref,
+  monthNdLines,
   parseQuery,
+  REFERENCE_TABLE_ID,
+  referenceTable,
+  roundDecimal,
+  yearMonths,
   sortAlerts,
   sortHref,
   sortRows,
@@ -70,18 +92,10 @@ import {
 import { BudgetError } from "@/lib/budget/store";
 import CroiseePage from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/page";
 import { CHAPTER_TOTAL, CHAPTERS, chapterDef, chapterLinks, EN_CONSTRUCTION, neighbours } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/chapitres";
-import { loadCroiseeContext, once, type CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
+import { journalReason, loadCroiseeContext, once, type CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { AlertList, ChapterPrevu, ModelTable, NdNote, Pliant, Spark, Tuile, Tuiles } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/atomes";
-import ChAbsences from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChAbsences";
-import ChBudget from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChBudget";
-import ChEffectifs from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChEffectifs";
-import ChEffets from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChEffets";
-import ChFixeVariable from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChFixeVariable";
-import ChJuridique from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChJuridique";
-import ChPaieCompta from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChPaieCompta";
-import ChRestructuration from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChRestructuration";
-import ChServices from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChServices";
-import ChSynthese from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChSynthese";
+import type { MonthPayroll, PayrollWindow } from "@/lib/payroll/engine";
+import type { ChapterId } from "@/lib/viz/croisee";
 
 const sp = (s: string) => s.replace(/[  ]/g, " "); // espaces insécables → espace
 const WS = { id: "w1", name: "Espace démo", slug: "demo", role: "reader" as const };
@@ -139,6 +153,14 @@ describe("glossaire de la Masse salariale croisée", () => {
     }
     expect(glossaryEntry("croisee-etp-proratise")).toBeUndefined();
     expect(CROISEE_TERMS.etpProratise).toBe("etp-prorated");
+  });
+
+  it("exports : protection contre les formules alignée sur l'addendum L (« - » sauf nombre pur) ; impression : en-tête complet", () => {
+    const exp = glossaryEntry("croisee-export")!.definition;
+    expect(exp).toContain("(il commence par =, +, @, une tabulation ou un retour à la ligne, ou par - quand ce n'est pas un nombre)");
+    expect(exp).not.toContain("=, +, -, @");
+    expect(glossaryEntry("croisee-impression")!.definition).toContain("la période, N-1, le service, le budget saisi et le scénario retenus, et les mois non clos");
+    expect(glossaryEntry("croisee-vue-ensemble")!.definition).toContain("« Référence annuelle N-1 sur douze mois »");
   });
 });
 
@@ -207,6 +229,16 @@ describe("mise en forme des cellules par nature (cas écrits à la main)", () =>
     expect(cellView({ exact: 1.23456 }, col("etp")).text).toBe("1,23");
     expect(cellView({ exact: 0.125 }, col("pourcent")).text.replace(/\s/g, " ")).toBe("12,50 %");
     expect(sp(cellView({ exact: 1234.5 }, col("eur")).text)).toBe("1 234,50 €");
+    // Demi exact : arrondi sur la représentation décimale, vers l'extérieur de zéro, comme le format de la cellule Excel.
+    expect(sp(cellView({ exact: 1.005 }, col("eur")).text)).toBe("1,01 €");
+    expect(sp(cellView({ exact: -1.005 }, col("eur")).text)).toBe("−1,01 €");
+    expect(sp(cellView({ exact: 2.675 }, col("eur", { signed: true })).text)).toBe("+2,68 €");
+    expect(cellView({ exact: 1.005 }, col("etp")).text).toBe("1,01");
+    expect(cellView({ exact: 0.00125 }, col("pourcent")).text.replace(/\s/g, " ")).toBe("0,13 %"); // 0,125 % → 0,13 %
+    // Une valeur qui s'affiche 0,00 n'a ni signe ni ton.
+    expect(cellView({ exact: -0.004 }, col("eur", { signed: true, costTrend: true }))).toMatchObject({ tone: "flat" });
+    expect(sp(cellView({ exact: -0.004 }, col("eur", { signed: true })).text)).toBe("0,00 €");
+    expect(cellView({ exact: 1e21 }, col("eur"))).toMatchObject({ text: "n.d.", nd: "valeur hors limites" });
     expect(cellView({ exact: 1.5 }, col("text"))).toMatchObject({ text: "n.d.", nd: "valeur numérique dans une colonne de texte" });
     expect(cellView(12.5, col("eur"))).toMatchObject({ text: "n.d.", nd: "valeur hors de l'unité de base" });
   });
@@ -219,6 +251,26 @@ describe("mise en forme des cellules par nature (cas écrits à la main)", () =>
     expect(cellView(3, col("nombre")).tone).toBe("flat");
     expect(cellView(12345, col("eur"), { kind: "etp" }).text).toBe("1,23");
     expect(cellView("Atelier", col("text"), { kind: "eur" }).text).toBe("Atelier");
+  });
+});
+
+describe("roundDecimal (cas écrits à la main)", () => {
+  it("arrondi au demi supérieur (vers l'extérieur de zéro) sur la représentation décimale", () => {
+    expect(roundDecimal(1.005, 2)).toBe(101); // 1,005 × 100 vaut 100,4999… en flottant : Math.round donnerait 100
+    expect(roundDecimal(-1.005, 2)).toBe(-101);
+    expect(roundDecimal(2.675, 2)).toBe(268);
+    expect(roundDecimal(1234.5, 2)).toBe(123450);
+    expect(roundDecimal(1.23456, 2)).toBe(123);
+    expect(roundDecimal(0.125, 4)).toBe(1250);
+    expect(roundDecimal(0.00125, 4)).toBe(13);
+    expect(roundDecimal(0.004, 2)).toBe(0);
+    expect(Object.is(roundDecimal(-0.004, 2), 0)).toBe(true); // jamais −0
+    expect(roundDecimal(1e-7, 2)).toBe(0);
+    expect(roundDecimal(0, 2)).toBe(0);
+    expect(roundDecimal(12, 0)).toBe(12);
+    expect(roundDecimal(Number.POSITIVE_INFINITY, 2)).toBeNull();
+    expect(roundDecimal(Number.NaN, 2)).toBeNull();
+    expect(roundDecimal(1e21, 2)).toBeNull(); // hors des entiers sûrs
   });
 });
 
@@ -398,16 +450,44 @@ describe("Pliant, NdNote, ChapterPrevu", () => {
   });
 });
 
-// --- Les dix coquilles -------------------------------------------------------------------------------------------------------------
-describe("coquilles des dix chapitres", () => {
-  const views = { synthese: ChSynthese, effectifs: ChEffectifs, absences: ChAbsences, "fixe-variable": ChFixeVariable, services: ChServices, budget: ChBudget, "paie-compta": ChPaieCompta, effets: ChEffets, restructuration: ChRestructuration, juridique: ChJuridique };
-  it("chacune rend « Prévu » avec la raison « chapitre en cours de construction »", () => {
-    for (const c of CHAPTERS) {
-      const ctx = { slug: "demo", chapter: c } as unknown as CroiseeContext;
-      const out = renderToStaticMarkup(h(views[c.id], { ctx }));
+// --- Composants des chapitres -------------------------------------------------------------------------------------------------
+// Les chapitres vivants sont remplacés par leurs agents : on vérifie seulement que chaque module exporte un composant par défaut.
+// Les chapitres de statut « prevu » (chapitres.ts) rendent la mention Prévu (cx-prevu-<id>), qu'ils soient synchrones ou non.
+const MODULES: Record<ChapterId, string> = {
+  synthese: "ChSynthese",
+  effectifs: "ChEffectifs",
+  absences: "ChAbsences",
+  "fixe-variable": "ChFixeVariable",
+  services: "ChServices",
+  budget: "ChBudget",
+  "paie-compta": "ChPaieCompta",
+  effets: "ChEffets",
+  restructuration: "ChRestructuration",
+  juridique: "ChJuridique",
+};
+type ChapterView = (p: { ctx: CroiseeContext }) => ReactNode | Promise<ReactNode>;
+const actualChapter = async (id: ChapterId) => (await vi.importActual<{ default: unknown }>(`@/app/e/[slug]/studio-rh/masse-salariale/croisee/${MODULES[id]}`)).default;
+
+describe("composants des chapitres", () => {
+  beforeEach(() => {
+    Object.assign(state, { pay: fakePay(), payCalls: 0, budgets: BUDGETS, scenarios: SCENARIOS, getScenario: null, getScenarioCalls: 0 });
+  });
+
+  it("chaque module de chapitre exporte un composant par défaut", async () => {
+    for (const c of CHAPTERS) expect(typeof (await actualChapter(c.id)), c.id).toBe("function");
+  });
+
+  it("les chapitres « Prévu » rendent cx-prevu-<id>, sans lire aucune source", async () => {
+    const prevu = CHAPTERS.filter((c) => c.statut === "prevu");
+    expect(prevu.map((c) => c.id)).toEqual(["restructuration", "juridique"]);
+    for (const c of prevu) {
+      const ctx = await loadCroiseeContext("demo", WS, { chapitre: c.id });
+      const view = (await actualChapter(c.id)) as ChapterView;
+      const out = renderToStaticMarkup((await view({ ctx })) as ReactElement);
       expect(out, c.id).toContain(`data-testid="cx-prevu-${c.id}"`);
-      expect(out, c.id).toContain(EN_CONSTRUCTION);
+      expect(out, c.id).toContain('<span class="tag">Prévu</span>');
     }
+    expect(state.payCalls).toBe(0);
   });
 });
 
@@ -461,6 +541,26 @@ describe("contexte partagé", () => {
     expect(state.getScenarioCalls).toBe(0);
   });
 
+  it("chapitre sans filtres : les choix de l'adresse sont gardés tels quels dans les liens (validés au retour)", async () => {
+    const ctx = await loadCroiseeContext("demo", WS, { chapitre: "restructuration", annee: "2025", a: "06", service: "Bureau", budget: "b-old", scenario: "s-a", affichage: "tableau" });
+    expect(ctx.href({ chapitre: "synthese" })).toBe("/e/demo/studio-rh/masse-salariale/croisee?chapitre=synthese&annee=2025&a=06&service=Bureau&budget=b-old&scenario=s-a&affichage=tableau");
+    expect(ctx.notices).toEqual([]);
+    expect(state.payCalls).toBe(0);
+    // Retour sur un chapitre à filtres : les valeurs y sont validées par le contexte (mois disponibles).
+    const back = await loadCroiseeContext("demo", WS, { chapitre: "synthese", annee: "2025", a: "02" });
+    expect(back.period).toMatchObject({ year: 2025, from: "01", to: "02" });
+  });
+
+  it("raison du journal non lu : lecture absente ou incomplète, source DSN, journal lu", () => {
+    const p = fakePay();
+    expect(journalReason(p as never)).toBeNull();
+    expect(journalReason({ input: null, unavailable: "journal comptable absent de la lecture PayFit appliquée", source: "payfit" })).toBe("journal comptable absent de la lecture PayFit appliquée");
+    expect(journalReason({ input: null, unavailable: null, source: "dsn" })).toBe("source RH retenue : DSN — journal de paie PayFit non lu");
+    expect(journalReason({ input: null, unavailable: "aucune source RH retenue (Aucune source appliquée pour ce domaine.) : connectez PayFit ou déposez des DSN dans Données", source: null })).toBe(
+      "aucune source RH retenue (aucune source appliquée pour ce domaine) : connectez PayFit ou déposez des DSN dans Données",
+    );
+  });
+
   it("période par défaut : de janvier au dernier mois clos de la dernière année ; N-1 sur les mêmes mois", async () => {
     const ctx = await loadCroiseeContext("demo", WS, {});
     expect(ctx.period).toMatchObject({ year: 2026, from: "01", to: "02", months: ["2026-01", "2026-02"] });
@@ -501,8 +601,8 @@ describe("contexte partagé", () => {
     expect(ko.service.value).toBeUndefined();
     expect(ko.notices).toEqual([
       "paramètre ignoré : service=Inconnu (service absent du journal)",
-      "paramètre ignoré : budget=b-2025 (aucun budget saisi de ce nom pour 2026)",
-      "paramètre ignoré : scenario=s-b (aucun scénario de ce nom ne couvre 2026)",
+      "paramètre ignoré : budget=b-2025 (identifiant inconnu parmi les budgets saisis pour 2026)",
+      "paramètre ignoré : scenario=s-b (identifiant inconnu parmi les scénarios qui couvrent 2026)",
     ]);
   });
 
@@ -536,19 +636,64 @@ describe("contexte partagé", () => {
   });
 });
 
+// --- Blocs communs : référence annuelle N-1 (adaptateur pur) -------------------------------------------------------------------
+describe("référence annuelle N-1 sur douze mois", () => {
+  const nd = (month: string, code: "not-read" | "no-journal", reason: string): MonthPayroll => ({ month, kind: "nd", open: false, nd: { code, reason } });
+  it("douze mois de l'année ; raisons des mois n.d. regroupées (le mois retiré du texte du moteur)", () => {
+    expect(yearMonths(2025)).toEqual(["2025-01", "2025-02", "2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12"]);
+    const rows = [
+      nd("2025-01", "no-journal", "journal de paie 2025-01 non renvoyé par PayFit (mois non clôturé ou hors historique)"),
+      nd("2025-02", "no-journal", "journal de paie 2025-02 non renvoyé par PayFit (mois non clôturé ou hors historique)"),
+      { month: "2025-03", kind: "value" } as unknown as MonthPayroll,
+      nd("2025-04", "not-read", "mois 2025-04 hors de la lecture PayFit appliquée"),
+    ];
+    expect(monthNdLines(rows)).toEqual([
+      "janv. 2025, févr. 2025 : journal de paie non renvoyé par PayFit (mois non clôturé ou hors historique)",
+      "avr. 2025 : mois hors de la lecture PayFit appliquée",
+    ]);
+  });
+
+  it("valeurs du moteur reprises telles quelles (masse chargée, brut) ; mois non clos signalé ; n.d. jamais 0", () => {
+    // Cas écrit à la main : brut 3 000,00 € + cotisations 1 200,00 € = masse chargée 4 200,00 €.
+    const value = { kind: "value", brut: 300000, cotisations: 120000, masse: 420000, months: [], openMonths: ["2025-12"], paidContractMonths: 0 } as unknown as PayrollWindow;
+    const t = referenceTable({ year: 2025, scope: "Tous les services", window: value });
+    expect(t.id).toBe(REFERENCE_TABLE_ID);
+    expect(t.title).toBe("Référence annuelle 2025, janvier → décembre · Tous les services");
+    expect(t.columns.map((c) => [c.header, c.kind])).toEqual([["Indicateur", "text"], ["2025 (douze mois)", "eur"]]);
+    expect(t.rows.map((r) => r.cells)).toEqual([["Masse salariale chargée", 420000], ["Rémunération brute", 300000]]);
+    expect(t.notes).toEqual(["Mois non clos : déc. 2025."]);
+    const out = sp(renderToStaticMarkup(h(ModelTable, { table: t, slug: "demo" })));
+    expect(out).toContain("4 200,00 €");
+    expect(out).toContain("3 000,00 €");
+    expect(out).toContain('data-testid="cx-table-commun-reference-n1"');
+
+    const months = [nd("2025-11", "not-read", "mois 2025-11 hors de la lecture PayFit appliquée"), nd("2025-12", "not-read", "mois 2025-12 hors de la lecture PayFit appliquée")];
+    const missing = { kind: "nd", nd: { code: "month-nd", reason: "…" }, months } as unknown as PayrollWindow;
+    const t2 = referenceTable({ year: 2025, scope: "Atelier", window: missing });
+    const why = "nov. 2025, déc. 2025 : mois hors de la lecture PayFit appliquée";
+    expect(t2.rows.map((r) => r.cells[1])).toEqual([{ nd: why }, { nd: why }]);
+    expect(t2.notes).toEqual([]);
+    const out2 = sp(renderToStaticMarkup(h(ModelTable, { table: t2, slug: "demo" })));
+    expect(out2).not.toMatch(/0,00|data-money-cents="0"/);
+    expect(out2.match(new RegExp(`<li>${why}</li>`, "g"))).toHaveLength(1); // raison écrite une fois sous le tableau
+  });
+});
+
 // --- La page ---------------------------------------------------------------------------------------------------------------------
 describe("page Masse salariale croisée", () => {
   beforeEach(() => {
     Object.assign(state, { pay: fakePay(), payCalls: 0, budgets: BUDGETS, scenarios: SCENARIOS, getScenario: null, getScenarioCalls: 0 });
   });
   const render = async (q: Record<string, string> = {}) => sp(renderToStaticMarkup(await CroiseePage({ params: Promise.resolve({ slug: "demo" }), searchParams: Promise.resolve(q) })));
+  const part = (out: string, re: RegExp) => out.match(re)?.[0] ?? "";
 
   it("gabarit : en-tête « Masse salariale », onglet croisée courant et non « Prévu », sommaire, onglets, filtres, chapitre, pied", async () => {
     const out = await render();
     expect(out).toContain("<h1>Masse salariale</h1>");
     expect(out).toMatch(/data-testid="ms-tabs"[\s\S]*?<a href="\/e\/demo\/studio-rh\/masse-salariale\/croisee" aria-current="page" data-tab="croisee">Masse salariale croisée<\/a>/);
     expect(out.match(/data-testid="ms-tabs"[\s\S]*?<\/nav>/)![0].match(/class="soon"/g)).toHaveLength(3);
-    for (const id of ["cx-page", "cx-chapter-menu", "cx-chapter-tabs", "cx-chapter-head", "cx-filters", "cx-pager", "cx-foot", "cx-prevu-synthese", "cx-print-synthese", "cx-presets"]) expect(out, id).toContain(`data-testid="${id}"`);
+    for (const id of ["cx-page", "cx-chapter-menu", "cx-chapter-tabs", "cx-chapter-head", "cx-filters", "cx-pager", "cx-foot", "cx-stub-synthese", "cx-print-synthese", "cx-presets", "cx-commun"]) expect(out, id).toContain(`data-testid="${id}"`);
+    expect(out).toContain('data-ctx="synthese"'); // le chapitre reçoit le contexte
     expect(out).toContain("01 / 10");
     expect(out).toContain("Où en est la masse salariale face au budget, et où finit l&#x27;année ?");
     expect(out).toContain("Début du rapport");
@@ -561,18 +706,32 @@ describe("page Masse salariale croisée", () => {
     expect(out.match(/janvier → février 2026/g)!.length).toBeLessThanOrEqual(2); // résumé du tiroir et en-tête d'impression
   });
 
-  it("chapitre inconnu : Synthèse et un avis ; chapitre « Prévu » : pas de filtres ni de bouton de synthèse", async () => {
+  it("identifiants HTML uniques (chapitre budget : corps cx-budget, champ du tiroir cx-f-budget) ; chaque libellé vise un champ", async () => {
+    const out = await render({ chapitre: "budget" });
+    const ids = [...out.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+    expect(ids.length).toBeGreaterThan(5);
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
+    expect(ids).toEqual(expect.arrayContaining(["cx-budget", "cx-f-annee", "cx-f-de", "cx-f-a", "cx-f-service", "cx-f-budget", "cx-f-scenario", "cx-chapitre"]));
+    for (const m of out.matchAll(/\sfor="([^"]+)"/g)) expect(ids, m[1]).toContain(m[1]);
+    // Le « ? » de la période est à côté du champ, hors du libellé (nom accessible du champ = son libellé).
+    expect(out).toContain('<label for="cx-f-de">Premier mois</label>');
+    expect(out).not.toMatch(/<label[^>]*>[^<]*<a class="gloss-link"/);
+    expect(out).toMatch(/<select class="select" id="cx-f-de"[\s\S]*?<\/select><a class="gloss-link"/);
+  });
+
+  it("chapitre inconnu : Synthèse et un avis ; chapitre « Prévu » : ni filtres, ni bouton de synthèse, ni blocs communs, aucune source lue", async () => {
     const unknown = await render({ chapitre: "zz" });
     expect(unknown).toContain('data-chapter="synthese"');
     expect(unknown).toContain("paramètre ignoré : chapitre=zz (chapitre inconnu : Synthèse affichée)");
     state.payCalls = 0;
     const prevu = await render({ chapitre: "restructuration" });
-    expect(prevu).toContain('data-testid="cx-prevu-restructuration"');
+    expect(prevu).toContain('data-testid="cx-stub-restructuration"');
     expect(prevu).toContain("09 / 10");
-    expect(prevu).not.toContain('data-testid="cx-filters"');
-    expect(prevu).not.toContain('data-testid="cx-print-synthese"');
+    for (const id of ["cx-filters", "cx-print-synthese", "cx-commun", "cx-commun-sources", "cx-commun-reference", "cx-commun-definitions", "cx-source-paie"]) expect(prevu, id).not.toContain(`data-testid="${id}"`);
     expect(prevu).toContain('data-testid="cx-print"');
     expect(state.payCalls).toBe(0);
+    // « Synthèse en PDF · 1 page » : sur la Synthèse seulement.
+    expect(await render({ chapitre: "services" })).not.toContain('data-testid="cx-print-synthese"');
   });
 
   it("liens de chapitre : même période et service, tri retiré ; précédent / suivant vers l'en-tête du chapitre", async () => {
@@ -582,5 +741,94 @@ describe("page Masse salariale croisée", () => {
     expect(out).toContain('href="/e/demo/studio-rh/masse-salariale/croisee?chapitre=budget&amp;annee=2026&amp;de=01&amp;a=02&amp;service=Bureau#cx-chapitre"');
     // Réinitialiser : le chapitre seul.
     expect(out).toContain('<a class="btn" href="/e/demo/studio-rh/masse-salariale/croisee?chapitre=services">Réinitialiser</a>');
+  });
+
+  it("chapitre sans filtres (09, 10) : les liens gardent les valeurs brutes de l'adresse", async () => {
+    const out = await render({ chapitre: "restructuration", annee: "2025", a: "06", service: "Bureau", budget: "b-old", scenario: "s-a" });
+    const q = "annee=2025&amp;a=06&amp;service=Bureau&amp;budget=b-old&amp;scenario=s-a";
+    expect(out).toContain(`href="/e/demo/studio-rh/masse-salariale/croisee?chapitre=synthese&amp;${q}"`); // sommaire et onglets
+    expect(out).toContain(`href="/e/demo/studio-rh/masse-salariale/croisee?chapitre=effets&amp;${q}#cx-chapitre"`); // précédent
+    expect(out).toContain(`href="/e/demo/studio-rh/masse-salariale/croisee?chapitre=juridique&amp;${q}#cx-chapitre"`); // suivant
+    expect(state.payCalls).toBe(0);
+  });
+
+  it("en-tête d'impression : espace, chapitre, période, N-1, service, budget, scénario et mois non clos", async () => {
+    const head = part(await render({ a: "03" }), /<p class="cx-print-head"[\s\S]*?<\/p>/);
+    expect(head).toContain('data-testid="cx-print-head"');
+    for (const t of ["Espace démo", "01 / 10 Synthèse", "janvier → mars 2026", "N-1 : janvier → mars 2025", "Tous les services", "Budget : « Budget révisé »", "Scénario : « Scénario A »", "mois non clos : mars 2026"]) expect(head, t).toContain(t);
+    state.budgets = [];
+    state.scenarios = [];
+    const nd = part(await render(), /<p class="cx-print-head"[\s\S]*?<\/p>/);
+    expect(nd).toContain("Budget : n.d. (aucun budget saisi pour 2026)");
+    expect(nd).toContain("Scénario : n.d. (aucun scénario ne couvre 2026)");
+    expect(nd).not.toContain("mois non clos");
+  });
+
+  it("impression de la synthèse : la classe .cx-syn est documentée et agrandie dans croisee.css ; menus lisibles (11 px) et onglets non rognés", () => {
+    const css = readFileSync("src/styles/croisee.css", "utf8");
+    expect(css).toMatch(/body\[data-print="synthese"\] \.cx-syn \{[^}]*zoom: 1\.1/);
+    expect(css).toMatch(/body\[data-print="synthese"\][^{]*\.cx-common/);
+    expect(css).toMatch(/\.cx-menu-name \.soon \{[^}]*font-size: 11px/);
+    expect(css).toMatch(/\.cx-tabs \.tabs \{[^}]*padding-block: 4px/);
+    expect(css).toMatch(/\.cx-menu \.ui-dropdown-panel \{[^}]*calc\(100vw - var\(--sidebar\) - 72px\)/);
+  });
+
+  it("pied de page : date du journal seulement s'il est lu ; sinon n.d. et la raison exacte (lecture incomplète, source DSN)", async () => {
+    const ok = part(await render(), /<p class="tile-foot" data-testid="cx-source-paie">[\s\S]*?<\/p>/);
+    expect(ok).toContain("Journal de paie : lecture PayFit du ");
+    expect(ok).not.toContain("n.d.");
+
+    const p = fakePay();
+    state.pay = { ...p, input: null, unavailable: "journal comptable absent de la lecture PayFit appliquée", service: { axis: null, origin: "none", updatedAt: null }, axes: [] };
+    const partial = part(await render(), /<p class="tile-foot" data-testid="cx-source-paie">[\s\S]*?<\/p>/);
+    expect(partial).toContain('Journal de paie : <span class="nd">n.d.</span> — journal comptable absent de la lecture PayFit appliquée');
+    expect(partial).not.toContain("lecture PayFit du");
+
+    state.pay = { ...p, source: "dsn", read: null, input: null, unavailable: null, service: { axis: null, origin: "none", updatedAt: null }, axes: [] };
+    const dsn = part(await render(), /<p class="tile-foot" data-testid="cx-source-paie">[\s\S]*?<\/p>/);
+    expect(dsn).toContain('<span class="nd">n.d.</span> — source RH retenue : DSN — journal de paie PayFit non lu');
+    expect(dsn).not.toContain("aucune lecture appliquée");
+  });
+
+  it("blocs communs sous le chapitre : sources et hypothèses de travail, référence annuelle N-1, définitions (renvois au glossaire)", async () => {
+    const out = await render({ service: "Atelier" });
+    // Ordre : chapitre, précédent / suivant, blocs communs, pied de page ; blocs repliés par défaut.
+    const at = (t: string) => out.indexOf(`data-testid="${t}"`);
+    expect(at("cx-stub-synthese")).toBeLessThan(at("cx-pager"));
+    expect(at("cx-pager")).toBeLessThan(at("cx-commun-sources"));
+    expect(at("cx-commun-sources")).toBeLessThan(at("cx-commun-reference"));
+    expect(at("cx-commun-reference")).toBeLessThan(at("cx-commun-definitions"));
+    expect(at("cx-commun-definitions")).toBeLessThan(at("cx-foot"));
+    expect(out).toMatch(/<details class="cx-fold" id="cx-commun-sources" data-testid="cx-commun-sources"><summary>Sources et hypothèses de travail<\/summary>/);
+
+    const sources = part(out, /data-testid="cx-commun-sources"[\s\S]*?<\/details>/);
+    expect(sources).toContain("« Budget révisé » · modifié le 01/06/2026 · par défaut, le plus récent de l&#x27;année");
+    expect(sources).toContain("« Scénario A » · figé · mois du scénario : avr. 2026 → déc. 2026 · base figée sur mars 2026 · par défaut, le plus récent qui couvre l&#x27;année");
+    expect(sources).toContain("Seuil de confidentialité</dt>");
+    expect(sources).toContain('<span class="nd">n.d.</span> — seuil de confidentialité non défini (Paramètres)');
+    expect(sources).toContain('<span class="nd">n.d.</span> — seuils d&#x27;effectif non définis (Paramètres)');
+    expect(sources).toContain('href="/e/demo/parametres#croisee"');
+
+    // Référence N-1 : journal lu sans montant pour 2025 dans ce jeu → n.d., raisons par mois, jamais 0 ; service écrit.
+    const ref = part(out, /data-testid="cx-commun-reference"[\s\S]*?<\/details>/);
+    expect(ref).toContain("Référence annuelle N-1 sur douze mois");
+    expect(ref).toContain("Référence annuelle 2025, janvier → décembre · Atelier");
+    expect(ref).toContain("janv. 2025, févr. 2025, mars 2025 : journal de paie non renvoyé par PayFit (mois non clôturé ou hors historique)");
+    expect(ref).toContain("avr. 2025, mai 2025, juin 2025, juil. 2025, août 2025, sept. 2025, oct. 2025, nov. 2025, déc. 2025 : mois hors de la lecture PayFit appliquée");
+    expect(ref).not.toMatch(/0,00|data-money-cents="0"/);
+
+    const defs = part(out, /data-testid="cx-commun-definitions"[\s\S]*?<\/details>/);
+    for (const id of [...chapterDef("synthese").terms, CROISEE_TERMS.vueEnsemble, CROISEE_TERMS.periodeFiltres]) expect(defs, id).toContain(`href="/e/demo/glossaire#def-${id}"`);
+    expect(defs).toContain(`>${glossaryEntry(CROISEE_TERMS.alertes)!.term}</a>`);
+    for (const e of [CROISEE_TERMS.alertes, CROISEE_TERMS.ecartBudget]) expect(defs).not.toContain(glossaryEntry(e)!.definition.slice(0, 40)); // aucune définition recopiée
+  });
+
+  it("référence N-1 sans journal ou sans période : n.d. avec la raison exacte", async () => {
+    const p = fakePay();
+    state.pay = { ...p, source: "dsn", read: null, input: null, unavailable: null, service: { axis: null, origin: "none", updatedAt: null }, axes: [] };
+    const ref = part(await render(), /data-testid="cx-commun-reference"[\s\S]*?<\/details>/);
+    expect(ref).toContain('data-testid="cx-commun-reference-nd"');
+    expect(ref).toContain("Référentiel RH non construit"); // période n.d. : raison de la période
+    expect(ref).not.toContain("cx-table-commun-reference-n1");
   });
 });

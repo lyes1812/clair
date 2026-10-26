@@ -1,0 +1,45 @@
+/* Masse salariale croisée, chapitres 04 · Fixe & variable et 05 · Services. Variables de globals.css et charts.css ; gabarit, cartes
+   et tableaux de croisee.css et masse-salariale.css. Aucune couleur codée en dur : jetons seulement. */
+
+.cx-masse { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; }
+
+/* Cartes (six : six colonnes, puis trois, puis deux, voir croisee.css) et lignes sous les cartes. */
+.cx-masse-cards { display: grid; gap: 12px; min-width: 0; }
+.cx-masse-under { display: grid; gap: 6px; min-width: 0; }
+
+/* Blocs : titre et étiquette, n.d., graphiques puis tableaux exacts. */
+.cx-masse-block { display: grid; gap: 14px; min-width: 0; scroll-margin-top: 72px; }
+.cx-masse-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.cx-masse-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 0; font-size: var(--clair-type-subheading); font-weight: 600; color: var(--ink); }
+.cx-masse-note { margin: 0; }
+.cx-masse-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+.cx-masse-charts.one { grid-template-columns: minmax(0, 1fr); }
+.cx-masse-chart { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.cx-masse-link { margin: 0; }
+.cx-masse-link a, .cx-masse-filter a { color: var(--blue); }
+
+/* Deux blocs côte à côte (contribution et répartition des services). */
+.cx-masse-halves { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; min-width: 0; }
+@media (max-width: 960px) {
+  .cx-masse-charts, .cx-masse-halves { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Filtre Service rappelé au-dessus du tableau des services. */
+.cx-masse-filter { margin: 0; line-height: 1.5; }
+
+/* Indicateurs « Prévu » : étiquette, libellé, raison. */
+.cx-masse-prevu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: var(--clair-type-form); line-height: 1.5; color: var(--muted); }
+.cx-masse-prevu-list strong { color: var(--ink); font-weight: 600; }
+.cx-masse-prevu-list .tag { margin-right: 4px; }
+
+/* Limites de la lecture : une ligne chacune. */
+.cx-masse-limits { display: grid; gap: 6px; min-width: 0; }
+.cx-masse-limits-title { margin: 0; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); }
+.cx-masse-limits ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+
+@media print {
+  .cx-masse-charts, .cx-masse-halves { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8pt; }
+  .cx-masse-block { break-inside: auto; }
+  .cx-masse-chart, .cx-masse-prevu, .cx-masse-limits, .cx-masse-cards { break-inside: avoid; }
+  .cx-masse-link, .cx-masse-filter a { display: none; }
+}

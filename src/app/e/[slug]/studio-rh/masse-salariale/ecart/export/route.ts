@@ -13,7 +13,7 @@ import { periodText } from "@/lib/viz/ecart";
 import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
 import { loadVersions, type Loaded } from "../../ecart-data";
 import { ecartRows } from "../../ecart-rows";
-import { peopleIndex } from "../../people-index";
+import { peopleIndex, type PersonAbsent, type PersonInfo } from "../../people-index";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +42,6 @@ const pctCell = (d: Diff) => (d.kind !== "value" ? "" : d.pct ? decimal(d.pct.nu
 // --- Excel ---------------------------------------------------------------------------------------------------------------------
 
 const UNIT_LABEL = { eur: "€", etp: "ETP", nombre: "Nombre" } as const;
-const ND_REFERENTIEL = "non renseigné dans le référentiel Collaborateurs";
 const isZoomRubric = (s: string): s is ZoomRubric => Object.hasOwn(ZOOM_RUBRICS, s); // jamais « in » : les clés héritées (constructor, toString…) sont refusées
 const USAGE = { payfit: "journal de paie et référentiel Collaborateurs (versions réelles)", dsn: "déclarations (DSN) et référentiel Collaborateurs (versions réelles)" } as const;
 const TABLE_DEFINITIONS = [ECART_TERMS.versions, ECART_TERMS.rangsDeMois, ECART_TERMS.rubriques, ECART_TERMS.effectifs, ECART_TERMS.ecart, ECART_TERMS.ecartPourcentage, "etp-average", MASSE_TERMS.masse, MASSE_TERMS.brut, MASSE_TERMS.cotisations, "lecture-nd"];
@@ -111,9 +110,20 @@ async function tableXlsx(workspace: WorkspaceAccess, loaded: Loaded, vue: "synth
   return xlsxResponse(buffer, "ecart-budgetaire");
 }
 
-type ZoomEntry = { k: string; i: { label: string; externalId: string | null; service: string | null; contract: string | null; start: string | null; end: string | null }; av: number | null; bv: number | null };
+type ZoomEntry = { k: string; i: PersonInfo; av: number | null; bv: number | null };
 
-const orNd = (e: ZoomEntry, v: string | null): ExportCell => v ?? (e.k === HORS_SALARIE ? "" : { nd: ND_REFERENTIEL });
+// Salarié du détail absent de l'index (ni référentiel Collaborateurs, ni base ou embauche d'un scénario choisi).
+const NOT_INDEXED = { nd: "salarié absent du référentiel Collaborateurs" };
+const UNKNOWN: PersonAbsent = { service: NOT_INDEXED, contract: NOT_INDEXED, start: NOT_INDEXED, end: NOT_INDEXED };
+const UNSAID = { nd: "raison non précisée" }; // index sans raison : jamais produit par peopleIndex
+
+// Service, contrat et dates : un champ null prend ce que l'index dit de son absence (« Non ventilé » ou n.d. avec sa raison
+// exacte). Restent vides (sans objet) la date de sortie d'un contrat en cours et la ligne « Hors salarié », qui n'est pas une personne.
+const identityCells = (e: ZoomEntry): ExportCell[] => {
+  if (e.k === HORS_SALARIE) return ["", "", "", ""];
+  const why = e.i.absent ?? { service: UNSAID, contract: UNSAID, start: UNSAID };
+  return [e.i.service ?? why.service, e.i.contract ?? why.contract, e.i.start ?? why.start, e.i.end ?? why.end ?? ""];
+};
 
 async function zoomXlsx(workspace: WorkspaceAccess, loaded: Loaded, rubric: ZoomRubric, pair: number, entries: ZoomEntry[]): Promise<Response> {
   const a = loaded.versions[pair];
@@ -141,8 +151,7 @@ async function zoomXlsx(workspace: WorkspaceAccess, loaded: Loaded, rubric: Zoom
           { header: b.label, key: "v2", kind: "eur", width: 22 },
           { header: "Écart", key: "ecart", kind: "eur" },
         ],
-        // Service et contrat absents du référentiel : n.d. avec la raison (« Hors salarié » n'est pas une personne : sans objet, cellule vide).
-        rows: entries.map((e) => [e.i.label, e.i.externalId ?? "", orNd(e, e.i.service), orNd(e, e.i.contract), e.i.start ?? "", e.i.end ?? "", e.av ?? "", e.bv ?? "", (e.bv ?? 0) - (e.av ?? 0)]),
+        rows: entries.map((e) => [e.i.label, e.i.externalId ?? "", ...identityCells(e), e.av ?? "", e.bv ?? "", (e.bv ?? 0) - (e.av ?? 0)]),
         note: `Somme des écarts : ${formatEuros(total)} · ${reconciliation}.`,
       },
     ],
@@ -174,7 +183,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     const people = peopleIndex(loaded);
     const keys = [...new Set([...za.byKey.keys(), ...zb.byKey.keys()])];
     const entries: ZoomEntry[] = keys
-      .map((x) => ({ k: x, i: x === HORS_SALARIE ? { label: "Hors salarié", externalId: null, service: null, contract: null, start: null, end: null } : (people.get(x) ?? { label: x, externalId: x, service: null, contract: null, start: null, end: null }) }))
+      .map((x): { k: string; i: PersonInfo } => ({ k: x, i: x === HORS_SALARIE ? { label: "Hors salarié", externalId: null, service: null, contract: null, start: null, end: null } : (people.get(x) ?? { label: x, externalId: x, service: null, contract: null, start: null, end: null, absent: UNKNOWN }) }))
       .sort((x, y) => x.i.label.localeCompare(y.i.label))
       .map((k) => ({ ...k, av: za.byKey.get(k.k) ?? null, bv: zb.byKey.get(k.k) ?? null }));
     if (xlsx) return zoomXlsx(workspace, loaded, rubric, pair, entries);

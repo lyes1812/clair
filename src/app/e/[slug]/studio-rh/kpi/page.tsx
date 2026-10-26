@@ -1,23 +1,19 @@
 import "@/styles/kpi.css";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
-import { formatDate, monthEnd } from "@/lib/dates";
-import { categoryMonth, getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
-import { CATEGORY_IDS, CATEGORY_LABELS, type CategoryId } from "@/lib/budget/types";
+import { formatDate } from "@/lib/dates";
+import { CATEGORY_LABELS, type CategoryId } from "@/lib/budget/types";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
-import { coverageAt, gateAt, monthRanges, natureOfMonth } from "@/lib/rh/headcount";
+import { monthRanges, natureOfMonth } from "@/lib/rh/headcount";
 import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
-import { KPI_DETAIL_IDS, kpiDashboard, kpiDetail } from "@/lib/rh/kpi/dashboard";
+import { KPI_DETAIL_IDS, kpiDetail } from "@/lib/rh/kpi/dashboard";
 import { ETP_PRORATED_LABEL, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
 import { fmtDelta, fmtEtp4, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
-import { civilWindow, closedMonths, defaultYear, lastClosedMonth, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
-import type { Compared, KpiDetailId, KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
-import { loadKpiContext } from "@/lib/rh/kpi-context";
+import { previousWindow } from "@/lib/rh/kpi/period";
+import type { Compared, KpiDetailId, Ratio } from "@/lib/rh/kpi/types";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
-import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
-import type { RhBuildData } from "@/lib/rh/referential/types";
 import type { Shown } from "@/lib/rh/view";
 import { absenceTypeText, absenteeismSeries, deltaExact, etpProratedNotes, etpSeries, headcountSeries, motifsRetenusLine } from "@/lib/viz/kpi";
 import {
@@ -56,12 +52,14 @@ import {
   TurnoverDetail,
   turnoverShown,
 } from "./components";
+import { ExportMenu } from "@/components/ExportMenu";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Prevu, type PrevuLink } from "@/components/Prevu";
 import { EffectifsMensuels } from "./EffectifsMensuels";
 import { PeriodModeFields } from "./PeriodModeFields";
-import { KPI_VUES, resolveKpiVue } from "./tabs";
+import { coverageShown, loadCategoryMonths, loadKpiSuivi, suiviColumnOn } from "./suivi-data";
+import { KPI_VUES } from "./tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -101,20 +99,6 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
     { label: "Natures comptées dans l'effectif", value: natureList(natures.codes), origin: natures.origin === "default" ? "valeur par défaut validée" : "modifié par un administrateur", testId: "natures" },
     ...items.map(([k, label, value]) => ({ label, value, origin: kpiOriginText(k, settings.origins[k], (d) => dateTimeFmt.format(d)).replace(/\.$/, ""), testId: k })),
   ];
-}
-
-// Couverture d'un mois du tableau : complet, borne basse ou n.d. avec la raison.
-function coverageShown(data: RhBuildData, month: string, establishments?: string[], raw?: PayfitHistoryLimit | null): Shown {
-  const ref = data.build.referenceDate;
-  if (ref && monthEnd(month) > ref) return { text: `n.d. — mois non clos à la date de référence (${formatDate(ref)})`, kind: "nd" };
-  const cov = coverageAt(data, month, establishments);
-  const g = gateAt(data, monthEnd(month), establishments);
-  if (g.nd) return { text: `n.d. — ${g.nd.reason}`, kind: "nd" };
-  const lower = cov.filter((c) => c.presenceStatus === "lower_bound");
-  if (lower.length) return { text: "borne basse", kind: "lower", foot: lower[0].presenceReason ?? undefined };
-  // Historique PayFit brut : mois antérieur à la limite de conservation, calculé sur ce que l'API renvoie (mention en tête).
-  if (raw && month >= raw.lowerFrom && month <= raw.lowerTo) return { text: "brut (API PayFit)", kind: "value" };
-  return { text: "complet", kind: "value" };
 }
 
 // Entrées de KPI RH pas encore construites : l'état en une phrase, ce qui existe déjà (avec un lien) et ce qui reste à préciser.
@@ -158,17 +142,14 @@ const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: Prev
 export default async function KpiPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
   const sp = await searchParams;
-  const ctx = await loadKpiContext(slug, {});
-  if (!ctx.input) return <KpiHeader ctx={ctx} closedMonth={null} />;
-  const data = ctx.input.data;
-  const open = ctx.input.openMonths ?? [];
-  const rawLimit = ctx.collab.payfitHistory?.mode === "raw" ? ctx.collab.payfitHistory.limit : null;
-  const closed = closedMonths(data, open);
-  const last = lastClosedMonth(data, open);
+  // Chargement commun avec l'export (mêmes paramètres d'adresse, mêmes règles de remplacement d'une valeur invalide).
+  const suivi = await loadKpiSuivi(slug, sp);
+  const ctx = suivi.ctx;
+  if (suivi.kind === "no-input") return <KpiHeader ctx={ctx} closedMonth={null} />;
 
-  if (ctx.settings.invalid.length) {
+  if (suivi.kind === "settings-invalid") {
     return (
-      <KpiHeader ctx={ctx} closedMonth={last}>
+      <KpiHeader ctx={ctx} closedMonth={suivi.last}>
         <section className="placeholder" data-testid="kpi-settings-invalid">
           <h3>n.d. — paramètres des KPI illisibles</h3>
           <p className="muted">
@@ -179,13 +160,13 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       </KpiHeader>
     );
   }
-  if (!last) {
+  if (suivi.kind === "no-closed-month") {
     return (
       <KpiHeader ctx={ctx} closedMonth={null}>
         <section className="placeholder" data-testid="kpi-no-closed-month">
           <h3>n.d. — aucun mois clos à la date de référence</h3>
           <p className="muted">
-            Date de référence : {formatDate(data.build.referenceDate)}.
+            Date de référence : {formatDate(suivi.data.build.referenceDate)}.
             <GlossaryLink slug={slug} term={KPI_TERMS.closedPeriod} />
           </p>
         </section>
@@ -194,29 +175,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   }
 
   // Paramètres GET : une valeur invalide est remplacée par le défaut, et l'écran le dit.
-  const notices: string[] = [];
+  const { data, rawLimit, closed, last, years, vue, mode, fin, year, etab, nature, w, input, dash, notices } = suivi;
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
-  const vue = resolveKpiVue(one(sp.vue));
-  const rawMode = one(sp.mode);
-  const mode = rawMode === "civil" ? "civil" : "glissant";
-  if (rawMode && rawMode !== "civil" && rawMode !== "glissant") ignore("mode", rawMode, "valeurs possibles : glissant, civil");
-  const rawFin = one(sp.fin);
-  const fin = closed.includes(rawFin) ? rawFin : last;
-  if (rawFin && rawFin !== fin) ignore("fin", rawFin, "hors des mois clos");
-  const years = selectableYears(data, open);
-  const rawYear = one(sp.annee);
-  const year = years.some((y) => String(y.year) === rawYear) ? Number(rawYear) : defaultYear(data, open)!;
-  if (rawYear && String(year) !== rawYear) ignore("annee", rawYear, "hors des années couvertes");
-  const rawEtab = one(sp.etab);
-  const etab = ctx.collab.establishments.some((e) => e.id === rawEtab) ? rawEtab : "";
-  if (rawEtab && !etab) ignore("etab", rawEtab, "établissement inconnu");
-  const rawNature = one(sp.nature);
-  const nature = ctx.collab.natures.codes.includes(rawNature) ? rawNature : "";
-  if (rawNature && !nature) ignore("nature", rawNature, "nature non comptée dans l'effectif");
-
-  const w: Window = mode === "civil" ? civilWindow(year) : rollingWindow(fin);
-  const input: KpiInput = { ...ctx.input, scope: { establishments: etab ? [etab] : undefined, nature: nature || undefined } };
-  const dash = kpiDashboard(input, w);
 
   // detail et mois : un détail de mois exige un mois valide de la fenêtre ou de son N-1 ; un détail de période n'en prend pas ;
   // l'absentéisme accepte les deux. Tout paramètre écarté est signalé avec sa raison.
@@ -328,11 +288,9 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const absCur = t.absenteeism.current;
   const prCur = t.etpProrated.current;
 
-  const [catNatures, catOverrides] = await Promise.all([getCategoryNatures(ctx.collab.workspace.id), getContractCategories(ctx.collab.workspace.id)]);
-  const catMonths = w.months.map((m) => categoryMonth(ctx.input!, m, catNatures.natures, catOverrides));
+  const { months: catMonths, keys: catKeys } = await loadCategoryMonths(ctx.input!, w, ctx.collab.workspace.id);
   const tileOn = (id: string) => vue === "suivi" || (vue === "turnover" ? id === "turnover" || id === "headcount-avg" : id === "absenteeism");
-  const colOn = (c: string) => vue === "suivi" || (vue === "turnover" ? ["coverage", "headcount", "entries", "exits"].includes(c) : ["coverage", "theoretical", "absence-days", "absenteeism", "absenteeism-n1"].includes(c));
-  const catKeys = [...CATEGORY_IDS, "nc"].filter((k) => catMonths.some((c) => c.kind === "value" && c.byCategory[k]));
+  const colOn = (c: string) => suiviColumnOn(vue, c);
   // Page « Prévu » : aucun chiffre, donc ni limites de la lecture ni paramètres en vigueur à rappeler.
   const prevu = (PREVU_VUES as string[]).includes(vue);
   return (
@@ -508,7 +466,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
       <KpiCharts slug={slug} vue={vue === "turnover" ? "turnover" : vue === "absenteisme" ? "absenteisme" : "suivi"} rows={dash.rows} turnover={t.turnover} absenteeism={t.absenteeism} />
 
       <section className="panel">
-        <PanelTitle slug={slug} term={KPI_TERMS.monthly} label="Tableau mois par mois et ligne Période">Mois par mois</PanelTitle>
+        <div className="panel-head">
+          <PanelTitle slug={slug} term={KPI_TERMS.monthly} label="Tableau mois par mois et ligne Période">Mois par mois</PanelTitle>
+          <ExportMenu testid="kpi-export" options={[{ label: "Excel (.xlsx)", href: `/e/${slug}/studio-rh/kpi/export${query({ format: "xlsx" })}`, testid: "kpi-export-xlsx" }]} />
+        </div>
         <p className="kpi-scroll-hint" data-testid="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite.</p>
         <div className="table-wrap scroll">
           <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-monthly-table">

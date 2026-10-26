@@ -52,6 +52,7 @@ export const GLOSSARY_CROISEE: GlossaryEntry[] = [
     definition: p(
       "La Masse salariale croisée lit la masse salariale avec les effectifs, les absences, la rémunération, les services, le budget et la comptabilité, en dix chapitres : Synthèse ; Effectifs et mouvements ; Absences et congés ; Fixe et variable ; Services ; Budget et prévisions ; Paie et comptabilité ; Effets d'évolution ; Restructuration ; Bibliothèque juridique.",
       "Un seul chapitre est affiché à la fois. Le Sommaire et les onglets de chapitres mènent aux autres ; les liens « précédent » et « suivant » suivent l'ordre des chapitres. Le chapitre affiché est écrit dans l'adresse de la page (paramètre « chapitre ») : une adresse se partage ou se met en favori telle quelle. Un chapitre inconnu ouvre la Synthèse, avec un avis.",
+      "Sous chaque chapitre chiffré, trois blocs repliables : « Sources et hypothèses de travail » (budget saisi et scénario retenus, paramètres de la Masse salariale croisée), « Référence annuelle N-1 sur douze mois » et « Définitions et méthode » (renvois au glossaire). La référence annuelle donne la masse salariale chargée et la rémunération brute de janvier à décembre de l'année qui précède la période, pour le service choisi, calculées comme dans la Synthèse de la Masse salariale ; un seul mois n.d. rend l'année n.d., avec la raison de chaque mois.",
       "Les chiffres sont lus à la demande dans les sources retenues (Données), stockés dans Clair et jamais figés dans la page ; seules les données du chapitre affiché sont lues. Un chapitre ou un bloc marqué « Prévu » n'affiche aucun chiffre : il dit ce qui existe déjà ailleurs dans Clair.",
       "Aucun nom de salarié n'apparaît dans la Masse salariale croisée : les listes (mouvements, échéances) sont anonymes. Le détail nominatif reste dans Collaborateurs, selon les droits de chaque membre.",
     ),
@@ -272,7 +273,7 @@ export const GLOSSARY_CROISEE: GlossaryEntry[] = [
     term: "Impression et PDF de la synthèse",
     family: FAMILY,
     definition: p(
-      "« Imprimer / Enregistrer en PDF » imprime le chapitre affiché au format A4 paysage, avec en tête le nom de l'espace, le chapitre, la période et le service. Les menus, les onglets, les filtres, les boutons et les blocs repliés ne sont pas imprimés ; un long tableau peut se couper entre deux lignes. Pour obtenir un PDF, choisir « Enregistrer au format PDF » dans la fenêtre d'impression du navigateur.",
+      "« Imprimer / Enregistrer en PDF » imprime le chapitre affiché au format A4 paysage, avec en tête le nom de l'espace, le chapitre, la période, N-1, le service, le budget saisi et le scénario retenus, et les mois non clos. Les menus, les onglets, les filtres, les boutons et les blocs repliés ne sont pas imprimés ; un long tableau peut se couper entre deux lignes. Pour obtenir un PDF, choisir « Enregistrer au format PDF » dans la fenêtre d'impression du navigateur.",
       "« Synthèse en PDF · 1 page », sur le chapitre Synthèse, n'imprime que les cartes, le graphique principal et les points à surveiller, sur une page.",
       "Les couleurs de tendance s'impriment ; le signe de chaque écart reste écrit.",
     ),
@@ -284,7 +285,7 @@ export const GLOSSARY_CROISEE: GlossaryEntry[] = [
     family: FAMILY,
     definition: p(
       "Quand un chapitre propose le menu « Exporter », ses tableaux chiffrés s'exportent en Excel (.xlsx), proposé en premier, et en CSV. Le classeur reprend les lignes de l'écran, à l'euro près, et trois feuilles fixes : « Filtres » (période, service, budget, scénario), « Sources » (source et date de la lecture) et « Définitions » (les entrées du glossaire citées par le chapitre).",
-      "Une valeur n.d. est écrite « n.d. » avec sa raison, jamais zéro ; une cellule vide est sans objet. Les montants sont de vrais nombres, sans formule. Un texte qui pourrait être pris pour une formule par un tableur (il commence par =, +, -, @, une tabulation ou un retour à la ligne) est précédé d'une apostrophe.",
+      "Une valeur n.d. est écrite « n.d. » avec sa raison, jamais zéro ; une cellule vide est sans objet. Les montants sont de vrais nombres, sans formule. Un texte qui pourrait être pris pour une formule par un tableur (il commence par =, +, @, une tabulation ou un retour à la ligne, ou par - quand ce n'est pas un nombre) est précédé d'une apostrophe ; une cellule numérique, un écart négatif par exemple, ne l'est jamais.",
     ),
     see: ["croisee-impression", "lecture-nd"],
   },

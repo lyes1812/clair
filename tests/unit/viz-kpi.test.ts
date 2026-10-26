@@ -8,7 +8,7 @@ import { unitFormat } from "@/components/charts/units";
 import { GLOSSARY } from "@/lib/glossary";
 import { GLOSSARY_KPI, KPI_TERMS } from "@/lib/glossary/kpi";
 import { GLOSSARY_RH } from "@/lib/glossary/rh";
-import { KPI_DEFINITIONS, KPI_ND_EXPLANATIONS, SOURCE_GAPS } from "@/lib/rh/kpi/definitions";
+import { KPI_ND_EXPLANATIONS, SOURCE_GAPS } from "@/lib/rh/kpi/definitions";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import {
   absenceTypeLabel,
@@ -368,7 +368,8 @@ describe("glossaire KPI RH (lot 10)", () => {
     for (const [nom, id] of Object.entries(KPI_TERMS)) expect(known.has(id), `${nom} → ${id}`).toBe(true);
   });
   it("les anciennes ancres #def-… des définitions de l'écran sont conservées comme identifiants", () => {
-    for (const d of KPI_DEFINITIONS) expect(ids, d.id).toContain(d.id);
+    // Ancres des anciennes définitions de l'écran KPI RH (liste écrite à la main) : le glossaire est leur seule source.
+    for (const id of ["etp-contract", "etp-month-end", "etp-average", "headcount-average", "turnover", "absenteeism", "closed-period", "previous-period", "rounding"]) expect(ids, id).toContain(id);
     expect(ids).toContain("lecture-graphique");
     expect(ids).toContain("effectifs-mensuels");
   });

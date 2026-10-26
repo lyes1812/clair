@@ -1,0 +1,41 @@
+/* Masse salariale croisée, chapitres 06 · Budget & prévisions et 08 · Effets d'évolution. Variables de globals.css et charts.css ;
+   gabarit, cartes, tableaux et impression de croisee.css et masse-salariale.css. Aucune couleur codée en dur : jetons seulement. */
+
+.cx-bud { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; }
+
+/* Cartes (six : six colonnes, puis trois, puis deux, voir croisee.css) et lignes sous les cartes. */
+.cx-bud-cards { display: grid; gap: 12px; min-width: 0; }
+.cx-bud-under { display: grid; gap: 6px; min-width: 0; }
+
+/* Blocs : titre, renvois, n.d., graphiques puis tableaux exacts. */
+.cx-bud-block { display: grid; gap: 14px; min-width: 0; scroll-margin-top: 72px; }
+.cx-bud-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; min-width: 0; }
+.cx-bud-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 0; font-size: var(--clair-type-subheading); font-weight: 600; color: var(--ink); }
+.cx-bud-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; font-size: var(--clair-type-form); }
+.cx-bud-links a, .cx-bud-prevu-list a { color: var(--blue); }
+.cx-bud-note { margin: 0; }
+.cx-bud-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+.cx-bud-charts.one { grid-template-columns: minmax(0, 1fr); }
+.cx-bud-chart { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.cx-bud-tablelink { margin: 0; }
+.cx-bud-tablelink a { color: var(--blue); }
+@media (max-width: 960px) {
+  .cx-bud-charts { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Blocs « Prévu » : étiquette, libellé, raison, renvois. */
+.cx-bud-prevu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: var(--clair-type-form); line-height: 1.5; color: var(--muted); }
+.cx-bud-prevu-list strong { color: var(--ink); font-weight: 600; }
+.cx-bud-prevu-list .tag { margin-right: 4px; }
+
+/* Limites de la lecture : une ligne chacune. */
+.cx-bud-limits { display: grid; gap: 6px; min-width: 0; }
+.cx-bud-limits-title { margin: 0; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); }
+.cx-bud-limits ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+
+@media print {
+  .cx-bud-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8pt; }
+  .cx-bud-block { break-inside: auto; }
+  .cx-bud-chart, .cx-bud-prevu, .cx-bud-limits, .cx-bud-cards { break-inside: avoid; }
+  .cx-bud-links, .cx-bud-tablelink { display: none; }
+}

@@ -3,6 +3,7 @@ import "@/styles/hypotheses-resultat.css";
 import type { ReactNode } from "react";
 import { BarChart, LineChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
+import { ExportMenu } from "@/components/ExportMenu";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
@@ -13,28 +14,14 @@ import { CATEGORY_IDS, CATEGORY_LABELS, type BaseSnapshot, type CategoryId, type
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import { affichageOf, contributionsChart, costSeries, etpSeries, frDates, hasNd, hasValues, headcountSeries, monthAxis, monthLongLabel, natureChart, ndMonthsNote, showCharts, showTables, withAffichage, type NatureChart } from "@/lib/viz/hypotheses";
 import { monthShort } from "../masse-salariale/components";
+import { projectionRows, type ProjectionRow } from "./resultat-data";
 
 const KIND: Record<Contribution["kind"], string> = {
   base: "Base", augmentation: "Augmentation", quotite: "Changement de quotité", enveloppe: "Enveloppe", absence: "Congé non payé", depart: "Départ", "fin-contrat": "Fin de contrat connue", entree: "Entrée après la base", embauche: "Embauche", ponctuel: "Élément ponctuel", sortie: "Coûts de sortie",
 };
 const eur = (v: number | null) => (v === null ? "n.d." : formatEuros(v));
-const fd = (s: string | null) => (s === null ? null : frDates(s));
 const persons = (n: number) => `${n} ${n > 1 ? "personnes" : "personne"}`;
-type Row = { month: string; layer: "reel" | "parent" | "projete"; source?: string; brut: number | null; charges: number | null; cost: number | null; headcount: number | null; etp4: number | null; nd: string | null; etpNd: string | null };
-
-// Mois de l'année du premier mois projeté (réel figé) puis mois projetés jusqu'à la fin de l'horizon.
-function rowsOf(base: BaseSnapshot, proj: Projection, scenario: ScenarioRow): Row[] {
-  const year = scenario.firstMonth.slice(0, 4);
-  const actual: Row[] = base.actuals
-    .filter((a) => a.month.startsWith(year) && a.month < scenario.firstMonth)
-    .map((a) => (a.kind === "nd" ? { month: a.month, layer: "reel", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: frDates(a.reason), etpNd: null } : { month: a.month, layer: "reel", brut: a.brut, charges: a.cotisations, cost: a.masse, headcount: a.headcount, etp4: a.etp4, nd: null, etpNd: fd(a.etpNd) }));
-  // Base dérivée : mois projetés par le scénario parent dans l'année (coût et effectif seulement).
-  const prior: Row[] = (base.prior ?? [])
-    .filter((p) => p.month.startsWith(year) && p.month < scenario.firstMonth && !base.actuals.some((a) => a.month === p.month))
-    .map((p) => (p.kind === "nd" ? { month: p.month, layer: "parent", source: p.source, brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: frDates(p.reason), etpNd: null } : { month: p.month, layer: "parent", source: p.source, brut: p.brut ?? null, charges: p.charges ?? null, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: p.brut === undefined ? "brut et charges non conservés par la base dérivée (créée avant leur reprise)" : null, etpNd: fd(p.etpNd) }));
-  const projected: Row[] = proj.kind === "error" ? [] : proj.months.map((p: ProjectedMonth) => (p.kind === "nd" ? { month: p.month, layer: "projete", brut: null, charges: null, cost: null, headcount: null, etp4: null, nd: frDates(p.reasons.join(" ; ")), etpNd: null } : { month: p.month, layer: "projete", brut: p.brut, charges: p.charges, cost: p.cost, headcount: p.headcount, etp4: p.etp4, nd: null, etpNd: fd(p.etpNd) }));
-  return [...actual, ...prior, ...projected];
-}
+type Row = ProjectionRow;
 
 // Mois projetés par les scénarios parents, groupés par scénario d'origine (une base dérivée de base dérivée a deux sources).
 function priorBySource(base: BaseSnapshot, months: string[]) {
@@ -238,7 +225,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
   // Adresse de l'écran, mois ouvert conservé ; l'affichage « tout » n'est pas écrit dans l'adresse.
   const here = `${href}&vue=resultat&sous=projection${/^\d{4}-\d{2}$/.test(month) ? `&mois=${month}` : ""}`;
   const monthHref = (m: string) => `${withAffichage(`${href}&vue=resultat&sous=projection&mois=${m}`, aff)}#proj-detail`;
-  const rows = rowsOf(base, proj, scenario);
+  const rows = projectionRows(base, proj, scenario);
   const pm = proj.months;
   const nature = natureChart(pm);
   const ndMonths = pm.filter((p) => p.kind === "nd");
@@ -253,16 +240,19 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
   return (
     <MoneyText><>
       <div className="hr-switch">
-        <ViewSwitch
-          testid="proj-affichage"
-          label="Affichage de la projection"
-          current={aff}
-          options={[
-            { key: "tout", label: "Afficher tout", href: withAffichage(here, "tout") },
-            { key: "graphique", label: "Graphique", href: withAffichage(here, "graphique") },
-            { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
-          ]}
-        />
+        <div className="panel-tools">
+          <ViewSwitch
+            testid="proj-affichage"
+            label="Affichage de la projection"
+            current={aff}
+            options={[
+              { key: "tout", label: "Afficher tout", href: withAffichage(here, "tout") },
+              { key: "graphique", label: "Graphique", href: withAffichage(here, "graphique") },
+              { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
+            ]}
+          />
+          <ExportMenu testid="proj-export" options={[{ label: "Excel (.xlsx)", href: `/e/${slug}/studio-rh/hypotheses/export?scenario=${encodeURIComponent(scenario.id)}&vue=resultat&sous=projection&format=xlsx`, testid: "proj-export-xlsx" }]} />
+        </div>
         <p className="hr-context">{range} · {origin} avant {formatMonth(scenario.firstMonth).toLowerCase()}, projeté ensuite · <MoneyUnitLabel /></p>
       </div>
       {ndMonths.length > 0 && (

@@ -1,6 +1,7 @@
 import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import "@/styles/hypotheses-resultat.css";
 import { BarChart, LineChart, WaterfallChart } from "@/components/charts";
+import { ExportMenu } from "@/components/ExportMenu";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
@@ -40,7 +41,8 @@ export function ComparisonView({
   const pv = (m: string) => principal.points.get(m);
   const aff = affichageOf(affichage);
   // Adresse de l'écran : année et lectures choisies conservées ; l'affichage « tout » n'est pas écrit dans l'adresse.
-  const here = `${hrefBase}?${[`scenario=${encodeURIComponent(scenarioId)}`, "vue=resultat", "sous=comparaison", `annee=${encodeURIComponent(year)}`, ...selected.map((v) => `cmp=${encodeURIComponent(v)}`)].join("&")}`;
+  const query = [`scenario=${encodeURIComponent(scenarioId)}`, "vue=resultat", "sous=comparaison", `annee=${encodeURIComponent(year)}`, ...selected.map((v) => `cmp=${encodeURIComponent(v)}`)].join("&");
+  const here = `${hrefBase}?${query}`;
   const axis = monthAxis(months);
   const lines = comparisonSeries(principal, compared, months);
   const gaps = gapSeries(principal, compared, months);
@@ -50,16 +52,19 @@ export function ComparisonView({
   return (
     <MoneyText><>
       <div className="hr-switch">
-        <ViewSwitch
-          testid="cmp-affichage"
-          label="Affichage de la comparaison"
-          current={aff}
-          options={[
-            { key: "tout", label: "Afficher tout", href: withAffichage(here, "tout") },
-            { key: "graphique", label: "Graphique", href: withAffichage(here, "graphique") },
-            { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
-          ]}
-        />
+        <div className="panel-tools">
+          <ViewSwitch
+            testid="cmp-affichage"
+            label="Affichage de la comparaison"
+            current={aff}
+            options={[
+              { key: "tout", label: "Afficher tout", href: withAffichage(here, "tout") },
+              { key: "graphique", label: "Graphique", href: withAffichage(here, "graphique") },
+              { key: "tableau", label: "Tableau", href: withAffichage(here, "tableau") },
+            ]}
+          />
+          <ExportMenu testid="cmp-export" options={[{ label: "Excel (.xlsx)", href: `${hrefBase}/export?${query}&format=xlsx`, testid: "cmp-export-xlsx" }]} />
+        </div>
         <div className="hr-line-bar">
           <p className="hr-context">{year} · coût employeur mensuel · {principal.label}{compared.length ? ` face à ${compared.map((c) => c.label).join(", ")}` : ""} · <MoneyUnitLabel /></p>
           {compared.length > 0 && <TrendLegend slug={slug} />}

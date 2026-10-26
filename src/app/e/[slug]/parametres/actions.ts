@@ -11,6 +11,7 @@ import { requireWorkspace } from "@/lib/workspace";
 import { setProrata } from "@/lib/budget/settings";
 import { setCategoryNatures, setContractCategories } from "@/lib/budget/categories";
 import { CATEGORY_IDS } from "@/lib/budget/types";
+import { CROISEE_PARSERS, LIBELLE_MAX, SEUILS_MAX, setCroiseeSettings, type CroiseeWrite, type SeuilEffectif } from "@/lib/croisee-settings";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -170,4 +171,75 @@ export async function saveContractCategories(slug: string, _prev: FormState, for
   }
   revalidatePath(`/e/${slug}`, "layout");
   return { ok: "Catégories par contrat enregistrées (KPI RH et scénarios créés ensuite)." };
+}
+
+// Masse salariale croisée : lecture du formulaire. Un champ présent et vide supprime le réglage (« non défini ») ; un champ absent
+// du formulaire laisse le réglage inchangé ; une valeur hors règle refuse tout l'enregistrement. Rien n'est converti en silence :
+// « 2,5 », « -1 » ou « abc » sont refusés, jamais arrondis ni remplacés par 0.
+type CroiseeIntKey = "confidentialite" | "margeAlerte" | "horizonEcheances";
+const CROISEE_INT_ERRORS: Record<CroiseeIntKey, string> = {
+  confidentialite: "Valeur invalide : seuil de confidentialité (nombre entier de personnes, au moins 1).",
+  margeAlerte: "Valeur invalide : marge d'alerte (nombre entier de salariés, 0 ou plus).",
+  horizonEcheances: "Valeur invalide : horizon des échéances (nombre entier de jours, au moins 1).",
+};
+const digitsOf = (v: FormDataEntryValue | null | undefined) => String(v ?? "").replace(/[\s\u00a0\u202f]/g, "");
+const wholeNumber = (s: string) => (/^\d+$/.test(s) ? Number(s) : Number.NaN);
+
+function readCroiseeForm(formData: FormData): { values: CroiseeWrite } | { error: string } {
+  const values: CroiseeWrite = {};
+  for (const key of Object.keys(CROISEE_INT_ERRORS) as CroiseeIntKey[]) {
+    if (!formData.has(key)) continue;
+    const raw = digitsOf(formData.get(key));
+    if (raw === "") {
+      values[key] = null;
+      continue;
+    }
+    const v = CROISEE_PARSERS[key](wholeNumber(raw));
+    if (v === null) return { error: CROISEE_INT_ERRORS[key] };
+    values[key] = v;
+  }
+  // Seuils d'effectif : lignes « libellé + effectif » dans l'ordre du tableau ; une ligne entièrement vide est ignorée. Le champ
+  // caché « seuils » marque la présence du tableau dans le formulaire.
+  if (formData.has("seuils")) {
+    const labels = formData.getAll("seuilLibelle").map((v) => String(v).trim());
+    const counts = formData.getAll("seuilValeur").map(digitsOf);
+    const list: SeuilEffectif[] = [];
+    for (let i = 0; i < Math.max(labels.length, counts.length); i++) {
+      const libelle = labels[i] ?? "";
+      const raw = counts[i] ?? "";
+      if (libelle === "" && raw === "") continue;
+      const row = `Seuil d'effectif n° ${i + 1}`;
+      if (libelle === "" || raw === "") return { error: `${row} : libellé et effectif sont requis ensemble.` };
+      if (libelle.length > LIBELLE_MAX) return { error: `${row} : libellé de ${LIBELLE_MAX} caractères au plus.` };
+      const valeur = wholeNumber(raw);
+      if (!Number.isSafeInteger(valeur) || valeur < 1) return { error: `${row} : effectif en nombre entier de salariés, au moins 1.` };
+      list.push({ libelle, valeur });
+    }
+    if (list.length > SEUILS_MAX) return { error: `Seuils d'effectif : ${SEUILS_MAX} au plus.` };
+    if (new Set(list.map((x) => x.valeur)).size !== list.length) return { error: "Seuils d'effectif : deux seuils ne peuvent pas avoir le même effectif." };
+    if (list.length === 0) values.seuilsEffectif = null;
+    else {
+      const parsed = CROISEE_PARSERS.seuilsEffectif(list);
+      if (parsed === null) return { error: "Valeur invalide : seuils d'effectif suivis." };
+      values.seuilsEffectif = parsed;
+    }
+  }
+  return { values };
+}
+
+// Paramètres de la Masse salariale croisée (administrateur) : quatre réglages sans valeur par défaut, un événement setting.changed
+// par réglage modifié ou supprimé.
+export async function saveCroiseeSettings(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  const read = readCroiseeForm(formData);
+  if ("error" in read) return { error: read.error };
+  let written: string[];
+  try {
+    written = await setCroiseeSettings(workspace.id, read.values, session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  if (written.length === 0) return { ok: "Aucune modification : rien n'a été enregistré." };
+  revalidatePath(`/e/${slug}`, "layout");
+  return { ok: "Paramètres de la Masse salariale croisée enregistrés." };
 }

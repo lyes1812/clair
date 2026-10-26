@@ -1,0 +1,34 @@
+/* Masse salariale croisée, chapitre 07 · Paie & comptabilité. Variables de globals.css et charts.css ; gabarit, cartes et tableaux
+   de croisee.css et masse-salariale.css. Aucune couleur codée en dur : jetons seulement. */
+
+.cx-paie { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; }
+
+/* Cartes et légende des tendances de coût. */
+.cx-paie-cards { display: grid; gap: 10px; min-width: 0; }
+
+/* Blocs : titre, ligne de source, n.d., graphiques puis tableaux exacts. */
+.cx-paie-block { display: grid; gap: 14px; min-width: 0; scroll-margin-top: 72px; }
+.cx-paie-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 0; font-size: var(--clair-type-subheading); font-weight: 600; color: var(--ink); }
+.cx-paie-note { margin: 0; }
+.cx-paie-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+.cx-paie-charts.one { grid-template-columns: minmax(0, 1fr); }
+.cx-paie-chart { display: grid; gap: 8px; align-content: start; min-width: 0; }
+@media (max-width: 960px) {
+  .cx-paie-charts { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Blocs « Prévu » : étiquette, libellé, raison. */
+.cx-paie-prevu-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: var(--clair-type-form); line-height: 1.5; color: var(--muted); }
+.cx-paie-prevu-list strong { color: var(--ink); font-weight: 600; }
+.cx-paie-prevu-list .tag { margin-right: 4px; }
+
+/* Limites de la lecture : une ligne chacune. */
+.cx-paie-limits { display: grid; gap: 6px; min-width: 0; }
+.cx-paie-limits-title { margin: 0; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); }
+.cx-paie-limits ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+
+@media print {
+  .cx-paie-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8pt; }
+  .cx-paie-block { break-inside: auto; }
+  .cx-paie-chart, .cx-paie-prevu, .cx-paie-limits, .cx-paie-cards { break-inside: avoid; }
+}

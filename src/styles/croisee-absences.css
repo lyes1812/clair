@@ -1,0 +1,32 @@
+/* Masse salariale croisée, chapitre 03 · Absences & congés. Variables de globals.css et charts.css ; gabarit, tuiles et tableaux
+   de croisee.css et masse-salariale.css. Aucune couleur codée en dur : jetons seulement. */
+
+.cx-abs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; }
+
+/* Quatre cartes : quatre colonnes, puis deux, puis une. */
+.cx-abs-tiles { display: grid; gap: 10px; min-width: 0; }
+.cx-abs-tiles .facts.ms-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .cx-abs-tiles .facts.ms-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .cx-abs-tiles .facts.ms-tiles { grid-template-columns: minmax(0, 1fr); } }
+
+/* Blocs : titre, n.d., graphique suivi de son tableau exact, tableaux, mentions « Prévu ». */
+.cx-abs-block { gap: 14px; scroll-margin-top: 72px; }
+.cx-abs-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: var(--clair-type-subheading); font-weight: 600; color: var(--ink); }
+.cx-abs-chart { display: grid; gap: 12px; min-width: 0; }
+
+.cx-abs-prevu { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cx-abs-prevu-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--clair-type-form); color: var(--muted); line-height: 1.5; }
+.cx-abs-prevu-list strong { color: var(--ink); font-weight: 600; }
+.cx-abs-prevu-list a { color: var(--blue); }
+
+/* Limites de la lecture : une ligne chacune. */
+.cx-abs-limits { display: grid; gap: 6px; min-width: 0; }
+.cx-abs-limits-title { display: flex; align-items: center; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); }
+.cx-abs-limits ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+
+@media print {
+  .cx-abs-tiles .facts.ms-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6pt; }
+  .cx-abs-block { break-inside: auto; }
+  .cx-abs-chart, .cx-abs-prevu, .cx-abs-limits { break-inside: avoid; }
+  .cx-abs-prevu-list a { display: none; }
+}

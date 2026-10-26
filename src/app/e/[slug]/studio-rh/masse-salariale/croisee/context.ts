@@ -9,7 +9,7 @@ import type { KpiContext } from "@/lib/rh/kpi-context";
 import { closedMonths } from "@/lib/rh/kpi/period";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { hasAtLeast, type Role } from "@/lib/roles";
-import { croiseeHref, parseQuery, type CroiseeQuery, type QueryState } from "@/lib/viz/croisee";
+import { croiseeHref, parseQuery, shownValue, type CroiseeQuery, type QueryState } from "@/lib/viz/croisee";
 import { capital, monthShortYear, sourceReason } from "@/lib/viz/masse";
 import { kpiRefusal, periodLabel, previousMonths, resolvePeriod, type Period } from "@/lib/viz/synthese";
 import type { WorkspaceAccess } from "@/lib/workspace";
@@ -68,7 +68,7 @@ export function once<T>(fn: () => Promise<T>): () => Promise<T> {
   return () => (p ??= fn());
 }
 
-const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeZone: "Europe/Paris" });
+export const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeZone: "Europe/Paris" });
 const yearsOf = (s: ScenarioListRow["scenario"]) => new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)));
 
 export async function loadCroiseeContext(slug: string, workspace: WorkspaceAccess, sp: Search): Promise<CroiseeContext> {
@@ -125,9 +125,12 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
   const none = { selected: null, explicit: false, options: [], reason: null };
   const keep: QueryState = { chapitre: chapter.id, affichage: query.affichage, tri: query.tri, sens: query.sens };
 
-  // Chapitre sans filtres (chapitres « Prévu ») : aucune source n'est lue.
+  // Chapitre sans filtres (chapitres « Prévu ») : aucune source n'est lue. Les choix de l'adresse sont repris tels quels dans les
+  // liens (sommaire, onglets, précédent / suivant) : ils seront validés au retour sur un chapitre à filtres.
   if (!chapter.filtres) {
-    return make({ period: null, periodNd: null, prevMonths: [], labels: { period: "", prev: "" }, openMonths: [], service: { axis: null, value: undefined, label: "", options: [], reason: null }, budget: none, scenario: none, state: keep });
+    const raw = (v: string) => v || null;
+    const state: QueryState = { ...keep, annee: raw(query.annee), de: raw(query.de), a: raw(query.a), service: raw(query.service), budget: raw(query.budget), scenario: raw(query.scenario) };
+    return make({ period: null, periodNd: null, prevMonths: [], labels: { period: "", prev: "" }, openMonths: [], service: { axis: null, value: undefined, label: "", options: [], reason: null }, budget: none, scenario: none, state });
   }
 
   // --- Période : mois clos du référentiel RH ou du journal de paie (même règle que la Synthèse du Studio RH).
@@ -146,7 +149,7 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
     hasInput: Boolean(rh),
     invalid: kpi.settings.invalid.map((k) => KPI_KEYS[k]),
   });
-  const payrollWhy = journal ? null : pay.unavailable ? sourceReason(pay.unavailable) : pay.source === "dsn" ? "source RH retenue : DSN — journal de paie PayFit non lu" : "journal de paie indisponible";
+  const payrollWhy = journalReason(pay);
   const periodNd = period ? null : capital(rhRefusal ?? payrollWhy ?? "aucun mois clos à la date de référence");
   const months = period?.months ?? [];
   const prevMonths = period ? previousMonths(months) : [];
@@ -159,7 +162,7 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
     const known = servicesOf(journal, journal.months);
     const raw = query.service;
     const value: string | null | undefined = !raw ? undefined : raw === NV && known.includes(null) ? null : known.includes(raw) ? raw : undefined;
-    if (raw && value === undefined) notices.push(`paramètre ignoré : service=${raw.slice(0, 40)} (service absent du journal)`);
+    if (raw && value === undefined) notices.push(`paramètre ignoré : service=${shownValue(raw)} (service absent du journal)`);
     const options: Option[] = [{ value: "", label: "Tous les services" }, ...known.filter((s): s is string => s !== null).map((s) => ({ value: s, label: s })), ...(known.includes(null) ? [{ value: NV, label: "Non ventilé" }] : [])];
     service = { axis: pay.service.axis, value, label: value === undefined ? "Tous les services" : value === null ? "Non ventilé" : value, options, reason: null };
   } else {
@@ -170,7 +173,7 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
         : pay.axes.length === 0
           ? "aucun code analytique dans le journal PayFit"
           : `plusieurs axes analytiques (${pay.axes.join(", ")}) : choisir celui du service dans les Paramètres`;
-    if (query.service) notices.push(`paramètre ignoré : service=${query.service.slice(0, 40)} (${reason})`);
+    if (query.service) notices.push(`paramètre ignoré : service=${shownValue(query.service)} (${reason})`);
     service = { axis: null, value: undefined, label: "Tous les services", options: [], reason };
   }
 
@@ -182,7 +185,7 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
     const [budgets, scenarios] = await Promise.all([load.budgets(), load.scenarios()]);
     const ofYear = budgets.filter((b) => b.year === year).sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     const chosenBudget = query.budget ? (ofYear.find((b) => b.id === query.budget) ?? null) : null;
-    if (query.budget && !chosenBudget) notices.push(`paramètre ignoré : budget=${query.budget.slice(0, 40)} (aucun budget saisi de ce nom pour ${year})`);
+    if (query.budget && !chosenBudget) notices.push(`paramètre ignoré : budget=${shownValue(query.budget)} (identifiant inconnu parmi les budgets saisis pour ${year})`);
     const b = chosenBudget ?? ofYear[0] ?? null;
     budget = {
       selected: b,
@@ -192,7 +195,7 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
     };
     const covering = scenarios.filter((r) => yearsOf(r.scenario).has(year));
     const chosenScenario = query.scenario ? (covering.find((r) => r.scenario.id === query.scenario) ?? null) : null;
-    if (query.scenario && !chosenScenario) notices.push(`paramètre ignoré : scenario=${query.scenario.slice(0, 40)} (aucun scénario de ce nom ne couvre ${year})`);
+    if (query.scenario && !chosenScenario) notices.push(`paramètre ignoré : scenario=${shownValue(query.scenario)} (identifiant inconnu parmi les scénarios qui couvrent ${year})`);
     const s = chosenScenario ?? covering[0] ?? null;
     scenario = {
       selected: s,
@@ -226,6 +229,14 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
     scenario,
     state,
   });
+}
+
+// Raison pour laquelle le journal de paie n'est pas lu (null quand il l'est) : lecture PayFit absente ou incomplète (raison du
+// contexte de paie), ou source RH retenue = DSN (le journal PayFit n'est alors pas lu). Même texte dans la page et les chapitres.
+export function journalReason(pay: Pick<PayrollContext, "input" | "unavailable" | "source">): string | null {
+  if (pay.input) return null;
+  if (pay.unavailable) return sourceReason(pay.unavailable);
+  return pay.source === "dsn" ? "source RH retenue : DSN — journal de paie PayFit non lu" : "journal de paie indisponible";
 }
 
 // Mois non clos, en clair : « oct. 2026, nov. 2026 ».

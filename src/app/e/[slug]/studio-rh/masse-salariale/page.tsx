@@ -1,6 +1,7 @@
 import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import "@/styles/masse-salariale.css";
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
+import { ExportMenu } from "@/components/ExportMenu";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { ViewSwitch } from "@/components/ViewSwitch";
@@ -9,15 +10,16 @@ import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatMonth } from "@/lib/dates";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { dsnBrutWindow } from "@/lib/payroll/dsn";
-import { costPerEtp, evolution, monthPayroll, servicesOf, shiftYear, windowPayroll, withService, type CostPerEtp, type EtpMonth, type Evolution, type JournalInput, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
+import { monthPayroll, type CostPerEtp, type EtpMonth, type Evolution, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
 import { gridRubrics } from "@/lib/payroll/grid";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { brutCotisationsSeries, capital, costSeries, euros, eurosSigned, evoDelta, evoPctDelta, hasNd, masseSeries, monthShortYear, monthsAxis, ndGroups, ndLines, numTrend, reasonLines, serviceMonthSeries, servicesParts, sourceReason, trendOf } from "@/lib/viz/masse";
-import { AFFICHAGES, ChartGuard, Composition, eurosOf, GraphFoot, isAffichage, MM, MONTH_NAMES, monthShort, MsHead, MsRead, NdKey, NdLines, NdState, PanelHead, PeriodBar, ScrollTable, Tile, TrendChart, TrendLegend, type Affichage } from "./components";
+import { ChartGuard, Composition, eurosOf, GraphFoot, monthShort, MsHead, MsRead, NdKey, NdLines, NdState, PanelHead, PeriodBar, ScrollTable, Tile, TrendChart, TrendLegend, type Affichage } from "./components";
 import { DsnView } from "./DsnView";
 import { FixeVariableView, PaieComptaView } from "./Lot2Views";
+import { NV, periodLabel, serviceLabel, syntheseOf, VUES } from "./synthese-data";
 import { MS_PREVU } from "./tabs";
 
 export const dynamic = "force-dynamic";
@@ -63,8 +65,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       </ul>
     </div>
   );
-  const fullInput = ctx.input;
-  if (!fullInput) {
+  // Chargement commun avec l'export Excel (mêmes paramètres d'adresse, mêmes règles de remplacement d'une valeur invalide).
+  const synthese = syntheseOf(ctx, sp);
+  if (synthese.kind === "no-input") {
     return (
       <MoneyText><>
         {head()}
@@ -76,10 +79,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
     );
   }
 
-  const valueMonths = fullInput.months.filter((m) => monthPayroll(fullInput, m).kind === "value");
-  const closed = valueMonths.filter((m) => !fullInput.openMonths.includes(m));
-  const last = closed.at(-1) ?? valueMonths.at(-1) ?? null;
-  if (!last) {
+  if (synthese.kind === "no-month") {
     return (
       <MoneyText><>
         {head()}
@@ -89,57 +89,12 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
     );
   }
 
-  // Période : année, premier et dernier mois (paramètres GET ; une valeur invalide est remplacée et signalée).
-  const notices: string[] = [];
+  // Période : année, premier et dernier mois, service, onglet et affichage (paramètres GET ; une valeur invalide est remplacée et signalée).
+  const { fullInput, notices, vue, aff, knownServices, serviceValue, input, years, year, lastOfYear, from, to, months, prevMonths, cur, prev, evo, etpCur, etpPrev, cost, costPrev, serviceRows, totalCur, totalPrev, totalEvo, serviceNd, showDsn } = synthese;
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
-  // Service (code analytique de l'axe choisi) : « __nv__ » = lignes sans code de l'axe (non ventilé).
-  const NV = "__nv__";
-  // Onglets de l'écran (sous-vues de Masse salariale, pas des entrées de menu).
-  const VUES = { synthese: "Synthèse", "fixe-variable": "Fixe & variable", "paie-compta": "Paie & comptabilité" } as const;
-  const rawVue = one(sp.vue);
-  const vue: keyof typeof VUES = Object.hasOwn(VUES, rawVue) ? (rawVue as keyof typeof VUES) : "synthese";
-  if (rawVue && !Object.hasOwn(VUES, rawVue)) ignore("vue", rawVue, "vues : synthese, fixe-variable, paie-compta");
-  // Affichage : tout, graphiques seuls ou tableaux seuls (comme Écart budgétaire).
-  const rawAff = one(sp.affichage);
-  const aff: Affichage = isAffichage(rawAff) ? rawAff : "tout";
-  if (rawAff && !isAffichage(rawAff)) ignore("affichage", rawAff, `valeurs : ${AFFICHAGES.join(", ")}`);
   const showGraph = aff !== "tableau";
   const showTable = aff !== "graphique";
-  const rawService = one(sp.service);
-  const knownServices = ctx.service.axis ? servicesOf(fullInput, fullInput.months) : [];
-  const serviceValue: string | null | undefined = !rawService ? undefined : rawService === NV && knownServices.includes(null) ? null : knownServices.includes(rawService) ? rawService : undefined;
-  if (rawService && serviceValue === undefined) ignore("service", rawService, ctx.service.axis ? "service absent du journal" : "aucun axe analytique choisi");
-  const input: JournalInput = serviceValue === undefined ? fullInput : withService(fullInput, serviceValue);
-  const serviceLabel = (v: string | null) => (v === null ? "Non ventilé" : v);
-  const years = [...new Set(input.months.map((m) => Number(m.slice(0, 4))))].sort();
-  const rawYear = one(sp.annee);
-  const yearOk = years.map(String).includes(rawYear);
-  const year = yearOk ? Number(rawYear) : Number(last.slice(0, 4));
-  if (rawYear && !yearOk) ignore("annee", rawYear, `années lues : ${years.join(", ")}`);
-  const lastOfYear = year === Number(last.slice(0, 4)) ? last.slice(5, 7) : (input.months.filter((m) => m.startsWith(`${year}-`)).at(-1)?.slice(5, 7) ?? "12");
-  const rawFrom = one(sp.de);
-  const rawTo = one(sp.a);
-  let from = MM.includes(rawFrom) ? rawFrom : "01";
-  let to = MM.includes(rawTo) ? rawTo : lastOfYear;
-  if (rawFrom && from !== rawFrom) ignore("de", rawFrom, "mois 01 à 12 attendu");
-  if (rawTo && to !== rawTo) ignore("a", rawTo, "mois 01 à 12 attendu");
-  if (from > to) {
-    ignore("de", from, "après le dernier mois");
-    from = "01";
-    to = to < from ? lastOfYear : to;
-  }
-  const months = MM.filter((m) => m >= from && m <= to).map((m) => `${year}-${m}`);
-  const prevMonths = months.map((m) => shiftYear(m, -1));
-  const label = (ms: string[]) => (ms.length === 1 ? formatMonth(ms[0]) : `${MONTH_NAMES[Number(ms[0].slice(5)) - 1]} → ${MONTH_NAMES[Number(ms.at(-1)!.slice(5)) - 1]} ${ms[0].slice(0, 4)}`);
-
-  const cur = windowPayroll(input, months);
-  const prev = windowPayroll(input, prevMonths);
-  const evo = evolution(cur, prev, (w) => w.masse);
-  const svcFilter = serviceValue === undefined ? undefined : { value: serviceValue };
-  const etpCur = ctx.etp(months, svcFilter);
-  const etpPrev = ctx.etp(prevMonths, svcFilter);
-  const cost = costPerEtp(cur, etpCur);
-  const costPrev = costPerEtp(prev, etpPrev);
+  const label = periodLabel;
   const rate = (w: PayrollWindow) => (w.kind === "nd" || w.brut === 0 ? "n.d." : fmtPercent({ num: w.cotisations, den: w.brut }));
   const rawDetail = one(sp.mois);
   const detailMonth = isMonth(rawDetail) && (months.includes(rawDetail) || prevMonths.includes(rawDetail)) ? rawDetail : null;
@@ -157,21 +112,6 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   if (vue !== "synthese") resetQuery.set("vue", vue);
   if (aff !== "tout") resetQuery.set("affichage", aff);
   const resetHref = `${base}${resetQuery.toString() ? `?${resetQuery.toString()}` : ""}`;
-  // Table par service (toujours sur tout le journal) : la somme des services, non ventilé compris, égale le total.
-  const serviceRows = ctx.service.axis
-    ? servicesOf(fullInput, [...months, ...prevMonths]).map((v) => {
-        const si = withService(fullInput, v);
-        const c = windowPayroll(si, months);
-        const p = windowPayroll(si, prevMonths);
-        return { value: v, cur: c, prev: p, evo: evolution(c, p, (w) => w.masse) };
-      })
-    : [];
-  const totalCur = windowPayroll(fullInput, months);
-  const totalPrev = windowPayroll(fullInput, prevMonths);
-  const totalEvo = evolution(totalCur, totalPrev, (w) => w.masse);
-  const masseOf = (w: PayrollWindow) => (w.kind === "value" ? w.masse : -1);
-  serviceRows.sort((a, b) => (a.value === null ? 1 : b.value === null ? -1 : masseOf(b.cur) - masseOf(a.cur)));
-  const serviceNd = ctx.service.origin === "setting" ? "ventilation par service désactivée par un administrateur" : ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`;
   const presets = [
     { label: "Janv.–mars", de: "01", a: "03" },
     { label: "Janv.–juin", de: "01", a: "06" },
@@ -180,8 +120,6 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   ]
     .filter((p, i, all) => p.a <= lastOfYear && all.findIndex((x) => x.de === p.de && x.a === p.a) === i)
     .map((p) => ({ label: p.label, href: href({ de: p.de, a: p.a }), current: p.de === from && p.a === to }));
-  // Contrôle DSN : affiché sur le total entreprise seulement (la DSN ne porte pas le code analytique du journal).
-  const showDsn = serviceValue === undefined && [...months, ...prevMonths].some((m) => ctx.dsn.has(m));
   const etpSum = (c: CostPerEtp) => (c.kind === "value" ? `${fmtEtp4(c.etpMonths4)} ETP-mois` : "");
   // Coût par ETP n.d. à cause des ETP : mois regroupés par raison identique (au lieu d'une phrase par mois).
   const costReason = (c: CostPerEtp, etp: EtpMonth[]) =>
@@ -277,16 +215,21 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
             {cur.kind === "value" && cur.openMonths.length > 0 && <> · mois provisoires (paie non clôturée) : {cur.openMonths.map(monthShortYear).join(", ")}</>}
           </p>
           <TrendLegend slug={slug} />
-          <ViewSwitch
-            testid="ms-affichage"
-            label="Affichage des résultats"
-            current={aff}
-            options={[
-              { key: "tout", label: "Afficher tout", href: href({ aff: "tout" }) },
-              { key: "graphique", label: "Graphique", href: href({ aff: "graphique" }) },
-              { key: "tableau", label: "Tableau", href: tableHref },
-            ]}
-          />
+          <div className="panel-tools">
+            <ViewSwitch
+              testid="ms-affichage"
+              label="Affichage des résultats"
+              current={aff}
+              options={[
+                { key: "tout", label: "Afficher tout", href: href({ aff: "tout" }) },
+                { key: "graphique", label: "Graphique", href: href({ aff: "graphique" }) },
+                { key: "tableau", label: "Tableau", href: tableHref },
+              ]}
+            />
+            {vue === "synthese" && (
+              <ExportMenu testid="ms-export" options={[{ label: "Excel (.xlsx)", href: `${base}/export?annee=${year}&de=${from}&a=${to}${svcParam}&format=xlsx`, testid: "ms-export-xlsx" }]} />
+            )}
+          </div>
         </div>
       </div>
 

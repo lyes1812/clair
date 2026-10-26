@@ -1,0 +1,478 @@
+import ExcelJS from "exceljs";
+import { NextRequest } from "next/server";
+import { createElement as h } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { absenceDaysShown, absenteeismShown, etpProratedShown, etpShown, theoreticalShown } from "@/app/e/[slug]/studio-rh/kpi/components";
+import { categoriesSheet, suiviColumns, suiviSheet } from "@/app/e/[slug]/studio-rh/kpi/export/sheets";
+import { coverageShown, kpiSuiviOf } from "@/app/e/[slug]/studio-rh/kpi/suivi-data";
+import { syntheseOf } from "@/app/e/[slug]/studio-rh/masse-salariale/synthese-data";
+import { monthlySheet } from "@/app/e/[slug]/studio-rh/masse-salariale/export/sheets";
+import { BasesView } from "@/app/e/[slug]/studio-rh/hypotheses/BasesView";
+import { EnveloppesView } from "@/app/e/[slug]/studio-rh/hypotheses/EnveloppesView";
+import { GlobalesView } from "@/app/e/[slug]/studio-rh/hypotheses/GlobalesView";
+import { GridTools } from "@/app/e/[slug]/studio-rh/hypotheses/GridTools";
+import { projectionRows } from "@/app/e/[slug]/studio-rh/hypotheses/resultat-data";
+import { constantsSheet, envelopesSheet, projectionSheet, ratesSheet } from "@/app/e/[slug]/studio-rh/hypotheses/export/sheets";
+import { constantsOf, envelopesOf, rateMap, rateScopes } from "@/app/e/[slug]/studio-rh/hypotheses/grids-data";
+import { project } from "@/lib/budget/engine";
+import type { ScenarioRow } from "@/lib/budget/store";
+import type { BaseContract, BaseSnapshot, Hypothesis } from "@/lib/budget/types";
+import { formatMonth } from "@/lib/dates";
+import { XLSX_MIME } from "@/lib/export/response";
+import { buildWorkbook, type ExportCell } from "@/lib/export/xlsx";
+import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
+import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
+import { KPI_DEFAULTS } from "@/lib/rh-kpi-settings";
+import { kpiDashboard } from "@/lib/rh/kpi/dashboard";
+import { fmtEtp4, fmtHalfDays } from "@/lib/rh/kpi/format";
+import { rollingWindow } from "@/lib/rh/kpi/period";
+import type { KpiContext } from "@/lib/rh/kpi-context";
+import { fmtInt, showCount, showHeadcount, type Shown } from "@/lib/rh/view";
+import { DSN_ABSENCES, kpiInput } from "./helpers/kpi";
+import { dsnFixtureBuild } from "./helpers/rh";
+
+// Exports Excel des écrans chiffrés (KPI RH, Masse salariale, Hypothèses budgétaires). Données entièrement fictives (fixtures DSN de
+// test, journal et scénario écrits à la main) ; les cas de référence sont calculés à la main dans les commentaires.
+
+// --- Doubles : accès à l'espace, contextes chargés, lectures de sources, scénarios ---------------------------------------------
+const mocks = vi.hoisted(() => ({
+  role: { value: "editor" as "reader" | "editor" | "admin" },
+  kpiCtx: { value: null as unknown },
+  payCtx: { value: null as unknown },
+  scenario: { value: null as unknown },
+  budgets: { value: [] as unknown[] },
+  getScenario: vi.fn(),
+}));
+vi.mock("@/lib/workspace", () => ({
+  requireWorkspace: async (slug: string) => ({ session: {}, workspace: { id: "w1", name: "Espace fictif", slug, role: mocks.role.value } }),
+}));
+vi.mock("@/lib/rh/kpi-context", () => ({ loadKpiContext: async () => mocks.kpiCtx.value }));
+vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => mocks.payCtx.value }));
+vi.mock("@/lib/connectors/sync", () => ({
+  lastSync: async (_w: string, p: string) => (p === "payfit" || p === "dsn" ? { status: "applied", startedAt: new Date("2026-01-15T09:00:00Z"), finishedAt: new Date("2026-01-15T09:12:00Z") } : null),
+  activeSync: async (_w: string, p: string) => (p === "payfit" || p === "dsn" ? { decidedAt: new Date("2026-01-15T09:30:00Z") } : null),
+  SYNC_STATUS_LABELS: { applied: "Appliquée (active)" },
+}));
+vi.mock("@/lib/budget/categories", async (orig) => ({
+  ...(await orig<typeof import("@/lib/budget/categories")>()),
+  getCategoryNatures: async () => ({ natures: (await orig<typeof import("@/lib/budget/categories")>()).DEFAULT_CATEGORY_NATURES, origin: "default" }),
+  getContractCategories: async () => ({}),
+}));
+vi.mock("@/lib/budget/store", async (orig) => ({
+  ...(await orig<typeof import("@/lib/budget/store")>()),
+  getScenario: (...args: unknown[]) => mocks.getScenario(...args),
+  listScenarios: async () => [],
+  listBudgets: async () => mocks.budgets.value,
+}));
+
+const load = async (res: Response) => {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await res.arrayBuffer()) as unknown as ExcelJS.Buffer);
+  return wb;
+};
+const noteOf = (c: ExcelJS.Cell): string | null => (c.note ? (typeof c.note === "string" ? c.note : c.note.texts?.map((t) => t.text).join("") ?? "") : null);
+const isNd = (c: ExportCell): c is { nd: string } => typeof c === "object" && c !== null && "nd" in c;
+const ndText = (s: Shown) => s.text.replace(/^n\.d\. — /, "");
+// Ligne de données d'une feuille (en-tête en ligne 5 : titre, espace, filtres, note) : valeurs de la colonne 1 à n.
+const rowValues = (ws: ExcelJS.Worksheet, r: number, n: number) => Array.from({ length: n }, (_, i) => ws.getCell(r, i + 1).value);
+const ROUTES = {
+  kpi: () => import("@/app/e/[slug]/studio-rh/kpi/export/route"),
+  "masse-salariale": () => import("@/app/e/[slug]/studio-rh/masse-salariale/export/route"),
+  hypotheses: () => import("@/app/e/[slug]/studio-rh/hypotheses/export/route"),
+};
+const call = async (path: keyof typeof ROUTES, query: string) => {
+  const { GET } = await ROUTES[path]();
+  return GET(new NextRequest(`http://localhost/e/demo/studio-rh/${path}/export?${query}`), { params: Promise.resolve({ slug: "demo" }) });
+};
+
+// --- KPI RH -------------------------------------------------------------------------------------------------------------------
+// Fixture DSN de test (référentiel fictif) : 12 mois glissants d'octobre 2025 à septembre 2026. Valeurs de référence (vérifiées à la
+// main dans les tests du moteur) : effectif fin janvier 2026 = 6 personnes ; ETP fin septembre 2026 = 6,10 (61 000 dix-millièmes) ;
+// jours théoriques de décembre 2025 = 434 demi-journées = 217 jours ; absentéisme : n.d. (arrêts non extraits de la DSN).
+const dsn = dsnFixtureBuild();
+const kpiCtx = {
+  collab: { workspace: { id: "w1", name: "Espace fictif", slug: "demo", role: "editor" }, establishments: [], natures: { codes: ["01", "02"], origin: "default" }, payfitHistory: null, state: null },
+  settings: { values: KPI_DEFAULTS, origins: {}, invalid: [] },
+  input: { ...kpiInput(dsn, DSN_ABSENCES), openMonths: [] },
+  readTypes: [],
+} as unknown as KpiContext;
+
+describe("KPI RH › Suivi : la feuille « Mois par mois » reprend les lignes et les n.d. de l'écran", () => {
+  const s = kpiSuiviOf(kpiCtx, {});
+  if (s.kind !== "ready") throw new Error("contexte fictif incomplet");
+  const sheet = suiviSheet({ dash: s.dash, data: s.data, rawLimit: null, vue: "suivi" });
+  const cols = suiviColumns("suivi");
+  // Cellules de l'écran (mêmes fonctions que kpi/page.tsx), colonne par colonne.
+  const screen = s.dash.rows.map((r) => ({
+    coverage: coverageShown(s.data, r.month, s.input.scope.establishments, null),
+    headcount: showHeadcount(r.headcount, "persons"),
+    etp: etpShown(r.etp),
+    "etp-prorated": etpProratedShown(r.etpProrated),
+    entries: showCount(r.movements.entries),
+    exits: showCount(r.movements.exits),
+    theoretical: theoreticalShown(r.theoretical),
+    "absence-days": absenceDaysShown(r.absenteeism),
+    absenteeism: absenteeismShown(r.absenteeism),
+    "etp-n1": etpShown(r.previous.etp),
+    "absenteeism-n1": absenteeismShown(r.previous.absenteeism),
+  }));
+
+  it("mêmes mois, dans le même ordre, puis la ligne « Période »", () => {
+    expect(s.dash.rows.map((r) => r.month)).toEqual(["2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]);
+    expect(sheet.rows.map((r) => r[0])).toEqual([...s.dash.rows.map((r) => r.month), "Période"]);
+    expect(sheet.columns.map((c) => c.key)).toEqual(["mois", ...cols, "observations"]);
+  });
+
+  it("chaque cellule : n.d. de l'écran → n.d. avec la même raison (jamais 0) ; valeur de l'écran → vrai nombre ; borne basse → observation", () => {
+    let nd = 0;
+    screen.forEach((cells, i) => {
+      cols.forEach((c, j) => {
+        const shown = cells[c as keyof typeof cells];
+        const cell = sheet.rows[i][j + 1];
+        if (shown.kind === "nd") {
+          nd += 1;
+          expect(isNd(cell), `${s.dash.rows[i].month} ${c}`).toBe(true);
+          expect((cell as { nd: string }).nd).toBe(ndText(shown));
+        } else {
+          expect(isNd(cell), `${s.dash.rows[i].month} ${c}`).toBe(false);
+          expect(cell === "" ? "vide" : "valeur").toBe("valeur");
+        }
+        if (shown.kind === "lower") expect(String(sheet.rows[i].at(-1))).toContain("borne basse");
+        // Nombres entiers : le texte de l'écran se relit depuis la cellule.
+        if (shown.kind === "value" && (c === "headcount" || c === "entries" || c === "exits")) expect(fmtInt(cell as number)).toBe(shown.text);
+        if (shown.kind === "value" && (c === "etp" || c === "etp-n1")) expect(fmtEtp4(cell as number)).toBe(shown.text);
+        if (shown.kind === "value" && c === "theoretical") expect(fmtHalfDays((cell as { exact: number }).exact * 2)).toBe(shown.text);
+      });
+    });
+    expect(nd).toBeGreaterThan(0); // l'absentéisme DSN est n.d. : le cas est bien couvert
+  });
+
+  it("cas de référence : effectif fin janvier 2026 = 6, ETP fin septembre 2026 = 61 000 dix-millièmes, décembre 2025 = 217 jours théoriques", () => {
+    const at = (month: string, col: string) => sheet.rows[s.dash.rows.findIndex((r) => r.month === month)][cols.indexOf(col as never) + 1];
+    expect(at("2026-01", "headcount")).toBe(6);
+    expect(at("2026-09", "etp")).toBe(61_000);
+    expect(at("2025-12", "theoretical")).toEqual({ exact: 217 }); // 434 demi-journées ÷ 2
+    expect(isNd(at("2026-01", "absenteeism"))).toBe(true);
+  });
+
+  it("Turnover : seules les colonnes de l'écran (couverture, effectif, entrées, sorties)", () => {
+    expect(suiviColumns("turnover")).toEqual(["coverage", "headcount", "entries", "exits"]);
+    expect(suiviSheet({ dash: s.dash, data: s.data, rawLimit: null, vue: "turnover" }).columns.map((c) => c.header)).toEqual(["Mois", "Couverture", "Effectif fin de mois (personnes)", "Entrées", "Sorties", "Observations"]);
+  });
+
+  it("par catégorie : mois n.d. → n.d. dans chaque colonne ; catégorie absente du mois → cellule vide (sans objet), jamais 0", () => {
+    const sh = categoriesSheet(
+      [
+        { kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdi: { headcount: 3, etp4: 25_000 }, cdd: { headcount: 1, etp4: null } }, qualifiers: [] },
+        { kind: "nd", month: "2026-02", reason: "raison fictive" },
+      ],
+      ["cdi", "cdd", "stagiaire"],
+      { cdi: "CDI", cdd: "CDD", stagiaire: "Stagiaire" },
+    );
+    // Total janvier : 3 + 1 = 4 contrats ; ETP total n.d. (un contrat CDD sans quotité).
+    expect(sh.rows[0]).toEqual(["2026-01", 3, 25_000, 1, { nd: "quotité d'au moins un contrat de la catégorie n.d." }, "", "", 4, { nd: "quotité d'au moins un contrat de la catégorie n.d." }, ""]);
+    expect(sh.rows[1].slice(1, -1).every((c) => isNd(c))).toBe(true);
+  });
+});
+
+describe("route d'export de KPI RH (Excel)", () => {
+  beforeEach(() => {
+    mocks.kpiCtx.value = kpiCtx;
+    mocks.role.value = "reader"; // aucune donnée nominative : un lecteur exporte comme il lit l'écran
+  });
+
+  it("Suivi : classeur Excel, onglets de données puis Filtres, Sources et Définitions ; vrais nombres et n.d. avec raison", async () => {
+    const res = await call("kpi", "format=xlsx");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe(XLSX_MIME);
+    expect(res.headers.get("content-disposition")).toContain('filename="kpi-rh-suivi.xlsx"');
+    const wb = await load(res);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Mois par mois", "Par catégorie", "Filtres", "Sources", "Définitions"]);
+    const ws = wb.getWorksheet("Mois par mois")!;
+    expect(ws.getCell("A5").value).toBe("Mois");
+    expect(ws.getCell("A6").value).toBe("2025-10");
+    expect(ws.getCell("A18").value).toBe("Période");
+    // Janvier 2026 (ligne 9) : effectif 6 ; septembre 2026 (ligne 17) : ETP 6,1 (61 000 ÷ 10 000), format au centième.
+    expect(ws.getCell("C9").value).toBe(6);
+    expect(ws.getCell("D17").value).toBe(6.1);
+    expect(ws.getCell("D17").numFmt).toBe("#,##0.00");
+    // Absentéisme (colonne J) : n.d., raison en commentaire, jamais 0.
+    expect(ws.getCell("J9").value).toBe("n.d.");
+    expect(noteOf(ws.getCell("J9"))).toBe(ndText(absenteeismShown(kpiDashboard(kpiCtx.input!, rollingWindow("2026-09")).rows[3].absenteeism)));
+    const filtres = wb.getWorksheet("Filtres")!;
+    expect([filtres.getCell("A5").value, filtres.getCell("B5").value]).toEqual(["Entrée", "Suivi des effectifs"]);
+    expect(filtres.getCell("A6").value).toBe("Période");
+    expect(String(filtres.getCell("B6").value)).toContain("12 mois glissants");
+    expect(wb.getWorksheet("Sources")!.getCell("A5").value).toBe("Fichiers DSN");
+    // Toutes les définitions citées existent au glossaire (aucune ignorée).
+    expect(wb.getWorksheet("Définitions")!.rowCount).toBe(4 + 10);
+  });
+
+  it("paramètres de l'adresse repris (vue, mode) ; format inconnu refusé ; entrée sans tableau : 404", async () => {
+    const t = await load(await call("kpi", "vue=turnover&format=xlsx"));
+    expect(rowValues(t.getWorksheet("Mois par mois")!, 5, 6)).toEqual(["Mois", "Couverture", "Effectif fin de mois (personnes)", "Entrées", "Sorties", "Observations"]);
+    const civil = await load(await call("kpi", "mode=civil&annee=2025&format=xlsx"));
+    expect(civil.getWorksheet("Mois par mois")!.getCell("A6").value).toBe("2025-01");
+    expect((await call("kpi", "format=csv")).status).toBe(400);
+    expect((await call("kpi", "vue=pyramide&format=xlsx")).status).toBe(404);
+  });
+
+  it("Effectifs mensuels : une ligne par groupe de l'axe puis le total, une colonne par mois ; total fin septembre 2026 = 6,10 ETP", async () => {
+    mocks.payCtx.value = payCtx;
+    const res = await call("kpi", "vue=effectifs&mesure=etp&axe=categorie&annee=2026&format=xlsx");
+    expect(res.status).toBe(200);
+    const wb = await load(res);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Répartition mensuelle", "Répartition", "Filtres", "Sources", "Définitions"]);
+    const ws = wb.getWorksheet("Répartition mensuelle")!;
+    expect(rowValues(ws, 5, 2)).toEqual(["Groupe", "janv. 2026"]);
+    expect(ws.getCell(5, 10).value).toBe("sept. 2026");
+    const labels: string[] = [];
+    for (let r = 6; ws.getCell(r, 1).value; r++) labels.push(String(ws.getCell(r, 1).value));
+    expect(labels.at(-1)).toBe("Total");
+    // ETP fin septembre 2026 du référentiel fictif : 61 000 dix-millièmes, comme la tuile « ETP contractuel fin de mois ».
+    expect(ws.getCell(5 + labels.length, 10).value).toBe(6.1);
+    // Mois non lus (après septembre 2026) : n.d. avec raison, jamais 0.
+    expect(ws.getCell(5 + labels.length, 11).value).toBe("n.d.");
+    expect(noteOf(ws.getCell(5 + labels.length, 11))).toBeTruthy();
+    const filtres = wb.getWorksheet("Filtres")!;
+    expect([filtres.getCell("A5").value, filtres.getCell("B5").value, filtres.getCell("B6").value, filtres.getCell("B7").value]).toEqual(["Rubrique", "ETP", "Catégorie", "Réel PayFit"]);
+  });
+
+  it("paramètres des KPI illisibles : refus explicite (422), aucun chiffre remplacé", async () => {
+    mocks.kpiCtx.value = { ...kpiCtx, settings: { ...kpiCtx.settings, invalid: ["dayBasis"] } };
+    const res = await call("kpi", "format=xlsx");
+    expect(res.status).toBe(422);
+    expect(await res.text()).toMatch(/^n\.d\. — paramètres des KPI illisibles/);
+  });
+});
+
+// --- Masse salariale › Synthèse ----------------------------------------------------------------------------------------------
+// Journal fictif : janvier et février 2026 identiques — service A : salaires 3 000,00 €, primes 500,00 €, cotisations 1 500,00 €
+// (contrat C1) ; service B : salaires 2 000,00 €, cotisations 1 000,00 € (contrat C2). Brut du mois 5 500,00 €, cotisations
+// 2 500,00 €, masse chargée 8 000,00 €. Janvier 2025 : A 2 500 + 1 250, B 1 500 + 750 → masse 6 000,00 € ; février 2025 absent (n.d.).
+// ETP fin de mois : 2 chaque mois. Coût par ETP de janvier 2026 = 8 000,00 € ÷ 2 = 4 000,00 € ; janvier 2025 : 3 000,00 €.
+let n = 0;
+const line = (month: string, accountId: string, debit: number, contractId: string, svc: string): LedgerLine => ({
+  key: `${month}#${String(n++).padStart(5, "0")}`, month, accountId, accountName: accountId, debitCents: debit, creditCents: null, contractId, analytic: [{ type: "Service", code: svc, value: svc }],
+});
+const lines: LedgerLine[] = [];
+for (const m of ["2026-01", "2026-02"]) lines.push(line(m, "641100", 300000, "C1", "A"), line(m, "641300", 50000, "C1", "A"), line(m, "645100", 150000, "C1", "A"), line(m, "641100", 200000, "C2", "B"), line(m, "645100", 100000, "C2", "B"));
+lines.push(line("2025-01", "641100", 250000, "C1", "A"), line("2025-01", "645100", 125000, "C1", "A"), line("2025-01", "641100", 150000, "C2", "B"), line("2025-01", "645100", 75000, "C2", "B"));
+const journal: JournalInput = { lines, months: ["2025-01", "2025-02", "2026-01", "2026-02"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
+const payCtx = {
+  kpi: { input: null },
+  source: "payfit",
+  grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
+  read: { syncId: "s1", startedAt: new Date("2026-03-03T10:00:00Z"), months: journal.months },
+  unavailable: null,
+  input: journal,
+  etp: (months: string[]) => months.map((m) => ({ month: m, etp4: 20000, reason: null })),
+  axes: ["Service"],
+  service: { axis: "Service", origin: "single-axis", updatedAt: null },
+  dsn: new Map(),
+  etpQualifiers: [],
+  compta: async () => ({ source: null, reason: "aucune", lines: [], months: [], nd: {}, error: false }),
+  axisMissing: false,
+};
+
+describe("Masse salariale › Synthèse : export Excel", () => {
+  beforeEach(() => {
+    mocks.payCtx.value = payCtx;
+    mocks.role.value = "reader";
+  });
+
+  it("« Mois par mois » : mêmes lignes que l'écran (mois de la période, puis « Période ») ; montants en euros, n.d. jamais 0", async () => {
+    const s = syntheseOf(payCtx as never, { annee: "2026", de: "01", a: "02" });
+    if (s.kind !== "ready") throw new Error("contexte fictif incomplet");
+    const sheet = monthlySheet({ ...s, dsn: new Map() });
+    expect(sheet.rows.length).toBe(s.cur.months.length + 1);
+    // Écran : lignes data-month du tableau mensuel.
+    const { default: Page } = await import("@/app/e/[slug]/studio-rh/masse-salariale/page");
+    const html = renderToStaticMarkup(await Page({ params: Promise.resolve({ slug: "demo" }), searchParams: Promise.resolve({ annee: "2026", de: "01", a: "02" }) }));
+    const table = html.slice(html.indexOf('data-testid="ms-monthly-table"'), html.indexOf("</table>", html.indexOf('data-testid="ms-monthly-table"')));
+    expect([...table.matchAll(/<tr data-month="(\d{4}-\d{2})"/g)].map((m) => m[1])).toEqual(s.cur.months.map((r) => r.month));
+    // Bouton d'export : à côté de l'Affichage, mêmes paramètres que l'écran.
+    expect(html).toContain('href="/e/demo/studio-rh/masse-salariale/export?annee=2026&amp;de=01&amp;a=02&amp;format=xlsx" data-testid="ms-export-xlsx"');
+    expect(html.indexOf('data-testid="ms-affichage"')).toBeLessThan(html.indexOf('data-testid="ms-export"'));
+  });
+
+  it("cas de référence écrit à la main (janvier 2026, février 2026, période) et tableaux par service", async () => {
+    const res = await call("masse-salariale", "annee=2026&de=01&a=02&format=xlsx");
+    expect(res.status).toBe(200);
+    const wb = await load(res);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Mois par mois", "Services", "Services par mois", "Filtres", "Sources", "Définitions"]);
+    const ws = wb.getWorksheet("Mois par mois")!;
+    expect(rowValues(ws, 5, 12)).toEqual(["Mois", "Masse chargée", "Masse N-1", "Écart", "Brut", "dont primes", "Cotisations", "ETP fin de mois", "ETP N-1", "Coût / ETP", "Coût / ETP N-1", "Observations"]);
+    // Janvier : 8 000 € ; N-1 6 000 € ; écart +2 000 € ; brut 5 500 € dont primes 500 € ; cotisations 2 500 € ; ETP 2 et 2 ; coût par ETP 4 000 € et 3 000 €.
+    expect(rowValues(ws, 6, 11)).toEqual(["Janvier 2026", 8000, 6000, 2000, 5500, 500, 2500, 2, 2, 4000, 3000]);
+    // Février : N-1 absent du journal → n.d. (jamais 0), écart et coût N-1 n.d. aussi.
+    for (const c of ["C7", "D7", "K7"]) {
+      expect(ws.getCell(c).value).toBe("n.d.");
+      expect(noteOf(ws.getCell(c))).toBeTruthy();
+    }
+    expect(ws.getCell("B7").value).toBe(8000);
+    // Période : masse 16 000 € ; N-1 n.d. ; ETP-mois 2 + 2 = 4 ; coût par ETP-mois 16 000 ÷ 4 = 4 000 €.
+    expect(ws.getCell("A8").value).toBe("Période");
+    expect([ws.getCell("B8").value, ws.getCell("C8").value, ws.getCell("H8").value, ws.getCell("J8").value]).toEqual([16000, "n.d.", 4, 4000]);
+    // Services (tout le journal) : A = 2 × (3 000 + 500 + 1 500) = 10 000 € (62,5 %), B = 2 × 3 000 = 6 000 € (37,5 %) ; coût par
+    // personne-mois A = 10 000 ÷ 2 = 5 000 €, B = 6 000 ÷ 2 = 3 000 €, total 16 000 ÷ 4 = 4 000 €.
+    const sv = wb.getWorksheet("Services")!;
+    expect([sv.getCell("A6").value, sv.getCell("B6").value, sv.getCell("F6").value, sv.getCell("G6").value, sv.getCell("J6").value]).toEqual(["A", 10000, 0.625, 6000, 5000]);
+    expect([sv.getCell("A7").value, sv.getCell("B7").value, sv.getCell("F7").value, sv.getCell("J7").value]).toEqual(["B", 6000, 0.375, 3000]);
+    expect([sv.getCell("A8").value, sv.getCell("B8").value, sv.getCell("F8").value ?? null, sv.getCell("J8").value]).toEqual(["Total", 16000, null, 4000]);
+    expect(sv.getCell("C6").value).toBe("n.d."); // N-1 du service A : février 2025 n.d.
+    const sm = wb.getWorksheet("Services par mois")!;
+    expect(rowValues(sm, 6, 4)).toEqual(["A", 5000, 5000, 10000]);
+    expect(String(wb.getWorksheet("Filtres")!.getCell("B5").value)).toBe("janvier → février 2026");
+  });
+
+  it("source DSN : export refusé avec sa raison ; autre onglet que la Synthèse : 404", async () => {
+    mocks.payCtx.value = { ...payCtx, source: "dsn" };
+    expect((await call("masse-salariale", "format=xlsx")).status).toBe(422);
+    mocks.payCtx.value = payCtx;
+    expect((await call("masse-salariale", "vue=fixe-variable&format=xlsx")).status).toBe(404);
+  });
+});
+
+// --- Hypothèses budgétaires ----------------------------------------------------------------------------------------------------
+// Base fictive figée sur septembre 2026 : contrat A (service TECH) salaire 3 000,00 €, charges 1 320 ÷ 3 300 = 40 % → coût mensuel
+// 3 000 + 1 200 = 4 200,00 € ; contrat B (service SALES) salaire 2 000,00 €, charges 900 ÷ 2 000 = 45 % → 2 900,00 €. Réel janvier à
+// septembre : brut 5 000,00 €, charges 2 000,00 €, coût 7 000,00 €, 2 personnes, 2 ETP. Projection d'octobre à décembre sans
+// hypothèse : 4 200 + 2 900 = 7 100,00 € par mois.
+const sc = { id: "11111111-1111-1111-1111-111111111111", name: "Scénario fictif", kind: "revise", status: "brouillon", firstMonth: "2026-10", lastMonth: "2026-12", conventions: { prorata: "calendaire" }, createdAt: new Date("2026-10-01T08:00:00Z"), frozenAt: null } as unknown as ScenarioRow;
+const contract = (key: string, over: Partial<BaseContract>): BaseContract => ({
+  contractKey: key, externalId: key, label: `Contrat fictif ${key}`, service: null, serviceNd: null, startDate: "2025-01-06", endDate: null, counted: true, etp4: 10000, etpNd: null, category: "cdi", executive: false, base: null, baseNd: null, ...over,
+});
+const base: BaseSnapshot = {
+  currency: "EUR", refMonth: "2026-09", syncId: "s", readAt: "2026-10-05",
+  contracts: [contract("A", { service: "TECH", base: { salaryCents: 300000, refBrutCents: 330000, refCotisationsCents: 132000 } }), contract("B", { service: "SALES", base: { salaryCents: 200000, refBrutCents: 200000, refCotisationsCents: 90000 } })],
+  actuals: Array.from({ length: 9 }, (_, i) => ({ month: `2026-0${i + 1}`, kind: "value" as const, brut: 500000, cotisations: 200000, masse: 700000, headcount: 2, etp4: 20000, etpNd: null })),
+  refMasse: 700000, refBaseCost: 710000, etpNote: null,
+};
+// Hypothèses des grilles (les tests de projection et de comparaison n'en prennent aucune) : taux global de 2,50 % en novembre 2026,
+// une enveloppe de 1 000,00 € chargés en décembre 2026, une constante en % (5,25) et une en euros (1 500,00 €) en octobre 2026.
+const gridHyps: Hypothesis[] = [
+  { id: "h1", kind: "augmentation", label: "Taux fictif", from: "2026-11", rateBps: 250, scope: { kind: "global" } },
+  { id: "h2", kind: "enveloppe", label: "Enveloppe fictive", axis: "service", target: "Atelier", monthly: { "2026-12": 100000 }, chargesBps: null },
+  { id: "h3", kind: "constante", label: "Taux de référence fictif", unit: "pct", values: { "2026-10": 525 }, source: "Source fictive" },
+  { id: "h4", kind: "constante", label: "Plafond fictif", unit: "eur", values: { "2026-10": 150000 }, source: "Source fictive" },
+];
+const months = ["2026-10", "2026-11", "2026-12"];
+
+describe("Hypothèses budgétaires : feuilles de la projection et des grilles", () => {
+  it("Projection « Mois par mois » : mêmes lignes que l'écran (réel janvier à septembre, projeté octobre à décembre)", () => {
+    const proj = project(base, "2026-10", "2026-12", [], { prorata: "calendaire" });
+    const rows = projectionRows(base, proj, sc);
+    const sheet = projectionSheet(rows);
+    expect(rows.map((r) => r.layer)).toEqual([...Array(9).fill("reel"), "projete", "projete", "projete"]);
+    expect(sheet.rows.map((r) => r[0])).toEqual(rows.map((r) => formatMonth(r.month)));
+    expect(sheet.rows[0].slice(0, 7)).toEqual(["Janvier 2026", "Réel", 500000, 200000, 700000, 2, 20000]);
+    expect(sheet.rows[9].slice(0, 7)).toEqual(["Octobre 2026", "Projeté", 500000, 210000, 710000, 2, 20000]); // 4 200 + 2 900 = 7 100 €
+  });
+
+  it("grilles : taux en points de base (2,50 % → 250), enveloppe en centimes, constantes dans l'unité saisie ; vide = aucune hypothèse", () => {
+    const { scopes } = rateScopes(base, gridHyps);
+    expect(scopes.map((s) => s.key)).toEqual(["global", "service:SALES", "service:TECH", "statut:dirigeant", "statut:autres"]);
+    const rates = ratesSheet(scopes, rateMap(gridHyps), months);
+    expect(rates.rows[0]).toEqual(["Toute l'entreprise (hors embauches et entrées après la base)", "", 250, "", ""]);
+    const env = envelopesSheet(envelopesOf(gridHyps, "service"), "service", months);
+    expect(env.rows).toEqual([["Atelier", "Coût chargé", "", "non", "", "", 100000, ""]]);
+    const cst = constantsSheet(constantsOf(gridHyps), months);
+    expect(cst.rows[0]).toEqual(["Taux de référence fictif", "taux en %", "Source fictive", { exact: 5.25 }, "", "", ""]);
+    expect(cst.rows[1]).toEqual(["Plafond fictif", "montant en euros", "Source fictive", 150000, "", "", ""]);
+    expect(cst.rowKinds).toEqual(["etp", "eur"]);
+  });
+
+  it("classeur des constantes : 5,25 (taux) et 1 500,00 € (montant) en vrais nombres", async () => {
+    const buf = await buildWorkbook({ title: "T", workspaceName: "Espace fictif", generatedAt: "2026-01-15T09:12:00.000Z", filters: [], sheets: [constantsSheet(constantsOf(gridHyps), months)], sources: [], definitions: [] });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ExcelJS.Buffer);
+    const ws = wb.getWorksheet("Constantes")!;
+    expect([ws.getCell("D5").value, ws.getCell("D6").value]).toEqual([5.25, 1500]);
+    expect([ws.getCell("D5").numFmt, ws.getCell("D6").numFmt]).toEqual(["#,##0.00", '#,##0.00 "€"']);
+  });
+});
+
+describe("Hypothèses budgétaires : CSV des grilles conservé, Excel ajouté avant lui", () => {
+  const csvButton = (html: string) => html.slice(html.lastIndexOf("<button", html.indexOf('data-testid="grid-csv"')), html.indexOf("</button>", html.indexOf('data-testid="grid-csv"')) + 9);
+  it("GridTools : sans adresse Excel, menu inchangé (CSV seul) ; avec, Excel d'abord et bouton CSV identique", () => {
+    const before = renderToStaticMarkup(h(GridTools, { filename: "x.csv" }));
+    const after = renderToStaticMarkup(h(GridTools, { filename: "x.csv", xlsxHref: "/e/demo/studio-rh/hypotheses/export?scenario=s&vue=bases&format=xlsx" }));
+    expect(before).not.toContain("grid-xlsx");
+    expect(csvButton(after)).toBe(csvButton(before));
+    expect(csvButton(before)).toContain("CSV (.csv)");
+    expect(after.indexOf('data-testid="grid-xlsx"')).toBeLessThan(after.indexOf('data-testid="grid-csv"'));
+    expect(after).toContain('href="/e/demo/studio-rh/hypotheses/export?scenario=s&amp;vue=bases&amp;format=xlsx"');
+  });
+  it("vues : lien Excel vers la route, attributs CSV des cellules inchangés ; Bases individuelles sans lien Excel si la page ne l'autorise pas", () => {
+    const fullBase = { ...base };
+    const env = renderToStaticMarkup(h(EnveloppesView, { slug: "demo", scenario: sc, base: fullBase, hypotheses: gridHyps, axis: "service", canEdit: false }));
+    expect(env).toContain(`vue=env-service&amp;format=xlsx" data-testid="grid-xlsx"`);
+    expect(env).toContain('data-csv="2026-12"');
+    expect(env).toContain('data-csv="1000"'); // 100 000 centimes, écrits « 1000 » dans le CSV comme avant
+    const glob = renderToStaticMarkup(h(GlobalesView, { slug: "demo", scenario: sc, base: fullBase, hypotheses: gridHyps, canEdit: false }));
+    expect(glob).toContain("vue=globales&amp;grille=taux&amp;format=xlsx");
+    expect(glob).toContain("vue=globales&amp;grille=constantes&amp;format=xlsx");
+    expect(renderToStaticMarkup(h(BasesView, { slug: "demo", scenario: sc, base: fullBase, hypotheses: [], canEdit: false }))).not.toContain("grid-xlsx");
+    expect(renderToStaticMarkup(h(BasesView, { slug: "demo", scenario: sc, base: fullBase, hypotheses: [], canEdit: false, xlsx: true }))).toContain("vue=bases&amp;format=xlsx");
+  });
+});
+
+describe("route d'export des Hypothèses budgétaires", () => {
+  beforeEach(() => {
+    mocks.role.value = "editor";
+    mocks.getScenario.mockReset().mockResolvedValue({ scenario: sc, base, baseHash: "h", hypotheses: gridHyps });
+    mocks.budgets.value = [];
+  });
+
+  it("Bases individuelles (nominatif) : lecteur refusé (403) sans lire le scénario ; éditeur : une ligne par contrat", async () => {
+    mocks.role.value = "reader";
+    const denied = await call("hypotheses", `scenario=${sc.id}&vue=bases&format=xlsx`);
+    expect(denied.status).toBe(403);
+    expect(mocks.getScenario).not.toHaveBeenCalled();
+    mocks.role.value = "editor";
+    // Correction de base du contrat B : salaire 2 100,00 €, charges 45 % (4 500 points de base).
+    mocks.getScenario.mockResolvedValue({ scenario: sc, base, baseHash: "h", hypotheses: [...gridHyps, { id: "h5", kind: "base", label: "Correction fictive", contractKey: "B", salaryCents: 210000, chargesBps: 4500 }] });
+    const ws = (await load(await call("hypotheses", `scenario=${sc.id}&vue=bases&format=xlsx`))).getWorksheet("Bases individuelles")!;
+    // Contrat A : salaire 3 000 € ; taux 1 320 ÷ 3 300 = 0,4 ; coût mensuel 4 200 € ; aucune correction (cellules vides).
+    expect([ws.getCell("A6").value, ws.getCell("G6").value, ws.getCell("H6").value, ws.getCell("I6").value, ws.getCell("J6").value ?? null, ws.getCell("L6").value]).toEqual(["Contrat fictif A", 3000, 0.4, 4200, null, "figée"]);
+    // Contrat B : base 2 000 € à 45 % → 2 900 € ; correction en vrais nombres (2 100 €, 0,45), état sans montant écrit en texte.
+    expect([ws.getCell("I7").value, ws.getCell("J7").value, ws.getCell("K7").value, ws.getCell("L7").value]).toEqual([2900, 2100, 0.45, "corrigée"]);
+    expect(ws.getCell("A8").value ?? null).toBeNull(); // deux contrats, rien d'autre
+  });
+
+  it("lecteur : grilles non nominatives et résultat exportables ; Projection : 7 100 € en octobre 2026", async () => {
+    mocks.role.value = "reader";
+    mocks.getScenario.mockResolvedValue({ scenario: sc, base, baseHash: "h", hypotheses: [] });
+    const wb = await load(await call("hypotheses", `scenario=${sc.id}&vue=resultat&sous=projection&format=xlsx`));
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Mois par mois", "Par nature", "Filtres", "Sources", "Définitions"]);
+    const ws = wb.getWorksheet("Mois par mois")!;
+    expect(rowValues(ws, 15, 7)).toEqual(["Octobre 2026", "Projeté", 5000, 2100, 7100, 2, 2]);
+    expect(wb.getWorksheet("Sources")!.getCell("A5").value).toBe("PayFit (base figée du scénario)");
+    const env = await call("hypotheses", `scenario=${sc.id}&vue=env-service&format=xlsx`);
+    expect(env.status).toBe(200);
+  });
+
+  it("Comparaison face à un budget saisi : écart mensuel et annuel écrits à la main ; pont d'écart n.d. (budget sans ETP), jamais 0", async () => {
+    // Budget fictif : 6 500,00 € par mois sur 2026 → 78 000,00 €. Scénario : 9 × 7 000 + 3 × 7 100 = 84 300,00 €. Écart annuel 6 300,00 € ;
+    // janvier 7 000 − 6 500 = 500,00 €.
+    mocks.getScenario.mockResolvedValue({ scenario: sc, base, baseHash: "h", hypotheses: [] });
+    mocks.budgets.value = [{ id: "b0000000-0000-0000-0000-000000000000", name: "Budget fictif", year: "2026", amounts: Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`2026-${String(i + 1).padStart(2, "0")}`, 650000])) }];
+    const wb = await load(await call("hypotheses", `scenario=${sc.id}&vue=resultat&sous=comparaison&annee=2026&cmp=budget:b0000000-0000-0000-0000-000000000000&format=xlsx`));
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Mois par mois", "Écarts", "Pont d'écart", "Filtres", "Sources", "Définitions"]);
+    const ws = wb.getWorksheet("Mois par mois")!;
+    expect(rowValues(ws, 6, 6)).toEqual(["Janvier 2026", 7000, "réel", 6500, "budget", 500]);
+    expect(rowValues(ws, 18, 6).filter((v) => v !== null && v !== "")).toEqual(["Année 2026", 84300, 78000, 6300]);
+    const pont = wb.getWorksheet("Pont d'écart")!;
+    for (const c of ["B6", "C6", "D6", "E6"]) expect(pont.getCell(c).value).toBe("n.d.");
+  });
+
+  it("scénario inconnu : 404 ; entrée sans tableau : 404 ; format inconnu : 400", async () => {
+    mocks.getScenario.mockResolvedValue(null);
+    expect((await call("hypotheses", "scenario=inconnu&vue=bases&format=xlsx")).status).toBe(404);
+    mocks.getScenario.mockResolvedValue({ scenario: sc, base, baseHash: "h", hypotheses: [] });
+    expect((await call("hypotheses", `scenario=${sc.id}&vue=postes&format=xlsx`)).status).toBe(404);
+    expect((await call("hypotheses", `scenario=${sc.id}&vue=bases&format=csv`)).status).toBe(400);
+  });
+});

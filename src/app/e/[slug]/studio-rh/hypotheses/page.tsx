@@ -10,7 +10,6 @@ import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
 import type { ScenarioRow } from "@/lib/budget/store";
 import { getConventions, PRORATA_LABELS } from "@/lib/budget/settings";
 import { getScenario, KIND_LABELS, listBudgets, listScenarios, type BudgetRow } from "@/lib/budget/store";
-import { budgetSeries, liveSeries, scenarioSeries, shifted, type Series } from "@/lib/budget/series";
 import { monthRange } from "@/lib/connectors/months";
 import { dateFr } from "@/lib/viz/hyp-saisie";
 import { formatEuros } from "@/lib/money";
@@ -21,11 +20,12 @@ import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { ActionForm } from "./ActionForm";
 import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
-import { ComparisonView, type Option } from "./ComparisonView";
+import { ComparisonView } from "./ComparisonView";
 import { LandingView, variantOptions } from "./LandingView";
 import { measures, retraite, sensitivities, type Variant, type VariantKind } from "@/lib/budget/lot3";
 import { toCents } from "@/lib/money";
 import { ProjectionView } from "./ProjectionView";
+import { loadComparison } from "./resultat-data";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { Prevu } from "@/components/Prevu";
 import { BasesView } from "./BasesView";
@@ -83,36 +83,10 @@ function landingTab(slug: string, s: ScenarioRow, base: BaseSnapshot, hyps: Hypo
   );
 }
 
-// Onglet Comparaison : lectures choisies (paramètre « cmp ») ; par défaut réel courant, N-1 et budgets saisis de l'année.
+// Onglet Comparaison : lectures choisies (paramètre « cmp ») ; par défaut réel courant, N-1 et budgets saisis de l'année. Chargement
+// commun avec l'export Excel.
 async function comparison(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, proj: Projection, sp: Search) {
-  const years = [...new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)))];
-  const year = years.includes(one(sp.annee)) ? one(sp.annee) : years[0];
-  const [budgets, scenarios] = await Promise.all([listBudgets(workspaceId), listScenarios(workspaceId)]);
-  const options: Option[] = [
-    { value: "reel", label: "Réel courant (lecture PayFit appliquée)" },
-    { value: "n1", label: "N-1 (réel figé du scénario, projeté du parent le cas échéant)" },
-    ...budgets.filter((b: BudgetRow) => b.year === year).map((b) => ({ value: `budget:${b.id}`, label: `Budget saisi « ${b.name} » (${b.year})` })),
-    ...scenarios.filter((x) => x.scenario.id !== s.id).map((x) => ({ value: `scenario:${x.scenario.id}`, label: `Scénario « ${x.scenario.name} » (${KIND_LABELS[x.scenario.kind]}, ${x.scenario.status === "fige" ? "figé" : "brouillon"})` })),
-  ];
-  const raw = Array.isArray(sp.cmp) ? sp.cmp : sp.cmp ? [sp.cmp] : null;
-  const selected = (raw ?? ["reel", "n1", ...options.filter((o) => o.value.startsWith("budget:")).map((o) => o.value)]).filter((v) => options.some((o) => o.value === v)).slice(0, 3);
-  const principal = scenarioSeries(s.id, s.name, base, proj);
-  const compared: Series[] = [];
-  for (const v of selected) {
-    if (v === "n1") compared.push(shifted(principal, 12, "n1", "N-1"));
-    else if (v === "reel") {
-      const ctx = await loadPayrollContext(slug);
-      // Sans journal PayFit (source DSN, lecture absente) : chaque mois est n.d. avec la raison réelle.
-      const why = ctx.unavailable ?? (ctx.source === "dsn" ? "source RH retenue : DSN — journal de paie PayFit non lu" : "journal de paie indisponible");
-      compared.push(ctx.input ? liveSeries("reel", "Réel courant", ctx.input, ctx.kpi.input) : { key: "reel", label: "Réel courant", points: new Map(monthRange(`${year}-01`, `${year}-12`).map((m) => [m, { month: m, kind: "nd" as const, reason: why }])) });
-    } else if (v.startsWith("budget:")) {
-      const b = budgets.find((x) => x.id === v.slice(7));
-      if (b) compared.push(budgetSeries(`budget-${b.id.slice(0, 8)}`, `Budget « ${b.name} »`, b.year, b.amounts));
-    } else if (v.startsWith("scenario:")) {
-      const o = await getScenario(workspaceId, v.slice(9));
-      if (o) compared.push(scenarioSeries(`scenario-${o.scenario.id.slice(0, 8)}`, `« ${o.scenario.name} »`, o.base, project(o.base, o.scenario.firstMonth, o.scenario.lastMonth, o.hypotheses, o.scenario.conventions)));
-    }
-  }
+  const { years, year, options, selected, principal, compared } = await loadComparison(slug, workspaceId, s, base, proj, sp);
   return <ComparisonView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} years={years} year={year} principal={principal} compared={compared} options={options} selected={selected} refMonth={base.refMonth} affichage={one(sp.affichage)} />;
 }
 
@@ -328,7 +302,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
         ) : vue === "embauches" ? (
           <EmbauchesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={editing} par={one(sp.par)} affichage={one(sp.affichage)} />
         ) : vue === "bases" ? (
-          <BasesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={editing} />
+          <BasesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={editing} xlsx={canEdit} />
         ) : vue === "env-service" || vue === "env-rubrique" ? (
           <EnveloppesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} axis={vue === "env-service" ? "service" : "rubrique"} canEdit={editing} />
         ) : vue === "globales" ? (

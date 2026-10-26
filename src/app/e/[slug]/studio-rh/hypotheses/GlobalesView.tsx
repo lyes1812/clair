@@ -10,6 +10,7 @@ import { countByYear, gridYears } from "@/lib/viz/hyp-saisie";
 import { frDates, gridCaption } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { saveConstantsAction, saveRatesAction } from "./actions";
+import { constantsOf, rateMap, rateScopes } from "./grids-data";
 import { DirtyIndicator, GridTools, RowFill } from "./GridTools";
 import { CardTitle, decText, detailOf, UNIT_LABEL } from "./shared";
 
@@ -20,42 +21,11 @@ const BLANK_ROWS = 3;
 // constantes de référence. Aucune valeur n'est préchargée : une cellule vide n'a pas d'hypothèse.
 export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; canEdit: boolean }) {
   const months = monthRange(scenario.firstMonth, scenario.lastMonth);
-  const services = [...new Set([...base.contracts.map((c) => c.service), ...hypotheses.map((h) => (h.kind === "embauche" ? h.service : h.kind === "augmentation" && h.scope.kind === "service" ? h.scope.service : null))].filter((s): s is string => s !== null))].sort();
-  // Statut « cadre dirigeant » de PayFit : lu dans le référentiel Collaborateurs et conservé dans la base figée du scénario.
-  const dirigeants = base.contracts.filter((c) => c.executive === true).length;
-  const autres = base.contracts.filter((c) => c.executive === false).length;
-  const unknown = base.contracts.length - dirigeants - autres;
-  const oldBase = base.contracts.every((c) => c.executive === undefined);
-  const hasStatutHyp = hypotheses.some((h) => h.kind === "augmentation" && h.scope.kind === "statut");
-  const showStatut = dirigeants + autres > 0 || hasStatutHyp;
-  const statutNote = oldBase
-    ? "Statut cadre dirigeant absent de la base figée de ce scénario (créé avant sa conservation) : créez un nouveau scénario pour l'utiliser."
-    : dirigeants + autres === 0
-      ? "Statut cadre dirigeant non renseigné dans les données lues (PayFit : champ estCadreDirigeant vide pour tous les contrats) : aucune ligne par statut."
-      : unknown > 0
-        ? `${unknown} contrat(s) sans statut renseigné ne reçoivent aucune augmentation par statut (seulement celles de leur service, de toute l'entreprise ou saisies sur eux).`
-        : null;
-  // `label` : intitulé complet (lecteurs d'écran, export) ; `short` et `note` : affichage sur deux lignes dans la cellule.
-  type Scope = { key: string; label: string; short: string; note: string | null };
-  const count = (n: number) => `${n} contrat${n > 1 ? "s" : ""}`;
-  const scopes: Scope[] = [
-    { key: "global", label: "Toute l'entreprise (hors embauches et entrées après la base)", short: "Toute l'entreprise", note: "hors embauches et entrées après la base" },
-    ...services.map((s) => ({ key: `service:${s}`, label: `Service ${s}`, short: `Service ${s}`, note: null })),
-    ...(showStatut
-      ? [
-          { key: "statut:dirigeant", label: `Cadres dirigeants (${count(dirigeants)})`, short: "Cadres dirigeants", note: count(dirigeants) },
-          { key: "statut:autres", label: `Hors cadres dirigeants (${count(autres)})`, short: "Hors cadres dirigeants", note: count(autres) },
-        ]
-      : []),
-  ];
-  const rate = new Map<string, number>();
-  for (const h of hypotheses) {
-    if (h.kind !== "augmentation") continue;
-    const k = scopeKeyOf(h.scope);
-    if (k) rate.set(`${k}|${h.from}`, h.rateBps);
-  }
+  // Périmètres (entreprise, services, statuts) et taux enregistrés : communs à l'écran et à l'export Excel.
+  const { scopes, statutNote } = rateScopes(base, hypotheses);
+  const rate = rateMap(hypotheses);
   const targeted = hypotheses.filter((h) => h.kind === "augmentation" && scopeKeyOf(h.scope) === null);
-  const consts: (Cst | null)[] = [...hypotheses.filter((h): h is Cst => h.kind === "constante"), ...(canEdit ? Array.from({ length: BLANK_ROWS }, () => null) : [])];
+  const consts: (Cst | null)[] = [...constantsOf(hypotheses), ...(canEdit ? Array.from({ length: BLANK_ROWS }, () => null) : [])];
   // Année affichée : le scénario peut couvrir deux années ; les cellules de l'autre année restent dans le formulaire.
   const ratesYears = gridYears(months, countByYear([...rate.keys()].map((k) => k.slice(k.lastIndexOf("|") + 1))));
   const constYears = gridYears(months, countByYear(consts.flatMap((c) => (c ? Object.keys(c.values) : []))));
@@ -115,9 +85,10 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
       </table>
     </div>
   );
-  const frame = (gy: ReturnType<typeof gridYears>, filename: string, caption: string, table: React.ReactNode) => (
+  const xlsxHref = (grille: "taux" | "constantes") => `/e/${slug}/studio-rh/hypotheses/export?scenario=${encodeURIComponent(scenario.id)}&vue=globales&grille=${grille}&format=xlsx`;
+  const frame = (gy: ReturnType<typeof gridYears>, filename: string, caption: string, table: React.ReactNode, grille: "taux" | "constantes") => (
     <div className="hs-grid" data-grid-root data-ys={gy.multi ? "0" : undefined}>
-      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} />
+      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} xlsxHref={xlsxHref(grille)} />
       <p className="hs-unit">{caption}</p>
       {table}
     </div>
@@ -130,9 +101,9 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
         <CardTitle title="Taux d'augmentation par mois" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.globales} />} />
         {canEdit ? (
           <ActionForm action={saveRatesAction.bind(null, slug, scenario.id)} submit="Enregistrer les taux" testid="glob-rates-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
-            {frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesCaption, ratesTable)}
+            {frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesCaption, ratesTable, "taux")}
           </ActionForm>
-        ) : frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesCaption, ratesTable)}
+        ) : frame(ratesYears, `taux-augmentation-${scenario.firstMonth}.csv`, ratesCaption, ratesTable, "taux")}
         {statutNote && <p className="tile-foot" data-testid="glob-statut-note">{statutNote}</p>}
         {targeted.length > 0 && (
           <details>
@@ -147,9 +118,9 @@ export function GlobalesView({ slug, scenario, base, hypotheses, canEdit }: { sl
         {canEdit ? (
           <ActionForm action={saveConstantsAction.bind(null, slug, scenario.id)} submit="Enregistrer les constantes" testid="glob-consts-form" className="form hs-grid-form" footer={<DirtyIndicator />}>
             <input type="hidden" name="n" value={consts.length} />
-            {frame(constYears, `constantes-${scenario.firstMonth}.csv`, constCaption, constTable)}
+            {frame(constYears, `constantes-${scenario.firstMonth}.csv`, constCaption, constTable, "constantes")}
           </ActionForm>
-        ) : frame(constYears, `constantes-${scenario.firstMonth}.csv`, constCaption, constTable)}
+        ) : frame(constYears, `constantes-${scenario.firstMonth}.csv`, constCaption, constTable, "constantes")}
       </section>
     </></MoneyText>
   );

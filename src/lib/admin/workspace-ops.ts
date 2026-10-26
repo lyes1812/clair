@@ -165,7 +165,7 @@ export function parseArgs(argv: string[], now: Date = new Date()): ParsedArgs {
   if (command === "kpi-settings") {
     if (!switches.has("exclude-none")) return fail("--exclude-none est obligatoire : la commande applique « aucune exclusion de nature de sortie ».");
     const raw = need("absence-types");
-    if (raw === null) return fail("--absence-types est obligatoire : liste explicite des types d'absence retenus.");
+    if (raw === null) return fail("--absence-types est obligatoire : liste explicite des motifs d'absence retenus.");
     const list = parseCodeList(raw, "--absence-types", "absence");
     if (!list.ok) return fail(list.error);
     return { ok: true, command, slug, excludeNone: true, absenceTypes: list.value, dryRun: switches.has("dry-run") };
@@ -204,7 +204,7 @@ export const KPI_ADMIN_KEYS = ["excludedExitNatures", "absenceTypes"] as const s
 export type KpiAdminKey = (typeof KPI_ADMIN_KEYS)[number];
 export const KPI_ADMIN_LABELS: Record<KpiAdminKey, string> = {
   excludedExitNatures: "Natures de sortie exclues du turnover",
-  absenceTypes: "Types d'absence retenus pour l'absentéisme",
+  absenceTypes: "Motifs d'absence retenus pour l'absentéisme",
 };
 export type SettingOrigin = "default" | "setting" | "invalid";
 // explicit : valeur identique à la valeur en vigueur, mais à enregistrer quand même (décision de l'administration, clé pas encore enregistrée).
@@ -213,7 +213,7 @@ export type KpiPlan =
   | { ok: true; rows: KpiPlanRow[]; changedKeys: KpiAdminKey[] }
   | { ok: false; error: string; unknownCodes: string[]; blockedKeys: string[] };
 
-// Décisions de Lyes : aucune exclusion de nature de sortie ; types d'absence = liste explicite, chaque code présent dans la
+// Décisions de Lyes : aucune exclusion de nature de sortie ; motifs d'absence = liste explicite, chaque code présent dans la
 // lecture. setKpiSettings réécrit à sa valeur par défaut tout réglage illisible : si un autre réglage que ces deux-là l'est,
 // le plan est refusé plutôt que de le toucher. Les valeurs sont des codes de configuration, jamais des données de personnes.
 // « Aucune exclusion » est une décision, pas seulement un défaut : tant que la clé n'est pas un réglage enregistré, la liste vide
@@ -283,7 +283,7 @@ export function renderWritten(plan: Extract<KpiPlan, { ok: true }>, keyName: (k:
   return out;
 }
 
-// --- Types d'absence de la lecture active
+// --- Motifs d'absence de la lecture active
 
 // Aucun compteur : un effectif faible par code (maternité, longue maladie) révélerait une situation individuelle dans la
 // sortie du terminal, donc dans des journaux. Seuls « présent » et « retenu » sortent ; un éventuel count de la lecture est ignoré.
@@ -299,7 +299,7 @@ export function absenceTypeRows(read: { type: string; count?: number }[], chosen
 }
 
 export function renderAbsenceTypes(rows: AbsenceTypeRow[]): string[] {
-  if (!rows.length) return ["Aucun type d'absence dans la lecture active."];
+  if (!rows.length) return ["Aucun motif d'absence dans la lecture active."];
   return rows.map((r) => `  ${r.type} : ${r.inRead ? "présent" : "absent de la lecture"} · retenu : ${r.chosen ? "oui" : "non"}${r.retainable ? "" : " · non retenable (espace ou plus de 128 caractères)"}`);
 }
 
@@ -422,10 +422,10 @@ const OLD_SOURCE_TEXT: Record<OldValue["source"], string> = { option: "option de
 // Anciens réglages (codes de configuration) ; quand l'un est introuvable, la sortie dit comment le fournir.
 export function renderOldSettings(exclusions: OldValue, absenceTypes: OldValue): string[] {
   const out = [
-    `Anciens réglages : exclusions de sortie ${exclusions.value ? `= ${exclusions.value.join(", ") || "aucune"}` : "inconnues"} (${OLD_SOURCE_TEXT[exclusions.source]}) ; types d'absence ${absenceTypes.value ? `= ${absenceTypes.value.join(", ") || "aucun"}` : "inconnus"} (${OLD_SOURCE_TEXT[absenceTypes.source]}).`,
+    `Anciens réglages : exclusions de sortie ${exclusions.value ? `= ${exclusions.value.join(", ") || "aucune"}` : "inconnues"} (${OLD_SOURCE_TEXT[exclusions.source]}) ; motifs d'absence ${absenceTypes.value ? `= ${absenceTypes.value.join(", ") || "aucun"}` : "inconnus"} (${OLD_SOURCE_TEXT[absenceTypes.source]}).`,
   ];
   if (exclusions.source === "introuvable") out.push("  Exclusions de sortie introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-exclusions.");
-  if (absenceTypes.source === "introuvable") out.push("  Types d'absence introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-absence-types.");
+  if (absenceTypes.source === "introuvable") out.push("  Motifs d'absence introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-absence-types.");
   return out;
 }
 
@@ -437,15 +437,28 @@ export const RH_REBUILD_ANNOUNCE = "Référentiel Collaborateurs périmé ou abs
 export const RH_CURRENT_ANNOUNCE = "Référentiel Collaborateurs à jour : utilisé tel quel, non reconstruit.";
 export const RH_REBUILT_DONE = "Référentiel Collaborateurs reconstruit : écriture effectuée (tables rh_*, événement rh.rebuilt).";
 export const RH_UP_TO_DATE_DONE = "Référentiel Collaborateurs déjà à jour à la reconstruction : aucune écriture.";
+export const RH_NO_READ_REFUSAL = "aucune lecture appliquée : rien à reconstruire, aucune écriture";
 export const NO_ADMIN_MESSAGE = "Aucun administrateur dans cet espace : écriture refusée.";
 export type RebuildDecision = { action: "use-current" } | { action: "rebuild" } | { action: "refuse"; reason: string };
 
-// Un référentiel à jour est utilisé sans rien écrire ; sinon reconstruction (annoncée), refusée avec --no-rebuild et sans administrateur.
-export function rebuildDecision(a: { current: boolean; noRebuild: boolean; hasAdmin: boolean }): RebuildDecision {
+// Un référentiel à jour est utilisé sans rien écrire ; sans lecture RH appliquée, refus direct (rien à reconstruire, aucune
+// annonce) ; sinon reconstruction (annoncée), refusée avec --no-rebuild et sans administrateur.
+export function rebuildDecision(a: { current: boolean; noRebuild: boolean; hasAdmin: boolean; noRead?: boolean }): RebuildDecision {
   if (a.current) return { action: "use-current" };
+  if (a.noRead) return { action: "refuse", reason: RH_NO_READ_REFUSAL };
   if (a.noRebuild) return { action: "refuse", reason: RH_REBUILD_REFUSAL };
   if (!a.hasAdmin) return { action: "refuse", reason: RH_NO_ADMIN_REFUSAL };
   return { action: "rebuild" };
+}
+
+// Sortie après ensureRhBuild : « none » (lecture disparue entre la sonde et la reconstruction) est traité avant le choix du
+// message d'écriture, puisque rien n'a été écrit. Même build que le build courant sondé : aucune écriture. Tout état autre que
+// « ready » est refusé ; « ready » rend le build à lire.
+export type RebuildOutcome<B> = { done: string | null } & ({ refusal: string } | { refusal: null; build: B });
+export function rebuildOutcome<B extends { id: string }>(previousId: string | null, state: { kind: "none" } | { kind: "ready" | "unavailable"; build: B }): RebuildOutcome<B> {
+  if (state.kind === "none") return { done: null, refusal: RH_NO_READ_REFUSAL };
+  const done = previousId !== null && state.build.id === previousId ? RH_UP_TO_DATE_DONE : RH_REBUILT_DONE;
+  return state.kind === "ready" ? { done, refusal: null, build: state.build } : { done, refusal: `référentiel Collaborateurs indisponible (${state.kind})` };
 }
 
 // --- ETP par service (même chemin que l'écran Effectifs mensuels)
@@ -519,7 +532,7 @@ export function renderProbe(a: { months: string[]; service: ServiceProbeMonth[];
     out.push(`  ${name}, actuel comparé à l'ancien : ${x.order ? orderText(x.order) : "non comparé"}`);
   };
   block("Turnover", a.kpi.turnover, "anciennes exclusions de sortie");
-  block("Absentéisme", a.kpi.absenteeism, "anciens types d'absence");
+  block("Absentéisme", a.kpi.absenteeism, "anciens motifs d'absence");
   out.push(`Absentéisme par motif (fenêtre ${a.kpi.window.from} → ${a.kpi.window.to})`);
   out.push(`  Lignes de motif : ${a.kpi.motifs.lines.length}`);
   a.kpi.motifs.lines.forEach((c, i) => out.push(`  ligne ${i + 1} : ${probeCellText(c)}`));

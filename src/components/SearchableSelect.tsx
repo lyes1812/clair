@@ -99,7 +99,7 @@ export function SearchableSelect({ options, searchLabel, defaultValue = "", valu
         <button type="button" className="btn filter-choice-clear" aria-label={`Fermer la recherche : ${searchLabel}`}
           onClick={() => { setQuery(""); setOpen(false); button.current?.focus(); }}><X size={14} aria-hidden="true" /></button>
       </div>
-      <p id={statusId} className="hint" role="status">{query.trim() ? `${found} résultat${found > 1 ? "s" : ""} · choix conservés` : "Saisis un nom, puis choisis dans la liste."}</p>
+      <p id={statusId} className="hint" role="status">{query.trim() ? `${found} résultat${found > 1 ? "s" : ""} · choix conservés` : "Saisir un nom, puis choisir dans la liste."}</p>
     </div>}
   </div>;
 }

@@ -12,6 +12,7 @@ vi.mock("@/lib/settings", () => ({
 import {
   CROISEE_KEYS,
   CROISEE_PARSERS,
+  croiseeSettingLines,
   croiseeSettingReason,
   croiseeSettingsHref,
   getCroiseeSettings,
@@ -142,6 +143,41 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
     expect(croiseeSettingReason("horizonEcheances", absent)).toBe("horizon des échéances non défini (Paramètres)");
     expect(croiseeSettingReason("margeAlerte", absent)).toBe("marge d'alerte des seuils d'effectif non définie (Paramètres)");
     expect(croiseeSettingsHref("demo")).toBe("/e/demo/parametres#croisee");
+  });
+
+  it("liste de seuils vide : lisible mais « seuils d'effectif non définis » (raison non nulle, aucune valeur utilisable)", () => {
+    const s = readCroiseeSettings(new Map([["rh.croisee.seuilsEffectif", row([])]]));
+    expect(s.seuilsEffectif).toEqual({ kind: "set", value: [], updatedAt: AT, updatedBy: "u1" });
+    expect(croiseeSettingReason("seuilsEffectif", s.seuilsEffectif)).toBe("seuils d'effectif non définis (Paramètres)");
+    expect(settingValue(s.seuilsEffectif)).toBeNull();
+    // Une liste non vide reste une valeur définie.
+    const one = readCroiseeSettings(new Map([["rh.croisee.seuilsEffectif", row([{ libelle: "Seuil A", valeur: 11 }])]]));
+    expect(croiseeSettingReason("seuilsEffectif", one.seuilsEffectif)).toBeNull();
+    expect(settingValue(one.seuilsEffectif)).toEqual([{ libelle: "Seuil A", valeur: 11 }]);
+  });
+
+  it("lignes du bloc « Sources et hypothèses de travail » : valeur écrite, ou n.d. avec la raison (jamais de défaut)", () => {
+    const set = readCroiseeSettings(
+      new Map([
+        ["rh.croisee.confidentialite", row(5)],
+        ["rh.croisee.seuilsEffectif", row([{ libelle: "Seuil B", valeur: 50 }, { libelle: "Seuil A", valeur: 11 }])],
+        ["rh.croisee.margeAlerte", row(0)],
+        ["rh.croisee.horizonEcheances", row(1)],
+      ]),
+    );
+    expect(croiseeSettingLines(set)).toEqual([
+      { key: "confidentialite", label: "Seuil de confidentialité", text: "5 personnes", reason: null },
+      { key: "seuilsEffectif", label: "Seuils d'effectif suivis", text: "« Seuil A » : 11 salariés ; « Seuil B » : 50 salariés", reason: null },
+      { key: "margeAlerte", label: "Marge d'alerte des seuils d'effectif", text: "0 salarié", reason: null },
+      { key: "horizonEcheances", label: "Horizon des échéances de contrat", text: "1 jour", reason: null },
+    ]);
+    const other = readCroiseeSettings(new Map([["rh.croisee.confidentialite", row(1)], ["rh.croisee.seuilsEffectif", row([])], ["rh.croisee.margeAlerte", row("2")]]));
+    expect(croiseeSettingLines(other)).toEqual([
+      { key: "confidentialite", label: "Seuil de confidentialité", text: "1 personne", reason: null },
+      { key: "seuilsEffectif", label: "Seuils d'effectif suivis", text: null, reason: "seuils d'effectif non définis (Paramètres)" },
+      { key: "margeAlerte", label: "Marge d'alerte des seuils d'effectif", text: null, reason: "marge d'alerte des seuils d'effectif illisible : à ré-enregistrer (Paramètres)" },
+      { key: "horizonEcheances", label: "Horizon des échéances de contrat", text: null, reason: "horizon des échéances non défini (Paramètres)" },
+    ]);
   });
 
   it("getCroiseeSettings : une seule lecture des quatre clés de l'espace", async () => {

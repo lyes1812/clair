@@ -12,6 +12,8 @@ import { loadSourceInputs, sourceRows } from "@/lib/export/sources";
 import { buildWorkbook, definitionsFor, EMPTY_CELL_NOTE, exactRatio, formatParis, NUM_FMT, percentCell, rationalCell, roundedRatio, type WorkbookSpec } from "@/lib/export/xlsx";
 import { glossaryEntry } from "@/lib/glossary";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
+import type { Loaded } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
+import type { PersonAbsent, PersonInfo } from "@/app/e/[slug]/studio-rh/masse-salariale/people-index";
 
 // Données entièrement fictives. Les cas de référence sont calculés à la main (voir les commentaires).
 
@@ -768,7 +770,10 @@ describe("route d'export de l'écart : ?format=xlsx, CSV inchangé", () => {
     // Version 1 → version 2, en centimes : personne A 1 000 000 → 2 000 000 (+1 000 000) ; personne B 500 000 → absente (−500 000) ;
     // personne C absente → 500 000 (+500 000) ; hors salarié 200 000 → 200 000 (0). Somme des écarts : 1 000 000 = écart de la
     // rubrique (4 000 000 − 3 000 000) : rapproché.
-    const info = (label: string, externalId: string, service: string | null, contract: string | null, start: string | null, end: string | null) => ({ label, externalId, service, contract, start, end });
+    const info = (label: string, externalId: string, service: string | null, contract: string | null, start: string | null, end: string | null, absent?: PersonAbsent) => ({ label, externalId, service, contract, start, end, ...(absent ? { absent } : {}) });
+    // Raisons telles que peopleIndex les donne : contrat lu seulement dans le référentiel (B), contrat de la base de scénario sans raison propre (C).
+    const REF_ONLY: PersonAbsent = { service: { nd: "service non lu (contrat hors base de scénario)" }, contract: { nd: "non renseigné dans le référentiel Collaborateurs" }, start: { nd: "date de début absente du référentiel Collaborateurs" } };
+    const IN_BASE: PersonAbsent = { service: "Non ventilé", contract: { nd: "non renseigné dans le référentiel Collaborateurs" }, start: { nd: "date de début absente du référentiel Collaborateurs" } };
     // Chaque appel de route lit le détail de la version 1 puis celui de la version 2.
     const primeZoom = () =>
       mocks.zoomOf
@@ -779,12 +784,12 @@ describe("route d'export de l'écart : ?format=xlsx, CSV inchangé", () => {
       primeZoom();
       mocks.people.value = new Map([
         ["c1", info("Personne A", "M-001", "Service fictif", "CDI", "2024-02-01", null)],
-        ["c2", info("Personne B", "M-002", null, null, "2023-05-15", "2026-02-28")],
-        ["c3", info("Personne C", "M-003", null, "CDD", "2026-02-02", null)],
+        ["c2", info("Personne B", "M-002", null, null, "2023-05-15", "2026-02-28", REF_ONLY)],
+        ["c3", info("Personne C", "M-003", null, "CDD", "2026-02-02", null, IN_BASE)],
       ]);
     });
 
-    it("Excel : une ligne par salarié, nom en première colonne figée, absent d'une version = cellule vide, service et contrat non renseignés = n.d. avec raison, rapprochement dans la note", async () => {
+    it("Excel : une ligne par salarié, nom en première colonne figée, absent d'une version = cellule vide, service et contrat absents = raison exacte de l'index, rapprochement dans la note", async () => {
       const res = await call("format=xlsx&zoom=masse:1");
       expect(res.status).toBe(200);
       expect(res.headers.get("content-disposition")).toContain('filename="ecart-detail-masse.xlsx"');
@@ -795,22 +800,22 @@ describe("route d'export de l'écart : ?format=xlsx, CSV inchangé", () => {
       expect(ws.getCell("A6").value).toBe("Hors salarié");
       expect([ws.getCell("G6").value, ws.getCell("H6").value, ws.getCell("I6").value]).toEqual([2_000, 2_000, 0]); // écart nul : un vrai zéro
       // « Hors salarié » n'est pas une personne : service et contrat sans objet, cellules vides (pas de n.d.).
-      expect([ws.getCell("C6").value ?? null, ws.getCell("D6").value ?? null]).toEqual([null, null]);
+      expect(["C6", "D6", "E6", "F6"].map((c) => ws.getCell(c).value ?? null)).toEqual([null, null, null, null]);
       expect(ws.getCell("A7").value).toBe("Personne A");
       expect(ws.getCell("B7").value).toBe("M-001");
       expect(iso(ws.getCell("E7"))).toBe("2024-02-01T00:00:00.000Z");
-      expect(ws.getCell("F7").value ?? null).toBeNull();
+      expect(ws.getCell("F7").value ?? null).toBeNull(); // contrat en cours : date de sortie sans objet, vide
       expect([ws.getCell("G7").value, ws.getCell("H7").value, ws.getCell("I7").value]).toEqual([10_000, 20_000, 10_000]);
       expect([ws.getCell("C7").value, ws.getCell("D7").value]).toEqual(["Service fictif", "CDI"]); // renseignés : écrits tels quels
       expect(ws.getCell("A8").value).toBe("Personne B");
       expect(ws.getCell("H8").value ?? null).toBeNull(); // absente de la version 2 : vide, pas 0
       expect([ws.getCell("G8").value, ws.getCell("I8").value]).toEqual([5_000, -5_000]);
-      // Service et contrat non renseignés : « n.d. » (jamais vide ni 0) avec la raison en commentaire de cellule.
-      for (const c of ["C8", "D8", "C9"]) {
-        expect(ws.getCell(c).value).toBe("n.d.");
-        expect(noteOf(ws.getCell(c))).toBe("non renseigné dans le référentiel Collaborateurs");
-      }
+      // Contrat lu seulement dans le référentiel : « n.d. » (jamais vide ni 0), chacun avec sa raison en commentaire de cellule.
+      expect([ws.getCell("C8").value, noteOf(ws.getCell("C8"))]).toEqual(["n.d.", "service non lu (contrat hors base de scénario)"]);
+      expect([ws.getCell("D8").value, noteOf(ws.getCell("D8"))]).toEqual(["n.d.", "non renseigné dans le référentiel Collaborateurs"]);
       expect(ws.getCell("A9").value).toBe("Personne C");
+      // Base de scénario sans raison propre : « Non ventilé » est une valeur (comme à l'écran Masse salariale), pas un n.d.
+      expect([ws.getCell("C9").value, noteOf(ws.getCell("C9"))]).toEqual(["Non ventilé", null]);
       expect(ws.getCell("D9").value).toBe("CDD");
       expect(ws.getCell("G9").value ?? null).toBeNull();
       expect([ws.getCell("H9").value, ws.getCell("I9").value]).toEqual([5_000, 5_000]);
@@ -872,6 +877,108 @@ describe("route d'export de l'écart : ?format=xlsx, CSV inchangé", () => {
       mocks.role.value = "reader";
       expect((await call("format=xlsx&zoom=masse:1")).status).toBe(403);
       expect((await call("zoom=masse:1")).status).toBe(403);
+    });
+
+    // Index réel (peopleIndex non doublé), sur un scénario et un référentiel fictifs écrits à la main :
+    //   base de scénario : c1 service n.d. avec sa raison propre ; c2 service null sans raison (« Non ventilé »), nature et date de
+    //   début absentes ; c5 nature absente de la base figée (champ non conservé) ;
+    //   embauche h1 : service et contrat non saisis ; référentiel seul : c4 (aucun service lu, nature et date de début absentes) ;
+    //   c1 figure aussi au référentiel : la base l'emporte.
+    const PLURAL = "plusieurs services en 2026-01 (Service fictif 1, Service fictif 2) : non ventilé";
+    const fictive = {
+      scenarios: new Map([
+        [
+          "s1",
+          {
+            base: {
+              contracts: [
+                { externalId: "c1", label: "Personne A", service: null, serviceNd: PLURAL, nature: "01", startDate: "2024-02-01", endDate: null },
+                { externalId: "c2", label: "Personne B", service: null, serviceNd: null, nature: null, startDate: null, endDate: "2026-02-28" },
+                { externalId: "c5", label: "Personne E", service: "Service fictif", serviceNd: null, startDate: "2025-01-06", endDate: null },
+              ],
+            },
+            hypotheses: [
+              { id: "h1", kind: "embauche", label: "Poste fictif", service: null, category: null, start: "2026-02-02", end: null },
+              { id: "d1", kind: "depart", label: "Départ fictif", contractKey: "k2", lastPaidDate: "2026-02-28", exitCost: null },
+            ],
+          },
+        ],
+      ]),
+      ctx: {
+        kpi: {
+          input: {
+            data: {
+              persons: [{ personKey: "p4", usageName: null, familyName: "Personne", givenNames: "D" }],
+              contracts: [
+                { externalId: "c4", personKey: "p4", nature: null, startDate: null, endDate: null },
+                { externalId: "c1", personKey: null, nature: "02", startDate: "2020-01-01", endDate: null },
+              ],
+            },
+          },
+        },
+      },
+    } as unknown as Loaded;
+    const realIndex = async () => (await vi.importActual<typeof import("@/app/e/[slug]/studio-rh/masse-salariale/people-index")>("@/app/e/[slug]/studio-rh/masse-salariale/people-index")).peopleIndex(fictive);
+    const REF = "non renseigné dans le référentiel Collaborateurs";
+    const NO_START = "date de début absente du référentiel Collaborateurs";
+    const HIRE = "non saisi dans l'hypothèse d'embauche";
+
+    it("peopleIndex : raison exacte de chaque champ absent, selon l'origine (base de scénario, embauche, référentiel seul) ; valeurs affichées inchangées", async () => {
+      const index = await realIndex();
+      expect([...index.keys()].sort()).toEqual(["c1", "c2", "c4", "c5", "embauche:h1"]);
+      expect(index.get("c1")).toEqual({ label: "Personne A", externalId: "c1", service: null, contract: "CDI (01)", start: "2024-02-01", end: null, absent: { service: { nd: PLURAL }, contract: { nd: REF }, start: { nd: NO_START } } });
+      expect(index.get("c2")).toEqual({ label: "Personne B", externalId: "c2", service: null, contract: null, start: null, end: "2026-02-28", absent: { service: "Non ventilé", contract: { nd: REF }, start: { nd: NO_START } } });
+      expect(index.get("c5")?.absent?.contract).toEqual({ nd: "nature absente de la base figée du scénario (créé avant sa conservation)" });
+      expect(index.get("embauche:h1")).toEqual({ label: "Poste fictif (embauche)", externalId: null, service: null, contract: null, start: "2026-02-02", end: null, absent: { service: { nd: HIRE }, contract: { nd: HIRE }, start: { nd: HIRE } } });
+      expect(index.get("c4")).toEqual({ label: "Personne D", externalId: "c4", service: null, contract: null, start: null, end: null, absent: { service: { nd: "service non lu (contrat hors base de scénario)" }, contract: { nd: REF }, start: { nd: NO_START } } });
+    });
+
+    it("Excel : chaque cellule absente porte la raison de son cas ; salarié hors index = n.d. sur service, contrat et les deux dates ; vides seulement « Hors salarié » et la sortie d'un contrat en cours ; CSV inchangé", async () => {
+      mocks.people.value = (await realIndex()) as Map<string, PersonInfo>;
+      // Montants en centimes, version 1 → version 2 : c1 100 000 → 120 000 (+200,00 €) ; c2 50 000 → absent (−500,00 €) ;
+      // c4, c5, h1 et x9 absents → 30 000, 20 000, 40 000 et 5 000 ; hors salarié 10 000 → 10 000.
+      const zoom = () =>
+        mocks.zoomOf
+          .mockReset()
+          .mockReturnValueOnce({ kind: "value", byKey: new Map([["c1", 100_000], ["c2", 50_000], [HORS_SALARIE, 10_000]]) })
+          .mockReturnValueOnce({ kind: "value", byKey: new Map([["c1", 120_000], ["c4", 30_000], ["c5", 20_000], ["embauche:h1", 40_000], ["x9", 5_000], [HORS_SALARIE, 10_000]]) });
+      zoom();
+      const ws = (await load(Buffer.from(await (await call("format=xlsx&zoom=masse:1")).arrayBuffer()))).getWorksheet("Détail par salarié")!;
+      const rowOf = (name: string) => {
+        let found = -1;
+        ws.eachRow((row, n) => {
+          if (row.getCell(1).value === name) found = n;
+        });
+        expect(found, name).toBeGreaterThan(5);
+        return found;
+      };
+      // Service (C), contrat (D), date d'embauche (E), date de sortie (F) : valeur, date ISO, n.d. et sa raison, ou vide.
+      const shown = (r: number) =>
+        [3, 4, 5, 6].map((col) => {
+          const c = ws.getCell(r, col);
+          if (c.value === null || c.value === undefined || c.value === "") return null;
+          if (c.value instanceof Date) return c.value.toISOString().slice(0, 10);
+          return c.value === "n.d." ? `n.d. — ${noteOf(c)}` : c.value;
+        });
+      expect(shown(rowOf("Personne A"))).toEqual([`n.d. — ${PLURAL}`, "CDI (01)", "2024-02-01", null]);
+      expect(shown(rowOf("Personne B"))).toEqual(["Non ventilé", `n.d. — ${REF}`, `n.d. — ${NO_START}`, "2026-02-28"]);
+      expect(shown(rowOf("Personne D"))).toEqual(["n.d. — service non lu (contrat hors base de scénario)", `n.d. — ${REF}`, `n.d. — ${NO_START}`, null]);
+      expect(shown(rowOf("Personne E"))).toEqual(["Service fictif", "n.d. — nature absente de la base figée du scénario (créé avant sa conservation)", "2025-01-06", null]);
+      const hire = rowOf("Poste fictif (embauche)");
+      expect(ws.getCell(hire, 2).value ?? null).toBeNull(); // pas de matricule pour une embauche prévue : sans objet
+      expect(shown(hire)).toEqual([`n.d. — ${HIRE}`, `n.d. — ${HIRE}`, "2026-02-02", null]);
+      const unknown = rowOf("x9");
+      expect(ws.getCell(unknown, 2).value).toBe("x9");
+      expect(shown(unknown)).toEqual(Array(4).fill("n.d. — salarié absent du référentiel Collaborateurs"));
+      expect(shown(rowOf("Hors salarié"))).toEqual([null, null, null, null]);
+      // Le CSV du détail ne change pas : champs absents vides, comme avant.
+      zoom();
+      const { lines } = await csvOf(await call("zoom=masse:1"));
+      expect(lines).toContain('"200,00";"1000,00";"1200,00";"c1";"Personne A";"";"CDI (01)";"2024-02-01";""');
+      expect(lines).toContain('"-500,00";"500,00";"";"c2";"Personne B";"";"";"";"2026-02-28"');
+      expect(lines).toContain('"50,00";"";"50,00";"x9";"x9";"";"";"";""');
+      expect(lines).toContain('"400,00";"";"400,00";"";"Poste fictif (embauche)";"";"";"2026-02-02";""');
+      expect(warn).not.toHaveBeenCalled();
     });
   });
 });

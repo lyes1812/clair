@@ -10,6 +10,7 @@ import { countByYear, gridYears } from "@/lib/viz/hyp-saisie";
 import { gridCaption } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { addHypothesisAction, saveEnvelopesAction } from "./actions";
+import { envelopesOf } from "./grids-data";
 import { DirtyIndicator, GridTools, RowFill } from "./GridTools";
 import { AmountFields, CardTitle, decText, Field, FieldGroup, Text } from "./shared";
 
@@ -20,7 +21,7 @@ const BLANK_ROWS = 3;
 // Chaque ligne est une hypothèse visible dans la projection (une ligne par mois renseigné) ; un mois vide n'a pas d'enveloppe.
 export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; axis: Env["axis"]; canEdit: boolean }) {
   const months = monthRange(scenario.firstMonth, scenario.lastMonth);
-  const rows: (Env | null)[] = [...hypotheses.filter((h): h is Env => h.kind === "enveloppe" && h.axis === axis), ...(canEdit ? Array.from({ length: BLANK_ROWS }, () => null) : [])];
+  const rows: (Env | null)[] = [...envelopesOf(hypotheses, axis), ...(canEdit ? Array.from({ length: BLANK_ROWS }, () => null) : [])];
   const what = axis === "service" ? "Centre de coûts" : "Rubrique";
   const targets = [...new Set(axis === "service"
     ? [...base.contracts.map((c) => c.service), ...hypotheses.map((h) => (h.kind === "embauche" ? h.service : h.kind === "enveloppe" && h.axis === "service" ? h.target : null))].filter((s): s is string => s !== null)
@@ -77,7 +78,7 @@ export function EnveloppesView({ slug, scenario, base, hypotheses, axis, canEdit
   );
   const frame = (
     <div className="hs-grid" data-grid-root data-ys={gy.multi ? "0" : undefined}>
-      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} />
+      <GridTools filename={filename} years={gy.tabs} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} xlsxHref={`/e/${slug}/studio-rh/hypotheses/export?scenario=${encodeURIComponent(scenario.id)}&vue=env-${axis}&format=xlsx`} />
       <p className="hs-unit">{canEdit ? gridCaption("Montants en € par mois (chargés ou bruts selon la ligne)", months) : <>Montants en <MoneyUnitLabel /> par mois (chargés ou bruts selon la ligne) · {gridCaption("", months).replace(/^ · /, "")}</>}</p>
       {grid}
     </div>

@@ -2,7 +2,7 @@ import { MoneyText } from "@/components/Money";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
-import { enteredAfter, roundDiv } from "@/lib/budget/engine";
+import { enteredAfter } from "@/lib/budget/engine";
 import type { ScenarioRow } from "@/lib/budget/store";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 import { BUDGET_TERMS } from "@/lib/glossary/budget";
@@ -11,15 +11,17 @@ import { dateFr } from "@/lib/viz/hyp-saisie";
 import { deMois, frDates } from "@/lib/viz/hyp-saisie-fmt";
 import { ActionForm } from "./ActionForm";
 import { saveBasesAction } from "./actions";
+import { baseFixes, baseMonthlyCost } from "./grids-data";
 import { DirtyIndicator, GridTools } from "./GridTools";
 import { CardTitle, detailOf, decText } from "./shared";
 
 // Bases individuelles : base figée du scénario (réel jusqu'au mois de référence) et correction de la base de chaque
 // contrat — salaire mensuel de base et taux de charges saisis par l'utilisateur, jamais déduits.
-export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; canEdit: boolean }) {
-  const fixes = new Map(hypotheses.flatMap((h) => (h.kind === "base" ? [[h.contractKey, h] as const] : [])));
+// `xlsx` : export Excel de la grille (nominatif : réservé aux administrateurs et éditeurs, la page le décide selon le rôle).
+export function BasesView({ slug, scenario, base, hypotheses, canEdit, xlsx = false }: { slug: string; scenario: ScenarioRow; base: BaseSnapshot; hypotheses: Hypothesis[]; canEdit: boolean; xlsx?: boolean }) {
+  const fixes = baseFixes(hypotheses);
   const toFix = base.contracts.filter((c) => !c.base && !fixes.has(c.contractKey));
-  const cost = (c: BaseSnapshot["contracts"][number]) => (c.base ? c.base.salaryCents + roundDiv(BigInt(c.base.salaryCents) * BigInt(c.base.refCotisationsCents), BigInt(c.base.refBrutCents)) : null);
+  const cost = baseMonthlyCost;
   const rows = base.contracts;
   const table = (
     <div className="table-wrap scroll" {...(canEdit ? {} : { role: "region", "aria-label": "Contrats de la base", tabIndex: 0 })}>
@@ -62,7 +64,7 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
   // « Copier vers le bas » seulement : un salaire n'a pas de sens dans la colonne des charges, ni l'inverse.
   const frame = (
     <div className="hs-grid" data-grid-root>
-      <GridTools filename={`bases-${scenario.firstMonth}.csv`} tools={["down"]} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} />
+      <GridTools filename={`bases-${scenario.firstMonth}.csv`} tools={["down"]} readOnly={!canEdit} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.grilles} />} xlsxHref={xlsx ? `/e/${slug}/studio-rh/hypotheses/export?scenario=${encodeURIComponent(scenario.id)}&vue=bases&format=xlsx` : undefined} />
       {table}
     </div>
   );

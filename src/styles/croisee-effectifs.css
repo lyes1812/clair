@@ -1,0 +1,33 @@
+/* Masse salariale croisée, chapitre 02 · Effectifs & mouvements. Variables de globals.css et charts.css ; gabarit, tuiles et tableaux
+   de croisee.css et masse-salariale.css. Aucune couleur codée en dur : jetons seulement. */
+
+.cx-eff { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; }
+
+/* Huit cartes : quatre colonnes, puis deux, puis une. */
+.cx-eff-tiles { display: grid; gap: 14px; min-width: 0; }
+.cx-eff-tiles .facts.ms-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .cx-eff-tiles .facts.ms-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .cx-eff-tiles .facts.ms-tiles { grid-template-columns: minmax(0, 1fr); } }
+
+/* Blocs : titre, n.d., graphique suivi de son tableau exact, tableaux, mentions « Prévu ». */
+.cx-eff-block { gap: 14px; scroll-margin-top: 72px; }
+.cx-eff-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: var(--clair-type-subheading); font-weight: 600; color: var(--ink); }
+.cx-eff-chart { display: grid; gap: 12px; min-width: 0; }
+.cx-eff-link { margin: 0; }
+.cx-eff-link a { color: var(--blue); }
+
+.cx-eff-prevu { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cx-eff-prevu-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--clair-type-form); color: var(--muted); line-height: 1.5; }
+.cx-eff-prevu-list strong { color: var(--ink); font-weight: 600; }
+
+/* Limites de la lecture : une ligne chacune. */
+.cx-eff-limits { display: grid; gap: 6px; min-width: 0; }
+.cx-eff-limits-title { display: flex; align-items: center; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); }
+.cx-eff-limits ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+
+@media print {
+  .cx-eff-tiles .facts.ms-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6pt; }
+  .cx-eff-block { break-inside: auto; }
+  .cx-eff-chart, .cx-eff-prevu, .cx-eff-limits { break-inside: avoid; }
+  .cx-eff-link { display: none; }
+}

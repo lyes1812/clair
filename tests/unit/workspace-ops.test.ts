@@ -18,6 +18,7 @@ import {
   probeKpis,
   probeServiceEtp,
   rebuildDecision,
+  rebuildOutcome,
   removalRefusal,
   removedCollections,
   renderAbsenceTypes,
@@ -28,6 +29,7 @@ import {
   resolveOldValue,
   RH_CURRENT_ANNOUNCE,
   RH_NO_ADMIN_REFUSAL,
+  RH_NO_READ_REFUSAL,
   RH_REBUILD_ANNOUNCE,
   RH_REBUILD_REFUSAL,
   RH_REBUILT_DONE,
@@ -191,7 +193,7 @@ describe("plan des réglages KPI (avant / après)", () => {
       changedKeys: ["excludedExitNatures", "absenceTypes"],
       rows: [
         { key: "excludedExitNatures", label: "Natures de sortie exclues du turnover", before: ["10", "20"], after: [], origin: "setting", changed: true, explicit: false },
-        { key: "absenceTypes", label: "Types d'absence retenus pour l'absentéisme", before: ["test_sickness"], after: ["test_accident", "test_sickness"], origin: "default", changed: true, explicit: false },
+        { key: "absenceTypes", label: "Motifs d'absence retenus pour l'absentéisme", before: ["test_sickness"], after: ["test_accident", "test_sickness"], origin: "default", changed: true, explicit: false },
       ],
     });
     if (!plan.ok) return;
@@ -200,7 +202,7 @@ describe("plan des réglages KPI (avant / après)", () => {
       "  avant : 10, 20 (enregistré)",
       "  après : aucune",
       "  à écrire",
-      "Types d'absence retenus pour l'absentéisme (rh.kpi.absence.types)",
+      "Motifs d'absence retenus pour l'absentéisme (rh.kpi.absence.types)",
       "  avant : test_sickness (valeur par défaut)",
       "  après : test_accident, test_sickness",
       "  à écrire",
@@ -218,7 +220,7 @@ describe("plan des réglages KPI (avant / après)", () => {
       changedKeys: ["excludedExitNatures"],
       rows: [
         { key: "excludedExitNatures", label: "Natures de sortie exclues du turnover", before: [], after: [], origin: "default", changed: true, explicit: true },
-        { key: "absenceTypes", label: "Types d'absence retenus pour l'absentéisme", before: ["test_accident", "test_sickness"], after: ["test_accident", "test_sickness"], origin: "setting", changed: false, explicit: false },
+        { key: "absenceTypes", label: "Motifs d'absence retenus pour l'absentéisme", before: ["test_accident", "test_sickness"], after: ["test_accident", "test_sickness"], origin: "setting", changed: false, explicit: false },
       ],
     });
     if (!plan.ok) return;
@@ -231,7 +233,7 @@ describe("plan des réglages KPI (avant / après)", () => {
     expect(written[1]).toContain("Natures de sortie exclues du turnover : aucune, enregistrée explicitement");
     expect(written).toHaveLength(2);
   });
-  it("décision explicite limitée aux exclusions : types d'absence égaux au défaut non enregistrés ou exclusions déjà enregistrées vides ne sont pas réécrits ; illisible : réécrit sans être « explicite »", () => {
+  it("décision explicite limitée aux exclusions : motifs d'absence égaux au défaut non enregistrés ou exclusions déjà enregistrées vides ne sont pas réécrits ; illisible : réécrit sans être « explicite »", () => {
     const sameAsDefault = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_sickness"] }, origins: origins({ excludedExitNatures: "setting", absenceTypes: "default" }), present, absenceTypes: ["test_sickness"] });
     expect(sameAsDefault).toMatchObject({ ok: true, changedKeys: [] });
     const invalid = planKpiSettings({ current: { excludedExitNatures: [], absenceTypes: ["test_sickness"] }, origins: origins({ excludedExitNatures: "invalid", absenceTypes: "setting" }), present, absenceTypes: ["test_sickness"] });
@@ -248,7 +250,7 @@ describe("plan des réglages KPI (avant / après)", () => {
     expect(plan).toMatchObject({ ok: false, unknownCodes: ["test_inconnu", "test_zz"], blockedKeys: [] });
     expect(!plan.ok && plan.error).toContain("test_inconnu, test_zz");
   });
-  it("lecture sans aucun type d'absence : tous les codes demandés sont inconnus", () => {
+  it("lecture sans aucun motif d'absence : tous les codes demandés sont inconnus", () => {
     expect(planKpiSettings({ current, origins: origins(), present: [], absenceTypes: ["test_sickness"] })).toMatchObject({ ok: false, unknownCodes: ["test_sickness"] });
   });
   it("un autre réglage illisible : refus (setKpiSettings le réécrirait à sa valeur par défaut) ; un des deux réglages concernés illisible : à réécrire", () => {
@@ -263,7 +265,7 @@ describe("plan des réglages KPI (avant / après)", () => {
   });
 });
 
-describe("types d'absence de la lecture active (jamais un compteur)", () => {
+describe("motifs d'absence de la lecture active (jamais un compteur)", () => {
   it("union triée des types lus et des types retenus absents de la lecture ; code non retenable signalé ; « présent » / « retenu » seulement", () => {
     // Les compteurs 3, 5 et 1 (lecture) sont ignorés : un effectif faible par code révélerait une situation individuelle.
     const rows = absenceTypeRows([{ type: "test_sickness", count: 3 }, { type: "test_paid_leave", count: 5 }, { type: "type avec espace", count: 1 }], ["test_sickness", "test_old"]);
@@ -283,7 +285,7 @@ describe("types d'absence de la lecture active (jamais un compteur)", () => {
     // Aucun chiffre : le seul « 128 » est la limite de longueur d'un code, dans la remarque d'un code non retenable.
     expect(lines.filter((l) => !l.includes("non retenable")).join("\n")).not.toMatch(/\d/);
     expect(lines[3].replace("128", "")).not.toMatch(/\d/);
-    expect(renderAbsenceTypes([])).toEqual(["Aucun type d'absence dans la lecture active."]);
+    expect(renderAbsenceTypes([])).toEqual(["Aucun motif d'absence dans la lecture active."]);
   });
   it("lecture sans compteur : mêmes lignes", () => {
     expect(absenceTypeRows([{ type: "test_a" }], [])).toEqual([{ type: "test_a", chosen: false, inRead: true, retainable: true }]);
@@ -381,15 +383,15 @@ describe("ancien réglage retrouvé dans le journal d'audit", () => {
 describe("anciens réglages : sortie de la sonde", () => {
   it("retrouvés (option, journal) : une seule ligne, valeurs et provenance", () => {
     expect(renderOldSettings({ value: ["10"], source: "journal" }, { value: [], source: "option" })).toEqual([
-      "Anciens réglages : exclusions de sortie = 10 (journal d'audit) ; types d'absence = aucun (option de la commande).",
+      "Anciens réglages : exclusions de sortie = 10 (journal d'audit) ; motifs d'absence = aucun (option de la commande).",
     ]);
   });
   it("introuvables : la sortie dit qu'une valeur par défaut n'est jamais journalisée et quelle option fournir", () => {
     const both = renderOldSettings({ value: null, source: "introuvable" }, { value: null, source: "introuvable" });
     expect(both).toEqual([
-      "Anciens réglages : exclusions de sortie inconnues (introuvable dans le journal d'audit) ; types d'absence inconnus (introuvable dans le journal d'audit).",
+      "Anciens réglages : exclusions de sortie inconnues (introuvable dans le journal d'audit) ; motifs d'absence inconnus (introuvable dans le journal d'audit).",
       "  Exclusions de sortie introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-exclusions.",
-      "  Types d'absence introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-absence-types.",
+      "  Motifs d'absence introuvables : une valeur par défaut n'est jamais journalisée ; les fournir par --old-absence-types.",
     ]);
     const onlyTypes = renderOldSettings({ value: ["10"], source: "option" }, { value: null, source: "introuvable" });
     expect(onlyTypes).toHaveLength(2);
@@ -421,6 +423,24 @@ describe("référentiel Collaborateurs de la sonde : reconstruction annoncée, r
     expect(RH_CURRENT_ANNOUNCE).toContain("non reconstruit");
     expect(RH_REBUILT_DONE).toContain("écriture effectuée");
     expect(RH_UP_TO_DATE_DONE).toContain("aucune écriture");
+  });
+  it("aucune lecture RH appliquée : refus direct, sans annonce de reconstruction, avant --no-rebuild et le contrôle de l'administrateur", () => {
+    expect(RH_NO_READ_REFUSAL).toBe("aucune lecture appliquée : rien à reconstruire, aucune écriture");
+    for (const noRebuild of [false, true]) {
+      for (const hasAdmin of [false, true]) expect(rebuildDecision({ current: false, noRebuild, hasAdmin, noRead: true }), `${noRebuild} ${hasAdmin}`).toEqual({ action: "refuse", reason: RH_NO_READ_REFUSAL });
+    }
+    // Sans l'option, décision inchangée.
+    expect(rebuildDecision({ current: false, noRebuild: false, hasAdmin: true, noRead: false })).toEqual({ action: "rebuild" });
+  });
+  it("sortie après reconstruction : « none » traité avant le choix du message d'écriture ; même build qu'avant = aucune écriture ; indisponible refusé", () => {
+    // Lecture disparue entre la sonde et la reconstruction : ni « reconstruit », ni « déjà à jour » ; refus sans écriture.
+    expect(rebuildOutcome("b1", { kind: "none" })).toEqual({ done: null, refusal: RH_NO_READ_REFUSAL });
+    expect(rebuildOutcome(null, { kind: "none" })).toEqual({ done: null, refusal: RH_NO_READ_REFUSAL });
+    // Le build rendu est celui sondé (b1) : aucune écriture. Un autre (b2), ou aucun build courant avant : écriture effectuée.
+    expect(rebuildOutcome("b1", { kind: "ready", build: { id: "b1" } })).toEqual({ done: RH_UP_TO_DATE_DONE, refusal: null, build: { id: "b1" } });
+    expect(rebuildOutcome("b1", { kind: "ready", build: { id: "b2" } })).toEqual({ done: RH_REBUILT_DONE, refusal: null, build: { id: "b2" } });
+    expect(rebuildOutcome(null, { kind: "ready", build: { id: "b2" } })).toEqual({ done: RH_REBUILT_DONE, refusal: null, build: { id: "b2" } });
+    expect(rebuildOutcome(null, { kind: "unavailable", build: { id: "b3" } })).toEqual({ done: RH_REBUILT_DONE, refusal: "référentiel Collaborateurs indisponible (unavailable)" });
   });
 });
 

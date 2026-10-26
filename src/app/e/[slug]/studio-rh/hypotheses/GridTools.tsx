@@ -92,7 +92,8 @@ function exportCsv(scope: HTMLElement, filename: string) {
 }
 
 // `help` : lien « ? » vers le glossaire (élément rendu côté serveur : ce composant client n'importe pas le glossaire).
-export function GridTools({ filename, years, tools = ["right", "down", "fill"], readOnly = false, help }: { filename: string; years?: YearTab[]; tools?: Tool[]; readOnly?: boolean; help?: React.ReactNode }) {
+// `xlsxHref` : export Excel de la grille (valeurs enregistrées, calculé par le serveur), proposé avant le CSV dans « Exporter ».
+export function GridTools({ filename, years, tools = ["right", "down", "fill"], readOnly = false, help, xlsxHref }: { filename: string; years?: YearTab[]; tools?: Tool[]; readOnly?: boolean; help?: React.ReactNode; xlsxHref?: string }) {
   const root = useRef<HTMLDivElement>(null);
   const valueRef = useRef<HTMLInputElement>(null);
   const active = useRef<HTMLInputElement | null>(null);
@@ -248,6 +249,11 @@ export function GridTools({ filename, years, tools = ["right", "down", "fill"], 
           </button>
         )}
         <DropdownMenu label="Exporter" testid="grid-export-menu">
+        {xlsxHref && (
+          <a className="btn small" href={xlsxHref} data-testid="grid-xlsx" title={readOnly ? undefined : "Valeurs enregistrées : une saisie non enregistrée n'est pas reprise (elle l'est dans le CSV)"}>
+            Excel (.xlsx)
+          </a>
+        )}
         <button
           type="button"
           className="btn small"

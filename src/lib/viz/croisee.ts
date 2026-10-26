@@ -3,9 +3,10 @@ import type { ChartSeries } from "@/components/charts/shared";
 import type { UnitName } from "@/components/charts/units";
 import { formatDate, isIsoDate } from "@/lib/dates";
 import type { ColumnKind, ExportCell } from "@/lib/export/xlsx";
+import type { MonthPayroll, PayrollWindow } from "@/lib/payroll/engine";
 import { fmtEtp4, fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { costTone, type TrendTone } from "@/lib/trend";
-import { euros, eurosSigned } from "@/lib/viz/masse";
+import { euros, eurosSigned, monthShortYear, ndGroups, ndLines } from "@/lib/viz/masse";
 import type { TileValue } from "@/lib/viz/synthese";
 
 // Masse salariale croisée : types et utilitaires partagés par la page, les dix chapitres et les exports (écran, CSV et Excel
@@ -51,10 +52,11 @@ export type CroiseeQuery = {
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => ((Array.isArray(v) ? v[0] : v) ?? "").trim();
 // Valeur reprise dans un avis : courte, sans caractère de contrôle.
-const shown = (v: string) => {
+export const shownValue = (v: string) => {
   const s = v.replace(/[\u0000-\u001f\u007f]/g, " ");
   return s.length > 40 ? `${s.slice(0, 40)}…` : s;
 };
+const shown = shownValue;
 
 export function parseQuery(sp: Search): CroiseeQuery {
   const notices: string[] = [];
@@ -179,6 +181,22 @@ const BASE_KINDS = new Set<ColumnKind>(["eur", "etp", "nombre"]);
 // Unité effective d'une cellule : celle de la ligne remplace eur / etp / nombre de la colonne (même règle que l'export Excel).
 export const cellKind = (col: CroiseeColumn, row?: Pick<CroiseeRow, "kind">): ColumnKind => (row?.kind && BASE_KINDS.has(col.kind) ? row.kind : col.kind);
 
+// Arrondi d'une valeur exacte à `digits` décimales, fait sur sa représentation décimale à quinze chiffres significatifs (celle
+// qu'affiche un tableur), demi vers l'extérieur de zéro : 1,005 → 101 centièmes, −1,005 → −101 ; jamais sur x × 10^digits en
+// flottant (1,005 × 100 vaut 100,49999…). Renvoie l'entier en unités de 10^−digits, ou null (non fini, hors des entiers sûrs).
+export function roundDecimal(x: number, digits: number): number | null {
+  if (!Number.isFinite(x) || !Number.isInteger(digits) || digits < 0 || digits > 10) return null;
+  const [mant, exp = "0"] = Math.abs(x).toPrecision(15).split("e");
+  const [ip, fp = ""] = mant.split(".");
+  const all = `${ip}${fp}`;
+  const cut = ip.length + Number(exp) + digits; // nombre de chiffres conservés
+  const kept = cut <= 0 ? "0" : all.slice(0, cut).padEnd(cut, "0");
+  const next = cut < 0 ? "0" : (all[cut] ?? "0");
+  const n = Number(kept) + (next >= "5" ? 1 : 0);
+  if (!Number.isSafeInteger(n)) return null;
+  return x < 0 && n !== 0 ? -n : n;
+}
+
 // Texte d'une cellule selon sa nature. n.d. → « n.d. » et sa raison ; « » ou absente → sans objet (« — ») ; jamais un zéro inventé.
 export function cellView(cell: CroiseeCell | undefined, col: CroiseeColumn, row?: Pick<CroiseeRow, "kind">): CellView {
   const kind = cellKind(col, row);
@@ -191,10 +209,14 @@ export function cellView(cell: CroiseeCell | undefined, col: CroiseeColumn, row?
     const x = cell.exact;
     if (!Number.isFinite(x)) return { text: "n.d.", nd: "valeur non finie", na: false, tone: "flat", numeric };
     if (!numeric) return { text: "n.d.", nd: "valeur numérique dans une colonne de texte", na: false, tone: "flat", numeric };
-    const sign = plus(col.signed, x);
-    if (kind === "eur") return view(`${sign}${euros(Math.round(x * 100))}`, costTone(x));
-    if (kind === "pourcent") return view(`${sign}${minus(two.format(x * 100))}${col.points ? " pts" : " %"}`, costTone(x));
-    return view(`${sign}${minus(two.format(x))}`, costTone(x));
+    // Un seul arrondi, sur la représentation décimale (comme le format de la cellule Excel) : centièmes d'euro, d'ETP ou de nombre ;
+    // centièmes de point pour un pourcentage (0,125 → 1 250 → « 12,50 % »). Signe et ton suivent la valeur arrondie affichée.
+    const n = roundDecimal(x, kind === "pourcent" ? 4 : 2);
+    if (n === null) return { text: "n.d.", nd: "valeur hors limites", na: false, tone: "flat", numeric };
+    const sign = plus(col.signed, n);
+    if (kind === "eur") return view(`${sign}${euros(n)}`, costTone(n));
+    if (kind === "pourcent") return view(`${sign}${minus(two.format(n / 100))}${col.points ? " pts" : " %"}`, costTone(n));
+    return view(`${sign}${minus(two.format(n / 100))}`, costTone(n));
   }
   if (!Number.isSafeInteger(cell)) return { text: "n.d.", nd: "valeur hors de l'unité de base", na: false, tone: "flat", numeric };
   const sign = plus(col.signed, cell);
@@ -287,3 +309,37 @@ export type ChapterModel = {
   nd: { reason: string; action?: { href: string; label: string } } | null; // chapitre entier non calculable
   terms: string[];
 };
+
+// --- Bloc commun « Référence annuelle N-1 sur douze mois » -------------------------------------------------------------------------
+
+// Les douze mois d'une année : « 2025-01 » … « 2025-12 ».
+export const yearMonths = (year: number): string[] => Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+
+// Raisons des mois n.d. d'une fenêtre du journal de paie, regroupées par raison identique (le mois, écrit dans la raison du moteur,
+// en est retiré pour regrouper) : « avr. 2025, mai 2025 : mois hors de la lecture PayFit appliquée ».
+export function monthNdLines(rows: readonly MonthPayroll[]): string[] {
+  const strip = (r: Extract<MonthPayroll, { kind: "nd" }>) => r.nd.reason.split(r.month).join("").replace(/\s{2,}/g, " ").trim();
+  return ndLines(ndGroups(rows.map((r) => ({ month: r.month, reason: r.kind === "nd" ? strip(r) : null }))));
+}
+
+export const REFERENCE_TABLE_ID = "commun-reference-n1";
+
+// Tableau de la référence annuelle : masse salariale chargée et rémunération brute des douze mois de l'année, telles que les calcule
+// le moteur du journal de paie (windowPayroll), pour le service retenu. Un mois n.d. rend l'année n.d. (raisons listées), jamais
+// une somme partielle ; un mois non clos est signalé.
+export function referenceTable(p: { year: number; scope: string; window: PayrollWindow }): CroiseeTable {
+  const w = p.window;
+  const nd = w.kind === "nd" ? { nd: monthNdLines(w.months).join(" ; ") || w.nd.reason } : null;
+  const cell = (pick: (v: Extract<PayrollWindow, { kind: "value" }>) => number): CroiseeCell => (w.kind === "value" ? pick(w) : nd!);
+  return {
+    id: REFERENCE_TABLE_ID,
+    title: `Référence annuelle ${p.year}, janvier → décembre · ${p.scope}`,
+    columns: [
+      { key: "indicateur", header: "Indicateur", kind: "text" },
+      { key: "annee", header: `${p.year} (douze mois)`, kind: "eur" },
+    ],
+    rows: [{ cells: ["Masse salariale chargée", cell((v) => v.masse)] }, { cells: ["Rémunération brute", cell((v) => v.brut)] }],
+    notes: w.kind === "value" && w.openMonths.length > 0 ? [`Mois non clos : ${w.openMonths.map(monthShortYear).join(", ")}.`] : [],
+    terms: ["masse", "brut", "previous-period"],
+  };
+}
