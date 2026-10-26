@@ -3,10 +3,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { FixeVariableChapter } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChFixeVariable";
 import { ServicesChapter } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChServices";
+import { CHAPTERS } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/chapitres";
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import type { Affichage } from "@/app/e/[slug]/studio-rh/masse-salariale/components";
 import { syntheseOf } from "@/app/e/[slug]/studio-rh/masse-salariale/synthese-data";
 import { readCroiseeSettings, type CroiseeSettings } from "@/lib/croisee-settings";
+import { glossaryEntry } from "@/lib/glossary";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES, type RubricId } from "@/lib/payroll/grid";
 import { serviceRows as sharedServiceRows } from "@/lib/payroll/service-rows";
@@ -685,24 +687,75 @@ describe("ServicesChapter : rendu du modèle", () => {
 
 // --- Seuil de confidentialité sous le filtre Service (cas écrits à la main) -------------------------------------------------------
 
-describe("serviceConfidentiality : chaque mois connu du service retenu est un groupe de contrats rémunérés", () => {
-  const v = (brut: number, ...paid: string[]) => ({ kind: "value" as const, brut, paidContracts: paid });
+describe("serviceConfidentiality : chaque mois connu du service retenu est un groupe de contrats qui portent une ligne de masse", () => {
+  // nonZero : une ligne de masse (brut ou cotisations) du mois a un solde non nul ; contracts : contrats qui portent une telle ligne.
+  const v = (nonZero: boolean, ...contracts: string[]) => ({ kind: "value" as const, nonZero, contracts });
   const ND = { kind: "nd" as const };
+  const NV = "effectif du groupe non dénombré : seuil de confidentialité non vérifiable — service retenu par le filtre";
   it("seuil absent : n.d. avec la raison du paramètre", () => {
-    expect(serviceConfidentiality({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" }, [v(1000, "a")])).toEqual({ cause: "parametre", reason: "seuil de confidentialité non défini (Paramètres)" });
+    expect(serviceConfidentiality({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" }, [v(true, "a")])).toEqual({ cause: "parametre", reason: "seuil de confidentialité non défini (Paramètres)" });
   });
-  it("seuil 3 : trois et quatre contrats → affiché ; un mois n.d. ne compte pas ; un mois vide (aucun brut, aucun contrat) n'est pas masqué", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(1000, "a", "b", "c"), v(500, "a", "b", "c", "d"), ND, v(0)])).toBeNull();
+  it("seuil 3 : trois et quatre contrats → affiché ; un mois n.d. ne compte pas ; un mois vide (aucun contrat, aucun montant non nul) n'est pas masqué", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, "a", "b", "c"), v(true, "a", "b", "c", "d"), ND, v(false)])).toBeNull();
   });
   it("seuil 3 : un mois à deux contrats → tout le chapitre n.d.", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(1000, "a", "b", "c"), v(400, "a", "b")])).toEqual({ cause: "seuil", reason: "non affiché (seuil de confidentialité : 3 personnes) — service retenu par le filtre" });
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, "a", "b", "c"), v(true, "a", "b")])).toEqual({ cause: "seuil", reason: "non affiché (seuil de confidentialité : 3 personnes) — service retenu par le filtre" });
   });
-  it("brut sans contrat rattaché : effectif non dénombré, seuil non vérifiable ; un mois sous le seuil l'emporte", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(1000, "a", "b", "c"), v(200)])).toEqual({ cause: "seuil", reason: "effectif du groupe non dénombré : seuil de confidentialité non vérifiable — service retenu par le filtre" });
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(200), v(400, "a")])!.reason).toMatch(/^non affiché/);
+  it("montant de masse non nul sans contrat rattaché : effectif non dénombré, seuil non vérifiable ; un mois sous le seuil l'emporte", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, "a", "b", "c"), v(true)])).toEqual({ cause: "seuil", reason: NV });
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true), v(true, "a")])!.reason).toMatch(/^non affiché/);
   });
-  it("seuil 1 : un seul contrat suffit", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(1000, "a")])).toBeNull();
+  it("seuil 1 : un seul contrat suffit ; un montant non nul sans aucun contrat reste non vérifiable dès que le seuil est défini", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(true, "a")])).toBeNull();
+    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(true, "a"), v(true)])).toEqual({ cause: "seuil", reason: NV });
+  });
+});
+
+describe("loadFixeVariableInput sous filtre Service : la taille se compte sur toute ligne de masse, pas seulement le brut", () => {
+  // Journal fictif, axe « Service », janvier 2026 (janvier 2025 : une seule ligne, du service E) :
+  // - C : cotisations 300 € portées par le contrat c7, aucun brut (l'ancien décompte sur le brut donnait 0 contrat : affiché) ;
+  // - D : cotisations 120 € sans contrat rattaché, aucun brut ;
+  // - E : salaires 800 € (c8) et dotation de provision de congés payés 50 € (c9, compte 6412, hors masse : c9 ne compte pas).
+  const J2: JournalInput = {
+    lines: [
+      ln("m1", "2026-01", "645000", 30000, "c7", "C"),
+      ln("m2", "2026-01", "645000", 12000, null, "D"),
+      ln("m3", "2026-01", "641100", 80000, "c8", "E"),
+      ln("m4", "2026-01", "641200", 5000, "c9", "E"),
+      ln("m5", "2025-01", "641100", 70000, "c8", "E"),
+    ],
+    months: ["2025-01", "2026-01"],
+    openMonths: [],
+    grid: DEFAULT_PREFIXES,
+    serviceAxis: "Service",
+  };
+  const at = (service: string, seuil: number) => loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", service, settings: seuilSettings(seuil), pay: { ...PAY, input: J2 } }));
+  it("C (1 contrat qui ne porte que des cotisations) : masqué au seuil 2, affiché au seuil 1 (cotisations 300 €)", async () => {
+    expect((await at("C", 2)).nd?.reason).toBe("non affiché (seuil de confidentialité : 2 personnes) — service retenu par le filtre");
+    const one = await at("C", 1);
+    expect(one.nd).toBeNull();
+    expect(one.data!.cur).toMatchObject({ kind: "value", brut: 0, cotisations: 30000, masse: 30000 });
+  });
+  it("D (cotisations non nulles, aucun contrat) : non vérifiable, même au seuil 1", async () => {
+    expect((await at("D", 1)).nd?.reason).toBe("effectif du groupe non dénombré : seuil de confidentialité non vérifiable — service retenu par le filtre");
+  });
+  it("E : la dotation de provision (hors masse) n'ajoute pas c9 ; 1 contrat → masqué au seuil 2", async () => {
+    expect((await at("E", 2)).nd?.reason).toMatch(/^non affiché \(seuil de confidentialité : 2 personnes\)/);
+    expect((await at("E", 1)).nd).toBeNull();
+  });
+});
+
+describe("glossaire atteignable : part des primes et contribution des services", () => {
+  it("la carte et le tableau « Parts du brut » renvoient à la part des primes ; le bloc de contribution et le tableau des services, à la contribution", async () => {
+    const m = fv();
+    expect(tile(m, "part-primes").term).toBe("croisee-part-primes");
+    expect(table(m, FV.parts).terms).toEqual(["croisee-rigidite", "croisee-part-primes"]);
+    expect(m.terms).toContain("croisee-part-primes");
+    const s = buildServices(await loadServicesInput(fakeCtx()));
+    expect(s.blocks.find((b) => b.id === "contribution")!.term).toBe("croisee-contribution-services");
+    expect(table(s, "services").terms).toContain("croisee-contribution-services");
+    expect(CHAPTERS.find((c) => c.id === "services")!.terms).toContain("croisee-contribution-services");
+    for (const id of ["croisee-part-primes", "croisee-contribution-services"]) expect(glossaryEntry(id), id).toBeTruthy();
   });
 });
 

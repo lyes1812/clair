@@ -82,18 +82,20 @@ export type ChapterExport = {
   model: (ctx: CroiseeContext) => Promise<ExportModel>; // la fonction mémoïsée du chapitre, celle qu'appelle Ch<Chapitre>.tsx
   sorted: boolean; // l'écran trie ses tableaux triables par l'adresse (tri, sens)
   defaultSort?: DefaultSort; // ordre des lignes du modèle quand l'adresse n'en demande aucun (écrit dans « Filtres »)
-  uses: (u: UsesIn) => SourceUse[]; // sources réellement lues par le chargeur du chapitre
+  uses: (u: UsesIn) => SourceUse[]; // sources réellement lues par le chargeur du chapitre (sourceUses y ajoute la référence N-1)
 };
 
 // Registre des chapitres vivants : la fonction <chapitre>Model du composant du chapitre, rien d'autre (aucun second calcul). Les
 // chapitres « Prévu » (09, 10) n'y figurent pas : ils n'ont aucun tableau. `uses` suit les lectures de load<Chapitre>Input.
 export const CROISEE_EXPORTS: Readonly<Partial<Record<ChapterId, ChapterExport>>> = {
-  // Sous un filtre de service, seul le journal (restreint au service) est lu : référentiel RH, budget et scénario, globaux, sont
-  // « non filtrables ». Sans filtre, la comptabilité et la DSN ne servent qu'aux contrôles du journal : lues seulement quand le journal
-  // est lu et que tous les mois de la période y sont calculés (même condition que loadSyntheseInput).
-  synthese: { model: syntheseModel, sorted: false, uses: (u) => (u.filtered ? ["journal"] : ["rh", "journal", "budget", "scenario", ...(u.journal && u.period ? (["compta", "dsn"] as const) : [])]) },
+  // Sous un filtre de service, le journal (restreint au service) et le référentiel RH (ETP du service, dénominateur du coût par
+  // ETP-mois) sont lus ; budget et scénario, globaux, sont « non filtrables ». Sans filtre, la comptabilité et la DSN ne servent qu'aux
+  // contrôles du journal : lues seulement quand le journal est lu et que tous les mois de la période y sont calculés (même condition
+  // que loadSyntheseInput).
+  synthese: { model: syntheseModel, sorted: false, uses: (u) => (u.filtered ? ["rh", "journal"] : ["rh", "journal", "budget", "scenario", ...(u.journal && u.period ? (["compta", "dsn"] as const) : [])]) },
   effectifs: { model: effectifsModel, sorted: false, uses: () => ["rh", "journal"] },
-  // Sous un filtre de service, rien n'est lu (chaque bloc est « non filtrable par service »).
+  // Sous un filtre de service, le chargeur ne lit rien (chaque bloc est « non filtrable par service »). Le journal de la référence
+  // annuelle N-1, exportée sous le chapitre, est ajouté par sourceUses.
   absences: { model: absencesModel, sorted: false, uses: (u) => (u.filtered ? [] : ["rh"]) },
   "fixe-variable": { model: fixeVariableModel, sorted: false, uses: () => ["journal"] },
   services: { model: servicesModel, sorted: true, defaultSort: { table: SERVICES_IDS.table, ...SERVICES_DEFAULT_SORT }, uses: () => ["journal"] },
@@ -118,13 +120,19 @@ export function chapterExport(raw: string | null | undefined): ExportLookup {
   return { kind: "ok", id, entry: found };
 }
 
+// La page affiche la référence annuelle N-1 sous chaque chapitre à filtres ; l'export la reprend (classeur, CSV) et cite sa source.
+const referenceShown = (ctx: Pick<CroiseeContext, "chapter">): boolean => ctx.chapter.filtres;
+
 // Sources du chapitre pour ce contexte : filtre de service de l'adresse, journal de paie lu ou non, mois de la période calculés ou non
 // (lecteur mémoïsé du contexte, déjà chargé par la page et par le chapitre ; windowPayroll est mémoïsé par mois sur la même entrée).
-export async function sourceUses(ctx: Pick<CroiseeContext, "service" | "load" | "period">, entry: Pick<ChapterExport, "uses">): Promise<SourceUse[]> {
+// La référence annuelle N-1, exportée sous tout chapitre à filtres (tableau ou n.d.), est tirée du journal de paie : le journal est
+// alors cité, même quand le chapitre ne le lit pas (Absences & congés), et « Sources » écrit n.d. avec sa raison s'il n'est pas lu.
+export async function sourceUses(ctx: Pick<CroiseeContext, "chapter" | "service" | "load" | "period">, entry: Pick<ChapterExport, "uses">): Promise<SourceUse[]> {
   const pay = await ctx.load.payroll();
   const journal = journalReason(pay) === null;
   const period = journal && pay.input !== null && ctx.period !== null && windowPayroll(pay.input, ctx.period.months).kind === "value";
-  return entry.uses({ filtered: ctx.service.value !== undefined, journal, period });
+  const uses = entry.uses({ filtered: ctx.service.value !== undefined, journal, period });
+  return referenceShown(ctx) && !uses.includes("journal") ? [...uses, "journal"] : uses;
 }
 
 // --- Référence annuelle N-1 sur douze mois (bloc commun de la page) -----------------------------------------------------------------
@@ -146,7 +154,7 @@ export function referenceBlock(ctx: Pick<CroiseeContext, "period" | "periodNd" |
 
 // Référence du contexte, comme la page : lue seulement pour un chapitre à filtres (le journal y est lu).
 export async function croiseeReference(ctx: Pick<CroiseeContext, "chapter" | "period" | "periodNd" | "service" | "load">): Promise<ReferenceBlock | null> {
-  if (!ctx.chapter.filtres) return null;
+  if (!referenceShown(ctx)) return null;
   return referenceBlock(ctx, await ctx.load.payroll());
 }
 
@@ -233,15 +241,47 @@ const quote = (s: string) => `"${s.replace(/"/g, '""')}"`;
 // feuille « Filtres », ne dirait pas autrement.
 export type CsvLead = { column: CroiseeColumn; value: CroiseeCell };
 
+// Colonne « Unité » du CSV d'un tableau à unités mêlées : le CSV écrit 5,34 pour 5,34 % comme 5,34 ETP, l'unité de chaque ligne y
+// est donc écrite. Noms des unités ; un pourcentage d'une colonne d'écart de taux est en points.
+const CSV_UNIT_HEADER = "Unité";
+const CSV_UNITS: Partial<Record<ColumnKind, string>> = { eur: "€", etp: "ETP", pourcent: "%", nombre: "nombre" };
+const csvUnit = (col: CroiseeColumn, row: Pick<CroiseeRow, "kind">): string | null => {
+  const kind = cellKind(col, row);
+  return kind === "pourcent" && col.points ? "points" : (CSV_UNITS[kind] ?? null);
+};
+
+// Unité d'une ligne : celle de ses colonnes chiffrées renseignées (n.d. compris, sans objet exclu), avec l'unité de la ligne qui
+// remplace celle de la colonne (cellKind, comme à l'écran) ; une colonne d'une autre unité est nommée : « % (Écart : points) ». Vide
+// pour une ligne sans cellule chiffrée.
+function rowUnit(t: Pick<CroiseeTable, "columns">, r: CroiseeRow): string {
+  const units = t.columns.flatMap((c, i) => {
+    const u = r.cells[i] === undefined || r.cells[i] === "" ? null : csvUnit(c, r);
+    return u ? [{ header: c.header, u }] : [];
+  });
+  if (units.length === 0) return "";
+  const main = units[0].u;
+  const others = units.filter((x) => x.u !== main).map((x) => `${x.header} : ${x.u}`);
+  return others.length ? `${main} (${others.join(" ; ")})` : main;
+}
+
 // CSV d'un tableau : marque d'ordre des octets, séparateur point-virgule, fin de ligne Windows, champs entre guillemets ; en-têtes,
-// lignes (dans l'ordre de l'écran) puis le total ; mêmes colonnes et mêmes cellules que l'écran, plus les colonnes `lead`.
+// lignes (dans l'ordre de l'écran) puis le total ; mêmes colonnes et mêmes cellules que l'écran, plus les colonnes `lead`. Un tableau
+// dont des lignes portent leur propre unité (row.kind) reçoit la colonne « Unité » juste après la première colonne (sauf s'il en a
+// déjà une).
 export function tableCsv(t: CroiseeTable, rows: CroiseeRow[] = t.rows, lead: CsvLead[] = []): string {
   const [first, ...rest] = t.columns;
-  const cols = [first, ...lead.map((l) => l.column), ...rest];
-  const lines = [cols.map((c) => quote(safeText(c.header))).join(";")];
-  for (const r of allRows(t, rows)) {
-    const cells = [r.cells[0], ...lead.map((l) => l.value), ...rest.map((_, i) => r.cells[i + 1])];
-    lines.push(cols.map((c, i) => quote(csvCell(cells[i], c, r))).join(";"));
+  const all = allRows(t, rows);
+  const unit = all.some((r) => r.kind !== undefined) && !t.columns.some((c) => c.header === CSV_UNIT_HEADER);
+  const headers = [first.header, ...(unit ? [CSV_UNIT_HEADER] : []), ...lead.map((l) => l.column.header), ...rest.map((c) => c.header)];
+  const lines = [headers.map((h) => quote(safeText(h))).join(";")];
+  for (const r of all) {
+    const cells = [
+      csvCell(r.cells[0], first, r),
+      ...(unit ? [safeText(rowUnit(t, r))] : []),
+      ...lead.map((l) => csvCell(l.value, l.column, r)),
+      ...rest.map((c, i) => csvCell(r.cells[i + 1], c, r)),
+    ];
+    lines.push(cells.map(quote).join(";"));
   }
   return `${CSV_BOM}${lines.join("\r\n")}\r\n`;
 }
@@ -367,6 +407,8 @@ const SHORTER: [string, string][] = [
   ["atterrissage retraité", "retraité"],
   ["de l'effectif moyen aux seuils", "aux seuils"],
   [", mois par mois", " par mois"],
+  // Chapitre 07 : la coupe à 31 caractères retirerait « déclaré », c'est-à-dire ce que le tableau compare.
+  ["Brut du journal de paie et brut déclaré (DSN, type 001)", "Brut journal et brut DSN"],
 ];
 // Mots qui ne terminent pas un nom de feuille coupé.
 const TRAILING_WORDS = new Set(["de", "du", "des", "la", "le", "les", "et", "à", "au", "aux", "en", "par", "sur", "face", "ou", "pour", "avec"]);

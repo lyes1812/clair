@@ -20,7 +20,7 @@ import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { ETP_PRORATED_LABEL, etpProratedMonth, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
 import { fmtEtp4, fmtFixed, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { civilWindow, countedOpts, previousWindow, rollingWindow } from "@/lib/rh/kpi/period";
-import { turnover } from "@/lib/rh/kpi/turnover";
+import { monthMovements, turnover } from "@/lib/rh/kpi/turnover";
 import { kpiNd, type Delta, type DeltaUnit, type Kind, type KpiInput, type KpiNd, type Ratio, type Window } from "@/lib/rh/kpi/types";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { costTone } from "@/lib/trend";
@@ -40,7 +40,7 @@ import {
   type TileVariation,
 } from "@/lib/viz/croisee";
 import { publicScenario, zoomReason } from "@/lib/viz/croisee-budget";
-import { seuilAlerts } from "@/lib/viz/croisee-effectifs";
+import { continuitySwaps, seuilAlerts, type ReasonSwap } from "@/lib/viz/croisee-effectifs";
 import { buildServices, loadServicesInput, N1_NEGATIF, N1_NUL, SERVICES_IDS, type ServicesInput } from "@/lib/viz/croisee-masse";
 import { masseWaterfall, type MasseRubric } from "@/lib/viz/ecart";
 import { etpProratedNotes, motifsRetenusLine, type EtpIn, type HeadcountIn, type RatioIn } from "@/lib/viz/kpi";
@@ -54,9 +54,11 @@ import { averageTile, deltaView, eurosOfFraction, evolutionView, kpiRefusal, lan
 // - buildSynthese(input), pure, met ces résultats en forme : six cartes, points à surveiller, graphique principal et son tableau
 //   exact, composition, cascade de l'écart de coût, tableau par service, chiffres clés et séries des cartes en tableau ;
 // - syntheseModel(ctx), mémoïsée par requête : l'écran et les exports partent de ce même modèle, calculé une fois.
-// Seul calcul nouveau de ce fichier : la moyenne, sur la période, de l'ETP contractuel proratisé (etpProratedAverage, testée).
+// Calculs nouveaux de ce fichier : la moyenne, sur la période, de l'ETP contractuel proratisé (etpProratedAverage) et l'écart exact
+// du coût par ETP-mois, N − N-1 (costGapCell), testés à part.
 // Montants en centimes, ETP en dix-millièmes ou fractions exactes, taux en fractions ; un n.d. reste n.d. avec sa raison, et aucune
-// raison n'expose un nom ni un identifiant de contrat ou d'absence (publicScenario pour la projection, publicReason ensuite).
+// raison n'expose un nom ni un identifiant de contrat ou d'absence (publicScenario pour la projection, continuitySwaps pour le
+// turnover, publicReason ensuite).
 
 const CHAPTER = "synthese" as const;
 
@@ -271,6 +273,25 @@ export function etpProratedAverage(list: readonly EtpProratedMonthIn[]): Prorate
 // Filtre commun de la page croisée (src/lib/croisee/public.ts), ré-exporté.
 export { publicReason } from "@/lib/croisee/public";
 
+// Turnover du moteur ramené à ce que la Synthèse montre (valeur, entrées, sorties, raisons, mois des deux fenêtres), sans les
+// événements du moteur (contrats, dates). Comme au chapitre Effectifs, chaque raison « contrats continus non vérifiables » du moteur
+// (elle liste les identifiants de contrat) est remplacée par son texte exact : mois et nombre de contrats (continuitySwaps, calculés
+// sur les événements des mois des deux fenêtres). Seuls les remplacements exacts sont appliqués ici ; publicReason reste le filet commun
+// du modèle. Fonction pure.
+type TurnoverEngineIn = { kind: "exact"; ratio: Ratio; entries: number | null; exits: number } | { kind: "nd"; nd: { reason: string } };
+export type SyntheseTurnoverIn = ComparedIn<TurnoverIn> & { window: WindowMonths; previousWindow: WindowMonths };
+export function publicTurnover(t: { window: WindowMonths; previousWindow: WindowMonths; current: TurnoverEngineIn; previous: TurnoverEngineIn; delta: Delta }, swaps: readonly ReasonSwap[]): SyntheseTurnoverIn {
+  const swap = (s: string) => swaps.reduce((out, w) => out.split(w.raw).join(w.text), s);
+  const one = (x: TurnoverEngineIn): TurnoverIn => (x.kind === "nd" ? { kind: "nd", nd: { reason: swap(x.nd.reason) } } : { kind: "exact", ratio: x.ratio, entries: x.entries, exits: x.exits });
+  return {
+    current: one(t.current),
+    previous: one(t.previous),
+    delta: t.delta.kind === "nd" ? { kind: "nd", nd: { ...t.delta.nd, reason: swap(t.delta.nd.reason) } } : t.delta,
+    window: { months: [...t.window.months] },
+    previousWindow: { months: [...t.previousWindow.months] },
+  };
+}
+
 // --- Mise en forme ------------------------------------------------------------------------------------------------------------
 
 const nf = new Intl.NumberFormat("fr-FR");
@@ -279,6 +300,8 @@ const tileLine = (label: string, v: TileValue): TileVariation => plainVariation(
 const money = (w: WindowIn): TileValue => (w.kind === "nd" ? nd(w.nd.reason) : { text: euros(w.masse), kind: "value", reason: null });
 const pointOf = (s: Series, m: string): Point => s.points.get(m) ?? { month: m, kind: "nd", reason: "mois non couvert" };
 const monthsText = (list: string[]) => list.map(monthShortYear).join(", ");
+// « des 2 mois avec budget », « du mois avec budget » : même libellé que la carte du budget du chapitre 06 (croisee-budget.ts).
+const withBudgetText = (n: number) => (n === 1 ? "du mois avec budget" : `des ${nf.format(n)} mois avec budget`);
 // Mois consécutifs (dans l'ordre de `all`) : « avr. 2026 → déc. 2026 » ; sinon la liste.
 const monthsSpan = (list: string[], all: string[]): string => {
   const i = all.indexOf(list[0]);
@@ -297,6 +320,21 @@ const exactCell = (r: RatioIn, fmt: (x: Ratio) => string): CroiseeCell => (r.kin
 const deltaCell = (d: Delta): CroiseeCell => (d.kind === "nd" ? { nd: d.nd.reason } : { exact: d.value.num / d.value.den / (d.unit === "points" ? 100 : 1) });
 const centsCell = (w: WindowIn, pick: (x: Extract<WindowIn, { kind: "value" }>) => number): CroiseeCell => (w.kind === "nd" ? { nd: w.nd.reason } : pick(w));
 const costCell = (c: CostIn): CroiseeCell => (c.kind === "nd" ? { nd: c.nd.reason } : { exact: c.costCents.num / c.costCents.den / 100 });
+// Écart du coût par ETP-mois, N − N-1, en euros : différence exacte des deux fractions (centimes ÷ ETP-mois), calculée en entiers et
+// convertie une seule fois ; n.d. avec la raison de la valeur qui manque (mêmes mots que l'évolution du moteur de masse salariale).
+export function costGapCell(cur: CostIn, prev: CostIn): CroiseeCell {
+  if (cur.kind === "nd") return { nd: `période n.d. (${cur.nd.reason})` };
+  if (prev.kind === "nd") return { nd: `N-1 n.d. (${prev.nd.reason})` };
+  const a = cur.costCents;
+  const b = prev.costCents;
+  if (![a.num, a.den, b.num, b.den].every(Number.isSafeInteger) || a.den <= 0 || b.den <= 0) return { nd: "coût par ETP-mois : fraction invalide" };
+  let num = BigInt(a.num) * BigInt(b.den) - BigInt(b.num) * BigInt(a.den);
+  let den = BigInt(a.den) * BigInt(b.den);
+  const g = gcd(num, den);
+  num /= g;
+  den /= g;
+  return { exact: Number(num) / Number(den) / 100 };
+}
 // Écart d'une évolution du moteur, en montant et en % de N-1 (n.d. sur un N-1 nul ou négatif, comme le chapitre 05).
 const evoCell = (e: EvolutionIn): CroiseeCell => (e.kind === "nd" ? { nd: e.nd.reason } : e.deltaCents);
 const evoPctCell = (e: EvolutionIn): CroiseeCell => (e.kind === "nd" ? { nd: e.nd.reason } : e.ratio === null ? { nd: N1_NUL } : e.ratio.den < 0 ? { nd: N1_NEGATIF } : { exact: e.ratio.num / e.ratio.den });
@@ -443,9 +481,11 @@ export function buildSynthese(input: SyntheseInput): SyntheseModel {
         sub,
         value: { text: eurosSigned(g.delta), kind: "value", reason: null },
         valueTone: costTone(g.delta),
+        // Mois exclus : budget et réalisé portent sur les seuls mois comparés (la carte « Masse salariale chargée » couvre toute la
+        // période) ; libellés du chapitre 06 (« Budget des n mois avec budget », « Réalisé des mois comparés »).
         variations: [
-          plainVariation("Budget de la période", euros(g.b)),
-          plainVariation("Réalisé", euros(g.a)),
+          plainVariation(excluded.length ? `Budget ${withBudgetText(withBudget.length)}` : "Budget de la période", euros(g.b)),
+          plainVariation(excluded.length ? "Réalisé des mois comparés" : "Réalisé", euros(g.a)),
           costVariation("Écart (%)", g.pct === null ? null : g.delta, g.pct === null ? null : `${pct(g.pct)} · ${word}`, g.pct === null ? "budget saisi nul ou négatif : pourcentage non défini" : null),
         ],
         note,
@@ -800,11 +840,11 @@ export function buildSynthese(input: SyntheseInput): SyntheseModel {
   if (pay.kind === "value") {
     montantsRows.push(
       { cells: ["Masse salariale chargée", labels.period, centsCell(pay.cur, (x) => x.masse), `N-1 : ${labels.prev}`, centsCell(pay.prev, (x) => x.masse), pay.evolution.kind === "value" ? pay.evolution.deltaCents : { nd: pay.evolution.nd.reason }] },
-      { cells: ["Coût par ETP-mois", labels.period, costCell(pay.cost), `N-1 : ${labels.prev}`, costCell(pay.costPrev), ""] },
+      { cells: ["Coût par ETP-mois", labels.period, costCell(pay.cost), `N-1 : ${labels.prev}`, costCell(pay.costPrev), costGapCell(pay.cost, pay.costPrev)] },
     );
   } else {
     const r = { nd: pay.reason };
-    montantsRows.push({ cells: ["Masse salariale chargée", labels.period, r, `N-1 : ${labels.prev}`, r, r] }, { cells: ["Coût par ETP-mois", labels.period, r, `N-1 : ${labels.prev}`, r, ""] });
+    montantsRows.push({ cells: ["Masse salariale chargée", labels.period, r, `N-1 : ${labels.prev}`, r, r] }, { cells: ["Coût par ETP-mois", labels.period, r, `N-1 : ${labels.prev}`, r, r] });
   }
   {
     const b = alertBudget;
@@ -1075,6 +1115,10 @@ export async function loadSyntheseInput(ctx: CroiseeContext): Promise<SyntheseIn
     const opts = countedOpts(input);
     // Effectif moyen de l'année civile N-1 et de N à date : mêmes appels que le chapitre 02 (seuils d'effectif).
     const curMonths = monthsBetween(`${year}-01`, last);
+    // Turnover sur douze mois glissants et sur les douze mois qui les précèdent : raisons produites à partir des événements du moteur
+    // de ces vingt-quatre mois (continuitySwaps, comme le chapitre Effectifs), sans identifiant de contrat.
+    const to12 = compareWindows(input, rollingWindow(last), turnover, (t) => t.ratio, "points");
+    const swaps = continuitySwaps([...to12.window.months, ...to12.previousWindow.months].map((m) => monthMovements(input, m)));
     rh = {
       kind: "value",
       etpAverage: compareOver(input, months, prevMonths, etpAverage, (a) => a.ratio, "etp"),
@@ -1083,7 +1127,7 @@ export async function loadSyntheseInput(ctx: CroiseeContext): Promise<SyntheseIn
       proratedQualifier: etpProratedQualifier(input),
       absenteeism: compareOver(input, months, prevMonths, absenteeism, (a) => a.ratio, "points"),
       absenceTypes: input.params.absenceTypes,
-      turnover: compareWindows(input, rollingWindow(last), turnover, (t) => t.ratio, "points"),
+      turnover: publicTurnover(to12, swaps),
       annual: { prevYear: year - 1, prev: headcountAverage(input, civilWindow(year - 1)), curMonths, cur: headcountAverage(input, windowOf(curMonths)) },
       rolling,
       sparks: {

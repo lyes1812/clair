@@ -82,11 +82,12 @@ describe("maskCohorts — seuil de confidentialité", () => {
     expect(maskCohorts(ref, 1)).toEqual({ onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" });
   });
 
-  it("seuil 2 : « seulement N-1 » (1 contrat) masqué ; colonne Contrats → « seulement N » (2, premier des plus petits) ; colonne N-1 → lignes sans contrat (10,00 €)", () => {
-    // Colonne Contrats : 1 masqué ; plus petit affiché : « seulement N » (2) avant « les deux » (2) → secondaire.
-    // Colonne Coût N-1 : « seulement N-1 » masqué ; affichés : les deux 2 500,00 €, sans contrat 10,00 € → sans contrat secondaire.
-    // Colonne Coût N : « seulement N » et sans contrat masqués (2) ; colonne Contribution : 3 masqués → rien de plus.
-    expect(maskCohorts(ref, 2)).toEqual({ onlyPrev: "masked", onlyCur: "secondary", both: "shown", outside: "secondary" });
+  it("seuil 2 : « seulement N-1 » (1 contrat) masqué ; colonne Contrats → « seulement N » (2, premier des plus petits) ; colonne N-1 → « les deux » (les lignes sans contrat ne protègent personne)", () => {
+    // Colonne Contrats : 1 masqué ; plus petit affiché qui compte des contrats : « seulement N » (2) avant « les deux » (2) → 1 + 2 ≥ 2.
+    // Colonne Coût N-1 : « seulement N-1 » masqué ; les lignes sans contrat (10,00 €) ne décrivent personne → « les deux » secondaire.
+    // Colonne Coût N : « seulement N » et « les deux » arrivent masqués en second (passés en effectif non dénombré : aucune personne
+    // comptée) ; les lignes sans contrat ne peuvent pas les protéger → protection impossible, toute la colonne est masquée.
+    expect(maskCohorts(ref, 2)).toEqual({ onlyPrev: "masked", onlyCur: "secondary", both: "secondary", outside: "secondary" });
   });
 
   it("seuil 3 : les trois groupes (1, 2, 2 contrats) masqués ; chaque colonne a déjà deux lignes masquées, les lignes sans contrat restent", () => {
@@ -108,11 +109,12 @@ describe("maskCohorts — seuil de confidentialité", () => {
 
   it("le masquage secondaire choisit la plus petite valeur absolue (une contribution négative n'est pas « la plus petite »)", () => {
     // N-1 : A 5 000,00 € (sort), B, C, D 1 000,00 € chacun ; N : B, C, D 1 000,00 € ; E 800,00 € (entre) ; sans contrat −20,00 € en N.
-    // Seuil 2 : « seulement N-1 » (A) et « seulement N » (E) masqués. Colonne Contrats : 2 masqués. Colonne N-1 : A masqué, seul ;
-    // affichés : les deux 3 000,00 € ; → les deux secondaire. Colonne N : E masqué, les deux secondaire → 2. Colonne Contribution :
-    // A, E, les deux masqués → 3. Les lignes sans contrat (−20,00 €) restent affichées.
+    // Seuil 2 : « seulement N-1 » (A) et « seulement N » (E) masqués. Colonne Contrats : 2 masqués (2 contrats). Colonne N-1 : A
+    // masqué, seul ; affichés : les deux 3 000,00 € ; → les deux secondaire. Colonne N : E (1 contrat) et les deux (masqués en second,
+    // passés en effectif non dénombré) ne comptent qu'un contrat ; les lignes sans contrat (−20,00 €) ne protègent personne →
+    // protection impossible, elles sont masquées aussi.
     const p = partitionCohorts(map({ A: 500_000, B: 100_000, C: 100_000, D: 100_000 }), map({ B: 100_000, C: 100_000, D: 100_000, E: 80_000, [HORS]: -2_000 }), HORS) as Extract<CohortPartition, { kind: "value" }>;
-    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "shown" });
+    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "secondary" });
   });
 });
 

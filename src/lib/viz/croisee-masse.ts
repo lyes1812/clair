@@ -3,7 +3,7 @@ import { NV } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
 import type { ChartSeries } from "@/components/charts/shared";
 import { journalReason } from "@/lib/croisee/format";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { isHidden, maskGroups, maskReason, type Confidentialite } from "@/lib/croisee/structure";
+import { maskReason, type Confidentialite, type MaskStatus } from "@/lib/croisee/structure";
 import { croiseeSettingReason, settingValue } from "@/lib/croisee/settings-format";
 import { evolution, windowPayroll, withService } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
@@ -11,6 +11,7 @@ import { labelTotals, type LabelTotal } from "@/lib/payroll/lot2";
 import { serviceLabel, serviceRows, type ServiceRow } from "@/lib/payroll/service-rows";
 import { cellView, costVariation, plainVariation, sortRows, sortState, sparkValues, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeColumn, type CroiseeRow, type CroiseeTable, type SortDir, type TileSpec, type TileVariation } from "@/lib/viz/croisee";
 import { brutParts, capital, COLORS, euros, eurosSigned, fixeVariableMonths, fixeVariableSeries, monthLongLabel, monthsAxis, monthShortYear, ndGroups, ndLines, pluriel, primesSeries, reasonLines, servicesParts, type MonthIn, type PrimesMonth } from "@/lib/viz/masse";
+import { masseContracts } from "@/lib/viz/croisee-budget";
 import { MONTH_NAMES, nd as ndTile, type TileValue } from "@/lib/viz/synthese";
 
 // Masse salariale croisée, chapitres 04 · Fixe & variable et 05 · Services (journal de paie PayFit). buildFixeVariable et
@@ -66,6 +67,8 @@ export const MASSE_CX_TERMS = {
   grille: "grille",
   service: "service",
   partSalaires: "croisee-rigidite",
+  partPrimes: "croisee-part-primes",
+  contributionServices: "croisee-contribution-services",
   nonRecurrents: "croisee-non-recurrents",
   calendrierPrimes: "croisee-calendrier-primes",
   confidentialite: "croisee-confidentialite",
@@ -201,23 +204,25 @@ export const periodHeads = (labels: { period: string; prev: string }) => ({ n: c
 
 // --- Seuil de confidentialité sous le filtre Service ----------------------------------------------------------------------------
 
-// Mois d'une fenêtre du journal du service retenu : brut et contrats rémunérés (portant une ligne de brut), ou mois n.d.
-export type GuardMonth = { kind: "value"; brut: number; paidContracts: readonly string[] } | { kind: "nd" };
+// Mois du journal du service retenu, pour le seuil : contrats qui portent une ligne de la valeur affichée, c'est-à-dire de la masse
+// (brut ou cotisations : masseContracts), et présence d'une telle ligne de solde non nul ; ou mois n.d.
+export type GuardMonth = { kind: "value"; contracts: readonly string[]; nonZero: boolean } | { kind: "nd" };
 export type ServiceGuard = { cause: "parametre" | "seuil"; reason: string };
 
 // Sous le filtre Service, tous les chiffres du chapitre 04 décrivent ce seul service : le seuil de confidentialité s'y applique.
-// Chaque mois connu de la période et de N-1 est un groupe (ses contrats rémunérés) ; un mois de 1 à (seuil − 1) contrats, ou un
-// mois qui porte du brut sans contrat rattaché (effectif non dénombré), rend tout le chapitre n.d. : aucun montant de ce service ne
-// se lit alors, ni directement ni par différence. Seuil absent ou illisible : n.d. avec la raison du paramètre. null : affiché.
+// Chaque mois connu de la période et de N-1 est un groupe (ses contrats qui portent une ligne de masse : brut, cotisations) ; un mois
+// de 1 à (seuil − 1) contrats, ou un mois qui porte un montant de masse non nul sans aucun contrat rattaché (effectif non dénombré,
+// quel que soit le seuil défini), rend tout le chapitre n.d. : aucun montant de ce service ne se lit alors, ni directement ni par
+// différence. Un mois vide (aucun contrat, aucun montant non nul) ne désigne personne. Seuil absent ou illisible : n.d. avec la raison
+// du paramètre. null : affiché.
 export function serviceConfidentiality(conf: Confidentialite, months: readonly GuardMonth[]): ServiceGuard | null {
   if (conf.kind === "nd") return { cause: "parametre", reason: conf.reason };
-  const known = months.filter((m): m is Extract<GuardMonth, { kind: "value" }> => m.kind === "value");
-  const status = maskGroups(
-    known.map((m) => ({ size: m.paidContracts.length === 0 && m.brut !== 0 ? null : m.paidContracts.length, value: m.brut })),
-    conf.value,
-    false,
-  ).filter(isHidden);
-  const worst = status.includes("masked") ? "masked" : status[0];
+  const status = months.flatMap((m): MaskStatus[] => {
+    if (m.kind !== "value") return [];
+    const size = m.contracts.length;
+    return [size === 0 ? (m.nonZero ? "unverifiable" : "shown") : size < conf.value ? "masked" : "shown"];
+  });
+  const worst = status.includes("masked") ? "masked" : status.includes("unverifiable") ? "unverifiable" : null;
   if (!worst) return null;
   return { cause: "seuil", reason: `${maskReason(worst, conf.value)} — service retenu par le filtre` };
 }
@@ -252,7 +257,7 @@ function familiesOf(d: FixeVariableData): LabelIn[] {
 }
 
 export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
-  const terms = [X.fixeVariable, X.primes, X.stages, X.brut, X.cotisations, X.masse, X.evolution, X.grille, X.partSalaires, X.nonRecurrents, X.calendrierPrimes, X.confidentialite];
+  const terms = [X.fixeVariable, X.primes, X.stages, X.brut, X.cotisations, X.masse, X.evolution, X.grille, X.partSalaires, X.partPrimes, X.nonRecurrents, X.calendrierPrimes, X.confidentialite];
   const empty = { chapter: "fixe-variable" as const, alerts: [], terms, prevu: PREVU_FIXE_VARIABLE };
   const d = input.data;
   if (input.nd || !d) return { ...empty, tiles: [], tables: [], charts: [], blocks: [], limits: [], tileNd: [], trend: false, nd: input.nd ?? { reason: "journal de paie indisponible" } };
@@ -310,7 +315,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     amountTile("variable", "Variable (primes et indemnités)", X.fixeVariable, PICK.variable, { spark: spark("Variable", (m) => m.variable) }),
     amountTile("primes", "dont primes", X.primes, PICK.primes, cur.kind === "value" ? { note: families.length ? `${pluriel(families.length, "famille")} de prime` : "aucune famille de prime" } : {}),
     amountTile("stages", "Gratifications de stage", X.stages, PICK.stages, hasStages === false ? { note: "aucune ligne dans le journal sur la période" } : {}),
-    shareTile("part-primes", "Part des primes dans le brut", X.primes, PICK.primes),
+    shareTile("part-primes", "Part des primes dans le brut", X.partPrimes, PICK.primes),
     shareTile("part-salaires", "Part des salaires dans le brut", X.partSalaires, PICK.fixe),
   ];
   if (cur.kind === "nd") ndList.unshift({ label: `Période (${labels.period})`, reason: windowReason(cur) });
@@ -349,7 +354,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     title: "Parts du brut",
     columns: [text("indicateur", "Indicateur"), { key: "n", header: nHead, kind: "pourcent" }, { key: "n1", header: pHead, kind: "pourcent" }, { key: "ecart", header: "Écart (points)", kind: "pourcent", signed: true, points: true }],
     rows: [partLine("Part des salaires dans le brut", PICK.fixe), partLine("Part des primes dans le brut", PICK.primes)],
-    terms: [X.partSalaires, X.primes],
+    terms: [X.partSalaires, X.partPrimes],
   };
   const ringReason = cur.kind === "nd" ? windowReason(cur) : null;
   const ring = brutParts(cur.kind === "value" ? { fixe: PICK.fixe(cur), variable: PICK.variable(cur), stages: PICK.stages(cur) } : { fixe: 0, variable: 0, stages: 0 });
@@ -533,12 +538,18 @@ export async function loadFixeVariableInput(ctx: CroiseeContext): Promise<FixeVa
   const prevMonths = ctx.prevMonths;
   const cur = windowPayroll(input, months);
   const prev = windowPayroll(input, prevMonths);
-  // Service retenu : seuil de confidentialité sur ses contrats rémunérés de chaque mois (période et N-1).
+  // Service retenu : seuil de confidentialité sur les contrats qui portent une ligne de masse, chaque mois (période et N-1).
   if (svc !== undefined) {
     const conf = ctx.settings.confidentialite;
     const seuil = settingValue(conf);
     const c: Confidentialite = seuil !== null ? { kind: "set", value: seuil } : { kind: "nd", reason: croiseeSettingReason("confidentialite", conf) ?? "seuil de confidentialité non défini (Paramètres)" };
-    const guard = serviceConfidentiality(c, [...cur.months, ...prev.months]);
+    const guard = serviceConfidentiality(
+      c,
+      [...months, ...prevMonths].map((m): GuardMonth => {
+        const g = masseContracts(input, m);
+        return g ? { kind: "value", ...g } : { kind: "nd" };
+      }),
+    );
     if (guard) {
       const action = guard.cause === "parametre" ? { href: `/e/${ctx.slug}/parametres#croisee`, label: "Paramètres" } : { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
       return { nd: { reason: guard.reason, action }, data: null };
@@ -608,7 +619,7 @@ function evoPct(e: EvolutionIn, cur: WindowIn, prev: WindowIn): CroiseeCell {
 const perPerson = (w: WindowIn): CroiseeCell => (w.kind === "nd" ? { nd: windowReason(w) } : w.paidContractMonths > 0 ? { exact: w.masse / (w.paidContractMonths * 100) } : { nd: SANS_CONTRAT });
 
 export function buildServices(input: ServicesInput): ServicesModel {
-  const terms = [X.service, X.masse, X.evolution, X.primes, X.cotisations];
+  const terms = [X.service, X.masse, X.evolution, X.contributionServices, X.primes, X.cotisations];
   const empty = { chapter: "services" as const, alerts: [], terms, tiles: [] };
   const d = input.data;
   if (input.nd || !d) return { ...empty, tables: [], charts: [], blocks: [], limits: [], trend: false, count: null, selected: null, nd: input.nd ?? { reason: "journal de paie indisponible" } };
@@ -701,7 +712,7 @@ export function buildServices(input: ServicesInput): ServicesModel {
       ? [{ ...tableBlock, graph: true, notes: [SANS_LIGNE] }]
       : [
           tableBlock,
-          { id: "contribution", title: "Contribution des services à l'écart", term: X.evolution, graph: true, half: true, nd: [], charts: [contribution.id], tables: [], notes: [] },
+          { id: "contribution", title: "Contribution des services à l'écart", term: X.contributionServices, graph: true, half: true, nd: [], charts: [contribution.id], tables: [], notes: [] },
           { id: "repartition", title: "Répartition du coût", term: X.service, graph: true, half: true, nd: [], charts: [repartition.id], tables: [], notes: [] },
         ];
   const limits = [

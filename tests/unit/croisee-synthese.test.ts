@@ -6,18 +6,24 @@ import { SyntheseView } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/C
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import type { Layer, Point, Series } from "@/lib/budget/series";
 import type { CroiseeSetting, SeuilEffectif } from "@/lib/croisee-settings";
+import { monthRange } from "@/lib/connectors/months";
 import { glossaryEntry } from "@/lib/glossary";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
+import { monthMovements } from "@/lib/rh/kpi/turnover";
+import type { KpiInput } from "@/lib/rh/kpi/types";
 import { cellView, croiseeHref, yearMonths, type CroiseeTable } from "@/lib/viz/croisee";
+import { continuitySwaps } from "@/lib/viz/croisee-effectifs";
 import { N1_NUL, type ServicesInput, type WindowValue } from "@/lib/viz/croisee-masse";
 import {
   buildSynthese,
   chartHasData,
+  costGapCell,
   etpProratedAverage,
   loadSyntheseInput,
   PRINT_REPERES_MAX,
   publicReason,
+  publicTurnover,
   SYNTHESE_CX_TERMS,
   SYNTHESE_TABLE_IDS as ID,
   syntheseModel,
@@ -25,6 +31,8 @@ import {
   type SyntheseModel,
 } from "@/lib/viz/croisee-synthese";
 import type { MonthIn } from "@/lib/viz/masse";
+import { DSN_ABSENCES, kpiInput } from "./helpers/kpi";
+import { dsnFixtureBuild } from "./helpers/rh";
 
 // Chapitre 01 · Synthèse : entrées fictives écrites à la main, valeurs de référence calculées à la main (centimes, fractions exactes).
 const sp = (s: string) => s.replace(/[  ]/g, " ");
@@ -222,6 +230,84 @@ describe("publicReason : raisons du moteur sans identifiant de contrat ni d'abse
   });
 });
 
+describe("publicTurnover : raisons du turnover produites à partir des événements du moteur (continuitySwaps, comme Effectifs)", () => {
+  // Identifiants de contrat fictifs en texte libre : parenthèses, virgule et nom.
+  const ID_A = "CDD (Prénom FICTIF, remplacement) n°7";
+  const ID_B = "CDI (Nom FICTIF)";
+  const SUFFIX = " — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés";
+  const RAW_CUR = `entrées de 2026-02 : contrats continus non vérifiables (${ID_A} le 01/02/2026, ${ID_B} le 01/02/2026)${SUFFIX}`;
+  const RAW_PREV = `sorties de 2025-02 : contrats continus non vérifiables (${ID_B} le 28/02/2025)${SUFFIX}`;
+  const unknown = (kind: "entry" | "exit") => ({ why: "continuity-unknown" as const, row: { event: { kind } } });
+  // Mois du moteur, un dans chaque fenêtre : février 2026 (deux entrées non vérifiables), février 2025 (une sortie non vérifiable).
+  const swaps = continuitySwaps([
+    { month: "2026-02", entries: { kind: "nd", nd: { code: "coverage-incomplete", reason: RAW_CUR } }, exits: { kind: "exact" }, events: [unknown("entry"), unknown("entry")] },
+    { month: "2025-02", entries: { kind: "exact" }, exits: { kind: "nd", nd: { code: "coverage-incomplete", reason: RAW_PREV } }, events: [unknown("exit")] },
+  ]);
+  const CUR = "2026-02 : entrées n.d. — 2 contrats continus non vérifiables en 2026-02 (détail dans KPI RH)";
+  const PREV = "2025-02 : sorties n.d. — 1 contrat continu non vérifiable en 2025-02 (détail dans KPI RH)";
+  // Résultats du moteur (les événements, qui portent les contrats, sont gardés ici pour vérifier qu'ils ne passent pas).
+  const engineCur = { kind: "nd" as const, nd: { code: "month-nd", reason: `2026-02 : entrées n.d. — ${RAW_CUR}` }, months: [{ events: [{ externalId: ID_A }, { externalId: ID_B }] }] };
+  const enginePrev = { kind: "nd" as const, nd: { code: "month-nd", reason: `2025-02 : sorties n.d. — ${RAW_PREV}` }, months: [{ events: [{ externalId: ID_B }] }] };
+  const win = { months: monthRange("2025-04", "2026-03"), from: "2025-04", to: "2026-03", label: "avril 2025 → mars 2026" };
+  const prevWin = { months: monthRange("2024-04", "2025-03"), from: "2024-04", to: "2025-03", label: "avril 2024 → mars 2025" };
+  const engine = { window: win, previousWindow: prevWin, current: engineCur, previous: enginePrev, delta: { kind: "nd" as const, nd: { code: "current-not-exact" as const, reason: `valeur n.d. — 2026-02 : entrées n.d. — ${RAW_CUR}` } } };
+
+  it("cas de référence : raisons de N et N-1 et de l'écart réécrites (mois et nombre de contrats), fenêtres gardées, événements retirés", () => {
+    const pub = publicTurnover(engine, swaps);
+    expect(pub).toEqual({
+      current: { kind: "nd", nd: { reason: CUR } },
+      previous: { kind: "nd", nd: { reason: PREV } },
+      delta: { kind: "nd", nd: { code: "current-not-exact", reason: `valeur n.d. — ${CUR}` } },
+      window: { months: monthRange("2025-04", "2026-03") },
+      previousWindow: { months: monthRange("2024-04", "2025-03") },
+    });
+    expect(JSON.stringify(pub)).not.toMatch(/FICTIF|Prénom/);
+    // Valeur exacte : recopiée telle quelle (taux, entrées, sorties).
+    const exact = publicTurnover({ ...engine, current: { kind: "exact", ratio: { num: 3, den: 25 }, entries: 2, exits: 4 }, delta: { kind: "exact", unit: "points", value: { num: 1, den: 2 } } }, swaps);
+    expect([exact.current, exact.delta]).toEqual([{ kind: "exact", ratio: { num: 3, den: 25 }, entries: 2, exits: 4 }, { kind: "exact", unit: "points", value: { num: 1, den: 2 } }]);
+  });
+
+  it("buildSynthese : carte, ligne N-1, écart et tableau « ETP et taux » portent la raison du moteur réécrite, sans identifiant", () => {
+    const rh = value().rh;
+    if (rh.kind !== "value") throw new Error("entrée attendue");
+    const m = buildSynthese(input({ rh: { ...rh, turnover: publicTurnover(engine, swaps) } }));
+    expect(tile(m, "turnover").value.reason).toBe(CUR);
+    expect(tile(m, "turnover").variations!.slice(0, 2).map((v) => v.reason)).toEqual([PREV, `valeur n.d. — ${CUR}`]);
+    expect(tableOf(m, ID.rh).rows[3].cells.slice(2)).toEqual([{ nd: CUR }, "N-1 : avril 2024 → mars 2025", { nd: PREV }, { nd: `valeur n.d. — ${CUR}` }]);
+    expect(JSON.stringify(m)).not.toMatch(/FICTIF|Prénom/);
+    for (const affichage of ["tout", "tableau"] as const) expect(renderToStaticMarkup(h(SyntheseView, { model: m, slug: "demo", affichage })), affichage).not.toMatch(/FICTIF|Prénom/);
+  });
+});
+
+describe("costGapCell : écart du coût par ETP-mois, N − N-1, exact", () => {
+  const cost = (masse: number, etp4: number) => ({ kind: "value" as const, costCents: { num: masse * 10_000, den: etp4 }, etpMonths4: etp4 });
+  it("cas de référence : 500,03 € ÷ 5 ETP-mois = 100,006 € ; 250,02 € ÷ 5 = 50,004 € ; écart exact 50,002 € → « +50,00 € » (et non 100,01 − 50,00)", () => {
+    const c = costGapCell(cost(50_003, 50_000), cost(25_002, 50_000)) as { exact: number };
+    expect(c.exact).toBeCloseTo(50.002, 10);
+    expect(sp(cellView(c, { key: "ecart", header: "Écart", kind: "eur", signed: true, costTrend: true }).text)).toBe("+50,00 €");
+  });
+  it("valeur manquante : n.d. avec sa raison (période ou N-1), jamais zéro ni « sans objet »", () => {
+    const nd = (reason: string) => ({ kind: "nd" as const, nd: { reason } });
+    expect(costGapCell(nd("ETP fin 2026-02 : n.d."), cost(1, 1))).toEqual({ nd: "période n.d. (ETP fin 2026-02 : n.d.)" });
+    expect(costGapCell(cost(1, 1), nd("aucun ETP sur la période"))).toEqual({ nd: "N-1 n.d. (aucun ETP sur la période)" });
+  });
+  it("buildSynthese : 34 000 € ÷ 12 ETP-mois = 2 833,33 € ; 31 000 € ÷ 11,5 = 2 695,65 € ; écart 9 500/69 € = +137,68 € (hausse de coût)", () => {
+    // 850 000/3 − 6 200 000/23 = (19 550 000 − 18 600 000)/69 = 950 000/69 centimes = 137,681… €.
+    const pay = value().pay;
+    if (pay.kind !== "value") throw new Error("entrée attendue");
+    const m = buildSynthese(input({ pay: { ...pay, costPrev: cost(3_100_000, 115_000) } }));
+    const t = tableOf(m, ID.montants);
+    expect(texts(t)[1]).toEqual(["Coût par ETP-mois", "janvier → mars 2026", "2 833,33 €", "N-1 : janvier → mars 2025", "2 695,65 €", "+137,68 €"]);
+    const gapCell = t.rows[1].cells[5] as { exact: number };
+    expect(gapCell.exact).toBeCloseTo(9_500 / 69, 9);
+    expect(cellView(gapCell, t.columns[5], t.rows[1]).tone).toBe("bad");
+    expect(sp(tile(m, "masse").note!)).toBe("Coût par ETP-mois : 2 833,33 € (N-1 : 2 695,65 €)");
+    // Journal non lu : toute la ligne est n.d. avec la raison, écart compris.
+    const none = buildSynthese(input({ pay: { kind: "nd", reason: "journal de paie indisponible", action: { href: "/e/demo/donnees", label: "Données" } } }));
+    expect(tableOf(none, ID.montants).rows[1].cells[5]).toEqual({ nd: "journal de paie indisponible" });
+  });
+});
+
 // --- Cartes ------------------------------------------------------------------------------------------------------------------
 describe("buildSynthese : six cartes dans l'ordre, valeurs de référence", () => {
   const m = buildSynthese(input());
@@ -259,14 +345,32 @@ describe("buildSynthese : six cartes dans l'ordre, valeurs de référence", () =
     const t = tile(m, "ecart-budget");
     expect(sp(t.value.text)).toBe("+500,00 €");
     expect(t.valueTone).toBe("bad");
+    // Mois exclu : budget et réalisé des seuls mois comparés, libellés comme au chapitre 06 (la carte Masse couvre janvier → mars).
     expect(t.variations!.map((v) => [v.label, v.text && sp(v.text), v.tone])).toEqual([
-      ["Budget de la période", "22 000,00 €", "flat"],
-      ["Réalisé", "22 500,00 €", "flat"],
+      ["Budget des 2 mois avec budget", "22 000,00 €", "flat"],
+      ["Réalisé des mois comparés", "22 500,00 €", "flat"],
       ["Écart (%)", "+2,27 % · défavorable", "bad"],
     ]);
+    expect(sp(tile(m, "masse").value.text)).toBe("34 000,00 €");
     expect(t.note).toBe("Comparé sur 2 mois ; sans montant de budget, exclus : mars 2026");
     // Écart mensuel : janvier 0, février + 50 000 c, mars n.d. (jamais 0).
     expect(t.spark?.values).toEqual([0, 50_000, null]);
+  });
+  it("3 bis · un seul mois avec budget : « Budget du mois avec budget » (janvier : 11 000,00 − 11 000,00 = 0,00 €) ; aucun mois exclu : « Budget de la période » et « Réalisé »", () => {
+    const janOnly = { ...budgetPts, "2026-02": "montant du budget non saisi" };
+    const one = buildSynthese(input({ budget: { kind: "value", name: "Budget test", series: series("b", "Budget saisi « Budget test »", janOnly, () => "budget") } }));
+    expect(lines(one, "ecart-budget")).toEqual([
+      ["Budget du mois avec budget", "11 000,00 €"],
+      ["Réalisé des mois comparés", "11 000,00 €"],
+      ["Écart (%)", "0,00 % · égal au budget"],
+    ]);
+    // Mars saisi à 11 500 € : budget 33 500 € sur les trois mois ; réalisé 34 000 € ; écart +500 €.
+    const full = buildSynthese(input({ budget: { kind: "value", name: "Budget test", series: series("b", "Budget saisi « Budget test »", { ...budgetPts, "2026-03": 1_150_000 }, () => "budget") } }));
+    expect(lines(full, "ecart-budget").slice(0, 2)).toEqual([
+      ["Budget de la période", "33 500,00 €"],
+      ["Réalisé", "34 000,00 €"],
+    ]);
+    expect(tile(full, "ecart-budget").note).toBeUndefined();
   });
   it("4 · atterrissage 143 000,00 € sur douze mois ; mêmes 11 mois : 131 500,00 − 130 500,00 = +1 000,00 € (+0,77 %)", () => {
     // Budget sans mars : 2 × 11 000 + 8 × 12 000 + 12 500 = 130 500 ; scénario sur les mêmes mois : 11 000 + 11 500 + 8 × 12 000 + 13 000 = 131 500.
@@ -485,11 +589,13 @@ describe("buildSynthese : graphique principal (réel et projection distincts) et
     const t = tableOf(m, ID.montants);
     expect(texts(t)).toEqual([
       ["Masse salariale chargée", "janvier → mars 2026", "34 000,00 €", "N-1 : janvier → mars 2025", "31 000,00 €", "+3 000,00 €"],
-      ["Coût par ETP-mois", "janvier → mars 2026", "2 833,33 €", "N-1 : janvier → mars 2025", "n.d.", "—"],
+      ["Coût par ETP-mois", "janvier → mars 2026", "2 833,33 €", "N-1 : janvier → mars 2025", "n.d.", "n.d."],
       ["Écart au budget saisi", "janvier → mars 2026 (2 mois avec budget)", "22 500,00 €", "Budget saisi « Budget test »", "22 000,00 €", "+500,00 €"],
       ["Atterrissage 2026", "Scénario « Scénario test » · douze mois", "143 000,00 €", "—", "—", "—"],
       ["Atterrissage 2026 face au budget", "11 mois comparés (sans montant de budget : mars 2026)", "131 500,00 €", "Budget saisi « Budget test »", "130 500,00 €", "+1 000,00 €"],
     ]);
+    // Coût par ETP-mois N-1 n.d. : l'écart est n.d. avec la raison de la valeur qui manque (jamais « sans objet »).
+    expect(t.rows[1].cells[5]).toEqual({ nd: "N-1 n.d. (ETP fin 2025-02 : n.d.)" });
     for (const r of t.rows) if (typeof r.cells[2] === "number" && typeof r.cells[4] === "number") expect(r.cells[2] - r.cells[4]).toBe(r.cells[5]);
     const rh = tableOf(m, ID.rh);
     // En-tête neutre « N-1 » ; chaque ligne date sa référence. Turnover : douze mois glissants à fin mars 2026 (avril 2025 → mars
@@ -709,13 +815,13 @@ const JOURNAL: JournalInput = {
 
 describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources absentes", () => {
   const calls = { scenario: 0, compta: 0 };
-  const fakeCtx = (over: Record<string, unknown> = {}, journal: JournalInput | null = null, scenario: unknown = { kind: "nd", reason: "aucun scénario ne couvre 2026" }) => {
+  const fakeCtx = (over: Record<string, unknown> = {}, journal: JournalInput | null = null, scenario: unknown = { kind: "nd", reason: "aucun scénario ne couvre 2026" }, kpiIn: KpiInput | null = null) => {
     calls.scenario = 0;
     calls.compta = 0;
     const jan = journal !== null;
     const state = { chapitre: "synthese", annee: "2026", de: "01", a: jan ? "01" : "03" };
     const pay = {
-      kpi: { collab: { source: { chosen: jan ? "payfit" : "dsn", reason: "Source appliquée." }, state: { kind: "ready" } }, settings: { invalid: [] }, input: null },
+      kpi: { collab: { source: { chosen: jan ? "payfit" : "dsn", reason: "Source appliquée." }, state: { kind: "ready" } }, settings: { invalid: [] }, input: kpiIn },
       source: jan ? "payfit" : "dsn",
       unavailable: null,
       input: journal,
@@ -775,6 +881,33 @@ describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources a
     const m = buildSynthese(r);
     expect(m.alerts.map((a) => a.id)).toEqual(["atterrissage-nd", "source-journal", "source-rh"]);
     expect(m.tiles.every((t) => t.value.kind === "nd")).toBe(true);
+  });
+
+  it("DSN fictives, numéros de contrat en texte libre (parenthèses et nom) : le turnover N-1 bute sur des contrats continus non vérifiables ; raison du moteur réécrite (mois et nombre), aucun identifiant dans l'entrée, le modèle ni le rendu", async () => {
+    // Référentiel DSN fictif (octobre 2024 → septembre 2026) dont chaque numéro de contrat est remplacé par un texte libre fictif.
+    const data = dsnFixtureBuild();
+    const named = { ...data, contracts: data.contracts.map((c, i) => ({ ...c, externalId: `CDI (Prénom FICTIF ${i}, remplacement) n°${i}` })) };
+    const kin = kpiInput(named, DSN_ABSENCES);
+    // Prémisse : la raison brute du moteur pour octobre 2024 cite bien ces identifiants.
+    const oct = monthMovements(kin, "2024-10");
+    expect(JSON.stringify([oct.entries, oct.exits])).toMatch(/Prénom FICTIF/);
+    const months = monthRange("2026-01", "2026-09");
+    const prevMonths = monthRange("2025-01", "2025-09");
+    const period = { year: 2026, from: "01", to: "09", years: [2026], last: "09", months, notices: [] };
+    const r = await loadSyntheseInput(fakeCtx({ period, prevMonths, labels: { period: "janvier → septembre 2026", prev: "janvier → septembre 2025" } }, null, undefined, kin));
+    if (r.kind !== "value" || r.rh.kind !== "value") throw new Error("entrée attendue");
+    const t = r.rh.turnover;
+    expect(t.window.months).toEqual(monthRange("2025-10", "2026-09"));
+    expect(t.previousWindow.months).toEqual(monthRange("2024-10", "2025-09"));
+    // Texte exact du chapitre Effectifs (continuityText) : le mois et le nombre, sans le sens entre parenthèses de publicReason.
+    expect(t.previous.kind).toBe("nd");
+    const prevReason = t.previous.kind === "nd" ? t.previous.nd.reason : "";
+    expect(prevReason).toMatch(/^2024-10 : (entrées|sorties) n\.d\. — (1 contrat continu non vérifiable|\d+ contrats continus non vérifiables) en 2024-10 \(détail dans KPI RH\)$/);
+    expect(JSON.stringify(t)).not.toMatch(/FICTIF|Prénom/);
+    const m = buildSynthese(r);
+    expect(tile(m, "turnover").variations![0]).toMatchObject({ label: "N-1", text: null, reason: prevReason });
+    expect(JSON.stringify(m)).not.toMatch(/FICTIF|Prénom/);
+    for (const affichage of ["tout", "graphique", "tableau"] as const) expect(renderToStaticMarkup(h(SyntheseView, { model: m, slug: "demo", affichage })), affichage).not.toMatch(/FICTIF|Prénom/);
   });
 
   it("filtre de service : indicateurs RH, budget et atterrissage « non filtrable par service », sans lire le scénario ni la comptabilité", async () => {

@@ -198,8 +198,9 @@ describe("glossaire de la Masse salariale croisée", () => {
     const conf = glossaryEntry("croisee-confidentialite")!.definition;
     expect(conf).toContain(`« ${confidentialiteReason(2).replace("2 personnes", "N personnes")} »`);
     expect(conf).toContain(`« ${croiseeSettingReason("confidentialite", { kind: "absent" })} »`);
-    // Un groupe de 1 personne (seuil 3) : masqué ; le plus petit autre groupe affiché, ici vide, l'est aussi ; le reste est affiché.
-    expect(maskGroups([{ size: 1, value: 1 }, { size: 0, value: 0 }, { size: 6, value: 6 }], 3, true)).toEqual(["masked", "secondary", "shown"]);
+    // Un groupe de 1 personne (seuil 3) : masqué ; le groupe vide ne protège personne, le groupe de 6 est masqué (1 + 6 ≥ 3) ; le
+    // groupe vide reste affiché.
+    expect(maskGroups([{ size: 1, value: 1 }, { size: 0, value: 0 }, { size: 6, value: 6 }], 3, true)).toEqual(["masked", "shown", "secondary"]);
     // Sans total affiché, pas de masquage secondaire.
     expect(maskGroups([{ size: 1, value: 1 }, { size: 6, value: 6 }], 3, false)).toEqual(["masked", "shown"]);
     // Provision par service (seuil 3) : 1 contrat masqué ; le service sans contrat (provision la plus faible) ne suffit pas, le suivant

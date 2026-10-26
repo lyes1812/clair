@@ -15,7 +15,7 @@ import {
   type CongesPris,
 } from "@/lib/croisee/conges";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { confidentialiteReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type MaskStatus } from "@/lib/croisee/structure";
+import { confidentialiteReason, isHidden, maskReason, maskRelations, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type MaskCell as SharedMaskCell, type MaskRelation, type MaskStatus } from "@/lib/croisee/structure";
 import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSettings } from "@/lib/croisee/settings-format";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { absenteeism, absenteeismMonth, theoreticalWindow } from "@/lib/rh/kpi/absence";
@@ -43,9 +43,11 @@ import { deltaView, kpiRefusal, nd as ndTile, rateTile, windowOf, type TileValue
 // Seuil de confidentialité (rh.croisee.confidentialite ; absent ou illisible : blocs n.d. avec le lien vers les Paramètres) : une
 // cellule par motif qui décrit de 1 à (seuil − 1) personnes est masquée, dans le tableau par motif, les demi-journées prises par motif
 // et par mois et les absences posées à venir. Exception : le seul motif retenu présent dans la lecture n'est pas masqué (sa ligne égale
-// la tuile Absentéisme, déjà publiée dans KPI RH). Masquage secondaire (fonction partagée maskGroups) dans chaque relation publiée :
+// la tuile Absentéisme, déjà publiée dans KPI RH). Masquage secondaire (fonction partagée maskRelations) dans chaque relation publiée :
 // mois d'une ligne et son total ; motifs retenus d'un mois ou de la période et la tuile ; autres motifs de la période et (tous motifs −
-// tuile) : aucune valeur masquée ne se retrouve par différence. Les cartes, le tableau mensuel et le taux tous motifs (entreprise
+// tuile) : l'ensemble masqué de chaque relation compte au moins « seuil » personnes distinctes, aucune valeur masquée ne se retrouve
+// par différence. Quand les autres motifs ne peuvent pas se protéger entre eux (un seul motif non retenu sous le seuil, par exemple),
+// la ligne « tous motifs » de la période (ou de N-1) est masquée, avec la même raison. Les cartes et le tableau mensuel (entreprise
 // entière, mêmes valeurs que KPI RH) ne sont pas masqués.
 //
 // Aucun identifiant : les raisons du moteur qui nomment une absence ou un contrat sont remplacées à la lecture (conges.ts), et un
@@ -204,38 +206,25 @@ export const statutLabel = (s: AVenirStatut): string => (s === "pose" ? "Posée 
 // --- Seuil de confidentialité : masquage principal et secondaire ----------------------------------------------------------------------
 
 // Une cellule soumise au seuil : personnes concernées (null : non dénombrées), valeur affichée (null : déjà n.d. pour une autre raison),
-// exempt : valeur déjà publiée ailleurs (seul motif retenu = tuile Absentéisme), jamais masquée.
-export type MaskCell = { size: number | null; value: number | null; exempt?: boolean };
+// members : jetons des personnes (comptées une fois d'une cellule à l'autre) ; exempt : valeur déjà publiée ailleurs (seul motif retenu
+// = tuile Absentéisme), jamais masquée ; onlyAsTotal : taux tous motifs, masqué seulement quand il est le dernier recours.
+export type MaskCell = SharedMaskCell;
 
-// Statuts des cellules après masquage. relations : ensembles de cellules dont la somme est publiée (total affiché, ou différence de deux
-// totaux affichés) ; une ligne et son total forment une relation dont la constante (0) est connue. Pour chaque relation, la fonction
-// partagée maskGroups décide du masquage secondaire (la plus petite cellule affichée, zéro compris), jusqu'à ce que plus rien ne change :
-// une cellule masquée par une relation peut en découvrir une autre par une seconde relation. Les cellules exemptes (valeur publique)
-// ne participent pas aux relations ; une cellule déjà masquée y compte comme une cellule à protéger.
-export function maskCells(cells: readonly MaskCell[], relations: readonly (readonly number[])[], seuil: number): MaskStatus[] {
-  const st: MaskStatus[] = cells.map((c) => (c.value === null ? "nd" : c.exempt ? "shown" : c.size === null ? "unverifiable" : c.size > 0 && c.size < seuil ? "masked" : "shown"));
-  for (let changed = true; changed; ) {
-    changed = false;
-    for (const rel of relations) {
-      const members = rel.filter((i) => !cells[i].exempt);
-      if (members.length === 0) continue;
-      const out = maskGroups(
-        members.map((i) => ({ size: st[i] === "secondary" || st[i] === "unverifiable" ? null : cells[i].size, value: st[i] === "nd" ? null : cells[i].value })),
-        seuil,
-        true,
-      );
-      out.forEach((s, k) => {
-        if (s === "secondary" && st[members[k]] === "shown") {
-          st[members[k]] = "secondary";
-          changed = true;
-        }
-      });
-    }
-  }
-  return st;
+// Statuts des cellules après masquage. relations : ensembles de cellules dont la somme est publiée ; une relation donnée comme une
+// liste a une somme fixe (publiée ailleurs : tuile, tableau mensuel) ; { cells, total } désigne la cellule qui porte la somme (total
+// d'une ligne, taux tous motifs), masquée quand rien d'autre ne protège la relation. Règle : maskRelations (structure.ts) — l'ensemble
+// masqué de chaque relation compte au moins « seuil » personnes distinctes et deux cellules qui décrivent quelqu'un ; une cellule vide
+// ne protège personne ; la règle est reprise jusqu'à ce que plus rien ne change. Les cellules exemptes ne participent pas aux relations.
+export function maskCells(cells: readonly MaskCell[], relations: readonly (readonly number[] | MaskRelation)[], seuil: number): MaskStatus[] {
+  return maskRelations(
+    cells,
+    relations.map((r): MaskRelation => ("cells" in r ? r : { cells: r })),
+    seuil,
+  );
 }
 
-const maskCellOf = (c: CongeCell | undefined, exempt = false): MaskCell => (!c ? { size: null, value: 0 } : c.kind === "nd" ? { size: null, value: null } : { size: c.persons, value: c.half, exempt });
+const maskCellOf = (c: CongeCell | undefined, exempt = false): MaskCell =>
+  !c ? { size: null, value: 0 } : c.kind === "nd" ? { size: null, value: null } : { size: c.persons, value: c.half, exempt, ...(c.who ? { members: c.who } : {}) };
 
 // Grille « pris par motif » : pour chaque motif, les mois de la période, le total de la période et celui de N-1 (ce sont aussi les
 // colonnes du tableau par motif). published : totaux affichés ailleurs dans le chapitre (tableau mensuel des motifs retenus, tuile
@@ -245,7 +234,8 @@ export type CongesGrid = {
   exempt: number | null; // ligne du seul motif retenu présent dans la lecture
   published: { months: boolean[]; retainedCur: boolean; allCur: boolean; retainedPrev: boolean; allPrev: boolean };
 };
-export type CongesGridMask = { months: MaskStatus[][]; cur: MaskStatus[]; prev: MaskStatus[] };
+// allCur, allPrev : statut du taux tous motifs de la période et de N-1 (« secondary » : masqué pour protéger un autre motif).
+export type CongesGridMask = { months: MaskStatus[][]; cur: MaskStatus[]; prev: MaskStatus[]; allCur: MaskStatus; allPrev: MaskStatus };
 
 export function congesMask(g: CongesGrid, seuil: number): CongesGridMask {
   const k = g.published.months.length;
@@ -255,22 +245,33 @@ export function congesMask(g: CongesGrid, seuil: number): CongesGridMask {
     const ex = g.exempt === r;
     return [...l.months.map((c) => maskCellOf(c, ex)), maskCellOf(l.total, ex), maskCellOf(l.prev, ex)];
   });
+  // Taux tous motifs (période, N-1) : deux cellules de plus, total des « autres motifs » (ou de tous les motifs).
+  const allCurAt = cells.length;
+  const allPrevAt = allCurAt + 1;
+  cells.push({ size: null, value: g.published.allCur ? 0 : null, onlyAsTotal: true }, { size: null, value: g.published.allPrev ? 0 : null, onlyAsTotal: true });
   const all = g.lines.map((_, r) => r);
   const retained = all.filter((r) => g.lines[r].chosen);
   const others = all.filter((r) => !g.lines[r].chosen);
-  const rel: number[][] = all.map((r) => Array.from({ length: k + 1 }, (_, j) => at(r, j)));
+  // Une ligne : ses mois ont pour somme le total de la période de la ligne (cellule masquable).
+  const rel: MaskRelation[] = all.map((r) => ({ cells: Array.from({ length: k }, (_, j) => at(r, j)), total: at(r, k) }));
   g.published.months.forEach((ok, j) => {
-    if (ok) rel.push(retained.map((r) => at(r, j)));
+    if (ok) rel.push({ cells: retained.map((r) => at(r, j)) });
   });
-  const column = (j: number, retainedShown: boolean, allShown: boolean) => {
-    if (retainedShown && allShown) rel.push(retained.map((r) => at(r, j)), others.map((r) => at(r, j)));
-    else if (allShown) rel.push(all.map((r) => at(r, j)));
-    else if (retainedShown) rel.push(retained.map((r) => at(r, j)));
+  const column = (j: number, retainedShown: boolean, allShown: boolean, allAt: number) => {
+    if (retainedShown && allShown) rel.push({ cells: retained.map((r) => at(r, j)) }, { cells: others.map((r) => at(r, j)), total: allAt });
+    else if (allShown) rel.push({ cells: all.map((r) => at(r, j)), total: allAt });
+    else if (retainedShown) rel.push({ cells: retained.map((r) => at(r, j)) });
   };
-  column(k, g.published.retainedCur, g.published.allCur);
-  column(k + 1, g.published.retainedPrev, g.published.allPrev);
+  column(k, g.published.retainedCur, g.published.allCur, allCurAt);
+  column(k + 1, g.published.retainedPrev, g.published.allPrev, allPrevAt);
   const st = maskCells(cells, rel, seuil);
-  return { months: all.map((r) => Array.from({ length: k }, (_, j) => st[at(r, j)])), cur: all.map((r) => st[at(r, k)]), prev: all.map((r) => st[at(r, k + 1)]) };
+  return {
+    months: all.map((r) => Array.from({ length: k }, (_, j) => st[at(r, j)])),
+    cur: all.map((r) => st[at(r, k)]),
+    prev: all.map((r) => st[at(r, k + 1)]),
+    allCur: st[allCurAt],
+    allPrev: st[allPrevAt],
+  };
 }
 
 // Absences posées à venir : chaque ligne (motif × statut) et son total forment une relation ; aucun total de colonne n'est affiché.
@@ -280,7 +281,7 @@ export function aVenirMask(lines: readonly Pick<AVenirLine, "months" | "total">[
   const cells = lines.flatMap((l) => [...l.months.map((c) => maskCellOf(c)), maskCellOf(l.total)]);
   const st = maskCells(
     cells,
-    lines.map((_, r) => Array.from({ length: k + 1 }, (_, j) => at(r, j))),
+    lines.map((_, r) => ({ cells: Array.from({ length: k }, (_, j) => at(r, j)), total: at(r, k) })),
     seuil,
   );
   return { months: lines.map((_, r) => Array.from({ length: k }, (_, j) => st[at(r, j)])), total: lines.map((_, r) => st[at(r, k)]) };
@@ -504,15 +505,19 @@ function buildChapter(input: AbsencesInput): AbsencesModel {
     block({ id: "motifs", title: mTitle, term: TERMS.parMotif, tables: [TABLE_IDS.motifs] });
   }
 
-  // --- Taux d'absence, tous motifs : un autre calcul que l'absentéisme, à part (non soumis au seuil : entreprise entière)
-  const all = mc.all;
-  const allPrev = mp.all;
+  // --- Taux d'absence, tous motifs : un autre calcul que l'absentéisme, à part (entreprise entière). Il n'est masqué que lorsque, avec
+  // la tuile, il donnerait par différence la somme d'autres motifs masqués qui ne peuvent pas se protéger entre eux (un seul motif non
+  // retenu sous le seuil, par exemple) : période et N-1 chacun selon sa relation, avec la raison du seuil.
+  const allShown = (r: RateK, st: MaskStatus | undefined): RateK =>
+    r.kind !== "nd" && st !== undefined && isHidden(st) && seuil !== null ? { kind: "nd", nd: kpiNd("month-nd", maskReason(st, seuil)!) } : r;
+  const all = allShown(mc.all, grid?.mask.allCur);
+  const allPrev = allShown(mp.all, grid?.mask.allPrev);
   tables.push({
     id: TABLE_IDS.tousMotifs,
     title: ABSENCE_ALL_MOTIFS_LABEL,
     columns: [text("indicateur", "Indicateur"), num("demi-journees", `Demi-journées ${label}`), pct("taux", `Taux ${label}`), num("demi-journees-n1", `Demi-journées ${prevLabel}`), pct("taux-n1", `Taux ${prevLabel}`), points("ecart", "Écart (points)")],
     rows: [{ cells: [ABSENCE_ALL_MOTIFS_LABEL, halfOfRate(all), rateCell(all), halfOfRate(allPrev), rateCell(allPrev), rateGap(all, allPrev)] }],
-    terms: [TERMS.tousMotifs],
+    terms: [TERMS.tousMotifs, T.confidentialite],
   });
   block({ id: "tous-motifs", title: ABSENCE_ALL_MOTIFS_LABEL, term: TERMS.tousMotifs, tables: [TABLE_IDS.tousMotifs] });
 
@@ -593,8 +598,8 @@ function prevuItems(input: AbsencesInput): PrevuItem[] {
 // Limites de la lecture, une ligne chacune (le détail est au glossaire).
 function limitsOf(d: AbsencesData | null): string[] {
   return [
-    "Absentéisme, jours théoriques et taux tous motifs : entreprise entière, non soumis au seuil de confidentialité (mêmes valeurs que KPI RH).",
-    "Seuil de confidentialité : motifs et absences posées, avec masquage secondaire ; un motif retenu seul n'est pas masqué (il égale la tuile Absentéisme).",
+    "Absentéisme et jours théoriques : entreprise entière, non soumis au seuil de confidentialité (mêmes valeurs que KPI RH).",
+    "Seuil de confidentialité : motifs et absences posées, avec masquage secondaire ; un motif retenu seul n'est pas masqué (il égale la tuile Absentéisme) ; le taux tous motifs est masqué quand il donnerait par différence un motif masqué.",
     "Motifs tels que la source les nomme : aucun motif n'est classé en congé payé, RTT ou repos.",
     "Une demi-journée couverte par deux motifs compte dans chacun : la somme des motifs (et une barre empilée) peut dépasser le taux tous motifs.",
     ...(d?.source === "payfit" ? ["Absences posées et demandes en attente : statut lu à la date de la lecture PayFit, jours des mois lus seulement."] : []),

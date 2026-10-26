@@ -6,10 +6,10 @@ import type { ContractDraft } from "@/lib/rh/referential/types";
 // lecture de la source, ce que l'écran écrit sous le tableau.
 //
 // Seuil de confidentialité (paramètre d'espace, sans valeur par défaut) : sans seuil défini, toute la structure est n.d. avec la
-// raison. Avec un seuil, un groupe qui compte au moins une personne et moins de personnes que le seuil est masqué ; si c'est le seul
-// groupe masqué d'un ensemble dont le total est affiché, le plus petit groupe affiché l'est aussi (masquage secondaire), pour
-// qu'aucune valeur masquée ne se retrouve par différence. Le total n'est jamais modifié. Un groupe vide (aucune personne) reste à 0,
-// sauf s'il est retenu par le masquage secondaire.
+// raison. Avec un seuil, un groupe qui compte au moins une personne et moins de personnes que le seuil est masqué ; le total de la
+// caractéristique étant affiché, les groupes masqués doivent compter ensemble au moins « seuil » personnes distinctes (masquage
+// secondaire, maskRelations), pour qu'aucune valeur masquée ne se retrouve par différence ; un groupe vide ne protège personne. Le
+// total n'est jamais modifié. Un groupe vide (aucune personne) reste à 0, sauf quand toute la caractéristique doit être masquée.
 
 export type StructureField = "isFullTimeAtRead" | "modalityAtRead" | "executive";
 export type StructureContract = Pick<ContractDraft, "contractKey" | "personKey" | StructureField> & {
@@ -67,38 +67,143 @@ export const STRUCTURE_DIMENSIONS: DimensionDef[] = [
 ];
 
 // Raison d'une cellule masquée : la même pour le masquage principal et le masquage secondaire (deux raisons différentes diraient
-// laquelle des deux cellules est sous le seuil).
-export const confidentialiteReason = (seuil: number): string => `non affiché (seuil de confidentialité : ${seuil} personne${seuil > 1 ? "s" : ""})`;
+// laquelle des deux cellules est sous le seuil). Une seule formulation, avec l'unité réellement comptée : « N personnes » quand le
+// groupe est compté en personnes distinctes, « N contrats » quand il est compté en contrats.
+export type SeuilUnite = "personnes" | "contrats";
+const uniteText = (seuil: number, unite: SeuilUnite): string => (unite === "personnes" ? (seuil > 1 ? "personnes" : "personne") : seuil > 1 ? "contrats" : "contrat");
+export const confidentialiteReason = (seuil: number, unite: SeuilUnite = "personnes"): string => `non affiché (seuil de confidentialité : ${seuil} ${uniteText(seuil, unite)})`;
 // Groupe dont l'effectif n'est pas dénombré : le seuil ne peut pas être vérifié, la valeur n'est pas affichée.
 export const SEUIL_NON_VERIFIABLE = "effectif du groupe non dénombré : seuil de confidentialité non vérifiable";
 
-// --- Masquage d'un ensemble de groupes (fonction pure partagée par les tableaux du chapitre) --------------------------------------
+// --- Masquage (fonctions pures partagées par les tableaux de la page croisée) --------------------------------------------------------
 
 // size : personnes (ou contrats) que décrit la cellule, null s'il n'est pas dénombré ; value : valeur affichée (nombre de la cellule),
-// null si la cellule est déjà n.d. pour une autre raison.
-export type MaskInput = { size: number | null; value: number | null };
+// null si la cellule est déjà n.d. pour une autre raison. members : les personnes (ou contrats) décrits, sous une forme opaque (jeton,
+// numéro d'ordre) ; fournis, ils servent à compter une personne une seule fois d'une cellule masquée à l'autre ; absents, les tailles
+// des cellules masquées sont additionnées.
+export type MaskInput = { size: number | null; value: number | null; members?: readonly (string | number)[] };
+// exempt : valeur publiée ailleurs, jamais masquée, hors des relations. onlyAsTotal : somme publiée (taux tous motifs, par exemple),
+// jamais masquée pour elle-même ni retenue comme cellule secondaire ordinaire : elle n'est masquée que comme total d'une relation
+// qu'aucune autre cellule ne peut protéger. block : cellules masquées d'un bloc (les valeurs d'une même ligne qui se déduisent l'une de
+// l'autre, par exemple nombre, N-1, N et écart) : dès que l'une est masquée, les autres le sont aussi.
+export type MaskCell = MaskInput & { exempt?: boolean; onlyAsTotal?: boolean; block?: string | number };
+// Relation : cellules dont la somme est publiée. total : indice de la cellule qui porte cette somme quand elle est elle-même affichée et
+// masquable (total d'une ligne, taux tous motifs) ; absent, la somme est fixe : total de toute l'entreprise, ou valeur publiée ailleurs
+// (tuile Absentéisme, tableau mensuel), jamais masquée ici.
+export type MaskRelation = { cells: readonly number[]; total?: number };
 // shown : affichée ; masked : de 1 à (seuil − 1) personnes ; secondary : masquée pour protéger une autre cellule ; unverifiable :
 // effectif inconnu ; nd : déjà n.d. (raison propre).
 export type MaskStatus = "shown" | "masked" | "secondary" | "unverifiable" | "nd";
 
-// Un ensemble de cellules dont le total est affiché (totalShown) : si une seule d'entre elles est masquée (ou non vérifiable), la plus
-// petite cellule affichée est masquée aussi (à égalité, la première dans l'ordre) ; sans autre cellule affichée, rien de plus n'est
-// masqué (la cellule vaut alors le total, déjà publié). Un groupe vide (0) n'est jamais masqué au premier tour.
-export function maskGroups(groups: readonly MaskInput[], seuil: number, totalShown: boolean): MaskStatus[] {
-  const out = groups.map((g): MaskStatus => (g.value === null ? "nd" : g.size === null ? "unverifiable" : g.size > 0 && g.size < seuil ? "masked" : "shown"));
-  const hidden = out.filter((s) => s !== "shown").length;
-  const protect = out.filter((s) => s === "masked" || s === "unverifiable").length;
-  if (!totalShown || hidden !== 1 || protect !== 1) return out;
-  let pick = -1;
-  out.forEach((s, i) => {
-    if (s === "shown" && (pick < 0 || (groups[i].value as number) < (groups[pick].value as number))) pick = i;
+const protects = (s: MaskStatus): boolean => s === "masked" || s === "secondary" || s === "unverifiable";
+
+// Règle (celle de maskServices, Paie & comptabilité, étendue à plusieurs relations) :
+// 1. Masquage principal : une cellule de 1 à (seuil − 1) personnes est masquée ; une cellule dont l'effectif n'est pas dénombré est
+//    non vérifiable (masquée aussi). Une cellule vide (0) ne désigne personne : jamais masquée au premier tour.
+// 2. Relation dont la somme est publiée (somme fixe, ou total affiché) et qui contient une cellule masquée, non vérifiable ou
+//    secondaire : l'ensemble masqué de la relation doit compter AU MOINS « seuil » personnes (ou contrats) distinctes, et au moins
+//    deux cellules qui peuvent décrire quelqu'un (sinon une cellule secondaire seule se lirait par différence). Une cellule de taille 0
+//    (groupe vide, lignes sans contrat) n'apporte personne : elle ne suffit jamais à en protéger une autre ; une cellule n.d. ou non
+//    dénombrée n'apporte aucune personne comptée. Tant que ce n'est pas le cas, la plus petite cellule affichée qui apporte une
+//    personne (ou, pour la seconde cellule, qui décrit quelqu'un) est masquée à son tour (à égalité, la première dans l'ordre).
+// 3. Impossible (même toutes les cellules de la relation ne suffisent pas) : le total est masqué quand c'est une cellule masquable ;
+//    sinon (total de toute l'entreprise, ou publié ailleurs) toute la relation est masquée.
+// 4. Relation dont le total est masqué : la somme n'est plus publiée ; il suffit qu'aucune cellule masquée n'y reste seule, le total
+//    compris : un total à protéger dont toutes les cellules sont affichées se lirait par leur somme, la plus petite cellule qui décrit
+//    quelqu'un (à défaut, la plus petite) est alors masquée.
+// La règle est reprise relation par relation jusqu'à ce que plus rien ne change : une cellule masquée dans une relation peut en
+// découvrir une autre dans une seconde relation. Les relations sont lues dans l'ordre donné : l'appelant passe d'abord celles dont
+// le total est une cellule masquable (lignes), pour qu'elles soient protégées tant que leur total est encore affiché.
+export function maskRelations(cells: readonly MaskCell[], relations: readonly MaskRelation[], seuil: number): MaskStatus[] {
+  const st: MaskStatus[] = cells.map((c) =>
+    c.value === null ? "nd" : c.exempt || c.onlyAsTotal ? "shown" : c.size === null ? "unverifiable" : c.size > 0 && c.size < seuil ? "masked" : "shown",
+  );
+  // Personnes distinctes décrites par des cellules : réunion des membres fournis, plus la taille de celles qui n'en donnent pas (non
+  // dénombrée : 0).
+  const covered = (idx: readonly number[]): number => {
+    const ids = new Set<string>();
+    let others = 0;
+    for (const i of idx) {
+      const c = cells[i];
+      if (c.members) for (const m of c.members) ids.add(String(m));
+      else others += c.size ?? 0;
+    }
+    return ids.size + others;
+  };
+  const describes = (i: number): boolean => cells[i].size !== 0; // taille inconnue : peut décrire quelqu'un
+  const enough = (idx: readonly number[]): boolean => covered(idx) >= seuil && idx.filter(describes).length >= 2;
+  const smallest = (cand: readonly number[], ok: (i: number) => boolean): number => {
+    let pick = -1;
+    for (const i of cand) if (ok(i) && (pick < 0 || (cells[i].value as number) < (cells[pick].value as number))) pick = i;
+    return pick;
+  };
+  // Cellules d'un même bloc : masquées ensemble (la raison reste celle du seuil, principal ou secondaire).
+  const mates = new Map<string | number, number[]>();
+  cells.forEach((c, i) => {
+    if (c.block !== undefined) mates.set(c.block, [...(mates.get(c.block) ?? []), i]);
   });
-  if (pick >= 0) out[pick] = "secondary";
-  return out;
+  const hideBlock = (i: number) => {
+    const b = cells[i].block;
+    if (b !== undefined) for (const j of mates.get(b)!) if (st[j] === "shown" && !cells[j].exempt) st[j] = "secondary";
+  };
+  st.forEach((s, i) => {
+    if (protects(s)) hideBlock(i);
+  });
+  const hide = (i: number): boolean => {
+    if (i < 0 || st[i] !== "shown" || cells[i].exempt) return false;
+    st[i] = "secondary";
+    hideBlock(i);
+    return true;
+  };
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const r of relations) {
+      const members = r.cells.filter((i) => !cells[i].exempt && !cells[i].onlyAsTotal);
+      if (members.length === 0) continue;
+      const total = r.total !== undefined && !cells[r.total].exempt ? r.total : null;
+      const hidden = members.filter((i) => st[i] !== "shown");
+      const shown = members.filter((i) => st[i] === "shown");
+      if (total !== null && st[total] !== "shown") {
+        // Somme non publiée (total masqué ou n.d.) : seul un total à protéger, dont toutes les cellules sont affichées, se lirait.
+        if (protects(st[total]) && hidden.length === 0) {
+          const pick = smallest(shown, describes);
+          if (hide(pick >= 0 ? pick : smallest(shown, () => true))) changed = true;
+        }
+        continue;
+      }
+      if (!hidden.some((i) => protects(st[i])) || enough(hidden)) continue;
+      if (!enough([...hidden, ...shown])) {
+        // Impossible : le total masquable est masqué ; une somme fixe fait masquer toute la relation.
+        if (total !== null) changed = hide(total) || changed;
+        else for (const i of shown) changed = hide(i) || changed;
+        continue;
+      }
+      for (;;) {
+        const sel = members.filter((i) => st[i] !== "shown");
+        if (enough(sel)) break;
+        const base = covered(sel);
+        const short = base < seuil;
+        const pick = smallest(
+          members.filter((i) => st[i] === "shown"),
+          (i) => (short ? covered([...sel, i]) > base : describes(i)),
+        );
+        if (!hide(pick)) break; // garde-fou : la faisabilité est vérifiée ci-dessus
+        changed = true;
+      }
+    }
+  }
+  return st;
+}
+
+// Un seul ensemble de groupes dont le total est affiché (totalShown) et fixe (total de l'entreprise) : maskRelations sur cette seule
+// relation. Sans total affiché, seul le masquage principal s'applique.
+export function maskGroups(groups: readonly MaskInput[], seuil: number, totalShown: boolean): MaskStatus[] {
+  return maskRelations(groups, totalShown ? [{ cells: groups.map((_, i) => i) }] : [], seuil);
 }
 
 export const isHidden = (s: MaskStatus): boolean => s === "masked" || s === "secondary" || s === "unverifiable";
-export const maskReason = (s: MaskStatus, seuil: number): string | null => (s === "masked" || s === "secondary" ? confidentialiteReason(seuil) : s === "unverifiable" ? SEUIL_NON_VERIFIABLE : null);
+export const maskReason = (s: MaskStatus, seuil: number, unite: SeuilUnite = "personnes"): string | null =>
+  s === "masked" || s === "secondary" ? confidentialiteReason(seuil, unite) : s === "unverifiable" ? SEUIL_NON_VERIFIABLE : null;
 
 // --- Effectif d'un groupe en personnes distinctes -----------------------------------------------------------------------------------
 
@@ -139,7 +244,7 @@ export function effectifStructure(p: { contracts: StructureContract[]; confident
     if (missing.length > 0) members.push({ key: "non-renseigne", label: d.missing, list: missing });
     // Le total de la caractéristique (tous les contrats comptés) est affiché : masquage secondaire dans la caractéristique.
     const status = maskGroups(
-      members.map((m) => ({ size: persons(m.list), value: m.list.length })),
+      members.map((m) => ({ size: persons(m.list), value: m.list.length, members: [...new Set(m.list.map(personOf))] })),
       seuil,
       true,
     );

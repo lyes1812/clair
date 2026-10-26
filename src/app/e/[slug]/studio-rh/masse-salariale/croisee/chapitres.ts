@@ -84,7 +84,7 @@ const DEFS: Omit<ChapterDef, "num">[] = [
     statut: "vivant",
     filtres: true,
     graphiques: true,
-    terms: ["service"],
+    terms: ["service", T.contributionServices],
     liens: [{ path: MS, title: "Masse salariale › Synthèse", text: "Tableau par service, N et N-1." }],
   },
   {

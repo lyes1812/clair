@@ -12,7 +12,7 @@ import { memoByContext } from "./memo";
 // - « absence X : date de (début et de fin | début | fin) non renseignée dans PayFit » ;
 // - « (absences A, B) » (demi-journées incertaines) ;
 // - « entrées | sorties de AAAA-MM : contrats continus non vérifiables (C1 le …, C2 le …) — … », et toute liste de contrats restée
-//   entre parenthèses après « contrats continus non vérifiables » ;
+//   entre parenthèses après « contrats continus non vérifiables » (identifiants en texte libre : voir CONTINUITY) ;
 // - « <libellé> : base n.d. (…) — saisir une correction de base » (le libellé est le nom de la personne) ;
 // - et, par prudence, « sous le contrat X », « contrat X non renvoyé par PayFit », « contrat continu neutralisé (avec X le …) ».
 // Toute autre raison est rendue telle quelle. Le filtre est idempotent : une raison déjà publique n'est pas réécrite.
@@ -22,12 +22,25 @@ const HYP = "détail dans Hypothèses budgétaires";
 const nf = new Intl.NumberFormat("fr-FR");
 const many = (n: number, one: string, more: string) => `${nf.format(n)} ${n > 1 ? more : one}`;
 
-// Nombre de contrats d'une liste « C1 le 03/03/2026, C2 le 05/03/2026 » : les dates comptées, à défaut les éléments.
-const LE_DATE = / le \d{2}\/\d{2}\/\d{4}/g;
+// Nombre de contrats d'une liste « C1 le 03/03/2026, C2 le 05/03/2026 » : les dates qui terminent un élément (suivies de « , » ou de
+// la fin de la liste), à défaut les éléments.
+const LE_DATE = / le \d{2}\/\d{2}\/\d{4}(?=, |$)/g;
 const listCount = (list: string): number => (list.match(LE_DATE) ?? []).length || list.split(", ").filter((s) => s.trim() !== "").length || 1;
 
-const CONTINUITY = /(entrées|sorties) de (\d{4}-\d{2}) : contrats continus non vérifiables \(((?!détail dans KPI RH\))[^()]*)\)(?: — jour voisin hors de la couverture ; sans la neutralisation \(Paramètres\), ces mouvements seraient comptés)?/gi;
-const CONTINUITY_LIST = /contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))([^()]*)(\)|$)/g;
+// Contrats continus non vérifiables (turnover.ts) : « <sens> de AAAA-MM : contrats continus non vérifiables (<id> le JJ/MM/AAAA, …)
+// — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés ». L'identifiant est un
+// texte libre (numéro de contrat DSN : jusqu'à 128 caractères, parenthèses, virgules et noms compris) : la fin de la liste n'est jamais
+// cherchée par une classe de caractères. Elle est ancrée, par une correspondance paresseuse, d'abord sur le suffixe fixe du moteur
+// (« ) — jour voisin hors de la couverture »), puis, pour un texte sans ce suffixe, sur la date qui termine le dernier élément suivie
+// d'une fin de phrase (« le JJ/MM/AAAA) » puis fin du texte, « ; », « . », « , », « — » ou « ) ») ; une liste qu'aucune de ces formes
+// ne termine (liste coupée, texte inattendu) est retirée jusqu'à la fin du texte. Une passe par forme, dans cet ordre : une date entre
+// parenthèses à l'intérieur d'un identifiant ne coupe jamais une liste qui porte le suffixe. Les formes déjà publiques
+// (« (détail dans KPI RH) », « (N contrats, détail dans KPI RH) ») sont exclues : le filtre reste idempotent.
+const CONTINUITY = /(entrées|sorties) de (\d{4}-\d{2}) : contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+?)\) — jour voisin hors de la couverture(?: ; sans la neutralisation \(Paramètres\), ces mouvements seraient comptés)?/gis;
+const CONTINUITY_DATED = /(entrées|sorties) de (\d{4}-\d{2}) : contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+? le \d{2}\/\d{2}\/\d{4})\)(?=\s*(?:$|[;.,—)]))/gis;
+const CONTINUITY_LIST = /contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+?)\)(?= — jour voisin hors de la couverture)/gs;
+const CONTINUITY_LIST_DATED = /contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\))(.+? le \d{2}\/\d{2}\/\d{4})\)(?=\s*(?:$|[;.,—)]))/gs;
+const CONTINUITY_LIST_CUT = /contrats continus non vérifiables \((?!détail dans KPI RH\))(?!\d[\d\s ]* contrats?, détail dans KPI RH\)).*$/s;
 const ABSENCE_UNKNOWN_CONTRACT = /absence (?:(?!absence )[^;()])+? rattachée au contrat [^;()]+? inconnu du référentiel/g;
 const ABSENCE_DATE = /absence (?:(?!absence | : )[^;()])+? : date de (début et de fin|début|fin) non renseignée dans PayFit/g;
 const UNCERTAIN_LIST = /incertaine\(s\) \(absences ([^()]*)(\)|$)/g;
@@ -40,11 +53,16 @@ const NOT_RETURNED = /contrat (?!non )\S+ non renvoyé par PayFit/g;
 const NEUTRALIZED = /contrat continu neutralisé \(avec \S+ le (\d{2}\/\d{2}\/\d{4})\)/g;
 
 const absencesText = (list: string) => `${many(listCount(list), "absence", "absences")}, ${KPI}`;
+const continuity = (_m: string, what: string, month: string, list: string) => `${many(listCount(list), "contrat continu non vérifiable", "contrats continus non vérifiables")} en ${month} (${what.toLowerCase()}, ${KPI})`;
+const continuityList = (_m: string, list: string) => `contrats continus non vérifiables (${many(listCount(list), "contrat", "contrats")}, ${KPI})`;
 
 export function publicReason(text: string): string {
   return text
-    .replace(CONTINUITY, (_m, what: string, month: string, list: string) => `${many(listCount(list), "contrat continu non vérifiable", "contrats continus non vérifiables")} en ${month} (${what.toLowerCase()}, ${KPI})`)
-    .replace(CONTINUITY_LIST, (_m, list: string, close: string) => (close === ")" ? `contrats continus non vérifiables (${many(listCount(list), "contrat", "contrats")}, ${KPI})` : `contrats continus non vérifiables (${KPI})`))
+    .replace(CONTINUITY, continuity)
+    .replace(CONTINUITY_DATED, continuity)
+    .replace(CONTINUITY_LIST, continuityList)
+    .replace(CONTINUITY_LIST_DATED, continuityList)
+    .replace(CONTINUITY_LIST_CUT, `contrats continus non vérifiables (${KPI})`)
     .replace(ABSENCE_UNKNOWN_CONTRACT, `1 absence rattachée à un contrat inconnu du référentiel (${KPI})`)
     .replace(ABSENCE_DATE, (_m, which: string) => `1 absence sans date de ${which} renseignée dans PayFit (${KPI})`)
     .replace(UNCERTAIN_LIST, (_m, list: string, close: string) => `incertaine(s) (${close === ")" ? absencesText(list) : KPI})`)

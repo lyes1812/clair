@@ -234,9 +234,68 @@ describe("CSV d'un tableau", () => {
     expect(exportCell(undefined, eur)).toBe("");
     expect(exportCell(-2500, eur)).toBe(-2500);
   });
-  it("unité propre à une ligne (tableaux à unités mêlées) : la ligne d'ETP s'écrit en ETP dans une colonne en euros", () => {
+  it("unité propre à une ligne (tableaux à unités mêlées) : la ligne d'ETP s'écrit en ETP dans une colonne en euros, colonne « Unité » après la première", () => {
     const t: CroiseeTable = { id: "mix", title: "Mix", columns: [{ key: "l", header: "Ligne", kind: "text" }, { key: "v", header: "Valeur", kind: "eur" }], rows: [{ cells: ["Masse", 150000] }, { cells: ["ETP moyen", 25000], kind: "etp" }] };
-    expect(csvLines(tableCsv(t))).toEqual(['"Ligne";"Valeur"', '"Masse";"1500,00"', '"ETP moyen";"2,50"']);
+    expect(csvLines(tableCsv(t))).toEqual(['"Ligne";"Unité";"Valeur"', '"Masse";"€";"1500,00"', '"ETP moyen";"ETP";"2,50"']);
+  });
+
+  // Forme du tableau « Chiffres clés — ETP et taux » de la Synthèse (valeurs fictives) : colonnes en ETP, écart en points pour un taux.
+  const TAUX: CroiseeTable = {
+    id: "taux",
+    title: "Chiffres clés fictifs : ETP et taux",
+    columns: [
+      { key: "indicateur", header: "Indicateur", kind: "text" },
+      { key: "mesure", header: "Mesure", kind: "text" },
+      { key: "valeur", header: "Valeur", kind: "etp" },
+      { key: "n1", header: "N-1", kind: "etp" },
+      { key: "ecart", header: "Écart", kind: "etp", signed: true, points: true },
+    ],
+    rows: [
+      { cells: ["ETP moyen", "janvier → mars 2026", { exact: 12.5 }, { exact: 12.25 }, { exact: 0.25 }], kind: "etp" },
+      { cells: ["Absentéisme", "janvier → mars 2026", { exact: 0.0534 }, { exact: 0.05 }, { exact: 0.0034 }], kind: "pourcent" },
+      { cells: ["Turnover", "avr. 2025 → mars 2026", { nd: R2 }, 1250, ""], kind: "pourcent" },
+    ],
+  };
+  // Forme du tableau du ratio de Paie & comptabilité (valeurs fictives) : colonnes en euros, une ligne de ratio en pourcentage.
+  const RATIO: CroiseeTable = {
+    id: "ratio",
+    title: "Masse et produits fictifs",
+    columns: [
+      { key: "indicateur", header: "Indicateur", kind: "text" },
+      { key: "n", header: "Janvier → mars 2026", kind: "eur" },
+      { key: "n1", header: "N-1", kind: "eur" },
+    ],
+    rows: [
+      { cells: ["Masse salariale chargée", 4200000, 4000000] },
+      { cells: ["Masse salariale ÷ produits d'exploitation", { exact: 0.42 }, { nd: R1 }], kind: "pourcent" },
+      { cells: ["Ligne de rappel", "", ""] },
+    ],
+  };
+
+  it("colonne « Unité » (€, ETP, %, points) : cas de référence écrits à la main", () => {
+    // ETP moyen : 12,50 ; 12,25 ; écart 0,25 ETP (une colonne « points » d'une ligne en ETP reste en ETP).
+    // Absentéisme : 0,0534 = 5,34 % ; 0,05 = 5,00 % ; écart 0,0034 = 0,34 point.
+    // Turnover : valeur n.d. (unité gardée) ; N-1 1 250 centièmes de point = 12,50 % ; écart sans objet : son unité n'est pas citée.
+    expect(csvLines(tableCsv(TAUX))).toEqual([
+      '"Indicateur";"Unité";"Mesure";"Valeur";"N-1";"Écart"',
+      '"ETP moyen";"ETP";"janvier → mars 2026";"12,50";"12,25";"0,25"',
+      '"Absentéisme";"% (Écart : points)";"janvier → mars 2026";"5,34";"5,00";"0,34"',
+      `"Turnover";"%";"avr. 2025 → mars 2026";"n.d. (${R2})";"12,50";""`,
+    ]);
+    // Masse : 4 200 000 centimes = 42000,00 € ; ratio 0,42 = 42,00 % (et non 42,00 €) ; ligne sans cellule chiffrée : unité vide.
+    expect(csvLines(tableCsv(RATIO))).toEqual([
+      '"Indicateur";"Unité";"Janvier → mars 2026";"N-1"',
+      '"Masse salariale chargée";"€";"42000,00";"40000,00"',
+      `"Masse salariale ÷ produits d'exploitation";"%";"42,00";"n.d. (${R1})"`,
+      '"Ligne de rappel";"";"";""',
+    ]);
+  });
+
+  it("colonne « Unité » : avant les colonnes ajoutées (période) ; absente d'un tableau sans unité de ligne ou qui a déjà la sienne", () => {
+    expect(split(csvLines(tableCsv(RATIO, RATIO.rows, periodLead({ months: ["2026-01"] })))[0])).toEqual(["Indicateur", "Unité", "Début de période", "Fin de période", "Janvier → mars 2026", "N-1"]);
+    expect(split(csvLines(tableCsv(MONTANTS))[0])).not.toContain("Unité");
+    const key = keyFiguresTable([{ id: "etp", label: "ETP moyen", value: { text: "12,50 ETP", kind: "value", reason: null } }])!;
+    expect(split(csvLines(tableCsv(key))[0]).filter((h) => h === "Unité")).toHaveLength(1);
   });
 });
 
@@ -451,7 +510,8 @@ describe("registre : la fonction mémoïsée du chapitre, celle qu'appelle l'éc
     expect(u("synthese", false, false)).toEqual(["rh", "journal", "budget", "scenario"]);
     // Journal lu mais un mois de la période n.d. : loadSyntheseInput ne lit ni la comptabilité ni la DSN.
     expect(u("synthese", false, true, false)).toEqual(["rh", "journal", "budget", "scenario"]);
-    expect(u("synthese", true, true)).toEqual(["journal"]);
+    // Sous filtre : journal du service et référentiel RH (ETP du service, dénominateur du coût par ETP-mois).
+    expect(u("synthese", true, true)).toEqual(["rh", "journal"]);
     expect(u("effectifs", true, true)).toEqual(["rh", "journal"]);
     expect(u("absences", false, true)).toEqual(["rh"]);
     expect(u("absences", true, true)).toEqual([]);
@@ -464,7 +524,7 @@ describe("registre : la fonction mémoïsée du chapitre, celle qu'appelle l'éc
     expect(u("effets", false, true)).toEqual(["journal", "rh"]);
     // Dérivé du contexte : service retenu, journal non lu (raison de la page).
     const ctx = routeCtx({ chapitre: "synthese", service: "Atelier" }, async () => ({ input: null, unavailable: null, source: "dsn" }));
-    expect(await sourceUses(ctx, CROISEE_EXPORTS.synthese!)).toEqual(["journal"]);
+    expect(await sourceUses(ctx, CROISEE_EXPORTS.synthese!)).toEqual(["rh", "journal"]);
     expect(await sourceUses(routeCtx({ chapitre: "synthese" }, async () => ({ input: null, unavailable: null, source: "dsn" })), CROISEE_EXPORTS.synthese!)).toEqual(["rh", "journal", "budget", "scenario"]);
   });
   it("chapitre inconnu ou « Prévu » : refusé avec la raison ; absent : Synthèse", () => {
@@ -821,6 +881,38 @@ describe("feuille « Sources » : journal de paie non lu", () => {
   });
 });
 
+describe("« Sources » : le journal de la référence annuelle N-1 est cité sous tout chapitre à filtres", () => {
+  beforeEach(() => {
+    mocks.lastSync.mockReset().mockResolvedValue(null);
+    mocks.activeSync.mockReset().mockResolvedValue(null);
+  });
+  const DSN: PayrollLoader = async () => ({ input: null, unavailable: null, source: "dsn" });
+  const XLSX = { format: "xlsx" as const, generatedAt: "2026-10-26T09:30:00Z" };
+
+  it("Absences & congés : le chargeur ne lit pas le journal, la référence N-1 si ; pas de doublon ; sans référence, rien n'est ajouté", async () => {
+    expect(await sourceUses(routeCtx({ chapitre: "absences" }), CROISEE_EXPORTS.absences!)).toEqual(["rh", "journal"]);
+    expect(await sourceUses(routeCtx({ chapitre: "absences", service: "Atelier" }), CROISEE_EXPORTS.absences!)).toEqual(["journal"]);
+    expect(await sourceUses(routeCtx({ chapitre: "absences", service: "Atelier" }, DSN), CROISEE_EXPORTS.absences!)).toEqual(["journal"]);
+    expect(await sourceUses(routeCtx({ chapitre: "fixe-variable" }), CROISEE_EXPORTS["fixe-variable"]!)).toEqual(["journal"]);
+    // Chapitre sans filtres : la page n'affiche pas la référence, l'export ne cite pas son journal.
+    const noRef = { ...routeCtx({ chapitre: "absences" }), chapter: { ...chapterDef("absences"), filtres: false } } as CroiseeContext;
+    expect(await croiseeReference(noRef)).toBeNull();
+    expect(await sourceUses(noRef, CROISEE_EXPORTS.absences!)).toEqual(["rh"]);
+  });
+
+  it("classeur Absences & congés sous filtre de service : référence N-1 du service et ligne du journal ; journal non lu : n.d. avec la raison de la page", async () => {
+    const lu = await croiseeExport(routeCtx({ chapitre: "absences", service: "Atelier" }), CROISEE_EXPORTS.absences!, XLSX);
+    if (lu.kind !== "xlsx") throw new Error(`export refusé : ${lu.kind}`);
+    expect(lu.spec.sheets.map((x) => x.name)).toContain("Référence annuelle 2025");
+    expect(lu.spec.sources).toEqual([{ label: "PayFit", detail: `${JOURNAL_USAGE} · aucune lecture appliquée`, syncedAt: null, status: "Jamais synchronisée" }]);
+    const nonLu = await croiseeExport(routeCtx({ chapitre: "absences", service: "Atelier" }, DSN), CROISEE_EXPORTS.absences!, XLSX);
+    if (nonLu.kind !== "xlsx") throw new Error(`export refusé : ${nonLu.kind}`);
+    const reason = "source RH retenue : DSN — journal de paie PayFit non lu";
+    expect(nonLu.spec.sheets.find((x) => x.name === ND_SHEET)?.rows.at(-1)).toEqual([REFERENCE_TITLE, "", "Non disponible (n.d.)", reason]);
+    expect(nonLu.spec.sources).toEqual([{ label: "PayFit", detail: `${JOURNAL_USAGE} — n.d. : ${reason}`, syncedAt: null, status: "Jamais synchronisée" }]);
+  });
+});
+
 describe("feuille « Filtres » : service retenu et tri par défaut", () => {
   it("hors chapitre 05, le service retenu restreint les chiffres : il est écrit avec son axe", () => {
     const f = croiseeFilters(filterCtx({ chapter: chapterDef("fixe-variable"), service: { axis: "Service", value: "Atelier", label: "Atelier", options: [], reason: null } }), { limits: [] }, ["journal"]);
@@ -1030,7 +1122,8 @@ describe("noms de feuilles : courts, distincts, la partie qui distingue gardée"
       ["Atterrissage 2026 face au budget saisi « Budget fictif »", "Atterrissage face au budget"],
       ["Réalisé et budget saisi par mois, janvier → mars 2026", "Réalisé et budget saisi"],
       ["Provision de congés payés par service, fin mars 2026", "Provision CP par service"],
-      ["Brut du journal de paie et brut déclaré (DSN, type 001)", "Brut du journal de paie et brut"],
+      // Forme courte : la coupe à 31 caractères donnait « Brut du journal de paie et brut », sans « déclaré ».
+      ["Brut du journal de paie et brut déclaré (DSN, type 001)", "Brut journal et brut DSN"],
       ["Rapprochement par rubrique : journal de paie et comptabilité, janvier → mars 2026", "Rapprochement par rubrique"],
       ["Référence annuelle 2025, janvier → décembre · Tous les services", "Référence annuelle 2025"],
     ];
@@ -1040,6 +1133,8 @@ describe("noms de feuilles : courts, distincts, la partie qui distingue gardée"
     }
     const axes = cases.slice(0, 3).map((c) => c[0]);
     expect(new Set(sheetNames(axes)).size).toBe(3);
+    // Le titre complet reste dans la note de la feuille.
+    expect(tableSheet({ ...MENSUEL, title: "Brut du journal de paie et brut déclaré (DSN, type 001)" }).note).toBe("Tableau : Brut du journal de paie et brut déclaré (DSN, type 001).");
   });
 
   it("deux noms courts identiques : chacun garde sa précision quand elle tient ; sinon le classeur numérote", async () => {

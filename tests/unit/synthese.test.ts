@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import SynthesePage from "@/app/e/[slug]/studio-rh/page";
 import { MegaMenu } from "@/components/MegaMenu";
 import { glossaryEntry } from "@/lib/glossary";
-import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
+import { project } from "@/lib/budget/engine";
+import type { BaseSnapshot, Conventions, Hypothesis } from "@/lib/budget/types";
 import { monthRange } from "@/lib/connectors/months";
 import type { JournalInput, LedgerLine, MonthPayroll } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
@@ -530,6 +531,19 @@ describe("page : atterrissage du dernier scénario face au budget saisi", () => 
     expect(t.text).toContain("Budget saisi : n.d.");
     expect(t.text).toContain("aucun budget saisi pour 2026");
     expect(t.raw).not.toMatch(/trend-(bad|good)/);
+  });
+  it("contrat sans base ni correction, libellé nominatif : atterrissage n.d. avec le décompte de publicScenario, aucun libellé de contrat dans la page", async () => {
+    // Libellé fictif nominatif pour C (entré le 16/09/2026, sans base) et aucune correction : octobre → décembre n.d. pour ce contrat.
+    const named = { ...base, contracts: base.contracts.map((c) => (c.contractKey === "C" ? { ...c, label: "Prénom FICTIF (CDI)" } : c)) } as BaseSnapshot;
+    // Prémisse : le moteur de projection nomme le contrat dans sa raison.
+    expect(JSON.stringify(project(named, scenario.firstMonth, scenario.lastMonth, [], scenario.conventions as Conventions))).toContain("Prénom FICTIF (CDI) : base n.d.");
+    Object.assign(state, { ctx: makeCtx(), scenarios: [{ scenario, refMonth: "2026-09" }], full: { scenario, base: named, baseHash: "x", hypotheses: [] }, budgets: [budget("Budget saisi 2026", 800000, "2026-10-07T08:00:00Z")], fail: null });
+    const { html } = await render({ annee: "2026", de: "01", a: "03" });
+    const t = tile(html, "atterrissage");
+    const ONE = "1 contrat sans base de projection (détail dans Hypothèses budgétaires)";
+    expect(t.text).toContain("Atterrissage 2026 ? Scénario « Budget 2026 » n.d.");
+    expect(t.text).toContain(`2026-10 : ${ONE} ; 2026-11 : ${ONE} ; 2026-12 : ${ONE}`);
+    expect(html).not.toMatch(/FICTIF|Prénom/);
   });
   it("aucun scénario : pas de tuile ; base figée altérée : le scénario n'est pas lu et l'écran le dit", async () => {
     reset();

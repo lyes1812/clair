@@ -104,6 +104,46 @@ describe("publicReason : une forme du moteur par cas, le mois et le nombre gard�
   });
 });
 
+// --- Identifiant de contrat DSN en texte libre ---------------------------------------------------------------------------------------
+
+describe("publicReason : identifiant de contrat en texte libre (numéro DSN : jusqu'à 128 caractères, parenthèses et nom compris)", () => {
+  // Identifiants fictifs : un nom entre parenthèses ; une date entre parenthèses suivie d'un nom, complétée à 128 caractères.
+  const ID_A = "CDI (Prénom FICTIF) n°1";
+  const ID_B = "CDD (fin le 01/02/2026) Nom FICTIF ".padEnd(128, "9");
+  const SUFFIX = " — jour voisin hors de la couverture ; sans la neutralisation (Paramètres), ces mouvements seraient comptés";
+  const RAW = `sorties de 2026-03 : contrats continus non vérifiables (${ID_A} le 31/03/2026, ${ID_B} le 31/03/2026)${SUFFIX}`;
+  const PUB = "2 contrats continus non vérifiables en 2026-03 (sorties, détail dans KPI RH)";
+
+  it("texte du moteur : la liste se termine au suffixe fixe, jamais à la première parenthèse ; nombre et mois gardés", () => {
+    expect(ID_B).toHaveLength(128);
+    expect(publicReason(RAW)).toBe(PUB);
+    // Reprises du turnover : raison d'une fenêtre, raison de l'écart.
+    expect(publicReason(`2026-03 : sorties n.d. — ${RAW}`)).toBe(`2026-03 : sorties n.d. — ${PUB}`);
+    expect(publicReason(`valeur n.d. — 2026-03 : sorties n.d. — ${RAW}`)).toBe(`valeur n.d. — 2026-03 : sorties n.d. — ${PUB}`);
+    // Deux raisons du moteur dans un même texte : chacune s'arrête à son propre suffixe.
+    const RAW2 = `entrées de 2026-04 : contrats continus non vérifiables (${ID_A} le 01/04/2026)${SUFFIX}`;
+    expect(publicReason(`${RAW} ; ${RAW2}`)).toBe(`${PUB} ; 1 contrat continu non vérifiable en 2026-04 (entrées, détail dans KPI RH)`);
+  });
+
+  it("autres tournures : sans suffixe (date finale puis fin de phrase), sans « sens de mois », liste coupée", () => {
+    expect(publicReason(`entrées de 2026-02 : contrats continus non vérifiables (${ID_B} le 02/02/2026)`)).toBe("1 contrat continu non vérifiable en 2026-02 (entrées, détail dans KPI RH)");
+    expect(publicReason(`N-1 : contrats continus non vérifiables (${ID_A} le 01/02/2025, ${ID_B} le 03/02/2025) — jour voisin hors de la couverture`)).toBe(
+      "N-1 : contrats continus non vérifiables (2 contrats, détail dans KPI RH) — jour voisin hors de la couverture",
+    );
+    expect(publicReason(`N-1 : contrats continus non vérifiables (${ID_B} le 01/02/2025).`)).toBe("N-1 : contrats continus non vérifiables (1 contrat, détail dans KPI RH).");
+    expect(publicReason(`sorties de 2026-03 : contrats continus non vérifiables (${ID_A} le 31/03/2026, CDD (Nom FIC…`)).toBe("sorties de 2026-03 : contrats continus non vérifiables (détail dans KPI RH)");
+  });
+
+  it("aucun nom ni identifiant ne reste ; le filtre est idempotent", () => {
+    for (const s of [RAW, `2026-03 : sorties n.d. — ${RAW}`, `entrées de 2026-02 : contrats continus non vérifiables (${ID_B} le 02/02/2026)`, `N-1 : contrats continus non vérifiables (${ID_A} le 01/02/2025`]) {
+      const once = publicReason(s);
+      expect(once, s).not.toMatch(LEAK);
+      expect(once, s).not.toContain("Prénom");
+      expect(publicReason(once), s).toBe(once);
+    }
+  });
+});
+
 // --- Tout le modèle d'un chapitre ----------------------------------------------------------------------------------------------------
 
 const R_ABS = "2026-03 : absence ABS-TEST-1 rattachée au contrat CTR-TEST-1 inconnu du référentiel";

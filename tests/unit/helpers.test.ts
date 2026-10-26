@@ -61,7 +61,24 @@ describe("inscription sur invitation", async () => {
   const { allowedDomains, domainAllowed } = await import("@/lib/signup");
   it("lit la liste des domaines de recette et ignore les valeurs invalides", () => {
     expect(allowedDomains(" test.invalid, ,pas un domaine,Exemple.FR ")).toEqual(["test.invalid", "exemple.fr"]);
-    expect(allowedDomains(undefined)).toEqual([]);
+    expect(allowedDomains("")).toEqual([]);
+  });
+  it("sans argument ni variable d'environnement : aucun domaine (isolé du .env chargé)", () => {
+    vi.stubEnv("CLAIR_SIGNUP_ALLOWED_DOMAINS", undefined);
+    try {
+      expect(allowedDomains(undefined)).toEqual([]);
+      expect(allowedDomains()).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it("sans argument : lit CLAIR_SIGNUP_ALLOWED_DOMAINS", () => {
+    vi.stubEnv("CLAIR_SIGNUP_ALLOWED_DOMAINS", "recette.invalid");
+    try {
+      expect(allowedDomains()).toEqual(["recette.invalid"]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
   it("n'ouvre que les domaines listés, sans correspondance partielle", () => {
     const d = ["test.invalid"];

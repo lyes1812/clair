@@ -111,7 +111,8 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     expect(def(T.confidentialite)).toContain("La ligne « Lignes du journal sans contrat » des contrats observés ne décrit aucune personne : elle n'est masquée qu'au masquage secondaire.");
     // N-1 : a = 100 (N-1 seulement), b = 200 et d = 50 (les deux), x = 10 (sans contrat) ; N : b = 250, d = 60, c = 80 (N seulement),
     // x = 30. Seuil 2 : « N-1 seulement » et « N seulement » (1 contrat chacun) masqués ; dans la colonne N-1, la ligne sans contrat
-    // (10, plus petite valeur affichée) protège « N-1 seulement ».
+    // (10) ne protège personne : « les deux » (2 contrats) est masqué. Colonne N : « N seulement » et « les deux » (masqué en second,
+    // passé en effectif non dénombré) ne comptent qu'un contrat → la ligne sans contrat est masquée en second.
     const p = partitionCohorts(
       new Map([
         ["a", 100],
@@ -129,7 +130,7 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     );
     expect(p.kind).toBe("value");
     if (p.kind !== "value") return;
-    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "shown", outside: "secondary" });
+    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "secondary" });
     // Sans groupe masqué, la ligne sans contrat (valeur non nulle, aucun contrat) reste affichée.
     expect(maskCohorts(p, 1)).toEqual({ onlyPrev: "shown", onlyCur: "shown", both: "shown", outside: "shown" });
   });

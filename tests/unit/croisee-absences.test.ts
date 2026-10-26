@@ -293,8 +293,10 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
     const t = tableOf(m, TABLE_IDS.motifs);
     expect(t.columns.map((c) => c.header)).toEqual(["Motif", "Retenu dans l'absentéisme", `Demi-journées ${LABEL}`, `Taux ${LABEL}`, `Demi-journées ${PREV_LABEL}`, `Taux ${PREV_LABEL}`, "Écart (points)"]);
     expect(texts(t)).toEqual([
-      // 5 et 4 personnes : affiché. 60/1 820 = 3,30 % ; 50/1 820 = 2,75 % ; écart 10/1 820 × 100 = 0,549… point.
-      ["test_paid_leave", "non", "60", "3,30 %", "50", "2,75 %", "+0,55 pts"],
+      // Période : masquée en second. Autres motifs de la période (somme = tous motifs − tuile = 70 − 15) : test_rare (1 personne)
+      // masqué, test_unread n.d. (personnes non dénombrées : n'apporte aucune personne) → 1 < 3, test_paid_leave (5 personnes) est
+      // masqué aussi. N-1 : 50/1 820 = 2,75 % (4 personnes, rien à protéger) ; écart n.d.
+      ["test_paid_leave", "non", "n.d.", "n.d.", "50", "2,75 %", "n.d."],
       // 1 personne en N : n.d. ; aucune personne en N-1 (rien à protéger) : 0 affiché ; écart n.d.
       ["test_rare", "non", "n.d.", "n.d.", "0", "0,00 %", "n.d."],
       // Seul motif retenu : 15 et 19 demi-journées (2 personnes en N-1) affichées, comme la tuile (0,82 % et 1,04 %).
@@ -310,7 +312,7 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
     expect(texts(t)[2][5]).toBe(tile(m, "absenteisme-n1").value.text);
   });
 
-  it("« Taux d'absence, tous motifs » : tableau à part, jamais l'absentéisme ; non soumis au seuil", () => {
+  it("« Taux d'absence, tous motifs » : tableau à part, jamais l'absentéisme ; affiché quand les autres motifs se protègent entre eux", () => {
     const t = tableOf(m, TABLE_IDS.tousMotifs);
     expect(t.title).toBe("Taux d'absence, tous motifs");
     // 70/1 820 = 3,846… % ; 62/1 820 = 3,406… % ; écart 8/1 820 × 100 = 0,439… point.
@@ -324,9 +326,10 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
     expect(t.title).toBe("Demi-journées prises par motif et par mois");
     expect(t.columns.map((c) => c.header)).toEqual(["Motif", "Juil. 2026", "Août 2026", "Sept. 2026", `Demi-journées ${LABEL}`, `Demi-journées ${PREV_LABEL}`, "Écart (demi-journées)"]);
     expect(texts(t)).toEqual([
-      // Septembre : 1 personne ⇒ masqué ; le total de la ligne (60) est affiché ⇒ la plus petite cellule affichée de la ligne
-      // (juillet, 20) est masquée aussi : 60 − 30 ne donne plus septembre. Écart 60 − 50 = +10.
-      ["test_paid_leave", "n.d.", "30", "n.d.", "60", "50", "+10"],
+      // Septembre : 1 personne ⇒ masqué ; le total de la ligne (60) est encore affiché ⇒ la plus petite cellule affichée de la ligne
+      // (juillet, 20, 3 personnes) est masquée aussi : 1 + 3 ≥ 3, 60 − 30 ne donne plus septembre. La période (60) est ensuite
+      // masquée par la relation des autres motifs (voir le tableau par motif) ; écart n.d.
+      ["test_paid_leave", "n.d.", "30", "n.d.", "n.d.", "50", "n.d."],
       // Août et la période : 1 personne ⇒ masqués (deux cellules masquées dans la ligne : rien de plus).
       ["test_rare", "0", "n.d.", "0", "n.d.", "0", "n.d."],
       // Seul motif retenu : rien n'est masqué (juillet 6 et septembre 9 = tableau mensuel). Écart 15 − 19 = −4.
@@ -334,7 +337,7 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
       ["test_unread", "0", "n.d.", "0", "n.d.", "0", "n.d."],
     ]);
     // Cellules numériques (exportées comme nombres), jamais du texte « 3,5 j ».
-    expect(t.rows[0].cells.slice(2)).toEqual([30, { nd: CONF }, 60, 50, 10]);
+    expect(t.rows[0].cells.slice(2)).toEqual([30, { nd: CONF }, { nd: CONF }, 50, { nd: ECART_ND.valeur }]);
     expect(t.rows[2].cells.slice(1)).toEqual([6, 0, 9, 15, 19, -4]);
     expect(t.rows[0].cells[1]).toEqual({ nd: CONF });
     expect(t.rows[1].cells[6]).toEqual({ nd: ECART_ND.valeur });
@@ -442,14 +445,80 @@ describe("buildAbsences : cas B, deux motifs retenus soumis au seuil (masquage s
   });
 });
 
-describe("masquage : fonctions pures (cas écrits à la main, seuil 3)", () => {
-  it("maskCells : une cellule masquée dans une relation ⇒ la plus petite affichée (zéro compris) l'est aussi", () => {
-    expect(maskCells([{ size: 5, value: 20 }, { size: 1, value: 4 }, { size: 4, value: 30 }, { size: 0, value: 0 }], [[0, 1, 2, 3]], 3)).toEqual(["shown", "masked", "shown", "secondary"]);
+// Cas C : un seul motif non retenu présent (test_paid_leave, 2 personnes en N, 14 demi-journées en juillet) et le seul motif retenu
+// (test_sickness, exempté : sa ligne égale la tuile). Tous motifs N : 14 + 15 = 29 / 1 820 ; N-1 : 0 + 19 = 19 / 1 820. Sans masquage
+// du taux tous motifs, 29 − 15 (tuile) = 14 donnerait la valeur masquée des congés.
+const CONGES_C: CongesPris = {
+  window: W,
+  emptyReason: null,
+  lines: [
+    { type: "test_paid_leave", chosen: false, months: [v(14, 2), v(0, 0), v(0, 0)], total: v(14, 2) },
+    { type: "test_sickness", chosen: true, months: [v(6, 2), v(0, 0), v(9, 2)], total: v(15, 3) },
+  ],
+};
+const CONGES_C_N1: CongesPris = {
+  window: PW,
+  emptyReason: null,
+  lines: [
+    { type: "test_paid_leave", chosen: false, months: zero3, total: v(0, 0) },
+    { type: "test_sickness", chosen: true, months: [v(3, 1), v(4, 1), v(12, 2)], total: v(19, 2) },
+  ],
+};
+const dataC = (prev: CongesPris = CONGES_C_N1, prevLeave = 0): Partial<AbsencesData> => ({
+  motifs: {
+    current: { label: ABSENCE_ALL_MOTIFS_LABEL, lines: [line("test_paid_leave", false, 14), line("test_sickness", true, 15)], all: ex(29, 1820), emptyReason: null },
+    previous: { label: ABSENCE_ALL_MOTIFS_LABEL, lines: [line("test_paid_leave", false, prevLeave), line("test_sickness", true, 19)], all: ex(19 + prevLeave, 1820), emptyReason: null },
+  },
+  conges: { current: CONGES_C, previous: prev },
+});
+
+describe("buildAbsences : cas C, un seul motif non retenu sous le seuil (le taux tous motifs le donnerait par différence)", () => {
+  it("seuil 3 : congés (2 personnes) n.d. ; la ligne « tous motifs » de la période est n.d. avec la raison du seuil, N-1 reste affiché", () => {
+    const m = buildAbsences(input({}, dataC()));
+    const t = tableOf(m, TABLE_IDS.tousMotifs);
+    // N-1 : 19/1 820 = 1,04 % ; l'écart n'est pas calculé (valeur de la période n.d.).
+    expect(texts(t)).toEqual([["Taux d'absence, tous motifs", "n.d.", "n.d.", "19", "1,04 %", "n.d."]]);
+    expect(t.rows[0].cells[1]).toEqual({ nd: CONF });
+    expect(t.rows[0].cells[2]).toEqual({ nd: CONF });
+    expect(t.rows[0].cells[5]).toEqual({ nd: ECART_ND.valeur });
+    expect(texts(tableOf(m, TABLE_IDS.motifs))).toEqual([
+      ["test_paid_leave", "non", "n.d.", "n.d.", "0", "0,00 %", "n.d."],
+      ["test_sickness", "oui", "15", "0,82 %", "19", "1,04 %", "−0,22 pts"],
+    ]);
+    // La ligne des congés : juillet et la période masqués (leur total est lui-même masqué) ; août et septembre, vides, restent 0.
+    expect(texts(tableOf(m, TABLE_IDS.conges))[0]).toEqual(["test_paid_leave", "n.d.", "0", "0", "n.d.", "0", "n.d."]);
+    // La tuile et le tableau mensuel restent (entreprise entière, KPI RH).
+    expect(tile(m, "absenteisme").value.text).toBe("0,82 %");
   });
-  it("maskCells : deux cellules masquées ⇒ rien de plus ; un n.d. du moteur compte comme inconnu ; personnes non dénombrées ⇒ masquée", () => {
+
+  it("N-1 aussi sous le seuil (1 personne, 5 demi-journées en août 2025) : la ligne « tous motifs » est n.d. sur les deux périodes", () => {
+    const prev: CongesPris = { ...CONGES_C_N1, lines: [{ type: "test_paid_leave", chosen: false, months: [v(0, 0), v(5, 1), v(0, 0)], total: v(5, 1) }, CONGES_C_N1.lines[1]] };
+    const t = tableOf(buildAbsences(input({}, dataC(prev, 5))), TABLE_IDS.tousMotifs);
+    expect(texts(t)).toEqual([["Taux d'absence, tous motifs", "n.d.", "n.d.", "n.d.", "n.d.", "n.d."]]);
+    expect(t.rows[0].cells[3]).toEqual({ nd: CONF });
+  });
+
+  it("seuil 2 : les congés (2 personnes) sont affichés, le taux tous motifs aussi (29/1 820 = 1,59 % ; écart 10/1 820 × 100 = +0,55 point)", () => {
+    const t = tableOf(buildAbsences(input({ settings: settingsOf(2) }, dataC())), TABLE_IDS.tousMotifs);
+    expect(texts(t)).toEqual([["Taux d'absence, tous motifs", "29", "1,59 %", "19", "1,04 %", "+0,55 pts"]]);
+  });
+});
+
+describe("masquage : fonctions pures (cas écrits à la main, seuil 3)", () => {
+  it("maskCells : une cellule masquée dans une relation ⇒ la plus petite affichée qui compte des personnes l'est aussi (un motif vide ne protège pas)", () => {
+    // 1 personne masquée ; le motif vide (0) ne protège personne ; plus petite valeur qui compte des personnes : 20 (5) → 6 ≥ 3.
+    expect(maskCells([{ size: 5, value: 20 }, { size: 1, value: 4 }, { size: 4, value: 30 }, { size: 0, value: 0 }], [[0, 1, 2, 3]], 3)).toEqual(["secondary", "masked", "shown", "shown"]);
+  });
+  it("maskCells : l'ensemble masqué compte au moins « seuil » personnes ; un n.d. du moteur n'en apporte aucune ; personnes non dénombrées ⇒ masquée", () => {
+    // 1 + 2 = 3 personnes ≥ 3 : rien de plus.
     expect(maskCells([{ size: 1, value: 4 }, { size: 2, value: 6 }, { size: 9, value: 30 }], [[0, 1, 2]], 3)).toEqual(["masked", "masked", "shown"]);
-    expect(maskCells([{ size: 1, value: 4 }, { size: null, value: null }, { size: 9, value: 30 }], [[0, 1, 2]], 3)).toEqual(["masked", "nd", "shown"]);
+    // Le n.d. du moteur (personnes non dénombrées) ne compte pour personne : 1 < 3 → la cellule de 9 personnes est masquée.
+    expect(maskCells([{ size: 1, value: 4 }, { size: null, value: null }, { size: 9, value: 30 }], [[0, 1, 2]], 3)).toEqual(["masked", "nd", "secondary"]);
     expect(maskCells([{ size: null, value: 4 }, { size: 9, value: 30 }, { size: 8, value: 12 }], [[0, 1, 2]], 3)).toEqual(["unverifiable", "shown", "secondary"]);
+  });
+  it("maskCells : jetons de personne — une même personne dans deux cellules masquées ne compte qu'une fois", () => {
+    // Mois de 2 personnes {0, 1} et d'1 personne {1} masqués : 2 personnes distinctes < 3 → le mois de 4 personnes est masqué.
+    expect(maskCells([{ size: 2, value: 6, members: [0, 1] }, { size: 1, value: 2, members: [1] }, { size: 4, value: 9, members: [2, 3, 4, 5] }], [[0, 1, 2]], 3)).toEqual(["masked", "masked", "secondary"]);
   });
   it("maskCells : une cellule exemptée (valeur publiée) n'est jamais masquée et ne sert pas de masque secondaire", () => {
     expect(maskCells([{ size: 1, value: 4, exempt: true }, { size: 1, value: 2 }, { size: 5, value: 9 }], [[0, 1, 2]], 3)).toEqual(["shown", "masked", "secondary"]);
@@ -484,9 +553,22 @@ describe("masquage : fonctions pures (cas écrits à la main, seuil 3)", () => {
       exempt: null,
       published: { months: [false], retainedCur: false, allCur: false, retainedPrev: false, allPrev: false },
     };
-    expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"] });
+    expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
     // Avec la tuile publiée : la période de l'autre motif retenu est masquée en second (et, par sa ligne, son mois).
-    expect(congesMask({ ...g, published: { ...g.published, retainedCur: true } }, 3)).toEqual({ months: [["masked"], ["secondary"]], cur: ["masked", "secondary"], prev: ["shown", "shown"] });
+    expect(congesMask({ ...g, published: { ...g.published, retainedCur: true } }, 3)).toEqual({ months: [["masked"], ["secondary"]], cur: ["masked", "secondary"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
+  });
+  it("congesMask : un seul motif non retenu sous le seuil ⇒ le taux tous motifs est masqué (période), N-1 reste", () => {
+    // Motif retenu exempté (seul retenu : égal à la tuile) ; motif non retenu de 2 personnes (seuil 3) : la relation des autres motifs
+    // (tous motifs − tuile) n'a aucune autre cellule → son total, le taux tous motifs de la période, est masqué. N-1 : 0 personne.
+    const g = {
+      lines: [
+        { chosen: false, months: [v(14, 2)], total: v(14, 2), prev: v(0, 0) },
+        { chosen: true, months: [v(15, 3)], total: v(15, 3), prev: v(19, 2) },
+      ],
+      exempt: 1,
+      published: { months: [true], retainedCur: true, allCur: true, retainedPrev: true, allPrev: true },
+    };
+    expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"], allCur: "secondary", allPrev: "shown" });
   });
 });
 
@@ -712,8 +794,10 @@ describe("loadAbsencesInput puis buildAbsences : référentiel PayFit fictif", a
       ["test_paid_leave", "non", "n.d.", "n.d."],
       ["test_sickness", "oui", "4", "1,09 %"],
     ]);
-    // Tous motifs : congés C-1 (10) + C-2 (4) + maladie C-3 (4) = 18 demi-journées sur 366 = 4,918… %.
-    expect(texts(tableOf(m, TABLE_IDS.tousMotifs))[0].slice(1, 3)).toEqual(["18", "4,92 %"]);
+    // Tous motifs : congés C-1 (10) + C-2 (4) + maladie C-3 (4) = 18 demi-journées sur 366. Avec la tuile (4), il donnerait les
+    // congés (18 − 4 = 14 : 2 personnes, sous le seuil) par différence : n.d. avec la raison du seuil. N-1 : aucune absence, affiché.
+    expect(texts(tableOf(m, TABLE_IDS.tousMotifs))[0].slice(1, 3)).toEqual(["n.d.", "n.d."]);
+    expect(tableOf(m, TABLE_IDS.tousMotifs).rows[0].cells[1]).toEqual({ nd: CONF });
     // Demi-journées prises : congés avril (2 personnes) et période n.d. ; maladie mai 4.
     expect(texts(tableOf(m, TABLE_IDS.conges)).map((r) => r.slice(0, 4))).toEqual([
       ["test_paid_leave", "n.d.", "0", "n.d."],

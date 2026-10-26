@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { monthRange } from "@/lib/connectors/months";
-import { absencesEnCause, allMotifsInput, aVenirStatut, congesAVenir, congesPris, issueReason, motifInput, publicMonthReason, publicWindowReason, type CongesAVenir } from "@/lib/croisee/conges";
+import { absencesEnCause, allMotifsInput, aVenirStatut, congesAVenir, congesPris, issueReason, motifInput, personTokens, publicMonthReason, publicWindowReason, type CongesAVenir } from "@/lib/croisee/conges";
 import { absenteeism, absenteeismMonth } from "@/lib/rh/kpi/absence";
 import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import type { Window } from "@/lib/rh/kpi/types";
@@ -47,25 +47,37 @@ describe("congesPris : jours pris par motif et par mois (moteur de l'absentéism
     expect(c.lines.map((l) => l.type)).toEqual(["test_paid_leave", "test_sickness"]);
     const [leave, sick] = c.lines;
     // Congés : avril = C-1 du 6 au 14 (18) + C-2 le 30 (2) = 20 demi-journées, 2 personnes ; mai = C-2 (7), 1 personne (a5 refusée).
+    // Jetons de personne : rang parmi les personnes des contrats (P-1 → 0, P-2 → 1, P-3 → 2), le même d'un mois à l'autre.
     expect(leave).toEqual({
       type: "test_paid_leave",
       chosen: false,
       months: [
-        { kind: "exact", half: 20, persons: 2 },
-        { kind: "exact", half: 7, persons: 1 },
+        { kind: "exact", half: 20, persons: 2, who: [0, 1] },
+        { kind: "exact", half: 7, persons: 1, who: [1] },
       ],
-      total: { kind: "exact", half: 27, persons: 2 },
+      total: { kind: "exact", half: 27, persons: 2, who: [0, 1] },
     });
     // Maladie : aucun jour en avril (zéro réel : mois lu, contrats présents), 4 demi-journées en mai pour une personne.
     expect(sick).toEqual({
       type: "test_sickness",
       chosen: true,
       months: [
-        { kind: "exact", half: 0, persons: 0 },
-        { kind: "exact", half: 4, persons: 1 },
+        { kind: "exact", half: 0, persons: 0, who: [] },
+        { kind: "exact", half: 4, persons: 1, who: [2] },
       ],
-      total: { kind: "exact", half: 4, persons: 1 },
+      total: { kind: "exact", half: 4, persons: 1, who: [2] },
     });
+  });
+
+  it("jetons de personne : rang parmi les personnes des contrats de l'entrée, le même pour toute fenêtre et toute copie ; aucun identifiant", () => {
+    const token = personTokens(input);
+    expect(["payfit:P-1", "payfit:P-2", "payfit:P-3"].map(token)).toEqual([0, 1, 2]);
+    // Personne absente des contrats : le rang suivant, toujours le même.
+    expect(token("contrat:inconnu")).toBe(3);
+    expect(token("contrat:inconnu")).toBe(3);
+    // Mai seul : C-2 (congés) garde le jeton 1, C-3 (maladie) le jeton 2.
+    const may = congesPris(input, win(["2026-05"]));
+    expect(may.lines.map((l) => (l.months[0].kind === "nd" ? null : l.months[0].who))).toEqual([[1], [2]]);
   });
 
   it("le total de chaque motif est celui de l'absentéisme par motif (même moteur, même copie de l'entrée)", () => {
@@ -82,10 +94,10 @@ describe("congesPris : jours pris par motif et par mois (moteur de l'absentéism
     const leave = c.lines[0];
     // Avril : C-1 = 6, 7, 8, 9, 10, 13, 14 = 7 j = 14 + C-2 le 30 = 2 → 16 ; mai : C-2 = 1er (2) + matin du 4 (1) = 3.
     expect(leave.months).toEqual([
-      { kind: "exact", half: 16, persons: 2 },
-      { kind: "exact", half: 3, persons: 1 },
+      { kind: "exact", half: 16, persons: 2, who: [0, 1] },
+      { kind: "exact", half: 3, persons: 1, who: [1] },
     ]);
-    expect(leave.total).toEqual({ kind: "exact", half: 19, persons: 2 });
+    expect(leave.total).toEqual({ kind: "exact", half: 19, persons: 2, who: [0, 1] });
   });
 
   it("demi-journée incertaine (moment de début absent) : « ≥ » sur le mois et le total ; la personne sans jour compté n'est pas comptée", () => {
@@ -93,8 +105,8 @@ describe("congesPris : jours pris par motif et par mois (moteur de l'absentéism
     const a6 = absence("a6", "C-1", "2026-05-20", null, "2026-05-20", "end-of-day", { type: "test_sickness" });
     const c = congesPris(kpiInput(data, readAbsences([...ROWS, a6]), { absenceTypes: ["test_sickness"] }), AVRIL_MAI);
     const sick = c.lines.find((l) => l.type === "test_sickness")!;
-    expect(sick.months[1]).toEqual({ kind: "lower_bound", half: 4, persons: 1 });
-    expect(sick.total).toEqual({ kind: "lower_bound", half: 4, persons: 1 });
+    expect(sick.months[1]).toEqual({ kind: "lower_bound", half: 4, persons: 1, who: [2] });
+    expect(sick.total).toEqual({ kind: "lower_bound", half: 4, persons: 1, who: [2] });
   });
 
   it("mois hors des mois lus : n.d. avec la raison du moteur, jamais zéro ; le total de la fenêtre devient n.d.", () => {
@@ -108,7 +120,7 @@ describe("congesPris : jours pris par motif et par mois (moteur de l'absentéism
 
   it("mois lus sans absence (novembre–décembre 2025) : zéros réels, aucune personne", () => {
     const c = congesPris(input, win(["2025-11", "2025-12"]));
-    for (const l of c.lines) expect(l.total).toEqual({ kind: "exact", half: 0, persons: 0 });
+    for (const l of c.lines) expect(l.total).toEqual({ kind: "exact", half: 0, persons: 0, who: [] });
   });
 
   it("mois que le moteur rend n.d. (avril 2025 : borne basse de l'historique PayFit) : la raison du moteur passe telle quelle", () => {
@@ -193,7 +205,7 @@ describe("raisons publiques : aucun identifiant d'absence ni de contrat", async 
   it("congesPris : cellules et totaux n.d. avec la raison publique ; aucun identifiant, même dans une raison", () => {
     const c = congesPris(input, AVRIL_MAI);
     const [l, s] = c.lines;
-    expect(l.months).toEqual([{ kind: "nd", reason: UNKNOWN_AVRIL }, { kind: "exact", half: 7, persons: 1 }]);
+    expect(l.months).toEqual([{ kind: "nd", reason: UNKNOWN_AVRIL }, { kind: "exact", half: 7, persons: 1, who: [1] }]);
     expect(l.total).toEqual({ kind: "nd", reason: UNKNOWN_AVRIL });
     expect(s.months).toEqual([
       { kind: "nd", reason: "1 absence sans date de début ou de fin dans PayFit en 2026-04 (détail dans KPI RH)" },
@@ -237,9 +249,10 @@ describe("congesAVenir : congés posés et demandes en attente, en jours par moi
     expect(r.months).toEqual(["2026-10", "2026-11"]);
     expect(r.lines).toEqual([
       // Posés : octobre = C-1 du 26 au 31 = 12 ; novembre = C-1 1er et 2 (4) + C-3 le 30 (2) = 6, deux personnes.
-      { type: "test_paid_leave", statut: "pose", months: [{ kind: "exact", half: 12, persons: 1 }, { kind: "exact", half: 6, persons: 2 }], total: { kind: "exact", half: 18, persons: 2 } },
+      // Jetons : C-1 → 0, C-2 → 1, C-3 → 2 (personnes P-1, P-2, P-3).
+      { type: "test_paid_leave", statut: "pose", months: [{ kind: "exact", half: 12, persons: 1, who: [0] }, { kind: "exact", half: 6, persons: 2, who: [0, 2] }], total: { kind: "exact", half: 18, persons: 2, who: [0, 2] } },
       // En attente : aucun jour en octobre (zéro réel, mois lu), 3 demi-journées en novembre.
-      { type: "test_paid_leave", statut: "en-attente", months: [{ kind: "exact", half: 0, persons: 0 }, { kind: "exact", half: 3, persons: 1 }], total: { kind: "exact", half: 3, persons: 1 } },
+      { type: "test_paid_leave", statut: "en-attente", months: [{ kind: "exact", half: 0, persons: 0, who: [] }, { kind: "exact", half: 3, persons: 1, who: [1] }], total: { kind: "exact", half: 3, persons: 1, who: [1] } },
     ]);
     // b4 (décembre non lu), b5 (sans date de début), b8 (contrat inconnu).
     expect(r.nonRattachees).toBe(3);
@@ -250,8 +263,8 @@ describe("congesAVenir : congés posés et demandes en attente, en jours par moi
     const pose = r.lines.find((l) => l.statut === "pose")!;
     // Octobre : 26 → 30 = 10 ; novembre : lun. 2 (2) + lun. 30 (2) = 4.
     expect(pose.months).toEqual([
-      { kind: "exact", half: 10, persons: 1 },
-      { kind: "exact", half: 4, persons: 2 },
+      { kind: "exact", half: 10, persons: 1, who: [0] },
+      { kind: "exact", half: 4, persons: 2, who: [0, 2] },
     ]);
   });
 
@@ -270,8 +283,8 @@ describe("congesAVenir : congés posés et demandes en attente, en jours par moi
     const r = value(congesAVenir(kpiInput(data, readAbsences([...FUTURE, b9], READ_NOV)), "2026-09"));
     const pose = r.lines.find((l) => l.statut === "pose")!;
     // Le 19 est incertain (non compté) ; le 20 compte 2 demi-journées : octobre 12 + 2 = 14, deux personnes.
-    expect(pose.months[0]).toEqual({ kind: "lower_bound", half: 14, persons: 2 });
-    expect(pose.total).toEqual({ kind: "lower_bound", half: 20, persons: 3 });
+    expect(pose.months[0]).toEqual({ kind: "lower_bound", half: 14, persons: 2, who: [0, 1] });
+    expect(pose.total).toEqual({ kind: "lower_bound", half: 20, persons: 3, who: [0, 1, 2] });
   });
 
   it("mois non lu entre deux mois lus : n.d. avec la raison, et le total de la ligne est n.d.", () => {
@@ -282,7 +295,7 @@ describe("congesAVenir : congés posés et demandes en attente, en jours par moi
     expect(pose.months[1]).toEqual({ kind: "nd", reason: "absences non lues pour 2026-11 (mois lus : 2024-10 → 2026-12)" });
     expect(pose.total.kind).toBe("nd");
     // Décembre lu : le 1er → 4 de b4 = 8 demi-journées.
-    expect(pose.months[2]).toEqual({ kind: "exact", half: 8, persons: 1 });
+    expect(pose.months[2]).toEqual({ kind: "exact", half: 8, persons: 1, who: [2] });
   });
 
   it("aucun mois lu après le dernier mois clos, ou source DSN : n.d. avec la raison", () => {

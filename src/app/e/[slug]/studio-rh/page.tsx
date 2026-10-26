@@ -26,6 +26,7 @@ import type { DeltaUnit, EtpMonthEnd, Kind, KpiInput, Ratio, Window } from "@/li
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { hasAtLeast } from "@/lib/roles";
 import { trendClass, type TrendTone } from "@/lib/trend";
+import { publicScenario } from "@/lib/viz/croisee-budget";
 import { capital, euros, hasData, hasNd, masseSeries, monthLongLabel, monthShortYear, monthsAxis, seriesReasons, sourceReason } from "@/lib/viz/masse";
 import {
   averageTile,
@@ -393,11 +394,13 @@ export default async function SynthesePage({ params, searchParams }: { params: P
         const years = [...new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)))];
         const ly = years.includes(String(year)) ? String(year) : years[0];
         const lyMonths = monthRange(`${ly}-01`, `${ly}-12`);
-        const proj = project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions);
-        const land = landing(full.base, proj, ly);
+        // Raisons n.d. de la projection sans identité (le moteur nomme le contrat : « <libellé> : base n.d. (…) ») : publicScenario,
+        // comme la Masse salariale croisée ; montants identiques, le détail nominatif reste dans Hypothèses budgétaires.
+        const pub = publicScenario(full.base, project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions));
+        const land = landing(pub.base, pub.proj, ly);
         const chosen = [...(await listBudgets(ws.id))].filter((b) => b.year === ly).sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null;
         const bSeries = chosen ? budgetSeries(`budget-${chosen.id.slice(0, 8)}`, chosen.name, ly, chosen.amounts) : null;
-        const g = land.kind === "value" && bSeries ? gap(scenarioSeries(s.id, s.name, full.base, proj), bSeries, lyMonths) : null;
+        const g = land.kind === "value" && bSeries ? gap(scenarioSeries(s.id, s.name, pub.base, pub.proj), bSeries, lyMonths) : null;
         const v = landingView(land, bSeries ? { total: total(bSeries, lyMonths) } : null, g, ly);
         landingTile = {
           id: "atterrissage",
