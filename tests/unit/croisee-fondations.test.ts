@@ -94,6 +94,16 @@ import CroiseePage from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/page";
 import { CHAPTER_TOTAL, CHAPTERS, chapterDef, chapterLinks, EN_CONSTRUCTION, neighbours } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/chapitres";
 import { loadCroiseeContext, once, type CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { journalReason } from "@/lib/croisee/format";
+import { selectAlerts } from "@/lib/croisee/alertes";
+import { partitionCohorts } from "@/lib/croisee/cohortes";
+import { CSV_BOM, LOWER_BOUND, SERVICES_EXPORT_LABEL, tableCsv } from "@/lib/croisee/export";
+import { confidentialiteReason, maskGroups } from "@/lib/croisee/structure";
+import { croiseeSettingReason, SEUILS_MAX } from "@/lib/croisee-settings";
+import { safeText } from "@/lib/export/safe-text";
+import { DSN_ECHEANCES, MOTIF_PAYFIT, seuilAlerts } from "@/lib/viz/croisee-effectifs";
+import { BRUT_NUL, N1_NUL, PREVU_FIXE_VARIABLE } from "@/lib/viz/croisee-masse";
+import { maskServices } from "@/lib/viz/croisee-paie";
+import { PRINT_REPERES_MAX } from "@/lib/viz/croisee-synthese";
 import { AlertList, ChapterPrevu, ModelTable, NdNote, Pliant, Spark, Tuile, Tuiles } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/atomes";
 import type { MonthPayroll, PayrollWindow } from "@/lib/payroll/engine";
 import type { ChapterId } from "@/lib/viz/croisee";
@@ -142,8 +152,8 @@ describe("glossaire de la Masse salariale croisée", () => {
     for (const c of CHAPTERS) for (const id of c.terms) expect(glossaryEntry(id), `${c.id} → ${id}`).toBeDefined();
   });
 
-  it("vingt-trois entrées neuves, famille Masse salariale, sans « croisee-etp-proratise » (l'entrée etp-prorated est réutilisée)", () => {
-    expect(GLOSSARY_CROISEE).toHaveLength(23);
+  it("vingt-six entrées neuves, famille Masse salariale, sans « croisee-etp-proratise » (l'entrée etp-prorated est réutilisée)", () => {
+    expect(GLOSSARY_CROISEE).toHaveLength(26);
     expect(GLOSSARY_CROISEE.map((e) => e.id)).toEqual(Object.values(CROISEE_TERMS).filter((id) => id.startsWith("croisee-")));
     for (const e of GLOSSARY_CROISEE) {
       expect(e.id).toMatch(/^croisee-/);
@@ -158,10 +168,109 @@ describe("glossaire de la Masse salariale croisée", () => {
 
   it("exports : protection contre les formules alignée sur l'addendum L (« - » sauf nombre pur) ; impression : en-tête complet", () => {
     const exp = glossaryEntry("croisee-export")!.definition;
-    expect(exp).toContain("(il commence par =, +, @, une tabulation ou un retour à la ligne, ou par - quand ce n'est pas un nombre)");
+    expect(exp).toContain("(il commence par =, @, une tabulation, un retour chariot ou un saut de ligne, ou par + ou - quand ce n'est pas un nombre)");
     expect(exp).not.toContain("=, +, -, @");
     expect(glossaryEntry("croisee-impression")!.definition).toContain("la période, N-1, le service, le budget saisi et le scénario retenus, et les mois non clos");
     expect(glossaryEntry("croisee-vue-ensemble")!.definition).toContain("« Référence annuelle N-1 sur douze mois »");
+  });
+
+  // Les définitions disent ce que le code fait : chaque phrase vérifiée ici l'est sur la fonction ou la constante qui la met en œuvre,
+  // avec un cas écrit à la main (valeurs fictives).
+  it("export : chaque début de texte cité est protégé, un nombre signé ne l'est pas ; CSV avec marque d'ordre, points-virgules, décimal français, « n.d. (raison) » ; borne basse nommée", () => {
+    const exp = glossaryEntry("croisee-export")!.definition;
+    for (const s of ["=A1", "@A1", "\tA", "\rA", "\nA", "+A", "-A"]) expect(safeText(s), JSON.stringify(s)).toBe(`'${s}`);
+    for (const s of ["+12", "-3,5", "-0.25", "Atelier"]) expect(safeText(s), s).toBe(s);
+    const cols: CroiseeColumn[] = [
+      { key: "ligne", header: "Ligne", kind: "text" },
+      { key: "montant", header: "Montant", kind: "eur" },
+      { key: "taux", header: "Taux", kind: "pourcent" },
+    ];
+    const csv = tableCsv({ id: "t", title: "Tableau", columns: cols, rows: [{ cells: ["=Total", 123456, { exact: 0.0534 }] }, { cells: ["B", { nd: "mois non lu" }, ""] }] });
+    expect(csv).toBe(`${CSV_BOM}"Ligne";"Montant";"Taux"\r\n"'=Total";"1234,56";"5,34"\r\n"B";"n.d. (mois non lu)";""\r\n`);
+    expect(exp).toContain("marque d'ordre des octets, champs entre guillemets séparés par des points-virgules, fin de ligne Windows");
+    expect(exp).toContain("(5,34 pour 5,34 %)");
+    expect(exp).toContain(`« ${LOWER_BOUND} »`);
+    for (const sheet of ["« Chiffres clés »", "« Non disponibles »", "« Filtres »", "« Sources »", "« Définitions »"]) expect(exp).toContain(sheet);
+    expect(exp).toContain(`« ${SERVICES_EXPORT_LABEL} »`);
+  });
+
+  it("seuil de confidentialité : raison citée, masquage secondaire « zéro compris », provision par service cumulée jusqu'au seuil", () => {
+    const conf = glossaryEntry("croisee-confidentialite")!.definition;
+    expect(conf).toContain(`« ${confidentialiteReason(2).replace("2 personnes", "N personnes")} »`);
+    expect(conf).toContain(`« ${croiseeSettingReason("confidentialite", { kind: "absent" })} »`);
+    // Un groupe de 1 personne (seuil 3) : masqué ; le plus petit autre groupe affiché, ici vide, l'est aussi ; le reste est affiché.
+    expect(maskGroups([{ size: 1, value: 1 }, { size: 0, value: 0 }, { size: 6, value: 6 }], 3, true)).toEqual(["masked", "secondary", "shown"]);
+    // Sans total affiché, pas de masquage secondaire.
+    expect(maskGroups([{ size: 1, value: 1 }, { size: 6, value: 6 }], 3, false)).toEqual(["masked", "shown"]);
+    // Provision par service (seuil 3) : 1 contrat masqué ; le service sans contrat (provision la plus faible) ne suffit pas, le suivant
+    // est masqué aussi.
+    expect(maskServices([{ size: 1, order: 100 }, { size: 0, order: 0 }, { size: 5, order: 500 }, { size: 8, order: 800 }], 3)).toEqual(["masked", "secondary", "secondary", "shown"]);
+    expect(conf).toContain("un service sans contrat rémunéré (« Non ventilé », par exemple) ne suffit jamais à en protéger un autre");
+    expect(conf).toContain("zéro compris");
+  });
+
+  it("seuils d'effectif : prochain seuil strictement supérieur, distance inférieure ou égale à la marge ; libellé du repère et limites de saisie", () => {
+    const d = glossaryEntry("croisee-seuils-effectif")!.definition;
+    const seuils = [{ libelle: "Seuil A", valeur: 10 }, { libelle: "Seuil B", valeur: 20 }];
+    const avg = (num: number, den = 1) => ({ kind: "exact" as const, ratio: { num, den } });
+    // 19 / 2 = 9,5 : prochain seuil 10, distance 0,5 ≤ 1 → repère.
+    const near = seuilAlerts([{ id: "n", label: "Effectif moyen", avg: avg(19, 2) }], seuils, 1);
+    expect(near.map((a) => [a.level, a.label])).toEqual([["repere", "Effectif proche d'un seuil"]]);
+    // 10 : le seuil 10 est atteint, le prochain est 20 (distance 10 > 1) → aucun repère ; 9 avec une marge de 1 → distance 1 ≤ 1 → repère.
+    expect(seuilAlerts([{ id: "n", label: "Effectif moyen", avg: avg(10) }], seuils, 1)).toEqual([]);
+    expect(seuilAlerts([{ id: "n", label: "Effectif moyen", avg: avg(9) }], seuils, 1)).toHaveLength(1);
+    expect(d).toContain("premier seuil strictement supérieur");
+    expect(d).toContain("inférieure ou égale à la marge d'alerte");
+    expect(d).toContain("« Effectif proche d'un seuil »");
+    expect(SEUILS_MAX).toBe(20);
+    expect(d).toContain("vingt seuils au plus");
+    expect(d).toContain(`« ${croiseeSettingReason("seuilsEffectif", { kind: "absent" })} »`);
+  });
+
+  it("points à surveiller : libellés des niveaux et des points défavorables, regroupement des repères à l'impression", () => {
+    const d = glossaryEntry("croisee-alertes")!.definition;
+    for (const l of Object.values(ALERT_LEVEL_LABELS)) expect(d.toLowerCase()).toContain(l.toLowerCase());
+    const out = selectAlerts({
+      year: 2026,
+      budget: { kind: "value", name: "B", gap: { kind: "value", real: 300, budget: 200, delta: 100 }, monthly: [{ month: "2026-01", real: 150, budget: 100 }, { month: "2026-02", real: 150, budget: 100 }] },
+      landing: { kind: "value", total: 1300, gap: { kind: "value", landing: 1300, budget: 1200, delta: 100, months: 12, excluded: [] } },
+      openMonths: [],
+      unclassified: [],
+      missing: [],
+      seuils: { kind: "skip" },
+      checks: { compta: { kind: "skip" }, dsn: { kind: "skip" } },
+      hrefs: { parametres: "#", grille: "#", budget: "#", paieCompta: "#", donnees: "#" },
+    });
+    const defav = out.alerts.filter((a) => a.level === "defavorable").map((a) => a.label);
+    expect(defav).toEqual(["Budget dépassé", "Atterrissage au-dessus du budget annuel"]);
+    for (const l of defav) expect(d).toContain(`« ${l} »`);
+    expect(PRINT_REPERES_MAX).toBe(3);
+    expect(d).toContain("au-delà de trois repères");
+    expect(d).toContain("« + k autres repères »");
+  });
+
+  it("chapitres 02, 04, 05 et 06 : termes et phrases repris du code (titres de blocs, raisons, libellés de cartes)", () => {
+    expect(glossaryEntry(CROISEE_TERMS.rigidite)!.term).toBe("Part des salaires dans le brut");
+    expect(glossaryEntry(CROISEE_TERMS.partPrimes)!.term).toBe("Part des primes dans le brut");
+    expect(glossaryEntry(CROISEE_TERMS.contributionServices)!.term).toBe("Contribution des services à l'écart");
+    const rig = glossaryEntry(CROISEE_TERMS.rigidite)!.definition;
+    expect(rig).toContain(`« ${PREVU_FIXE_VARIABLE.find((x) => x.id === "fixe-variable-rigidite")!.reason} »`);
+    expect(rig).toContain(`« ${BRUT_NUL} »`);
+    expect(glossaryEntry(CROISEE_TERMS.contributionServices)!.definition).toContain(`« ${N1_NUL} »`);
+    expect(glossaryEntry(CROISEE_TERMS.structureEffectif)!.definition).toContain("« Qui compose l'effectif salarié ? »");
+    expect(glossaryEntry(CROISEE_TERMS.journalMouvements)!.definition).toContain("« Autres motifs (k motifs) »");
+    expect(glossaryEntry(CROISEE_TERMS.journalMouvements)!.definition).toContain(`L'API ${MOTIF_PAYFIT}`);
+    expect(glossaryEntry(CROISEE_TERMS.echeancesContrat)!.definition).toContain(`${DSN_ECHEANCES.replace(/^la DSN/, "La DSN")}`);
+    expect(glossaryEntry(CROISEE_TERMS.personnesObservees)!.term).toBe("Contrats observés seulement en N-1, seulement en N, dans les deux périodes");
+    // Partition écrite à la main : contrat « a » en N-1 seulement, « b » dans les deux, « c » en N seulement, lignes sans contrat ;
+    // la somme des contributions, lignes sans contrat comprises, égale l'écart total.
+    const part = partitionCohorts(new Map([["a", 100], ["b", 200], ["x", 10]]), new Map([["b", 250], ["c", 80], ["x", 30]]), "x");
+    expect(part.kind).toBe("value");
+    if (part.kind === "value") {
+      expect([part.onlyPrev.delta, part.both.delta, part.onlyCur.delta, part.outside?.delta]).toEqual([-100, 50, 80, 20]);
+      expect(part.total.delta).toBe(50);
+      expect(part.total.count).toBe(3);
+    }
   });
 });
 
