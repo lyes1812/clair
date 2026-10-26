@@ -1,12 +1,12 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
 
 // Écart budgétaire et analyse des écarts sur le journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle).
 // Deux scénarios de la même base : « Base T4 » (aucune hypothèse) et « Variante T4 » (prime de décembre 1 000 € brut + 30 %
 // et embauche à 50 % de 2 500 € brut temps plein à 20 % le 16 novembre). Valeurs recalculées à la main (voir budget.test.ts).
 const run = Date.now().toString(36);
 const slow = { timeout: 30_000 };
-const txt = async (l: Locator) => ((await l.textContent()) ?? "").replace(/\s+/g, " ").trim();
+const txt = exactText;
 
 test("Écart budgétaire et analyse des écarts : rubriques, détail par salarié, cascade ETP", async ({ page }) => {
   test.setTimeout(300_000);
@@ -49,7 +49,7 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   await he.getByLabel("Quotité (%)").fill("50");
   await he.getByLabel("Taux de charges (%)").fill("20");
   await he.getByLabel("Effectif").selectOption("oui");
-  await he.getByRole("button").click();
+  await he.getByRole("button", { name: "Ajouter l'embauche" }).click();
   await expect(he.getByRole("status")).toContainText("Remplaçant", slow);
   await tab("Enveloppes par rubrique").click();
   await page.getByTestId("env-ponctuels").getByText("Élément ponctuel (prime, régularisation…)").click();
@@ -76,7 +76,9 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   await form.locator("#de").selectOption("10");
   await form.locator("#a").selectOption("12");
   await form.getByRole("button", { name: "Afficher" }).click();
-  await page.getByTestId("ecart-vues").getByRole("link", { name: "Détail" }).click();
+  // Choix d'affichage en liste déroulante (lot d'ergonomie du 25/10) : même adresse qu'avant.
+  await page.getByTestId("ecart-vues").locator("select").selectOption({ label: "Détail" });
+  await page.waitForURL(/vue=detail/);
   const row = (k: string, col: string) => page.getByTestId("ecart-table").locator(`tr[data-row='${k}'] td[data-col='${col}']`);
   // Base : 3 × 22 140,00 € = 66 420,00 € ; variante : + prime 1 300,00 € + embauche 750,00 € (novembre) et 1 500,00 € (décembre).
   expect(await txt(row("masse", "v1"))).toBe("66 420,00 €");
@@ -107,7 +109,7 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   await expect(page.getByTestId("zoom-table").locator("tbody tr")).toHaveCount(2);
   expect(await txt(page.getByTestId("zoom-table").locator("tr[data-person='Remplaçant (embauche)'] td[data-col='ecart']"))).toBe("+2 250,00 €");
   expect(await txt(page.getByTestId("zoom-table").locator("tbody tr").filter({ hasText: "Hors salarié" }).locator("td[data-col='ecart']"))).toBe("+1 300,00 €");
-  await expect(page.getByTestId("zoom-ok")).toContainText("rapproché de l'écart de la rubrique (+3 550,00 €)");
+  await expect.poll(() => exactText(page.getByTestId("zoom-ok"))).toContain("rapproché de l'écart de la rubrique (+3 550,00 €)");
   expect(await txt(page.getByTestId("zoom-totals").locator("[data-col='total-all']"))).toBe("+3 550,00 €");
   await page.screenshot({ path: `${CAPTURES}/6-02-zoom.png`, fullPage: true });
   // Export CSV de l'écart : mêmes valeurs que l'écran.
@@ -122,7 +124,7 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   await page.goto(`${back.pathname}?${back.searchParams.toString()}`);
   const masseGap = page.locator("tr[data-row='masse'] td[data-col='g1']").first();
   await expect(masseGap).toHaveClass(/trend-bad/);
-  await expect(masseGap).toContainText("+3 550,00 €");
+  await expect.poll(() => exactText(masseGap)).toContain("+3 550,00 €");
   await expect(page.locator("tr[data-row='etp'] td.trend-bad, tr[data-row='etp'] td.trend-good")).toHaveCount(0);
 
   // Analyse des écarts : cascade d'ETP, contributions de masse, pont volume / coût moyen.

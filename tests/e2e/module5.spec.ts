@@ -1,11 +1,11 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
 
 // Module 5 (lot 1) : scénario sur le journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle).
 // Valeurs recalculées à la main depuis ref/fixtures/clair-test-generic-v1.json (voir tests/unit/budget.test.ts).
 const run = Date.now().toString(36);
 const slow = { timeout: 30_000 }; // environnement déployé : actions serveur parfois lentes
-const txt = async (l: Locator) => ((await l.textContent()) ?? "").replace(/\s+/g, " ").trim();
+const txt = exactText;
 
 test("Hypothèses budgétaires : base figée, hypothèses datées, projection traçable", async ({ page }) => {
   test.setTimeout(300_000);
@@ -91,7 +91,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await he0.getByLabel("Taux de charges (%)").fill("20");
   await he0.getByLabel("Effectif").selectOption("oui");
   await he0.getByLabel("Remplace (un seul poste)").selectOption({ label: "Départ 008" });
-  await he0.getByRole("button").click();
+  await he0.getByRole("button", { name: "Ajouter l'embauche" }).click();
   await expect(he0.getByRole("status")).toContainText("Remplaçant 008", slow);
 
   await tab("Enveloppes par rubrique").click();
@@ -209,7 +209,7 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await he.getByLabel("Quotité (%)").fill("100");
   await he.getByLabel("Taux de charges (%)").fill("5");
   await he.getByLabel("Effectif").selectOption("non");
-  await he.getByRole("button").click();
+  await he.getByRole("button", { name: "Ajouter l'embauche" }).click();
   await expect(he.getByRole("status")).toContainText("2 hypothèses enregistrées : « Stagiaire tech (1/2) » à « Stagiaire tech (2/2) »", slow);
   await page.reload();
   await expect(page.getByTestId("emb-table").locator("tr[data-hyp='Stagiaire tech (2/2)']")).toContainText("Stagiaire");
@@ -316,8 +316,8 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await expect(page.getByTestId("cmp-table").locator("thead")).toContainText("Budget « Budget 2026 »");
   // Année : 281 250,10 € projetés contre 288 000,00 € de budget → −6 749,90 € ; janv.–sept. : 211 260,00 € contre 216 000,00 €.
   const tileB = page.locator("[data-testid^='cmp-tile-budget-']");
-  await expect(tileB.locator("dd")).toContainText("-6 749,90 €");
-  await expect(page.locator("[data-testid^='cmp-ytd-budget-']")).toContainText("-4 740,00 €");
+  await expect.poll(() => exactText(tileB.locator("dd"))).toContain("-6 749,90 €");
+  await expect.poll(() => exactText(page.locator("[data-testid^='cmp-ytd-budget-']"))).toContain("-4 740,00 €");
   // N-1 : février 2025 = 18 230,00 € (module 4) ; réel courant : septembre 2026 lu, octobre non lu.
   expect(await txt(cmp("2026-02", "n1"))).toContain("18 230,00 €");
   expect(await txt(cmp("2026-09", "reel"))).toContain("24 600,00 €");
@@ -347,11 +347,11 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   await tab("Bases individuelles").click();
   await expect(page.getByTestId("hyp-base-masse")).toContainText("Coût projeté de décembre 2026 par « Révisé T4 2026 »");
   expect(await txt(page.getByTestId("hyp-base-masse").locator("dd"))).toBe("24 005,80 €");
-  await expect(page.getByTestId("hyp-base-gap")).toContainText("éléments ponctuels de décembre 2026 1 300,00 €");
+  await expect.poll(() => exactText(page.getByTestId("hyp-base-gap"))).toContain("éléments ponctuels de décembre 2026 1 300,00 €");
   await tab("Résultat").click();
   // Budget 2027 contre 2026 (réel janv.–sept. + projeté du révisé oct.–déc. = 281 250,10 €) : −8 780,50 €.
   await page.getByTestId("res-tabs").getByRole("link", { name: "Comparaison" }).click();
-  await expect(page.getByTestId("cmp-tile-n1").locator("dd")).toContainText("-8 780,50 €");
+  await expect.poll(() => exactText(page.getByTestId("cmp-tile-n1").locator("dd"))).toContain("-8 780,50 €");
   expect(await txt(cmp("2027-12", "n1"))).toContain("projeté — scénario « Révisé T4 2026 »");
 
   // Lot 4 — reprise des hypothèses d'un autre scénario : les départs de la variante (datés de 2026) sont hors de l'horizon

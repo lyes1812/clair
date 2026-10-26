@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { TOTP } from "otpauth";
 
 export const PASSWORD = "Fictif-Test-2026!";
@@ -58,4 +58,15 @@ export async function createWorkspaceAsAdmin(page: Page, name: string) {
   await page.getByRole("button", { name: "Continuer" }).click();
   await expect(page).toHaveURL(/\/e\/[a-z0-9-]+\/donnees$/, NAV);
   return { slug: page.url().match(/\/e\/([a-z0-9-]+)\//)![1], secret };
+}
+
+// Texte d'un élément avec les montants exacts : l'affichage arrondit à l'euro (ou au k€) selon la préférence de lecture, la
+// valeur au centime reste portée par data-money-exact. Les vérifications restent ainsi à l'euro près (au centime).
+export async function exactText(l: Locator): Promise<string> {
+  const t = await l.evaluate((el) => {
+    const c = el.cloneNode(true) as Element;
+    c.querySelectorAll<HTMLElement>("[data-money-exact]").forEach((m) => { m.textContent = m.dataset.moneyExact ?? m.textContent; });
+    return c.textContent ?? "";
+  });
+  return t.replace(/\s+/g, " ").trim();
 }

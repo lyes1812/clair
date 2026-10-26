@@ -1,6 +1,6 @@
 import { expect, test, type Locator } from "@playwright/test";
 import { fixtureDsnBytes } from "../../src/lib/dsn/fixture";
-import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
 
 // Module 4 (lot 1) : masse salariale réelle sur le journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle).
 // Valeurs attendues recalculées à la main depuis la fixture (voir tests/unit/payroll.test.ts).
@@ -11,7 +11,7 @@ const span = (from: string, to: string) => {
   for (let [y, m] = from.split("-").map(Number); `${y}-${String(m).padStart(2, "0")}` <= to; m === 12 ? ((m = 1), (y += 1)) : (m += 1)) out.push(`${y}-${String(m).padStart(2, "0")}`);
   return out;
 };
-const txt = async (l: Locator) => ((await l.textContent()) ?? "").replace(/\s+/g, " ").trim();
+const txt = exactText;
 
 test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, grille de comptes", async ({ page }) => {
   test.setTimeout(300_000);

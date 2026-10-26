@@ -49,7 +49,7 @@ test("Menu général : toutes les entrées s'ouvrent, pas de débordement mobile
   await he.getByLabel("Quotité (%)").fill("50");
   await he.getByLabel("Taux de charges (%)").fill("20");
   await he.getByLabel("Effectif").selectOption("oui");
-  await he.getByRole("button").click();
+  await he.getByRole("button", { name: "Ajouter l'embauche" }).click();
   await expect(he.getByRole("status")).toContainText("Remplaçant", slow);
   await page.getByTestId("hyp-duplicate").getByLabel("Nom de la copie").fill("Variante T4");
   await page.getByTestId("hyp-duplicate").getByRole("button").click();

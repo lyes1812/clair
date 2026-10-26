@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
 
 // Étape 1b : connecteur Pennylane sur le transport fictif (clé « fixture-pl-… », aucune donnée réelle).
 const run = Date.now().toString(36);
@@ -26,7 +26,7 @@ test("Pennylane : connexion, lecture du plan comptable et des écritures, applic
   const summary = page.getByTestId("sync-summary");
   await expect(summary.getByRole("row").filter({ hasText: "Plan comptable" })).toContainText(/lue\s*9\s*9/);
   // Cas de référence : 641100 en octobre 2024 = 13 840,00 € (somme des bruts fictifs du mois).
-  await expect(page.getByTestId("ledger-totals").getByRole("row").filter({ hasText: "2024-10" }).filter({ hasText: "641100" })).toContainText("13 840,00 €");
+  await expect.poll(() => exactText(page.getByTestId("ledger-totals").getByRole("row").filter({ hasText: "2024-10" }).filter({ hasText: "641100" }))).toContain("13 840,00 €");
   await page.screenshot({ path: `${CAPTURES}/1b-01-apercu-pennylane.png`, fullPage: true });
 
   await page.getByRole("button", { name: "Appliquer cette lecture" }).click();

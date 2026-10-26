@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { fixtureFecBytes, fixtureFecFilename } from "../../src/lib/fec/fixture";
-import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
 
 // Étape 1d : dépôt de FEC fictifs (générés depuis la fixture de référence ; SIREN fictif).
 const run = Date.now().toString(36);
@@ -25,7 +25,7 @@ test("FEC : dépôt, aperçu, application, réimport détecté, exercice remplac
   await expect(exercises).toContainText("2024-10-31 → 2025-09-30");
   await expect(exercises).toContainText("équilibré");
   // Cas de référence : 641100 en octobre 2024 = 13 840,00 €.
-  await expect(page.getByTestId("ledger-totals").getByRole("row").filter({ hasText: "2024-10" }).filter({ hasText: "641100" })).toContainText("13 840,00 €");
+  await expect.poll(() => exactText(page.getByTestId("ledger-totals").getByRole("row").filter({ hasText: "2024-10" }).filter({ hasText: "641100" }))).toContain("13 840,00 €");
   await expect(page.getByTestId("ledger-totals")).not.toContainText("512000");
   await page.screenshot({ path: `${CAPTURES}/1d-01-apercu-fec.png`, fullPage: true });
 

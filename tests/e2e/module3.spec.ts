@@ -84,11 +84,11 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(page.getByTestId("kpi-closed-month")).toContainText(closed);
   await expect(page.getByTestId("kpi-read-limits")).toBeVisible(); // bloc « Limites de la lecture » : résumé visible, textes dans le DOM
   await expect(page.getByTestId("kpi-payfit-notice")).toBeAttached();
-  await expect(page.getByTestId("kpi-payfit-notice")).toContainText("Quotités à la date de lecture");
+  await expect(page.getByTestId("kpi-payfit-notice")).toContainText("Quotités non historisées par PayFit");
   // Historique PayFit brut (défaut validé le 22/10/2026) : une seule mention en tête d'écran, pas de « ≥ » ni de n.d. de conservation.
   await expect(page.getByTestId("payfit-history-notice")).toContainText("Données telles que remontées par l'API PayFit");
   await expect(page.getByTestId("kpi-tile-etp-end").locator("dd")).toHaveText("6,10");
-  await expect(page.getByTestId("kpi-read-limits")).toContainText("Quotités à la date de lecture");
+  await expect(page.getByTestId("kpi-read-limits")).toContainText("Quotités non historisées par PayFit");
   // ETP moyen exact : somme des ETP fin de mois ÷ 12 (effectif exact au jour près depuis R − 12 mois).
   await expect(page.getByTestId("kpi-tile-etp-avg").locator("dd")).toHaveText(fr2(window.reduce((s, m) => s + etp4(m), 0), 12 * 10000));
   // Septembre 2026 clos : turnover brut 12/83 = 14,46 % (comme la DSN, le transport fictif renvoie tous les contrats), N-1 7/13 ;

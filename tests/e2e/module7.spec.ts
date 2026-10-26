@@ -1,11 +1,11 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
 
 // Entrées du cahier : KPI RH (turnover, absentéisme, effectifs mensuels), Collaborateurs (fiche), Reporting social — sur le
 // journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle). Septembre 2026 : 7 contrats CDI, 6,10 ETP.
 const run = Date.now().toString(36);
 const slow = { timeout: 30_000 };
-const txt = async (l: Locator) => ((await l.textContent()) ?? "").replace(/\s+/g, " ").trim();
+const txt = exactText;
 
 test("Entrées du cahier : KPI RH par onglet, effectifs mensuels par axe, fiche collaborateur, reporting social", async ({ page }) => {
   test.setTimeout(300_000);
