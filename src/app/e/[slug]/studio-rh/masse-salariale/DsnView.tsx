@@ -25,7 +25,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
   const last = usable.at(-1) ?? null;
   const source = (
     <p className="desc ms-source" data-testid="ms-source">
-      Source : <strong>DSN déposées</strong> (déclarations qui font foi, module Données) · mois couverts <span className="ms-nowrap">{covered[0] ?? "n.d."}</span> → <span className="ms-nowrap">{covered.at(-1) ?? "n.d."}</span> ·{" "}
+      Source : <strong>DSN déposées</strong> (déclarations qui font foi) · mois couverts <span className="ms-nowrap">{covered[0] ?? "n.d."}</span> → <span className="ms-nowrap">{covered.at(-1) ?? "n.d."}</span> ·{" "}
       <a href={`/e/${slug}/donnees`}>Données</a>
       <GlossaryLink slug={slug} term={MASSE_TERMS.brutDsn} />
     </p>
@@ -103,7 +103,7 @@ export function DsnView({ slug, dsn, sp }: { slug: string; dsn: Map<string, DsnM
         </div>
       </div>
       <section className="panel">
-        <PanelHead title={`Vue d'ensemble — ${label(months)}`} />
+        <PanelHead title="Vue d'ensemble" />
         <dl className="facts ms-tiles">
           <Tile
             testid="ms-tile-brut"

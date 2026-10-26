@@ -69,10 +69,9 @@ export function BasesView({ slug, scenario, base, hypotheses, canEdit }: { slug:
   return (
     <MoneyText><section className="panel" data-testid="hyp-base">
       <CardTitle title={`Base figée sur ${formatMonth(base.refMonth).toLowerCase()}`} help={<GlossaryLink slug={slug} term={BUDGET_TERMS.base} />} />
-      {base.origin && (
+      {base.origin && base.origin.notCarried.length > 0 && (
         <p className="notice" data-testid="hyp-base-origin">
-          Base dérivée du scénario « {base.origin.scenarioName} » : état projeté fin {formatMonth(base.origin.month).toLowerCase()}.
-          {base.origin.notCarried.length ? ` Non repris car postérieurs à ${formatMonth(base.origin.month).toLowerCase()} : ${frDates(base.origin.notCarried.join(" ; "))}.` : ""}
+          Non repris car postérieurs à {formatMonth(base.origin.month).toLowerCase()} : {frDates(base.origin.notCarried.join(" ; "))}.
           <GlossaryLink slug={slug} term={BUDGET_TERMS.derivee} />
         </p>
       )}
