@@ -77,6 +77,7 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   await form.locator("#a").selectOption("12");
   await form.getByRole("button", { name: "Afficher" }).click();
   // Choix d'affichage en liste déroulante (lot d'ergonomie du 25/10) : même adresse qu'avant.
+  await page.waitForLoadState("networkidle"); // liste interactive avant le choix (environnement déployé)
   await page.getByTestId("ecart-vues").locator("select").selectOption({ label: "Détail" });
   await page.waitForURL(/vue=detail/);
   const row = (k: string, col: string) => page.getByTestId("ecart-table").locator(`tr[data-row='${k}'] td[data-col='${col}']`);

@@ -14,6 +14,8 @@ test("PayFit : connexion, lecture, aperçu, application, relecture sans doublon"
   await expect(source.getByTestId("payfit-active")).toContainText("n.d.");
   await source.getByRole("link", { name: "Gérer" }).click();
 
+  // Formulaire interactif avant toute saisie (environnement déployé plus lent : sinon la soumission recharge la page).
+  await page.waitForLoadState("networkidle");
   // Clé mal formée : refusée sans appel réseau.
   await page.getByLabel("Clé API PayFit").fill("abc");
   await page.getByRole("button", { name: "Vérifier et enregistrer" }).click();

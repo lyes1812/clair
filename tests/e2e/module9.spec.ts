@@ -130,6 +130,7 @@ test("Menu général : toutes les entrées s'ouvrent, pas de débordement mobile
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Synthèse du Studio RH");
   const drop = page.getByTestId("mega-button-page");
   await expect(drop).toHaveAttribute("aria-expanded", "false");
+  await page.waitForLoadState("networkidle"); // menu interactif avant le clic (environnement déployé)
   await drop.click();
   const dropPanel = page.getByTestId("mega-panel-page");
   await expect(dropPanel).toBeVisible();

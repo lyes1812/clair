@@ -14,6 +14,8 @@ test("Pennylane : connexion, lecture du plan comptable et des écritures, applic
   await card.getByRole("link", { name: "Gérer" }).click();
   await expect(page).toHaveURL(new RegExp(`/e/${slug}/donnees/pennylane$`));
 
+  // Formulaire interactif avant toute saisie (environnement déployé plus lent : sinon la soumission recharge la page).
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("Clé API Pennylane").fill("fixture-pl-A-1");
   await page.getByRole("button", { name: "Vérifier et enregistrer" }).click();
   await expect(page.getByRole("status")).toContainText("Connexion vérifiée");
