@@ -206,9 +206,9 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   await expect(page.getByTestId("cx-chapter-menu")).not.toHaveAttribute("open", "");
   // Filtres conservés en passant par un chapitre sans filtres (09) puis retour.
   await page.goto(`${ms}/croisee?chapitre=restructuration&annee=2026&de=01&a=06`);
-  const back = await page.getByTestId("cx-pager").getByRole("link").first().getAttribute("href");
-  expect(back).toContain("annee=2026");
-  expect(back).toContain("a=06");
+  const backHref = await page.getByTestId("cx-pager").getByRole("link").first().getAttribute("href");
+  expect(backHref).toContain("annee=2026");
+  expect(backHref).toContain("a=06");
   // Exports : classeur Excel du chapitre Services et CSV de son tableau.
   const xl = await page.request.get(`${ms}/croisee/export?chapitre=services&format=xlsx`);
   expect(xl.status()).toBe(200);
