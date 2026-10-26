@@ -2,8 +2,8 @@ import "@/styles/croisee-effectifs.css";
 import { BarChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
-import type { CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
-import { buildEffectifs, loadEffectifsInput, type EffectifsBlock, type EffectifsModel, type PrevuItem } from "@/lib/viz/croisee-effectifs";
+import type { AlertSpec, CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
+import { effectifsModel, type EffectifsBlock, type EffectifsModel, type PrevuItem } from "@/lib/viz/croisee-effectifs";
 import { capital } from "@/lib/viz/masse";
 import { ChartGuard, GraphFoot, NdState, type Affichage } from "../components";
 import { AlertList } from "./atomes/AlertList";
@@ -12,11 +12,11 @@ import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
 import type { CroiseeContext } from "./context";
 
-// Chapitre 02 · Effectifs & mouvements. Le composant lit l'entrée du chapitre (lecteurs du contexte), construit le modèle par la fonction
-// pure buildEffectifs (le même que celui des exports) et le rend : cartes, graphiques chacun suivi de son tableau exact, tableaux,
-// n.d. avec leur raison et « Prévu ». Aucun nom de personne : le détail nominatif reste dans Collaborateurs › Mouvements.
+// Chapitre 02 · Effectifs & mouvements. Le composant prend le modèle du chapitre par effectifsModel (un seul calcul par requête, le
+// même que celui des exports) et le rend : cartes, graphiques chacun suivi de son tableau exact, tableaux, n.d. avec leur raison et
+// « Prévu ». Aucun nom ni identifiant : le détail nominatif reste dans Collaborateurs › Mouvements.
 export default async function ChEffectifs({ ctx }: { ctx: CroiseeContext }) {
-  const model = buildEffectifs(await loadEffectifsInput(ctx));
+  const model = await effectifsModel(ctx);
   return <EffectifsView model={model} slug={ctx.slug} affichage={ctx.affichage} tableauHref={ctx.href({ affichage: "tableau" })} />;
 }
 
@@ -32,6 +32,9 @@ export function EffectifsView({ model, slug, affichage, tableauHref }: ViewProps
   const chartOf = (id: string) => model.charts.find((c) => c.id === id);
   const showChart = affichage !== "tableau";
   const showTable = affichage !== "graphique";
+  // En affichage « Graphiques », les blocs de tableaux ne sont pas rendus : un lien d'alerte vers une ancre de la page mène à
+  // l'affichage « Tableaux ».
+  const alerts: AlertSpec[] = showTable ? model.alerts : model.alerts.map((a) => (a.href?.startsWith("#") ? { ...a, href: `${tableauHref.split("#")[0]}${a.href}` } : a));
   return (
     <div className="cx-eff" data-testid="cx-effectifs">
       {model.blocks.map((b) => {
@@ -39,7 +42,7 @@ export function EffectifsView({ model, slug, affichage, tableauHref }: ViewProps
           return (
             <section key={b.id} className="cx-eff-tiles" id="cx-effectifs-cartes" aria-label={b.title}>
               <Tuiles tiles={model.tiles} chapter="effectifs" slug={slug} testid="cx-tiles-effectifs" />
-              {model.alerts.length > 0 && <AlertList alerts={model.alerts} slug={slug} id="cx-effectifs-alertes" />}
+              {alerts.length > 0 && <AlertList alerts={alerts} slug={slug} id="cx-effectifs-alertes" />}
             </section>
           );
         }
@@ -90,6 +93,8 @@ function Block(p: {
   const { b, slug } = p;
   const chartTables = new Set(p.charts.map((c) => c.tableId));
   const others = p.tables.filter((t) => !chartTables.has(t.id));
+  // Plusieurs tableaux dans un même bloc : chacun porte un titre visible (la légende du tableau est réservée aux lecteurs d'écran).
+  const titled = others.length > 1;
   const titleId = `cx-effectifs-${b.id}-titre`;
   return (
     <section className="panel cx-eff-block" id={`cx-effectifs-${b.id}`} aria-labelledby={titleId} data-testid={`cx-effectifs-${b.id}`}>
@@ -110,8 +115,19 @@ function Block(p: {
           </div>
         );
       })}
-      {p.showTable && others.map((t) => <ModelTable key={t.id} table={t} slug={slug} />)}
-      {p.showTable && b.prevu.length > 0 && <PrevuList id={b.id} items={b.prevu} slug={slug} />}
+      {p.showTable &&
+        others.map((t) =>
+          titled ? (
+            <div key={t.id} className="cx-eff-subtable">
+              <h4 className="cx-eff-subtitle" data-testid={`cx-effectifs-titre-${t.id}`}>{t.title}</h4>
+              <ModelTable table={t} slug={slug} />
+            </div>
+          ) : (
+            <ModelTable key={t.id} table={t} slug={slug} />
+          ),
+        )}
+      {/* Un bloc de graphique garde sa mention « Prévu » dans les deux affichages ; un bloc de tableaux, seulement avec les tableaux. */}
+      {(b.graph || p.showTable) && b.prevu.length > 0 && <PrevuList id={b.id} items={b.prevu} slug={slug} />}
       {p.showTable && b.link && (
         <p className="tile-foot cx-eff-link">
           <a href={b.link.href}>

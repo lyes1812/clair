@@ -4,15 +4,16 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { absenceDaysShown, absenteeismShown, etpProratedShown, etpShown, theoreticalShown } from "@/app/e/[slug]/studio-rh/kpi/components";
-import { categoriesSheet, suiviColumns, suiviSheet } from "@/app/e/[slug]/studio-rh/kpi/export/sheets";
+import { CATEGORIES_UNSCOPED_NOTE, categoriesSheet, suiviColumns, suiviSheet } from "@/app/e/[slug]/studio-rh/kpi/export/sheets";
 import { coverageShown, kpiSuiviOf } from "@/app/e/[slug]/studio-rh/kpi/suivi-data";
 import { syntheseOf } from "@/app/e/[slug]/studio-rh/masse-salariale/synthese-data";
 import { monthlySheet } from "@/app/e/[slug]/studio-rh/masse-salariale/export/sheets";
 import { BasesView } from "@/app/e/[slug]/studio-rh/hypotheses/BasesView";
+import { CMP_NONE, ComparisonView } from "@/app/e/[slug]/studio-rh/hypotheses/ComparisonView";
 import { EnveloppesView } from "@/app/e/[slug]/studio-rh/hypotheses/EnveloppesView";
 import { GlobalesView } from "@/app/e/[slug]/studio-rh/hypotheses/GlobalesView";
 import { GridTools } from "@/app/e/[slug]/studio-rh/hypotheses/GridTools";
-import { projectionRows } from "@/app/e/[slug]/studio-rh/hypotheses/resultat-data";
+import { loadComparison, projectionRows } from "@/app/e/[slug]/studio-rh/hypotheses/resultat-data";
 import { constantsSheet, envelopesSheet, projectionSheet, ratesSheet } from "@/app/e/[slug]/studio-rh/hypotheses/export/sheets";
 import { constantsOf, envelopesOf, rateMap, rateScopes } from "@/app/e/[slug]/studio-rh/hypotheses/grids-data";
 import { project } from "@/lib/budget/engine";
@@ -22,9 +23,11 @@ import { formatMonth } from "@/lib/dates";
 import { XLSX_MIME } from "@/lib/export/response";
 import { buildWorkbook, type ExportCell } from "@/lib/export/xlsx";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
+import type { HeadcountResult } from "@/lib/rh/headcount";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 import { KPI_DEFAULTS } from "@/lib/rh-kpi-settings";
 import { kpiDashboard } from "@/lib/rh/kpi/dashboard";
+import type { KpiRow } from "@/lib/rh/kpi/types";
 import { fmtEtp4, fmtHalfDays } from "@/lib/rh/kpi/format";
 import { rollingWindow } from "@/lib/rh/kpi/period";
 import type { KpiContext } from "@/lib/rh/kpi-context";
@@ -118,10 +121,54 @@ describe("KPI RH › Suivi : la feuille « Mois par mois » reprend les lignes e
     "absenteeism-n1": absenteeismShown(r.previous.absenteeism),
   }));
 
-  it("mêmes mois, dans le même ordre, puis la ligne « Période »", () => {
+  it("mêmes mois, dans le même ordre, puis les lignes « Période » (moyennes, puis totaux et taux)", () => {
     expect(s.dash.rows.map((r) => r.month)).toEqual(["2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]);
-    expect(sheet.rows.map((r) => r[0])).toEqual([...s.dash.rows.map((r) => r.month), "Période"]);
+    expect(sheet.rows.map((r) => r[0])).toEqual([...s.dash.rows.map((r) => r.month), "Période — moyennes", "Période — totaux et taux"]);
     expect(sheet.columns.map((c) => c.key)).toEqual(["mois", ...cols, "observations"]);
+  });
+
+  it("lignes « Période » : moyennes au centième (format ETP), totaux au format de leur colonne (cas de référence écrit à la main)", () => {
+    // Fixture : effectif fin de mois 7 chaque mois sauf janvier 2026 (6) → 83 ÷ 12 = 6,9166… personnes ; ETP 5,6 × 3, 5,1 puis
+    // 6,1 × 8 → 70,7 ÷ 12 = 5,8916… (707 000 dix-millièmes ÷ 120 000) ; une entrée (février 2026) et une sortie (décembre 2025) ;
+    // jours théoriques : 217 + 210 + 217 + 186 + 182 + 217 + 210 + 217 + 210 + 217 + 217 + 210 = 2 510 jours.
+    const avg = sheet.rows.at(-2)!;
+    const tot = sheet.rows.at(-1)!;
+    const at = (row: ExportCell[], col: string) => row[cols.indexOf(col as never) + 1];
+    expect(at(avg, "headcount")).toEqual({ exact: 83 / 12 });
+    expect(at(avg, "etp")).toEqual({ exact: 707_000 / 120_000 });
+    expect([at(avg, "entries"), at(avg, "exits"), at(avg, "theoretical")]).toEqual(["", "", ""]);
+    expect([at(tot, "entries"), at(tot, "exits")]).toEqual([1, 1]); // entiers : « 1 », jamais « 1,00 »
+    expect(at(tot, "theoretical")).toEqual({ exact: 2510 });
+    expect([at(tot, "headcount"), at(tot, "etp"), at(tot, "etp-prorated")]).toEqual(["", "", ""]);
+    expect(isNd(at(tot, "absenteeism"))).toBe(true);
+    // Seule la ligne des moyennes prend le format au centième dans les colonnes d'effectif.
+    expect(sheet.rowKinds).toEqual([...Array(12).fill(undefined), "etp", undefined]);
+    expect(String(avg.at(-1))).toBe(`Moyennes des fins de mois (${s.dash.window.label})`);
+    expect(String(tot.at(-1))).toBe(`Totaux des mois (${s.dash.window.label}) ; absentéisme : taux de la période`);
+    // Turnover : moyenne d'effectif puis totaux ; Absentéisme : une seule ligne (aucune moyenne affichée).
+    expect(suiviSheet({ dash: s.dash, data: s.data, rawLimit: null, vue: "turnover" }).rows.slice(12).map((r) => r[0])).toEqual(["Période — moyennes", "Période — totaux"]);
+    const abs = suiviSheet({ dash: s.dash, data: s.data, rawLimit: null, vue: "absenteisme" });
+    expect(abs.rows.slice(12).map((r) => r[0])).toEqual(["Période — totaux et taux"]);
+    expect(abs.rowKinds?.every((k) => k === undefined)).toBe(true);
+  });
+
+  it("réserves que l'écran met en infobulle (déclarés après leur fin, mouvements neutralisés, borne basse) : reprises dans Observations", () => {
+    // Lignes fictives écrites à la main à partir des deux premiers mois de la fixture.
+    const [r0, r1] = s.dash.rows;
+    const hc = r0.headcount as Exclude<HeadcountResult, { kind: "nd" }>;
+    const rows: KpiRow[] = [
+      { ...r0, headcount: { ...hc, kind: "exact", declaredAfterEnd: 2 }, movements: { ...r0.movements, entries: { kind: "exact", value: 1, qualifiers: ["1 mouvement(s) de contrats continus neutralisé(s)"] } } },
+      { ...r1, headcount: { ...hc, kind: "lower_bound", declaredAfterEnd: 1 }, movements: { ...r1.movements, entries: { kind: "lower_bound", value: 2, qualifiers: ["borne basse (PayFit)"] }, exits: { kind: "lower_bound", value: 0, qualifiers: [] } } },
+    ];
+    // Infobulles de l'écran (mêmes fonctions que kpi/page.tsx).
+    expect(showHeadcount(rows[0].headcount, "persons").foot).toBe("2 déclaré(s) après leur fin, non compté(s)");
+    expect(showCount(rows[0].movements.entries).foot).toBe("1 mouvement(s) de contrats continus neutralisé(s)");
+    expect(showHeadcount(rows[1].headcount, "persons").foot).toBe("borne basse (voir la couverture du mois) · 1 déclaré(s) après leur fin, non compté(s)");
+    const sh = suiviSheet({ dash: { ...s.dash, rows }, data: s.data, rawLimit: null, vue: "suivi" });
+    expect(sh.rows[0].at(-1)).toBe("Effectif fin de mois (personnes) : 2 déclaré(s) après leur fin, non compté(s) ; Entrées : 1 mouvement(s) de contrats continus neutralisé(s)");
+    expect(sh.rows[1].at(-1)).toBe("Effectif fin de mois (personnes) : borne basse (au moins) · 1 déclaré(s) après leur fin, non compté(s) ; Entrées : borne basse (PayFit) ; Sorties : borne basse (au moins)");
+    // Les valeurs restent celles de l'écran (7 personnes, 1 et 2 entrées, 0 sortie) : la réserve ne change pas le chiffre.
+    expect([sh.rows[0][2], sh.rows[0][5], sh.rows[1][2], sh.rows[1][5], sh.rows[1][6]]).toEqual([7, 1, 7, 2, 0]);
   });
 
   it("chaque cellule : n.d. de l'écran → n.d. avec la même raison (jamais 0) ; valeur de l'écran → vrai nombre ; borne basse → observation", () => {
@@ -170,9 +217,19 @@ describe("KPI RH › Suivi : la feuille « Mois par mois » reprend les lignes e
       ["cdi", "cdd", "stagiaire"],
       { cdi: "CDI", cdd: "CDD", stagiaire: "Stagiaire" },
     );
-    // Total janvier : 3 + 1 = 4 contrats ; ETP total n.d. (un contrat CDD sans quotité).
-    expect(sh.rows[0]).toEqual(["2026-01", 3, 25_000, 1, { nd: "quotité d'au moins un contrat de la catégorie n.d." }, "", "", 4, { nd: "quotité d'au moins un contrat de la catégorie n.d." }, ""]);
+    // Total janvier : 3 + 1 = 4 contrats ; ETP total n.d. (un contrat CDD sans ETP de fin de mois). La raison ne présume pas de la
+    // cause (quotité absente, contrat non déclaré…) : l'écran n'écrit que « ETP n.d. », la cause est dans le détail de l'ETP.
+    const cat = "ETP fin de mois n.d. pour au moins un contrat de la catégorie (raison : détail de l'ETP fin de mois)";
+    const total = "ETP fin de mois n.d. pour au moins un contrat du mois (raison : détail de l'ETP fin de mois)";
+    expect(sh.rows[0]).toEqual(["2026-01", 3, 25_000, 1, { nd: cat }, "", "", 4, { nd: total }, ""]);
     expect(sh.rows[1].slice(1, -1).every((c) => isNd(c))).toBe(true);
+    expect(sh.note).toBe("Fin de mois ; catégorie sans contrat ce mois-là : cellule vide.");
+  });
+
+  it("par catégorie avec un filtre Établissement ou Nature : la note dit que le tableau couvre toute l'entreprise", () => {
+    const sh = categoriesSheet([{ kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdi: { headcount: 3, etp4: 25_000 } }, qualifiers: [] }], ["cdi"], { cdi: "CDI" }, { scoped: true });
+    expect(sh.note).toBe("Fin de mois ; catégorie sans contrat ce mois-là : cellule vide. Tous établissements et toutes natures comptées : les filtres Établissement et Nature ne s'appliquent pas à ce tableau.");
+    expect(sh.rows).toEqual([["2026-01", 3, 25_000, 3, 25_000, ""]]);
   });
 });
 
@@ -192,7 +249,12 @@ describe("route d'export de KPI RH (Excel)", () => {
     const ws = wb.getWorksheet("Mois par mois")!;
     expect(ws.getCell("A5").value).toBe("Mois");
     expect(ws.getCell("A6").value).toBe("2025-10");
-    expect(ws.getCell("A18").value).toBe("Période");
+    expect(ws.getCell("A18").value).toBe("Période — moyennes");
+    expect(ws.getCell("A19").value).toBe("Période — totaux et taux");
+    // Effectif moyen 83 ÷ 12 au centième (« 6,92 ») ; entrées et sorties de la période en entiers (« 1 »), comme l'écran.
+    expect([ws.getCell("C18").value, ws.getCell("C18").numFmt]).toEqual([83 / 12, "#,##0.00"]);
+    expect([ws.getCell("F19").value, ws.getCell("F19").numFmt, ws.getCell("G19").value, ws.getCell("G19").numFmt]).toEqual([1, "#,##0", 1, "#,##0"]);
+    expect([ws.getCell("H19").value, ws.getCell("H19").numFmt]).toEqual([2510, "#,##0.00"]);
     // Janvier 2026 (ligne 9) : effectif 6 ; septembre 2026 (ligne 17) : ETP 6,1 (61 000 ÷ 10 000), format au centième.
     expect(ws.getCell("C9").value).toBe(6);
     expect(ws.getCell("D17").value).toBe(6.1);
@@ -237,6 +299,25 @@ describe("route d'export de KPI RH (Excel)", () => {
     expect(noteOf(ws.getCell(5 + labels.length, 11))).toBeTruthy();
     const filtres = wb.getWorksheet("Filtres")!;
     expect([filtres.getCell("A5").value, filtres.getCell("B5").value, filtres.getCell("B6").value, filtres.getCell("B7").value]).toEqual(["Rubrique", "ETP", "Catégorie", "Réel PayFit"]);
+  });
+
+  it("Par catégorie : avec un établissement ou une nature retenu, même tableau (toute l'entreprise) et note qui le dit", async () => {
+    mocks.kpiCtx.value = { ...kpiCtx, collab: { ...kpiCtx.collab, establishments: [{ id: "00000000000011", label: "SIRET fictif" }] } };
+    const sheetOf = async (q: string) => (await load(await call("kpi", `${q}format=xlsx`))).getWorksheet("Par catégorie")!;
+    const all = await sheetOf("");
+    expect(String(all.getCell("A4").value)).not.toContain(CATEGORIES_UNSCOPED_NOTE);
+    for (const q of ["etab=00000000000011&", "nature=01&"]) {
+      const ws = await sheetOf(q);
+      expect(String(ws.getCell("A4").value), q).toContain(CATEGORIES_UNSCOPED_NOTE);
+      expect(rowValues(ws, 6, 5), q).toEqual(rowValues(all, 6, 5)); // le filtre ne restreint pas ce tableau
+    }
+  });
+
+  it("paramètre répété dans l'adresse : la première valeur est retenue, comme la page", async () => {
+    const wb = await load(await call("kpi", "mode=civil&annee=2024&annee=2025&format=xlsx"));
+    expect(wb.getWorksheet("Mois par mois")!.getCell("A6").value).toBe("2024-01");
+    const page = kpiSuiviOf(kpiCtx, { mode: "civil", annee: ["2024", "2025"] });
+    expect(page.kind === "ready" && page.w.months[0]).toBe("2024-01");
   });
 
   it("paramètres des KPI illisibles : refus explicite (422), aucun chiffre remplacé", async () => {
@@ -466,6 +547,40 @@ describe("route d'export des Hypothèses budgétaires", () => {
     expect(rowValues(ws, 18, 6).filter((v) => v !== null && v !== "")).toEqual(["Année 2026", 84300, 78000, 6300]);
     const pont = wb.getWorksheet("Pont d'écart")!;
     for (const c of ["B6", "C6", "D6", "E6"]) expect(pont.getCell(c).value).toBe("n.d.");
+  });
+
+  it("lecture d'une autre année (cmp = budget 2026 sur l'année 2027) : l'écran et le classeur n'ont aucune lecture comparée", async () => {
+    // Scénario fictif prolongé jusqu'en mars 2027 (années 2026 et 2027) ; budgets fictifs 2026 et 2027. Sur 2027, le budget 2026
+    // n'est pas une option : aucune lecture n'est retenue.
+    const sc2 = { ...sc, lastMonth: "2027-03" } as ScenarioRow;
+    const b26 = { id: "b2600000-0000-0000-0000-000000000000", name: "Budget fictif 2026", year: "2026", amounts: { "2026-01": 650000 } };
+    const b27 = { id: "b2700000-0000-0000-0000-000000000000", name: "Budget fictif 2027", year: "2027", amounts: { "2027-01": 700000 } };
+    mocks.getScenario.mockResolvedValue({ scenario: sc2, base, baseHash: "h", hypotheses: [] });
+    mocks.budgets.value = [b26, b27];
+    mocks.payCtx.value = payCtx;
+    const proj = project(base, sc2.firstMonth, sc2.lastMonth, [], sc2.conventions);
+    const sp = { scenario: sc2.id, vue: "resultat", sous: "comparaison", annee: "2027", cmp: `budget:${b26.id}` };
+    const c = await loadComparison("demo", "w1", sc2, base, proj, sp);
+    expect([c.year, c.selected, c.compared]).toEqual(["2027", [], []]);
+    // Écran : aucune tuile d'écart, aucun pont, tableau à deux colonnes (Mois, scénario).
+    const html = renderToStaticMarkup(h(ComparisonView, { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: sc2.id, years: c.years, year: c.year, principal: c.principal, compared: c.compared, options: c.options, selected: c.selected, refMonth: base.refMonth }));
+    expect(html).not.toContain('data-testid="cmp-ecarts"');
+    expect(html).not.toContain('data-testid="cmp-bridge"');
+    const thead = html.slice(html.indexOf('data-testid="cmp-table"'), html.indexOf("</thead>", html.indexOf('data-testid="cmp-table"')));
+    expect(thead.match(/<th[ >]/g)).toHaveLength(2);
+    // Lien Excel et liens d'affichage : la valeur sentinelle garde « aucune lecture » dans l'adresse.
+    const href = /href="([^"]+)" data-testid="cmp-export-xlsx"/.exec(html)![1].replaceAll("&amp;", "&");
+    expect(href).toBe(`/e/demo/studio-rh/hypotheses/export?scenario=${sc2.id}&vue=resultat&sous=comparaison&annee=2027&cmp=${CMP_NONE}&format=xlsx`);
+    expect(html).toContain(`annee=2027&amp;cmp=${CMP_NONE}&amp;affichage=graphique`);
+    // Classeur : même état que l'écran, sans feuille d'écarts ni de pont.
+    const wb = await load(await call("hypotheses", href.split("?")[1]));
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Mois par mois", "Filtres", "Sources", "Définitions"]);
+    expect(rowValues(wb.getWorksheet("Mois par mois")!, 5, 5).filter((v) => v !== null)).toEqual(["Mois", "Scénario fictif", "Origine — Scénario fictif", "Observations"]);
+    const filtres = wb.getWorksheet("Filtres")!;
+    const row = Array.from({ length: 10 }, (_, i) => i + 5).find((r) => filtres.getCell(r, 1).value === "Lectures comparées")!;
+    expect(filtres.getCell(row, 2).value).toBe("aucune");
+    // Sans la valeur sentinelle (adresse sans « cmp »), les lectures par défaut de 2027 reviendraient : réel, N-1, budget 2027.
+    expect((await loadComparison("demo", "w1", sc2, base, proj, { ...sp, cmp: undefined })).selected).toEqual(["reel", "n1", `budget:${b27.id}`]);
   });
 
   it("scénario inconnu : 404 ; entrée sans tableau : 404 ; format inconnu : 400", async () => {

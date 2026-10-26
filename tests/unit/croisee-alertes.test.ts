@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { monthsAboveBudget, nearThreshold, selectAlerts, type AlertesInput, type BudgetMonth } from "@/lib/croisee/alertes";
-import type { CroiseeSetting, SeuilEffectif } from "@/lib/croisee-settings";
+import { monthsAboveBudget, printFold, selectAlerts, type AlertesInput, type BudgetMonth } from "@/lib/croisee/alertes";
+import type { AlertSpec } from "@/lib/viz/croisee";
 
 // « À surveiller » (chapitre 01) : cas de référence écrits et calculés à la main, valeurs fictives.
-const sp = (s: string) => s.replace(/[  ]/g, " ");
-const set = <T,>(value: T): CroiseeSetting<T> => ({ kind: "set", value, updatedAt: null, updatedBy: null });
-const ABSENT = { kind: "absent" } as const;
-const HREFS = { parametres: "/e/demo/parametres#croisee", grille: "/e/demo/parametres#masse-salariale", budget: "/e/demo/studio-rh/hypotheses", paieCompta: "/e/demo/croisee?chapitre=paie-compta" };
+const sp = (s: string) => s.replace(/[\u00a0\u202f]/g, " ");
+const HREFS = { parametres: "/e/demo/parametres#croisee", grille: "/e/demo/parametres#masse-salariale", budget: "/e/demo/studio-rh/hypotheses", paieCompta: "/e/demo/croisee?chapitre=paie-compta", donnees: "/e/demo/donnees" };
+const SKIP = { compta: { kind: "skip" }, dsn: { kind: "skip" } } as const;
 
 // Quatre mois : janvier au-dessus du budget, février égal (pas au-dessus : comparaison stricte), mars avec un budget saisi de 0 €
 // (montant saisi : comparé, donc au-dessus), avril sans montant de budget (exclu et nommé).
@@ -25,15 +24,14 @@ const base = (over: Partial<AlertesInput> = {}): AlertesInput => ({
   openMonths: [],
   unclassified: [],
   missing: [],
-  headcount: { kind: "skip" },
-  seuils: ABSENT,
-  marge: ABSENT,
-  checks: { compta: null, dsn: null },
+  seuils: { kind: "skip" },
+  checks: SKIP,
   hrefs: HREFS,
   ...over,
 });
 const ids = (r: ReturnType<typeof selectAlerts>) => r.alerts.map((a) => a.id);
 const textOf = (r: ReturnType<typeof selectAlerts>, id: string) => sp(r.alerts.find((a) => a.id === id)?.text ?? "");
+const NO_BUDGET = { budget: { kind: "na" } } as const;
 
 describe("monthsAboveBudget : comparaison stricte, mois sans budget exclus", () => {
   it("cas de référence : deux mois au-dessus (dont un budget de 0 €), un égal, un sans budget, un réalisé n.d., un en dessous d'un centime", () => {
@@ -77,59 +75,65 @@ describe("selectAlerts : budget saisi", () => {
     expect(textOf(none, "budget-non-saisi")).toBe("Aucun montant de budget saisi « B » pour janv. 2026, févr. 2026.");
     const nd = selectAlerts(base({ budget: { kind: "value", name: "B", gap: { kind: "nd", reason: "réalisé : paie non clôturée à la lecture" }, monthly: [] } }));
     expect(nd.alerts.map((a) => [a.id, a.level, a.text])).toEqual([["budget-nd", "a-completer", "Réalisé : paie non clôturée à la lecture."]]);
-    expect(selectAlerts(base({ budget: { kind: "na" } })).alerts).toEqual([]);
+    expect(selectAlerts(base(NO_BUDGET)).alerts).toEqual([]);
   });
 });
 
 describe("selectAlerts : atterrissage", () => {
   it("au-dessus du budget annuel : défavorable ; comparaison sur les mois dotés d'un budget, mois exclus nommés", () => {
-    const full = selectAlerts(base({ budget: { kind: "na" }, landing: { kind: "value", total: 120_000_000, gap: { kind: "value", budget: 115_000_000, delta: 5_000_000, months: 12, excluded: [] } } }));
+    const full = selectAlerts(base({ ...NO_BUDGET, landing: { kind: "value", total: 120_000_000, gap: { kind: "value", landing: 120_000_000, budget: 115_000_000, delta: 5_000_000, months: 12, excluded: [] } } }));
     expect(ids(full)).toEqual(["atterrissage-depasse"]);
     expect(textOf(full, "atterrissage-depasse")).toBe("Atterrissage 2026 : 1 200 000,00 € pour un budget saisi de 1 150 000,00 € : écart +50 000,00 €.");
-    const part = selectAlerts(base({ budget: { kind: "na" }, landing: { kind: "value", total: 120_000_000, gap: { kind: "value", budget: 105_000_000, delta: 4_000_000, months: 11, excluded: ["2026-12"] } } }));
+    const part = selectAlerts(base({ ...NO_BUDGET, landing: { kind: "value", total: 120_000_000, gap: { kind: "value", landing: 109_000_000, budget: 105_000_000, delta: 4_000_000, months: 11, excluded: ["2026-12"] } } }));
     expect(textOf(part, "atterrissage-depasse")).toBe("Atterrissage et budget saisi comparés sur 11 mois (1 mois sans montant de budget exclu : déc. 2026) : écart +40 000,00 €.");
   });
   it("écart nul ou négatif : aucune alerte ; atterrissage n.d. : « Atterrissage non calculé » avec la raison", () => {
-    expect(ids(selectAlerts(base({ budget: { kind: "na" }, landing: { kind: "value", total: 100, gap: { kind: "value", budget: 100, delta: 0, months: 12, excluded: [] } } })))).toEqual([]);
-    expect(ids(selectAlerts(base({ budget: { kind: "na" }, landing: { kind: "value", total: 90, gap: null } })))).toEqual([]);
-    const nd = selectAlerts(base({ budget: { kind: "na" }, landing: { kind: "nd", reason: "2026-12 : hors de l'horizon du scénario" } }));
+    expect(ids(selectAlerts(base({ ...NO_BUDGET, landing: { kind: "value", total: 100, gap: { kind: "value", landing: 100, budget: 100, delta: 0, months: 12, excluded: [] } } })))).toEqual([]);
+    expect(ids(selectAlerts(base({ ...NO_BUDGET, landing: { kind: "value", total: 90, gap: null } })))).toEqual([]);
+    const nd = selectAlerts(base({ ...NO_BUDGET, landing: { kind: "nd", reason: "2026-12 : hors de l'horizon du scénario" } }));
     expect(nd.alerts.map((a) => [a.id, a.level, a.text])).toEqual([["atterrissage-nd", "a-completer", "2026-12 : hors de l'horizon du scénario."]]);
   });
 });
 
-describe("selectAlerts : seuils d'effectif (paramètres, sans valeur par défaut)", () => {
-  // Effectif moyen 97/2 = 48,5 ; seuils 11 et 50 : le prochain seuil strictement supérieur est 50, écart 1,5.
-  const avg = { kind: "value" as const, average: { num: 97, den: 2 } };
-  const SEUILS: SeuilEffectif[] = [{ libelle: "Seuil A", valeur: 50 }, { libelle: "Seuil B", valeur: 11 }];
-
-  it("nearThreshold : écart ≤ marge (inclus), seuil strictement au-dessus, aucun arrondi", () => {
-    expect(nearThreshold({ num: 97, den: 2 }, SEUILS, 2)).toEqual({ seuil: { libelle: "Seuil A", valeur: 50 }, gap: { num: 3, den: 2 } });
-    expect(nearThreshold({ num: 97, den: 2 }, SEUILS, 1)).toBeNull(); // 1,5 > 1
-    expect(nearThreshold({ num: 49, den: 1 }, SEUILS, 1)).toEqual({ seuil: { libelle: "Seuil A", valeur: 50 }, gap: { num: 1, den: 1 } }); // 1 ≤ 1
-    expect(nearThreshold({ num: 50, den: 1 }, SEUILS, 5)).toBeNull(); // seuil atteint, aucun seuil au-dessus
+describe("selectAlerts : seuils d'effectif (repères calculés par le chapitre 02, aucun seuil ici)", () => {
+  const repere: AlertSpec = { id: "effectifs-seuil-n1", level: "repere", label: "Effectif proche d'un seuil", text: "Effectif moyen 2025 : 48,50 pour le seuil « Seuil A » (50) ; marge d'alerte : 2.", href: "/x?chapitre=effectifs#cx-effectifs-seuils", linkLabel: "Effectifs & mouvements" };
+  it("réglage absent ou illisible : une mention avec le lien vers Paramètres, aucune alerte", () => {
+    const r = selectAlerts(base({ ...NO_BUDGET, seuils: { kind: "mention", id: "seuils-effectif", text: "Seuils d'effectif non définis (Paramètres)", settings: true } }));
+    expect(r.alerts).toEqual([]);
+    expect(r.mentions).toEqual([{ id: "seuils-effectif", text: "Seuils d'effectif non définis (Paramètres)", href: HREFS.parametres, linkLabel: "Paramètres" }]);
   });
-
-  it("seuils et marge définis : repère « Effectif proche d'un seuil »", () => {
-    const r = selectAlerts(base({ budget: { kind: "na" }, headcount: avg, seuils: set(SEUILS), marge: set(2) }));
+  it("effectif non filtrable par service : une mention sans lien", () => {
+    const r = selectAlerts(base({ ...NO_BUDGET, seuils: { kind: "mention", id: "seuils-effectif", text: "Seuils d'effectif : effectif moyen non filtrable par service.", settings: false } }));
+    expect(r.mentions).toEqual([{ id: "seuils-effectif", text: "Seuils d'effectif : effectif moyen non filtrable par service." }]);
+  });
+  it("repères reçus tels quels ; effectif moyen n.d. : un point « à compléter » qui nomme chaque effectif", () => {
+    const r = selectAlerts(base({ ...NO_BUDGET, seuils: { kind: "value", alerts: [repere], nd: [{ label: "Effectif moyen 2026 (janvier → mars 2026)", reason: "mars 2026 : mois non clos." }] } }));
+    expect(r.alerts).toEqual([{ id: "effectif-nd", level: "a-completer", label: "Effectif moyen non calculé", text: "Effectif moyen 2026 (janvier → mars 2026) : mars 2026 : mois non clos." }, repere]);
     expect(r.mentions).toEqual([]);
-    expect(r.alerts.map((a) => [a.id, a.level])).toEqual([["seuil-effectif", "repere"]]);
-    expect(textOf(r, "seuil-effectif")).toBe("Effectif moyen de la période : 48,50 ; seuil « Seuil A » : 50 salariés ; écart 1,50, marge 2.");
   });
+});
 
-  it("seuils absents, liste vide, illisibles, ou marge absente : aucune alerte, une mention et le lien vers Paramètres", () => {
-    const absent = selectAlerts(base({ budget: { kind: "na" }, headcount: avg }));
-    expect(absent.alerts).toEqual([]);
-    expect(absent.mentions).toEqual([{ id: "seuils-effectif", text: "Seuils d'effectif non définis (Paramètres)", href: HREFS.parametres, linkLabel: "Paramètres" }]);
-    expect(selectAlerts(base({ budget: { kind: "na" }, headcount: avg, seuils: set([]), marge: set(2) })).mentions[0].text).toBe("Seuils d'effectif non définis (Paramètres)");
-    expect(selectAlerts(base({ budget: { kind: "na" }, headcount: avg, seuils: { kind: "invalid", raw: "x" }, marge: set(2) })).mentions[0].text).toBe("Seuils d'effectif illisibles : à ré-enregistrer (Paramètres)");
-    const noMarge = selectAlerts(base({ budget: { kind: "na" }, headcount: avg, seuils: set(SEUILS) }));
-    expect(noMarge.alerts).toEqual([]);
-    expect(noMarge.mentions.map((m) => m.text)).toEqual(["Marge d'alerte des seuils d'effectif non définie (Paramètres)"]);
+describe("selectAlerts : comptabilité et DSN de contrôle", () => {
+  it("comptabilité non lue : « à compléter » vers Données ; rapprochement n.d. : la raison, mois en clair", () => {
+    const absent = selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "absent", reason: "aucune source comptable retenue" }, dsn: { kind: "skip" } } }));
+    expect(absent.alerts).toEqual([{ id: "source-compta", level: "a-completer", label: "Comptabilité non lue", text: "Aucune source comptable retenue.", href: HREFS.donnees, linkLabel: "Données" }]);
+    const nd = selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "nd", reason: "comptabilité non lue pour 2026-03" }, dsn: { kind: "skip" } } }));
+    expect(nd.alerts.map((a) => [a.id, a.label, a.text, a.href])).toEqual([["source-compta", "Rapprochement avec la comptabilité non calculé", "Comptabilité non lue pour mars 2026.", HREFS.paieCompta]]);
   });
-
-  it("effectif moyen n.d. avec seuils définis : « à compléter »", () => {
-    const r = selectAlerts(base({ budget: { kind: "na" }, headcount: { kind: "nd", reason: "mois en borne basse" }, seuils: set(SEUILS), marge: set(2) }));
-    expect(r.alerts.map((a) => [a.id, a.level, a.text])).toEqual([["effectif-nd", "a-completer", "Mois en borne basse."]]);
+  it("journal ≠ comptabilité : repère seulement si l'écart est non nul (au centime)", () => {
+    const one = selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "value", ecart: 1 }, dsn: { kind: "skip" } } }));
+    expect(ids(one)).toEqual(["journal-compta"]);
+    expect(textOf(one, "journal-compta")).toBe("Écart sur les comptes 63 et 64 de la période : +0,01 €.");
+    expect(ids(selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "value", ecart: 0 }, dsn: { kind: "skip" } } })))).toEqual([]);
+  });
+  it("DSN : aucune déposée, mois sans DSN exploitable (« à compléter ») ; écart avec mois de DSN incomplète nommés (repère)", () => {
+    const none = selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "skip" }, dsn: { kind: "nd", reason: "2026-01 : aucune DSN retenue", months: ["2026-01"], none: true } } }));
+    expect(none.alerts.map((a) => [a.id, a.level, a.label, a.text])).toEqual([["source-dsn", "a-completer", "DSN de contrôle non lue", "Aucune DSN déposée dans Données : le brut du journal de paie n'est pas contrôlé."]]);
+    const two = selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "skip" }, dsn: { kind: "nd", reason: "2026-01 : aucune DSN retenue ; 2026-02 : déclaration bloquée", months: ["2026-01", "2026-02"], none: false } } }));
+    expect(two.alerts.map((a) => [a.label, a.text])).toEqual([["DSN de contrôle non déposée pour un mois", "2 mois de la période sans DSN exploitable : janv. 2026 : aucune DSN retenue ; févr. 2026 : déclaration bloquée."]]);
+    const gap = selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "skip" }, dsn: { kind: "value", delta: -1_234, incomplete: ["2026-03"] } } }));
+    expect(textOf(gap, "journal-dsn")).toBe("Brut du journal moins brut déclaré (DSN, type 001) sur la période : −12,34 €. DSN incomplète : mars 2026.");
+    expect(ids(selectAlerts(base({ ...NO_BUDGET, checks: { compta: { kind: "skip" }, dsn: { kind: "value", delta: 0, incomplete: ["2026-03"] } } })))).toEqual([]);
   });
 });
 
@@ -138,27 +142,35 @@ describe("selectAlerts : ordre par niveau, aucun plafond", () => {
     const r = selectAlerts(
       base({
         landing: { kind: "nd", reason: "projection refusée (hypothèses en erreur)" },
-        openMonths: ["2026-06"],
+        openMonths: ["2026-06", "2025-06"],
         unclassified: ["6459", "6414", "6459"],
         missing: [{ id: "journal", label: "Journal de paie non lu", reason: "journal de paie indisponible", href: "/e/demo/donnees", linkLabel: "Données" }],
-        headcount: { kind: "value", average: { num: 97, den: 2 } },
-        seuils: set([{ libelle: "Seuil A", valeur: 50 }]),
-        marge: set(2),
-        checks: { compta: 0, dsn: -1_234 },
+        seuils: { kind: "value", alerts: [{ id: "effectifs-seuil-n", level: "repere", label: "Effectif proche d'un seuil", text: "…" }], nd: [] },
+        checks: { compta: { kind: "absent", reason: "aucune source comptable retenue" }, dsn: { kind: "value", delta: -1_234, incomplete: [] } },
       }),
     );
-    expect(ids(r)).toEqual(["budget-depasse", "atterrissage-nd", "source-journal", "comptes-non-classes", "budget-mois", "seuil-effectif", "mois-non-clos", "journal-dsn"]);
-    expect(r.alerts.map((a) => a.level)).toEqual(["defavorable", "a-completer", "a-completer", "a-completer", "repere", "repere", "repere", "repere"]);
+    expect(ids(r)).toEqual(["budget-depasse", "atterrissage-nd", "source-journal", "source-compta", "comptes-non-classes", "budget-mois", "effectifs-seuil-n", "mois-non-clos", "journal-dsn"]);
+    expect(r.alerts.map((a) => a.level)).toEqual(["defavorable", "a-completer", "a-completer", "a-completer", "a-completer", "repere", "repere", "repere", "repere"]);
     expect(textOf(r, "comptes-non-classes")).toBe("2 comptes de charges de personnel sans rubrique, hors masse chargée : 6414, 6459.");
     expect(r.alerts.find((a) => a.id === "comptes-non-classes")?.href).toBe(HREFS.grille);
-    expect(textOf(r, "mois-non-clos")).toBe("Paie non clôturée à la lecture : juin 2026 (montants provisoires).");
+    expect(r.alerts.find((a) => a.id === "mois-non-clos")?.label).toBe("Mois non clos (paie ou référentiel RH)");
+    expect(textOf(r, "mois-non-clos")).toBe("Non clôturés à la lecture : juin 2025, juin 2026 ; montants provisoires.");
     expect(textOf(r, "journal-dsn")).toBe("Brut du journal moins brut déclaré (DSN, type 001) sur la période : −12,34 €.");
     expect(r.alerts.find((a) => a.id === "source-journal")).toMatchObject({ text: "Journal de paie indisponible.", href: "/e/demo/donnees", linkLabel: "Données" });
   });
+});
 
-  it("journal et comptabilité : repère seulement si l'écart est non nul (au centime)", () => {
-    expect(ids(selectAlerts(base({ budget: { kind: "na" }, checks: { compta: 1, dsn: 0 } })))).toEqual(["journal-compta"]);
-    expect(textOf(selectAlerts(base({ budget: { kind: "na" }, checks: { compta: 1, dsn: 0 } })), "journal-compta")).toBe("Écart sur les comptes 63 et 64 de la période : +0,01 €.");
-    expect(ids(selectAlerts(base({ budget: { kind: "na" }, checks: { compta: 0, dsn: null } })))).toEqual([]);
+describe("printFold : « Synthèse en PDF · 1 page », repères regroupés au-delà du plafond", () => {
+  const a = (id: string, level: AlertSpec["level"]): AlertSpec => ({ id, level, label: id, text: id });
+  it("1 défavorable, 2 à compléter, 5 repères, plafond 3 : 6 imprimés, 2 repères regroupés ; aucun défavorable ni « à compléter » regroupé", () => {
+    const list = [a("r1", "repere"), a("d1", "defavorable"), a("r2", "repere"), a("c1", "a-completer"), a("r3", "repere"), a("c2", "a-completer"), a("r4", "repere"), a("r5", "repere")];
+    const f = printFold(list, 3);
+    expect(f.folded).toBe(2);
+    expect(f.shown.map((x) => x.id)).toEqual(["d1", "c1", "c2", "r1", "r2", "r3"]);
+  });
+  it("trois repères ou moins : rien n'est regroupé ; cinq défavorables : tous imprimés", () => {
+    expect(printFold([a("r1", "repere"), a("r2", "repere"), a("r3", "repere")], 3).folded).toBe(0);
+    const bad = printFold([1, 2, 3, 4, 5].map((i) => a(`d${i}`, "defavorable")), 3);
+    expect(bad).toEqual({ shown: [1, 2, 3, 4, 5].map((i) => a(`d${i}`, "defavorable")), folded: 0 });
   });
 });

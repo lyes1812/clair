@@ -4,7 +4,7 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { MoneyText } from "@/components/Money";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
-import { buildBudget, cascadeOf, loadBudgetInput, type BlocksModel, type CxBlock, type CxPrevu } from "@/lib/viz/croisee-budget";
+import { budgetModel, cascadeOf, type BlocksModel, type CxBlock, type CxPrevu } from "@/lib/viz/croisee-budget";
 import { ChartGuard, GraphFoot, NdLines, TrendLegend, type Affichage } from "../components";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
@@ -12,10 +12,10 @@ import { Tuiles } from "./atomes/Tuile";
 import type { CroiseeContext } from "./context";
 
 // Chapitre 06 · Budget & prévisions : réalisé, budget saisi et écart sur la période ; douze mois du scénario retenu face au réalisé et
-// au budget (comme Hypothèses › Résultat › Comparaison) ; atterrissage et atterrissage retraité ; écart lié aux personnes observées ;
-// blocs « Prévu ». Aucun calcul ici : le modèle vient de buildBudget, comme les exports.
+// au budget (comme Hypothèses › Résultat › Comparaison) ; atterrissage et atterrissage retraité ; écart lié aux contrats observés ;
+// blocs « Prévu ». Aucun calcul ici : le modèle vient de budgetModel, calculé une fois par requête et repris tel quel par les exports.
 export default async function ChBudget({ ctx }: { ctx: CroiseeContext }) {
-  const model = buildBudget(await loadBudgetInput(ctx));
+  const model = await budgetModel(ctx);
   return <BlocksChapter model={model} slug={ctx.slug} affichage={ctx.affichage} tableauHref={ctx.href({ affichage: "tableau" })} />;
 }
 

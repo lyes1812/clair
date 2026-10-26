@@ -17,14 +17,18 @@ import {
   BUDGET_CHART_IDS,
   BUDGET_CX_TERMS,
   BUDGET_TABLE_IDS,
+  budgetModel,
   buildBudget,
   buildEffets,
   cascadeOf,
   EFFETS_CHART_IDS,
   EFFETS_CX_TERMS,
   EFFETS_TABLE_IDS,
+  effetsModel,
   loadBudgetInput,
   loadEffetsInput,
+  paidSizes,
+  publicProjectionReasons,
   zoomReason,
   type BudgetChapterInput,
   type EffetsInput,
@@ -70,7 +74,9 @@ const ret: Retraite = {
   total: 230_000,
   retraite: 13_000_000,
 };
-const HREFS = { hypotheses: "/e/demo/studio-rh/hypotheses", comparaison: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=resultat&sous=comparaison&annee=2026", atterrissage: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=resultat&sous=atterrissage", postes: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=postes", embauches: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=embauches" };
+const HREFS = { hypotheses: "/e/demo/studio-rh/hypotheses", comparaison: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=resultat&sous=comparaison&annee=2026", atterrissage: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=resultat&sous=atterrissage", postes: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=postes", embauches: "/e/demo/studio-rh/hypotheses?scenario=s1&vue=embauches", parametres: "/e/demo/parametres#croisee" };
+// Seuil de confidentialité 1 : aucun groupe n'est sous le seuil (cas de base) ; les cas de masquage sont plus bas.
+const SEUIL_1 = { kind: "set" as const, value: 1 };
 
 function budgetInput(over: Partial<Extract<BudgetChapterInput, { kind: "value" }>> = {}): BudgetChapterInput {
   return {
@@ -92,6 +98,8 @@ function budgetInput(over: Partial<Extract<BudgetChapterInput, { kind: "value" }
       outside: { prev: 1_000, cur: 2_500, delta: 1_500 },
       total: { count: 5, prev: 351_000, cur: 407_500, delta: 56_500 },
     },
+    confidentialite: SEUIL_1,
+    serviceSizes: null,
     ...over,
   };
 }
@@ -168,20 +176,34 @@ describe("buildBudget — douze mois : scénario, réalisé, budget (comme Hypot
 describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", () => {
   const m = buildBudget(budgetInput());
 
-  it("atterrissage 132 300,00 € ; budget de l'année hors février : 10 200 + 10 500 + 9 × 11 000 = 119 700,00 €", () => {
+  it("atterrissage 132 300,00 € (douze mois) ; budget de l'année hors février : 10 200 + 10 500 + 9 × 11 000 = 119 700,00 € (11 mois) ; atterrissage des mêmes mois : 132 300 − 10 500 = 121 800,00 €", () => {
     const t = tile(m, "atterrissage");
     expect(sp(t.value.text)).toBe("132 300,00 €");
-    expect(t.variations![0].label).toBe("Budget saisi « Budget test »");
-    expect(sp(t.variations![0].text!)).toBe("119 700,00 €");
-    expect(sp(t.note!)).toBe("Réel janv.–mars : 31 500,00 € · Projeté avr.–déc. : 100 800,00 €");
+    expect(t.sub).toBe("Scénario « Scénario test » · douze mois");
+    expect(t.variations!.map((v) => [v.label, sp(v.text!)])).toEqual([
+      ["Budget saisi « Budget test » (11 mois)", "119 700,00 €"],
+      ["Atterrissage 2026, mois avec budget (11 mois)", "121 800,00 €"],
+    ]);
+    expect(sp(t.note!)).toBe("Réel janv.–mars : 31 500,00 € · Projeté avr.–déc. : 100 800,00 € ; sans montant de budget, exclus : févr. 2026");
   });
 
-  it("écart annuel sur les onze mois avec budget : (132 300 − 10 500) − 119 700 = +2 100,00 € ; 2 100 ÷ 119 700 = +1,75 %", () => {
+  it("écart annuel sur les onze mois avec budget : 121 800 − 119 700 = +2 100,00 € ; 2 100 ÷ 119 700 = +1,75 % (valeur − référence = écart, comme la carte d'atterrissage)", () => {
     const t = tile(m, "ecart-annuel");
     expect(sp(t.value.text)).toBe("+2 100,00 €");
     expect(t.valueTone).toBe("bad");
+    expect(t.sub).toBe("Atterrissage − budget saisi « Budget test », 11 mois comparés");
     expect(sp(t.variations![0].text!)).toBe("+1,75 % · défavorable");
-    expect(t.note).toBe("Comparé sur 11 mois ; sans montant de budget, exclus : févr. 2026");
+    expect(t.note).toBe("Sans montant de budget, exclus : févr. 2026");
+  });
+
+  it("budget saisi pour les douze mois : libellés sans nombre de mois, une seule ligne d'atterrissage face au budget", () => {
+    const full = budgetSeries("budget-b1", "Budget saisi « Budget test »", "2026", Object.fromEntries(Y26.map((x) => [x, 1_100_000])));
+    const f = buildBudget(budgetInput({ budget: { kind: "value", name: "Budget test", series: full } }));
+    const t = tile(f, "atterrissage");
+    expect(t.variations!.map((v) => v.label)).toEqual(["Budget saisi « Budget test »"]);
+    expect(sp(t.note!)).toBe("Réel janv.–mars : 31 500,00 € · Projeté avr.–déc. : 100 800,00 €");
+    // 132 300 − 12 × 11 000 = +300,00 €.
+    expect(table(f, BUDGET_TABLE_IDS.annuel).rows.map((r) => r.cells)).toEqual([["Atterrissage 2026", "Douze mois", 13_230_000, "Budget saisi « Budget test »", 13_200_000, 30_000]]);
   });
 
   it("retraité : 132 300 − 800 − 1 500 = 130 000,00 €", () => {
@@ -196,8 +218,29 @@ describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", 
     expect(Object.is(t.rows[3].cells[1], 0)).toBe(true);
     expect(Object.is(t.rows[4].cells[1], 0)).toBe(true);
     expect(z.charts.some((c) => c.id === BUDGET_CHART_IDS.retraite)).toBe(false);
-    expect(z.blocks.find((b) => b.id === "atterrissage")!.notes).toEqual(["Aucun élément non récurrent saisi ni prévu."]);
-    expect(z.tables.some((x) => x.id === BUDGET_TABLE_IDS.nonRecurrents)).toBe(false);
+    // La raison écrite est celle de la cascade (retraiteWaterfall) : le graphique ne disparaît jamais sans phrase.
+    expect(z.blocks.find((b) => b.id === "atterrissage")!.notes).toEqual(["Aucun élément non récurrent : l'atterrissage retraité 2026 égale l'atterrissage."]);
+  });
+
+  it("des lignes non récurrentes à 0 : même phrase (cascade « vide »), pas de cascade du retraité", () => {
+    const z = buildBudget(budgetInput({ scenario: { kind: "value", name: "Scénario test", refMonth: "2026-03", series: scen, landing: land, retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [{ label: "Saisie annulée", realised: 0, projected: 0 }], realised: 0, projected: 0, total: 0, retraite: 13_230_000 } } }));
+    expect(z.charts.some((c) => c.id === BUDGET_CHART_IDS.retraite)).toBe(false);
+    expect(z.blocks.find((b) => b.id === "atterrissage")!.notes).toEqual(["Aucun élément non récurrent : l'atterrissage retraité 2026 égale l'atterrissage."]);
+  });
+
+  it("atterrissage entièrement réel : la cascade n'est pas tracée et la phrase le dit", () => {
+    const real: Landing = { kind: "value", year: "2026", actual: 13_230_000, prior: 0, projected: 0, actualMonths: Y26, priorMonths: [], projectedMonths: [], total: 13_230_000 };
+    const z = buildBudget(budgetInput({ scenario: { kind: "value", name: "Scénario test", refMonth: "2026-12", series: scen, landing: real, retraite: ret } }));
+    expect(z.charts.some((c) => c.id === BUDGET_CHART_IDS.atterrissage)).toBe(false);
+    expect(z.blocks.find((b) => b.id === "atterrissage")!.notes).toEqual(["L'atterrissage 2026 est entièrement réel : une cascade n'apporterait rien de plus que le total."]);
+  });
+
+  it("atterrissage n.d. : les deux cascades le sont pour la même raison, une seule mention n.d. du bloc", () => {
+    const why = "2026-11 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)";
+    const z = buildBudget(budgetInput({ scenario: { kind: "value", name: "Scénario test", refMonth: "2026-03", series: scen, landing: { kind: "nd", year: "2026", reason: why }, retraite: { kind: "nd", year: "2026", reason: why } } }));
+    expect(z.charts.filter((c) => c.kind === "cascade")).toHaveLength(0);
+    expect(z.blocks.find((b) => b.id === "atterrissage")!.nd).toEqual([{ label: "Cascades de l'atterrissage et du retraité", reason: "novembre 2026 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)" }]);
+    expect(tile(z, "atterrissage").value.reason).toBe("novembre 2026 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)");
   });
 
   it("tableau exact des cascades : composantes, éléments retirés (négatifs), retraité en pied ; la somme se vérifie", () => {
@@ -210,12 +253,14 @@ describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", 
       ["Éléments non récurrents prévus (hypothèses)", -150_000],
     ]);
     expect(t.foot?.cells).toEqual(["Atterrissage retraité 2026", 13_000_000]);
-    const nr = table(m, BUDGET_TABLE_IDS.nonRecurrents);
-    expect(nr.rows.map((r) => r.cells)).toEqual([
-      ["Coûts de sortie (hypothèses de départ)", 0, 150_000, 150_000],
-      ["Prime exceptionnelle", 80_000, 0, 80_000],
-    ]);
-    expect(nr.foot?.cells).toEqual(["Total retiré de l'atterrissage", 80_000, 150_000, 230_000]);
+    // Libellés saisis des éléments non récurrents (texte libre, motifs de départ) : non repris, le détail reste dans Hypothèses.
+    expect(JSON.stringify(m)).not.toContain("Prime exceptionnelle");
+    expect(m.blocks.find((b) => b.id === "atterrissage")!.links).toEqual([{ href: HREFS.atterrissage, label: "Atterrissage et éléments non récurrents dans Hypothèses budgétaires" }]);
+  });
+
+  it("Hypothèses › Atterrissage montre une autre année que la période : pas de lien", () => {
+    const z = buildBudget(budgetInput({ hrefs: { ...HREFS, atterrissage: null } }));
+    expect(z.blocks.find((b) => b.id === "atterrissage")!.links).toEqual([]);
   });
 
   it("cascades : mêmes montants que le tableau, réel puis projection, puis retraité", () => {
@@ -226,25 +271,29 @@ describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", 
     for (const id of [BUDGET_CHART_IDS.atterrissage, BUDGET_CHART_IDS.retraite]) expect(m.charts.find((x) => x.id === id)!.tableId).toBe(BUDGET_TABLE_IDS.atterrissage);
   });
 
-  it("tableau atterrissage face au budget : mêmes mois que le budget, écart en pied", () => {
+  it("tableau atterrissage face au budget : douze mois sur leur ligne ; mêmes mois que le budget : valeur − référence = écart", () => {
     const t = table(m, BUDGET_TABLE_IDS.annuel);
+    expect(t.columns.map((c) => c.header)).toEqual(["Lecture", "Mois comparés", "Valeur", "Comparé à", "Référence", "Écart"]);
     expect(t.rows.map((r) => r.cells)).toEqual([
-      ["Atterrissage 2026", "11 mois avec budget", 12_180_000, ""],
-      ["Budget saisi « Budget test »", "11 mois avec budget", 11_970_000, ""],
+      ["Atterrissage 2026", "Douze mois", 13_230_000, "", "", ""],
+      // 121 800,00 − 119 700,00 = +2 100,00 €.
+      ["Atterrissage 2026, mois avec budget", "11 mois avec budget (sans montant de budget, exclus : févr. 2026)", 12_180_000, "Budget saisi « Budget test »", 11_970_000, 210_000],
     ]);
-    expect(t.foot?.cells).toEqual(["Écart atterrissage − budget", "11 mois avec budget", "", 210_000]);
+    expect(t.foot).toBeUndefined();
   });
 });
 
-describe("buildBudget — personnes observées et blocs Prévu", () => {
+describe("buildBudget — contrats observés et blocs Prévu", () => {
   const m = buildBudget(budgetInput());
 
-  it("tableau : trois groupes, lignes sans contrat, total ; colonne N vide (sans objet) pour « seulement N-1 »", () => {
+  it("tableau : trois groupes de contrats, lignes sans contrat, total ; colonne N vide (sans objet) pour « seulement N-1 »", () => {
     const t = table(m, BUDGET_TABLE_IDS.personnes);
+    expect(t.title).toBe("Écart de masse lié aux contrats observés, janvier → mars 2026 face à janvier → mars 2025");
+    expect(t.columns.map((c) => c.header)).toEqual(["Groupe", "Contrats", "Coût N-1 (janvier → mars 2025)", "Coût N (janvier → mars 2026)", "Contribution à l'écart"]);
     expect(t.rows.map((r) => r.cells)).toEqual([
-      ["Observées seulement en N-1", 1, 100_000, "", -100_000],
-      ["Observées seulement en N", 2, "", 150_000, 150_000],
-      ["Observées dans les deux périodes", 2, 250_000, 255_000, 5_000],
+      ["Contrats observés seulement en N-1", 1, 100_000, "", -100_000],
+      ["Contrats observés seulement en N", 2, "", 150_000, 150_000],
+      ["Contrats observés dans les deux périodes", 2, 250_000, 255_000, 5_000],
       ["Lignes du journal sans contrat", "", 1_000, 2_500, 1_500],
     ]);
     expect(t.foot?.cells).toEqual(["Total", 5, 351_000, 407_500, 56_500]);
@@ -257,6 +306,49 @@ describe("buildBudget — personnes observées et blocs Prévu", () => {
       expect(p.reason.length).toBeGreaterThan(10);
       expect(p.links[0].href).toMatch(/^\/e\/demo\/studio-rh\/hypotheses/);
     }
+  });
+});
+
+describe("buildBudget — seuil de confidentialité", () => {
+  const ND2 = { nd: "non affiché (seuil de confidentialité : 2 personnes)" };
+
+  it("seuil non défini : bloc des contrats observés n.d. avec la raison et le lien vers les Paramètres ; le reste du chapitre est affiché", () => {
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" } }));
+    expect(m.blocks.find((b) => b.id === "personnes")!.nd).toEqual([{ label: "Contrats observés", reason: "seuil de confidentialité non défini (Paramètres)", action: { href: "/e/demo/parametres#croisee", label: "Paramètres" } }]);
+    expect(m.tables.some((t) => t.id === BUDGET_TABLE_IDS.personnes)).toBe(false);
+    expect(sp(tile(m, "realise").value.text)).toBe("31 500,00 €");
+  });
+
+  it("seuil 2 : « seulement N-1 » (1 contrat) masqué ; masquage secondaire de « seulement N » et des lignes sans contrat ; total inchangé", () => {
+    const t = table(buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 } })), BUDGET_TABLE_IDS.personnes);
+    expect(t.rows.map((r) => r.cells)).toEqual([
+      ["Contrats observés seulement en N-1", ND2, ND2, "", ND2],
+      ["Contrats observés seulement en N", ND2, "", ND2, ND2],
+      ["Contrats observés dans les deux périodes", 2, 250_000, 255_000, 5_000],
+      ["Lignes du journal sans contrat", "", ND2, ND2, ND2],
+    ]);
+    // Le total n'est jamais masqué ; aucune valeur masquée ne se retrouve par différence d'une colonne (au moins deux n.d. par colonne).
+    expect(t.foot?.cells).toEqual(["Total", 5, 351_000, 407_500, 56_500]);
+    for (const j of [1, 2, 3, 4]) expect(t.rows.filter((r) => typeof r.cells[j] === "object").length, `colonne ${j}`).not.toBe(1);
+  });
+
+  it("filtre de service : un mois de 1 contrat masqué, le plus petit autre mois aussi ; total de la période affiché", () => {
+    // Service : 3 contrats en janvier, 1 en février, 3 en mars, 4 distincts sur la période ; seuil 2. Février masqué ; secondaire :
+    // janvier (10 000,00 €, plus petit que mars 11 000,00 €). Réalisé de la période : 31 500,00 €.
+    const m = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [3, 1, 3], period: 4 } }));
+    const t = table(m, BUDGET_TABLE_IDS.mensuel);
+    expect(t.rows.map((r) => r.cells[1])).toEqual([ND2, ND2, 1_100_000]);
+    expect(t.foot?.cells[1]).toBe(3_150_000);
+    expect(sp(tile(m, "realise").value.text)).toBe("31 500,00 €");
+    // Service de 1 contrat sur la période : carte et tableau n.d.
+    const one = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, confidentialite: { kind: "set", value: 2 }, serviceSizes: { months: [1, 1, 1], period: 1 } }));
+    expect(tile(one, "realise").value.reason).toBe("non affiché : service de moins de 2 contrats rémunérés (seuil de confidentialité)");
+    expect(table(one, BUDGET_TABLE_IDS.mensuel).foot?.cells[1]).toEqual({ nd: "non affiché : service de moins de 2 contrats rémunérés (seuil de confidentialité)" });
+  });
+
+  it("sans filtre : le réalisé de toute l'entreprise n'est jamais masqué", () => {
+    const m = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 50 } }));
+    expect(table(m, BUDGET_TABLE_IDS.mensuel).rows.map((r) => r.cells[1])).toEqual([1_000_000, 1_050_000, 1_100_000]);
   });
 });
 
@@ -289,13 +381,16 @@ describe("buildBudget — un n.d. reste n.d. jusqu'au tableau et au graphique", 
   });
 
   it("filtre de service : budget et scénario globaux n.d. « non filtrable par service », limite écrite", () => {
-    const f = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" } }));
+    const f = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" }, serviceSizes: { months: [3, 3, 3], period: 3 } }));
     expect(tile(f, "budget").value.reason).toBe("budget saisi global : non filtrable par service");
     expect(tile(f, "atterrissage").value.reason).toBe("scénario global : non filtrable par service");
     expect(f.blocks.find((b) => b.id === "prevision")!.nd[0].reason).toBe("scénario global : non filtrable par service");
     expect(f.charts).toHaveLength(0);
     expect(f.limits[0]).toContain("non filtrables par service");
     expect(sp(tile(f, "realise").value.text)).toBe("31 500,00 €");
+    // Effectif du service non dénombré : le seuil ne peut pas être vérifié, le réalisé n'est pas affiché.
+    const u = buildBudget(budgetInput({ filtered: true, budget: { kind: "na", reason: "budget saisi global : non filtrable par service" }, scenario: { kind: "na", reason: "scénario global : non filtrable par service" } }));
+    expect(tile(u, "realise").value.reason).toBe("effectif du groupe non dénombré : seuil de confidentialité non vérifiable");
   });
 
   it("période n.d. : le chapitre entier est n.d. avec sa raison et l'action", () => {
@@ -330,10 +425,13 @@ const effetsInput = (over: Partial<Extract<EffetsInput, { kind: "value" }>> = {}
   kind: "value",
   year: 2026,
   labels: { period: "janvier → février 2026", prev: "janvier → février 2025" },
+  masse: { cur: { kind: "value", num: 868_000, den: 1 }, prev: { kind: "value", num: 560_000, den: 1 } },
   pont: PONT,
   cascade: CASCADE,
   etp: { cur: { kind: "value", num: 30_000, den: 20_000 }, prev: { kind: "value", num: 20_000, den: 20_000 } },
-  hrefs: { analyse: "/e/demo/studio-rh/masse-salariale/analyse?v1=reel%3A2025&v2=reel%3A2026&de=01&a=02", embauches: "/e/demo/studio-rh/hypotheses", globales: "/e/demo/studio-rh/hypotheses", fixeVariable: "/x?chapitre=fixe-variable" },
+  confidentialite: SEUIL_1,
+  serviceSizes: null,
+  hrefs: { analyse: "/e/demo/studio-rh/masse-salariale/analyse?v1=reel%3A2025&v2=reel%3A2026&de=01&a=02", embauches: "/e/demo/studio-rh/hypotheses", globales: "/e/demo/studio-rh/hypotheses", fixeVariable: "/x?chapitre=fixe-variable", parametres: "/e/demo/parametres#croisee" },
   ...over,
 });
 
@@ -348,10 +446,12 @@ describe("buildEffets — pont volume / coût moyen (cas de référence)", () =>
     expect(m.tiles.map((t) => t.id)).toEqual(["ecart", "volume", "cout-moyen", "etp"]);
     expect(m.tiles.slice(0, 3).map((t) => sp(t.value.text))).toEqual(["+3 080,00 €", "+2 800,00 €", "+280,00 €"]);
     expect(m.tiles.slice(0, 3).map((t) => t.valueTone)).toEqual(["bad", "bad", "bad"]);
+    // Écart de coût : masse N et N-1 sur leur ligne, avec le libellé de chaque période.
+    expect(tile(m, "ecart").variations!.map((v) => [v.label, sp(v.text!)])).toEqual([["N (janvier → février 2026)", "8 680,00 €"], ["N-1 (janvier → février 2025)", "5 600,00 €"]]);
     const etp = tile(m, "etp");
     expect(etp.value.text).toBe("1,50 ETP");
     expect(etp.cost).toBeFalsy();
-    expect(etp.variations!.map((v) => [v.label, v.text, v.tone])).toEqual([["N-1", "1,00 ETP", "flat"], ["Écart", "+0,50 ETP", "flat"]]);
+    expect(etp.variations!.map((v) => [v.label, v.text, v.tone])).toEqual([["N-1 (janvier → février 2025)", "1,00 ETP", "flat"], ["Écart", "+0,50 ETP", "flat"]]);
   });
 
   it("tableau du pont : départ, effets, écart total, arrivée ; la somme des effets égale l'écart", () => {
@@ -393,12 +493,61 @@ describe("buildEffets — pont volume / coût moyen (cas de référence)", () =>
     expect(table(m, EFFETS_TABLE_IDS.pont).title).toBe("Pont de la masse salariale chargée, de N-1 (janvier → février 2025) à N (janvier → février 2026)");
   });
 
-  it("pont et cascade n.d. : cartes n.d. avec la raison (mois en toutes lettres), aucun graphique, bloc n.d.", () => {
+  it("pont et cascade n.d. : effets n.d. avec la raison (mois en toutes lettres), aucun graphique, bloc n.d. ; l'écart de masse reste affiché (il ne dépend pas de l'ETP)", () => {
     const n = buildEffets(effetsInput({ pont: { kind: "nd", reason: "Réel PayFit 2026 : ETP n.d. (2026-02)" }, cascade: { kind: "nd", reason: "service des collaborateurs non historisé" } }));
-    expect(n.tiles.slice(0, 3).map((t) => t.value)).toEqual(Array(3).fill({ text: "n.d.", kind: "nd", reason: "Réel PayFit 2026 : ETP n.d. (février 2026)" }));
+    expect(n.tiles.slice(1, 3).map((t) => t.value)).toEqual(Array(2).fill({ text: "n.d.", kind: "nd", reason: "Réel PayFit 2026 : ETP n.d. (février 2026)" }));
+    // 8 680,00 − 5 600,00 = +3 080,00 €.
+    expect(sp(tile(n, "ecart").value.text)).toBe("+3 080,00 €");
     expect(n.charts).toHaveLength(0);
     expect(n.tables).toHaveLength(0);
     expect(n.blocks.map((b) => b.nd[0]?.reason)).toEqual(["Réel PayFit 2026 : ETP n.d. (février 2026)", "service des collaborateurs non historisé"]);
+  });
+
+  it("masse n.d. : l'écart de masse est n.d. avec la raison de la masse", () => {
+    const n = buildEffets(effetsInput({ masse: { cur: { kind: "nd", reason: "2026-02 : paie non clôturée à la lecture" }, prev: { kind: "value", num: 560_000, den: 1 } } }));
+    expect(tile(n, "ecart").value).toEqual({ text: "n.d.", kind: "nd", reason: "février 2026 : paie non clôturée à la lecture" });
+  });
+});
+
+describe("buildEffets — seuil de confidentialité sur la cascade d'ETP", () => {
+  // Paliers : entrées nouvelles +0,50 ETP (1 contrat fictif), sorties −0,25 ETP (3 contrats), changement d'ETP +0,25 ETP (4 contrats),
+  // les autres paliers vides. Départ 1,00 ; arrivée 1,50.
+  const C3: Cascade = {
+    kind: "value",
+    months: 2,
+    start: 10_000,
+    end: 15_000,
+    steps: [
+      { id: "entrees-new", label: STEP_LABELS["entrees-new"], etp4: 5_000, people: [{ key: "k1", etp4: 5_000 }] },
+      { id: "entrees-report", label: STEP_LABELS["entrees-report"], etp4: 0, people: [] },
+      { id: "sorties", label: STEP_LABELS.sorties, etp4: -2_500, people: [{ key: "k2", etp4: -1_000 }, { key: "k3", etp4: -1_000 }, { key: "k4", etp4: -500 }] },
+      { id: "sorties-deport", label: STEP_LABELS["sorties-deport"], etp4: 0, people: [] },
+      { id: "etp-change", label: STEP_LABELS["etp-change"], etp4: 2_500, people: [{ key: "k5", etp4: 1_000 }, { key: "k6", etp4: 1_000 }, { key: "k7", etp4: 250 }, { key: "k8", etp4: 250 }] },
+    ],
+    residual: 0,
+  };
+  const N2 = { nd: "non affiché (seuil de confidentialité : 2 personnes)" };
+
+  it("seuil 2 : « entrées nouvelles » (1 contrat) masqué ; secondaire : le plus petit palier affiché (« entrées : effet report », 0) ; graphique non tracé", () => {
+    const m = buildEffets(effetsInput({ cascade: C3, confidentialite: { kind: "set", value: 2 } }));
+    const t = table(m, EFFETS_TABLE_IDS.etp);
+    expect(t.rows.map((r) => r.cells[2])).toEqual(["", N2, N2, -2_500, 0, 2_500, 0, 5_000]);
+    expect(t.foot?.cells).toEqual(["ETP moyen N (janvier → février 2026)", 15_000, ""]);
+    expect(m.charts.some((c) => c.id === EFFETS_CHART_IDS.etp)).toBe(false);
+    expect(m.blocks.find((b) => b.id === "etp")!.nd).toEqual([{ label: "Graphique de la cascade d'ETP", reason: "non affiché (seuil de confidentialité : 2 personnes)" }]);
+    // Aucune clé de contrat dans le modèle.
+    expect(JSON.stringify(m)).not.toMatch(/"k\d"/);
+  });
+
+  it("seuil 1 : rien n'est masqué, la cascade est tracée ; seuil non défini : bloc n.d. avec le lien vers les Paramètres", () => {
+    const m1 = buildEffets(effetsInput({ cascade: C3 }));
+    expect(table(m1, EFFETS_TABLE_IDS.etp).rows.map((r) => r.cells[2])).toEqual(["", 5_000, 0, -2_500, 0, 2_500, 0, 5_000]);
+    expect(m1.charts.some((c) => c.id === EFFETS_CHART_IDS.etp)).toBe(true);
+    const mx = buildEffets(effetsInput({ cascade: C3, confidentialite: { kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" } }));
+    expect(mx.blocks.find((b) => b.id === "etp")!.nd).toEqual([{ label: "Cascade d'ETP", reason: "seuil de confidentialité non défini (Paramètres)", action: { href: "/e/demo/parametres#croisee", label: "Paramètres" } }]);
+    expect(mx.tables.some((t) => t.id === EFFETS_TABLE_IDS.etp)).toBe(false);
+    // Le pont de toute l'entreprise reste affiché.
+    expect(sp(tile(mx, "volume").value.text)).toBe("+2 800,00 €");
   });
 });
 
@@ -423,10 +572,16 @@ const baseSnap: BaseSnapshot = { currency: "EUR", refMonth: "2026-02", syncId: "
 const proj = project(baseSnap, "2026-03", "2026-12", [], { prorata: "calendaire" });
 
 // kpiInput : référentiel RH simulé ; non nul seulement pour les versions filtrées par service (ETP du service lu par pay.etp).
-function fakeCtx(service: string | undefined, kpiInput: unknown = null): CroiseeContext {
-  const scenario: ScenarioLoad = { kind: "value", full: { scenario: { id: "s1", name: "Scénario test", firstMonth: "2026-03", lastMonth: "2026-12" }, base: baseSnap, baseHash: "h", hypotheses: [] } as never, proj };
+// seuil : seuil de confidentialité de l'espace (null : non défini) ; etp : ETP du service par mois ; scénario : base, projection, début.
+type FakeOpts = { seuil?: number | null; etp?: (months: string[]) => { month: string; etp4: number | null; reason: string | null }[]; base?: BaseSnapshot; firstMonth?: string };
+function fakeCtx(service: string | undefined, kpiInput: unknown = null, o: FakeOpts = {}): CroiseeContext {
+  const b = o.base ?? baseSnap;
+  const pr = o.base ? project(b, "2026-03", "2026-12", [], { prorata: "calendaire" }) : proj;
+  const scenario: ScenarioLoad = { kind: "value", full: { scenario: { id: "s1", name: "Scénario test", firstMonth: o.firstMonth ?? "2026-03", lastMonth: "2026-12" }, base: b, baseHash: "h", hypotheses: [] } as never, proj: pr };
+  const seuil = o.seuil === undefined ? 2 : o.seuil;
   return {
     slug: "demo",
+    settings: { confidentialite: seuil === null ? { kind: "absent" } : { kind: "set", value: seuil, updatedAt: null, updatedBy: null } },
     canEdit: true,
     period: { year: 2026, from: "01", to: "02", years: [2025, 2026], last: "02", months: ["2026-01", "2026-02"], notices: [] },
     periodNd: null,
@@ -438,7 +593,7 @@ function fakeCtx(service: string | undefined, kpiInput: unknown = null): Croisee
     state: { service: service ?? null },
     href: (patch = {}) => `/x?${new URLSearchParams(Object.entries(patch).filter(([, v]) => v) as [string, string][]).toString()}`,
     load: {
-      payroll: async () => ({ input: journal, kpi: { input: kpiInput }, etp: (months: string[]) => etpOf(months), unavailable: null, source: "payfit" }) as never,
+      payroll: async () => ({ input: journal, kpi: { input: kpiInput }, etp: (months: string[]) => (o.etp ?? etpOf)(months), unavailable: null, source: "payfit" }) as never,
       scenario: async () => scenario,
     },
   } as unknown as CroiseeContext;
@@ -487,14 +642,82 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
     expect(zoomReason("journal de paie indisponible")).toBe("journal de paie indisponible");
   });
 
-  it("filtre de service TECH : réalisé et personnes du service ; budget et scénario n.d.", async () => {
+  it("filtre de service TECH : réalisé et contrats du service ; budget et scénario n.d. ; seuil 2 : contrats observés n.d. (1 contrat en N-1)", async () => {
     const input = await loadBudgetInput(fakeCtx("TECH"));
     if (input.kind !== "value") throw new Error(input.reason);
     expect(input.budget).toEqual({ kind: "na", reason: "budget saisi global : non filtrable par service" });
     expect(input.scenario).toEqual({ kind: "na", reason: "scénario global : non filtrable par service" });
-    // TECH, N : alpha 2 × 2 940 + gamma 2 × 1 400 = 8 680,00 €.
-    expect(sp(tile(buildBudget(input), "realise").value.text)).toBe("8 680,00 €");
+    // Effectif du service : alpha et gamma payés en janvier et en février 2026 → 2, 2 ; 2 contrats distincts sur la période.
+    expect(input.serviceSizes).toEqual({ months: [2, 2], period: 2 });
+    const m = buildBudget(input);
+    // TECH, N : alpha 2 × 2 940 + gamma 2 × 1 400 = 8 680,00 € (2 contrats ≥ seuil 2 : affiché).
+    expect(sp(tile(m, "realise").value.text)).toBe("8 680,00 €");
     expect(input.cohorts.kind === "value" && input.cohorts.total).toEqual({ count: 2, prev: 560_000, cur: 868_000, delta: 308_000 });
+    // N-1 : alpha seul (1 contrat < 2) : le tableau du service n'est pas affiché.
+    expect(m.blocks.find((b) => b.id === "personnes")!.nd).toEqual([{ label: "Contrats observés", reason: "non affiché : service de moins de 2 contrats observés sur N ou sur N-1 (seuil de confidentialité)" }]);
+    expect(m.tables.some((t) => t.id === BUDGET_TABLE_IDS.personnes)).toBe(false);
+    // Seuil 3 : le service (2 contrats) est sous le seuil : réalisé n.d., aucune valeur du service dans le tableau mensuel.
+    const m3 = buildBudget(await loadBudgetInput(fakeCtx("TECH", null, { seuil: 3 })));
+    expect(tile(m3, "realise").value).toEqual({ text: "n.d.", kind: "nd", reason: "non affiché : service de moins de 3 contrats rémunérés (seuil de confidentialité)" });
+    expect(table(m3, BUDGET_TABLE_IDS.mensuel).rows.every((r) => typeof r.cells[1] === "object")).toBe(true);
+    // Seuil non défini : chiffres du service n.d. avec la raison et le lien vers les Paramètres.
+    const mx = buildBudget(await loadBudgetInput(fakeCtx("TECH", null, { seuil: null })));
+    expect(tile(mx, "realise").value.reason).toBe("seuil de confidentialité non défini (Paramètres)");
+    expect(mx.blocks.find((b) => b.id === "ecart")!.nd).toEqual([{ label: "Réalisé du service", reason: "seuil de confidentialité non défini (Paramètres)", action: { href: "/e/demo/parametres#croisee", label: "Paramètres" } }]);
+  });
+
+  it("paidSizes : contrats rémunérés (ligne de brut) par mois et contrats distincts sur la période ; mois hors lecture → null", () => {
+    // Toute l'entreprise, 2025 : alpha, beta → 2 par mois, 2 distincts. TECH 2026 : alpha, gamma. TECH 2025 : alpha seul.
+    expect(paidSizes(journal, ["2025-01", "2025-02"])).toEqual({ months: [2, 2], period: 2 });
+    const tech = { ...journal, serviceFilter: { value: "TECH" } };
+    expect(paidSizes(tech, ["2026-01", "2026-02"])).toEqual({ months: [2, 2], period: 2 });
+    expect(paidSizes(tech, ["2025-01", "2025-02"])).toEqual({ months: [1, 1], period: 1 });
+    expect(paidSizes(journal, ["2024-12", "2025-01"])).toEqual({ months: [null, 2], period: null });
+  });
+
+  it("atterrissage : lien vers Hypothèses seulement quand le scénario commence l'année de la période", async () => {
+    const same = await loadBudgetInput(fakeCtx(undefined));
+    expect(same.kind === "value" && same.hrefs.atterrissage).toBe("/e/demo/studio-rh/hypotheses?scenario=s1&vue=resultat&sous=atterrissage");
+    const other = await loadBudgetInput(fakeCtx(undefined, null, { firstMonth: "2025-10" }));
+    expect(other.kind === "value" && other.hrefs.atterrissage).toBeNull();
+    expect(other.kind === "value" && other.hrefs.parametres).toBe("/e/demo/parametres#croisee");
+  });
+
+  it("aucune identité : la raison n.d. du moteur qui nomme un contrat sans base est remplacée par un décompte", async () => {
+    // Contrat fictif sans base : le moteur rend chaque mois projeté n.d. avec son libellé.
+    const B: BaseContract = { ...A, contractKey: "payfit:y", externalId: "y", label: "Camille Exemple", base: null, baseNd: "salaire de base absent" };
+    const withNd: BaseSnapshot = { ...baseSnap, contracts: [A, B] };
+    const raw = project(withNd, "2026-03", "2026-12", [], { prorata: "calendaire" });
+    expect(raw.kind === "value" && raw.months[0].kind === "nd" && raw.months[0].reasons).toEqual(["Camille Exemple : base n.d. (salaire de base absent) — saisir une correction de base"]);
+    const input = await loadBudgetInput(fakeCtx(undefined, null, { base: withNd }));
+    if (input.kind !== "value" || input.scenario.kind !== "value") throw new Error("scénario attendu");
+    // Raison de l'année regroupée : dix mois projetés, une même raison.
+    expect(input.scenario.landing).toEqual({ kind: "nd", year: "2026", reason: "mars 2026, avr. 2026, mai 2026, juin 2026, juil. 2026, août 2026, sept. 2026, oct. 2026, nov. 2026, déc. 2026 : 1 contrat sans base de projection (détail dans Hypothèses budgétaires)" });
+    const m = buildBudget(input);
+    expect(table(m, BUDGET_TABLE_IDS.douzeMois).rows[2].cells[2]).toEqual({ nd: "1 contrat sans base de projection (détail dans Hypothèses budgétaires)" });
+    expect(JSON.stringify(m)).not.toMatch(/Camille|Exemple|payfit:y/);
+  });
+
+  it("publicProjectionReasons : décompte des raisons nominatives et des autres raisons, sans aucun texte du moteur", () => {
+    expect(publicProjectionReasons(["Nom Un : base n.d. (x) — saisir une correction de base", "Nom Deux : base n.d. (y) — saisir une correction de base", "texte inconnu Nom Trois"])).toEqual([
+      "2 contrats sans base de projection (détail dans Hypothèses budgétaires)",
+      "1 autre raison de n.d. de la projection (détail dans Hypothèses budgétaires)",
+    ]);
+    expect(publicProjectionReasons([])).toEqual([]);
+  });
+
+  it("budgetModel : un seul calcul par contexte de requête (écran et export)", async () => {
+    const ctx = fakeCtx(undefined);
+    let calls = 0;
+    const load = ctx.load.payroll;
+    ctx.load.payroll = () => {
+      calls += 1;
+      return load();
+    };
+    const a = await budgetModel(ctx);
+    expect(await budgetModel(ctx)).toBe(a);
+    expect(calls).toBe(1);
+    expect(a).toEqual(buildBudget(await loadBudgetInput(fakeCtx(undefined))));
   });
 });
 
@@ -514,6 +737,44 @@ describe("loadEffetsInput — mêmes versions et même pont que l'Analyse des é
     // Composition par salarié non historisée par service : la cascade d'ETP est n.d., avec la raison du module.
     expect(input.cascade.kind).toBe("nd");
     expect(input.hrefs.analyse).toBe("/e/demo/studio-rh/masse-salariale/analyse?v1=reel%3A2025&v2=reel%3A2026&de=01&a=02&service=TECH");
+    // Masse N et N-1 (aggregate, sans ETP) : 8 680,00 € et 5 600,00 €.
+    expect(input.masse).toEqual({ cur: aggregate(b, monthsB, "masse"), prev: aggregate(a, monthsA, "masse") });
+    expect(input.masse).toEqual({ cur: { kind: "value", num: 868_000, den: 1 }, prev: { kind: "value", num: 560_000, den: 1 } });
+    // Effectif du service : 2 contrats en N (alpha, gamma), 1 en N-1 (alpha).
+    expect(input.serviceSizes).toEqual({ cur: 2, prev: 1 });
+  });
+
+  it("service TECH sous le seuil (1 contrat en N-1, seuil 2) : cartes et pont du service n.d. ; seuil 1 : affichés", async () => {
+    const m = buildEffets(await loadEffetsInput(fakeCtx("TECH", {})));
+    const r = "non affiché : service de moins de 2 contrats rémunérés (seuil de confidentialité)";
+    expect(m.tiles.map((t) => t.value)).toEqual(Array(4).fill({ text: "n.d.", kind: "nd", reason: r }));
+    expect(m.tiles.every((t) => (t.variations ?? []).length === 0)).toBe(true);
+    expect(m.tables).toHaveLength(0);
+    expect(m.blocks.find((b) => b.id === "decomposition")!.nd).toEqual([{ label: "Pont volume / coût moyen du service", reason: r }]);
+    const m1 = buildEffets(await loadEffetsInput(fakeCtx("TECH", {}, { seuil: 1 })));
+    expect(m1.tiles.slice(0, 3).map((t) => sp(t.value.text))).toEqual(["+3 080,00 €", "+2 800,00 €", "+280,00 €"]);
+    // Seuil non défini : n.d. avec la raison et le lien vers les Paramètres.
+    const mx = buildEffets(await loadEffetsInput(fakeCtx("TECH", {}, { seuil: null })));
+    expect(tile(mx, "ecart").value.reason).toBe("seuil de confidentialité non défini (Paramètres)");
+    expect(mx.blocks.find((b) => b.id === "decomposition")!.nd[0].action).toEqual({ href: "/e/demo/parametres#croisee", label: "Paramètres" });
+  });
+
+  it("pont n.d. : la raison est datée du mois réel de N (le pont aligne N sur les mois de N-1)", async () => {
+    // ETP du service n.d. en février 2026 seulement.
+    const etp = (months: string[]) => months.map((month) => ({ month, etp4: month === "2026-02" ? null : month < "2026" ? 10_000 : 15_000, reason: month === "2026-02" ? "quotité absente" : null }));
+    const input = await loadEffetsInput(fakeCtx("TECH", {}, { etp, seuil: 1 }));
+    if (input.kind !== "value") throw new Error(input.reason);
+    expect(input.pont.kind).toBe("nd");
+    const reason = input.pont.kind === "nd" ? input.pont.reason : "";
+    expect(reason).toContain("2026-02");
+    expect(reason).not.toContain("2025-02");
+    // L'écart de masse reste calculé : il ne dépend pas de l'ETP.
+    expect(sp(tile(buildEffets(input), "ecart").value.text)).toBe("+3 080,00 €");
+  });
+
+  it("effetsModel : un seul calcul par contexte de requête", async () => {
+    const ctx = fakeCtx("TECH", {}, { seuil: 1 });
+    expect(await effetsModel(ctx)).toBe(await effetsModel(ctx));
   });
 });
 
@@ -542,6 +803,17 @@ describe("rendu du chapitre", () => {
     const t = render(m, "tableau");
     expect(t).not.toContain('data-testid="cx-chart-');
     expect(t).toContain('data-testid="cx-table-budget-douze-mois"');
+  });
+
+  it("seuil non défini : mention n.d. du bloc des contrats observés avec le lien vers les Paramètres ; seuil 2 : cellules n.d. avec la raison", () => {
+    const out = render(buildBudget(budgetInput({ confidentialite: { kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" } })));
+    expect(out).toContain('data-testid="cx-budget-personnes-nd"');
+    expect(out).toContain("seuil de confidentialité non défini (Paramètres)");
+    expect(out).toContain('href="/e/demo/parametres#croisee"');
+    expect(out).not.toContain('data-testid="cx-table-budget-personnes"');
+    const masked = render(buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 } })));
+    expect(masked).toContain('data-testid="cx-table-budget-personnes"');
+    expect(masked).toContain("non affiché (seuil de confidentialité : 2 personnes)");
   });
 
   it("chapitre n.d. : une seule mention avec la raison et l'action", () => {

@@ -4,7 +4,7 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { MoneyText } from "@/components/Money";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { ChapterId, CroiseeTable, SortDir } from "@/lib/viz/croisee";
-import { buildFixeVariable, loadFixeVariableInput, type FixeVariableModel, type MasseBlock, type MasseChart, type PrevuItem } from "@/lib/viz/croisee-masse";
+import { fixeVariableModel, type FixeVariableModel, type MasseBlock, type MasseChart, type PrevuItem } from "@/lib/viz/croisee-masse";
 import { capital } from "@/lib/viz/masse";
 import { ChartGuard, GraphFoot, NdLines, NdState, TrendLegend, type Affichage } from "../components";
 import { ModelTable } from "./atomes/ModelTable";
@@ -12,11 +12,12 @@ import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
 import type { CroiseeContext } from "./context";
 
-// Chapitre 04 · Fixe & variable. Le composant lit l'entrée du chapitre (lecteurs du contexte, mêmes fonctions que l'onglet Fixe &
-// variable de la Masse salariale), construit le modèle par la fonction pure buildFixeVariable (le même que celui des exports) et le
-// rend : cartes, graphiques suivis de leur tableau exact, tableaux, indicateurs « Prévu » avec leur raison, limites de la lecture.
+// Chapitre 04 · Fixe & variable. Le composant prend le modèle du chapitre (fixeVariableModel : lecture par les mêmes fonctions que
+// l'onglet Fixe & variable de la Masse salariale, puis fonction pure buildFixeVariable), calculé une fois par requête et partagé avec
+// les exports, et le rend : cartes, graphiques suivis de leur tableau exact, tableaux, indicateurs « Prévu » avec leur raison,
+// limites de la lecture.
 export default async function ChFixeVariable({ ctx }: { ctx: CroiseeContext }) {
-  const model = buildFixeVariable(await loadFixeVariableInput(ctx));
+  const model = await fixeVariableModel(ctx);
   return <FixeVariableChapter model={model} slug={ctx.slug} affichage={ctx.affichage} tableauHref={ctx.href({ affichage: "tableau" })} />;
 }
 
@@ -112,6 +113,12 @@ function Block({ b, model, chapter, slug, affichage, tableauHref, sort }: BlockP
             ))}
           </div>
         )}
+        {affichage === "graphique" &&
+          (b.graphLinks ?? []).map((id) => (
+            <p key={id} className="tile-foot cx-masse-link" data-testid={`cx-${chapter}-${b.id}-lien-${id}`}>
+              <a href={`${tableauHref}#cx-table-${id}`}>Valeurs exactes : tableau « {titleOf(id)} »</a>
+            </p>
+          ))}
         {showTable &&
           tables.map((t) => <ModelTable key={t.id} table={t} slug={slug} {...(sort && t.columns.some((c) => c.sortable) ? { sortBase: sort.base, tri: sort.tri, sens: sort.sens } : {})} />)}
         {showTable && b.trend && <TrendLegend slug={slug} />}

@@ -2,6 +2,7 @@ import { project } from "@/lib/budget/engine";
 import { BudgetError, getScenario, listBudgets, listScenarios, type BudgetRow, type ScenarioFull } from "@/lib/budget/store";
 import type { Projection } from "@/lib/budget/types";
 import { monthRange } from "@/lib/connectors/months";
+import { dateFmt, journalReason } from "@/lib/croisee/format";
 import { getCroiseeSettings, type CroiseeSettings } from "@/lib/croisee-settings";
 import { monthPayroll, servicesOf } from "@/lib/payroll/engine";
 import { loadPayrollContext, type ComptaSource, type PayrollContext } from "@/lib/payroll/context";
@@ -10,7 +11,7 @@ import { closedMonths } from "@/lib/rh/kpi/period";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { hasAtLeast, type Role } from "@/lib/roles";
 import { croiseeHref, parseQuery, shownValue, type CroiseeQuery, type QueryState } from "@/lib/viz/croisee";
-import { capital, monthShortYear, sourceReason } from "@/lib/viz/masse";
+import { capital } from "@/lib/viz/masse";
 import { kpiRefusal, periodLabel, previousMonths, resolvePeriod, type Period } from "@/lib/viz/synthese";
 import type { WorkspaceAccess } from "@/lib/workspace";
 import type { Affichage } from "../components";
@@ -68,7 +69,9 @@ export function once<T>(fn: () => Promise<T>): () => Promise<T> {
   return () => (p ??= fn());
 }
 
-export const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeZone: "Europe/Paris" });
+// Mises en forme pures (src/lib/croisee/format.ts), ré-exportées pour la page et ses composants.
+export { dateFmt, journalReason, openMonthsText } from "@/lib/croisee/format";
+
 const yearsOf = (s: ScenarioListRow["scenario"]) => new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)));
 
 export async function loadCroiseeContext(slug: string, workspace: WorkspaceAccess, sp: Search): Promise<CroiseeContext> {
@@ -230,14 +233,3 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
     state,
   });
 }
-
-// Raison pour laquelle le journal de paie n'est pas lu (null quand il l'est) : lecture PayFit absente ou incomplète (raison du
-// contexte de paie), ou source RH retenue = DSN (le journal PayFit n'est alors pas lu). Même texte dans la page et les chapitres.
-export function journalReason(pay: Pick<PayrollContext, "input" | "unavailable" | "source">): string | null {
-  if (pay.input) return null;
-  if (pay.unavailable) return sourceReason(pay.unavailable);
-  return pay.source === "dsn" ? "source RH retenue : DSN — journal de paie PayFit non lu" : "journal de paie indisponible";
-}
-
-// Mois non clos, en clair : « oct. 2026, nov. 2026 ».
-export const openMonthsText = (ctx: Pick<CroiseeContext, "openMonths">): string => ctx.openMonths.map(monthShortYear).join(", ");

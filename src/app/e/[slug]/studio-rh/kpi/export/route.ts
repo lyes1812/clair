@@ -21,7 +21,9 @@ export const dynamic = "force-dynamic";
 // Mêmes paramètres d'adresse et mêmes fonctions que l'écran ; onglets Filtres, Sources et Définitions. Aucun CSV n'existait pour
 // ces tableaux : l'export est Excel seulement. Aucune donnée nominative : ouvert à tous les rôles de l'espace, comme l'écran.
 type Ready = Extract<KpiSuivi, { kind: "ready" }>;
+type Search = Record<string, string | string[] | undefined>;
 const TABLE_VUES = ["suivi", "turnover", "absenteisme"] as const;
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const text = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 
 const definitionsOf = (ids: string[]) => {
@@ -64,7 +66,8 @@ async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABL
   const sheets: SheetSpec[] = [suiviSheet({ dash: s.dash, data: s.data, establishments: s.input.scope.establishments, rawLimit: s.rawLimit, vue })];
   if (vue === "suivi") {
     const cat = await loadCategoryMonths(s.ctx.input, s.w, workspace.id);
-    sheets.push(categoriesSheet(cat.months, cat.keys, { ...CATEGORY_LABELS, nc: "Non classé" }));
+    // Tableau calculé sur toute l'entreprise, comme l'écran : la note de la feuille le dit quand un filtre de périmètre est retenu.
+    sheets.push(categoriesSheet(cat.months, cat.keys, { ...CATEGORY_LABELS, nc: "Non classé" }, { scoped: Boolean(s.etab || s.nature) }));
   }
   const on = (c: string) => suiviColumnOn(vue, c);
   const label = KPI_VUES.find((v) => v.key === vue)!.label;
@@ -97,8 +100,8 @@ async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABL
   return xlsxResponse(buffer, `kpi-rh-${vue}`);
 }
 
-async function effectifsXlsx(workspace: WorkspaceAccess, slug: string, s: Ready, sp: Record<string, string>): Promise<Response> {
-  const e = await loadEffectifs(slug, workspace.id, s.ctx.input, { mesure: sp.mesure ?? "", axe: sp.axe ?? "", version: sp.version ?? "", annee: sp.annee ?? "" });
+async function effectifsXlsx(workspace: WorkspaceAccess, slug: string, s: Ready, sp: Search): Promise<Response> {
+  const e = await loadEffectifs(slug, workspace.id, s.ctx.input, { mesure: one(sp.mesure), axe: one(sp.axe), version: one(sp.version), annee: one(sp.annee) });
   if (e.grid.kind === "nd") return text(`n.d. — ${e.grid.reason}`, 422);
   const { repart, basis } = effectifsShare(e.grid, e.stock, e.year);
   const axisLabel = splitAxisLabel(AXES.find((a) => a.key === e.axis)!.label).name;
@@ -124,8 +127,13 @@ async function effectifsXlsx(workspace: WorkspaceAccess, slug: string, s: Ready,
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const { workspace } = await requireWorkspace(slug);
-  const sp = Object.fromEntries(req.nextUrl.searchParams);
-  if (sp.format && sp.format !== "xlsx") return text("Format inconnu : xlsx.", 400);
+  // Paramètre répété : tableau, comme les searchParams de la page ; la première valeur est retenue (one), comme à l'écran.
+  const sp: Search = {};
+  for (const k of new Set(req.nextUrl.searchParams.keys())) {
+    const all = req.nextUrl.searchParams.getAll(k);
+    sp[k] = all.length > 1 ? all : all[0];
+  }
+  if (sp.format && one(sp.format) !== "xlsx") return text("Format inconnu : xlsx.", 400);
   const s = await loadKpiSuivi(slug, sp);
   if (s.kind !== "ready") return text(notReady(s), 422);
   if (s.vue === "effectifs") return effectifsXlsx(workspace, slug, s, sp);

@@ -1,24 +1,37 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FixeVariableChapter } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChFixeVariable";
 import { ServicesChapter } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChServices";
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import type { Affichage } from "@/app/e/[slug]/studio-rh/masse-salariale/components";
+import { syntheseOf } from "@/app/e/[slug]/studio-rh/masse-salariale/synthese-data";
+import { readCroiseeSettings, type CroiseeSettings } from "@/lib/croisee-settings";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES, type RubricId } from "@/lib/payroll/grid";
+import { serviceRows as sharedServiceRows } from "@/lib/payroll/service-rows";
 import { cellView, croiseeHref, sortRows, type CroiseeCell, type CroiseeTable } from "@/lib/viz/croisee";
 import {
+  BRUT_NUL,
   buildFixeVariable,
   buildServices,
   FIXE_VARIABLE_IDS as FV,
+  fixeVariableModel,
   loadFixeVariableInput,
   loadServicesInput,
   monthReason,
+  N1_NEGATIF,
   N1_NUL,
+  periodHeads,
   PREVU_FIXE_VARIABLE,
   SANS_CONTRAT,
+  SANS_LIGNE,
+  serviceConfidentiality,
+  serviceLabel,
   serviceRows,
+  servicesModel,
+  servicesSort,
+  TOTAL_NUL,
   windowReason,
   type FixeVariableData,
   type FixeVariableModel,
@@ -28,6 +41,12 @@ import {
   type WindowIn,
 } from "@/lib/viz/croisee-masse";
 import type { MonthIn } from "@/lib/viz/masse";
+
+// La chaîne d'import (contexte de la page → paramètres de l'espace → client de base) exige une DATABASE_URL à l'import ; aucun test de
+// ce fichier n'ouvre de connexion. Sans variable fournie, une adresse factice suffit.
+vi.hoisted(() => {
+  process.env.DATABASE_URL ??= "postgres://factice:factice@localhost:5432/factice";
+});
 
 // Masse salariale croisée, chapitres 04 · Fixe & variable et 05 · Services. Données fictives écrites à la main ; chaque résultat
 // attendu est calculé à la main (commentaires). Un n.d. reste n.d. jusqu'au tableau et au graphique, jamais un zéro.
@@ -108,28 +127,53 @@ describe("raisons des n.d. du journal", () => {
 
 describe("buildFixeVariable : cartes", () => {
   const m = fv();
-  it("six cartes, dans l'ordre, montants et écarts de coût calculés à la main", () => {
+  const vars = (id: string) => tile(m, id).variations!.map((v) => [v.label, v.text === null ? null : sp(v.text), v.tone]);
+  it("six cartes, dans l'ordre, période écrite sur chacune ; montants, écart et écart en % calculés à la main", () => {
     expect(m.nd).toBeNull();
     expect(m.tiles.map((t) => t.id)).toEqual(["fixe", "variable", "primes", "stages", "part-primes", "part-salaires"]);
+    // Ligne de période : le libellé du contexte, jamais l'année seule.
+    expect(m.tiles.map((t) => t.sub)).toEqual(Array(6).fill("janvier → février 2026"));
     // Fixe : 8 000 € face à 7 500 € ; écart +500 € ; 500 ÷ 7 500 = 6,666… % → +6,67 %.
     const f = tile(m, "fixe");
     expect(sp(f.value.text)).toBe("8 000,00 €");
-    expect(sp(f.variations![0].text!)).toBe("7 500,00 €");
-    expect(sp(f.variations![1].text!)).toBe("+500,00 € · +6,67 %");
-    expect(f.variations![1].tone).toBe("bad");
+    expect(vars("fixe")).toEqual([
+      ["N-1", "7 500,00 €", "flat"],
+      ["Écart", "+500,00 €", "bad"],
+      ["Écart (%)", "+6,67 %", "bad"],
+    ]);
     expect(f.cost).toBe(true);
     // Variable : primes + indemnités = 1 000 + 500 = 1 500 € face à 500 € ; +1 000 € ; +200,00 %.
     expect(sp(tile(m, "variable").value.text)).toBe("1 500,00 €");
-    expect(sp(tile(m, "variable").variations![1].text!)).toBe("+1 000,00 € · +200,00 %");
+    expect(vars("variable").slice(1)).toEqual([
+      ["Écart", "+1 000,00 €", "bad"],
+      ["Écart (%)", "+200,00 %", "bad"],
+    ]);
     // dont primes : 1 000 € face à 500 € ; deux familles (deux libellés de prime sur la période).
-    expect(sp(tile(m, "primes").variations![1].text!)).toBe("+500,00 € · +100,00 %");
+    expect(vars("primes").slice(1)).toEqual([
+      ["Écart", "+500,00 €", "bad"],
+      ["Écart (%)", "+100,00 %", "bad"],
+    ]);
     expect(tile(m, "primes").note).toBe("2 familles de prime");
     // Gratifications : 0 € face à 200 € ; −200 € ; −100,00 % ; baisse de coût (vert) ; aucune ligne de stage en N.
     const s = tile(m, "stages");
     expect(sp(s.value.text)).toBe("0,00 €");
-    expect(sp(s.variations![1].text!)).toBe("−200,00 € · −100,00 %");
-    expect(s.variations![1].tone).toBe("good");
+    expect(vars("stages").slice(1)).toEqual([
+      ["Écart", "−200,00 €", "good"],
+      ["Écart (%)", "−100,00 %", "good"],
+    ]);
     expect(s.note).toBe("aucune ligne dans le journal sur la période");
+  });
+  it("N-1 nul : l'écart en euros garde son ton, l'écart en % est n.d. avec sa raison et sans couleur", () => {
+    // Indemnités seules en variable : N 500 €, N-1 0 € (écart +500 €, % non défini).
+    const w = fv({ prev: { ...PREV, byRubric: R(750000, 0, 20000, 0) } as WindowIn });
+    // Variable N-1 = primes 0 + indemnités 0 = 0 € ; N = 1 500 € ; écart +1 500 €.
+    expect(w.tiles.find((t) => t.id === "variable")!.variations!.map((v) => [v.label, v.text === null ? null : sp(v.text), v.reason ?? null, v.tone])).toEqual([
+      ["N-1", "0,00 €", null, "flat"],
+      ["Écart", "+1 500,00 €", null, "bad"],
+      ["Écart (%)", null, N1_NUL, "flat"],
+    ]);
+    // Raisons listées une fois sous les cartes, regroupées par raison identique (dont primes : 1 000 € face à 0 €, % non défini).
+    expect(w.tileNd).toEqual([`Variable (primes et indemnités) — écart (%), dont primes — écart (%) : ${N1_NUL}`]);
   });
   it("parts du brut : sous le nom « Part des salaires dans le brut », écart en points, sans ton de coût", () => {
     // Primes : 1 000 ÷ 9 500 = 10,526… % → 10,53 % ; N-1 500 ÷ 8 200 = 6,097… % → 6,10 % ; écart 4,428… pts → +4,43 pts.
@@ -145,6 +189,7 @@ describe("buildFixeVariable : cartes", () => {
     expect(sp(ps.value.text)).toBe("84,21 %");
     expect(sp(ps.variations![0].text!)).toBe("91,46 %");
     expect(sp(ps.variations![1].text!)).toBe("−7,25 pts");
+    expect(ps.sub).toBe("janvier → février 2026");
     expect(ps.cost).toBeUndefined();
     expect(ps.variations!.every((v) => v.tone === "flat")).toBe(true);
     expect(m.tiles.some((t) => /rigidit/i.test(t.label))).toBe(false);
@@ -157,6 +202,14 @@ describe("buildFixeVariable : cartes", () => {
 
 describe("buildFixeVariable : tableaux exacts", () => {
   const m = fv();
+  it("en-têtes de période : libellés du contexte, jamais l'année seule", () => {
+    expect(periodHeads({ period: "janvier → février 2026", prev: "janvier → février 2025" })).toEqual({ n: "Janvier → février 2026", n1: "N-1 (janvier → février 2025)" });
+    for (const id of [FV.composantes, FV.parts, FV.primesMois, FV.libelles]) {
+      const heads = table(m, id).columns.filter((c) => c.key === "n" || c.key === "n1").map((c) => c.header);
+      expect(heads, id).toEqual(["Janvier → février 2026", "N-1 (janvier → février 2025)"]);
+    }
+    for (const t of m.tables) for (const c of t.columns) expect(c.header, `${t.id}.${c.key}`).not.toMatch(/^\d{4}( \(N-1\))?$/);
+  });
   it("composantes : N, N-1, écart et écart (%) ; la somme des natures est le brut, brut + cotisations = masse", () => {
     const t = table(m, FV.composantes);
     expect(t.rows.map((r) => r.cells[0])).toEqual(["Fixe (salaires et congés payés)", "Variable (primes et indemnités)", "dont primes", "dont indemnités et avantages", "Gratifications de stage", "Brut", "dont brut hors primes", "Cotisations patronales"]);
@@ -233,7 +286,8 @@ describe("buildFixeVariable : graphiques (séries = valeurs des tableaux)", () =
     ]);
     expect(sp(ring.note!)).toBe("Hors anneau (montant nul ou négatif) : Gratifications de stage (0,00 €). Parts calculées sur les natures tracées.");
     const st = chart(m, FV.structure);
-    expect(st.categories).toEqual(["2025", "2026"]);
+    expect(st.categories).toEqual(["N-1", "N"]);
+    expect(st.categoryTitles).toEqual(["N-1 (janvier → février 2025)", "Janvier → février 2026"]);
     expect(st.series.map((s) => s.values)).toEqual([
       [750000, 800000],
       [50000, 150000],
@@ -250,6 +304,7 @@ describe("buildFixeVariable : graphiques (séries = valeurs des tableaux)", () =
       [50000, 0],
     ]);
     expect(pm.series.map((s) => s.color)).toEqual(["var(--chart-1)", "var(--chart-7)"]);
+    expect(pm.series.map((s) => s.name)).toEqual(["Primes, janvier → février 2026", "Primes, N-1 (janvier → février 2025)"]);
     expect(chart(m, FV.primesFamilles).series.map((s) => [s.name, s.values])).toEqual([
       ["Prime exceptionnelle", [0, 30000]],
       ["Prime sur objectifs", [60000, 10000]],
@@ -260,8 +315,15 @@ describe("buildFixeVariable : graphiques (séries = valeurs des tableaux)", () =
   });
   it("blocs, « Prévu » et limites", () => {
     expect(m.blocks.map((b) => b.id)).toEqual(["composition", "mois", "primes", "libelles"]);
-    expect(m.prevu.map((p) => p.id)).toEqual(["fixe-variable-indemnites", "fixe-variable-calendrier", "fixe-variable-heures-sup", "fixe-variable-fixe-contractuel"]);
+    expect(m.prevu.map((p) => p.id)).toEqual(["fixe-variable-indemnites", "fixe-variable-calendrier", "fixe-variable-heures-sup", "fixe-variable-fixe-contractuel", "fixe-variable-rigidite"]);
     expect(m.prevu).toBe(PREVU_FIXE_VARIABLE);
+    // Rigidité : « Prévu » avec sa raison, renvoi au glossaire ; la carte reste « Part des salaires dans le brut ».
+    expect(m.prevu.at(-1)).toEqual({
+      id: "fixe-variable-rigidite",
+      label: "Rigidité de la rémunération (fixe contractuel et avantages obligatoires)",
+      reason: "classification fixe / avantages obligatoires absente des sources ; seule la part des salaires dans le brut est calculée",
+      term: "croisee-rigidite",
+    });
     expect(m.limits.join(" ")).toMatch(/non distinguées par le journal PayFit/);
   });
 });
@@ -272,7 +334,8 @@ describe("buildFixeVariable : un n.d. reste n.d. jusqu'au tableau et au graphiqu
     const f = tile(m, "fixe");
     expect(f.value).toEqual({ text: "n.d.", kind: "nd", reason: FEB_WHY });
     expect(sp(f.variations![0].text!)).toBe("7 500,00 €");
-    expect(f.variations![1].text).toBeNull();
+    expect(f.variations![1]).toMatchObject({ text: null, reason: FEB_WHY });
+    expect(f.variations![2]).toMatchObject({ text: null, reason: FEB_WHY, tone: "flat" });
     expect(tile(m, "part-salaires").value.kind).toBe("nd");
     expect(m.tileNd).toEqual([`Période (janvier → février 2026) : ${FEB_WHY}`]);
   });
@@ -361,7 +424,10 @@ const JOURNAL: JournalInput = {
 const BASE = "/e/demo/studio-rh/masse-salariale/croisee";
 type PayStub = { input: JournalInput | null; unavailable: string | null; source: "payfit" | "dsn" | null; service: { axis: string | null }; axisMissing: boolean };
 const PAY: PayStub = { input: JOURNAL, unavailable: null, source: "payfit", service: { axis: "Service" }, axisMissing: false };
-function fakeCtx(o: { pay?: PayStub; service?: string | null; chapitre?: string; period?: boolean; reason?: string | null } = {}): CroiseeContext {
+// Paramètres de l'espace : aucun enregistré, ou un seuil de confidentialité (valeur brute telle qu'enregistrée).
+const NO_SETTINGS = readCroiseeSettings(new Map());
+const seuilSettings = (value: unknown): CroiseeSettings => readCroiseeSettings(new Map([["rh.croisee.confidentialite", { value }]]));
+function fakeCtx(o: { pay?: PayStub; service?: string | null; chapitre?: string; period?: boolean; reason?: string | null; settings?: CroiseeSettings } = {}): CroiseeContext {
   const state = { chapitre: o.chapitre ?? "services", annee: "2026", de: "01", a: "01", service: o.service === undefined ? null : o.service === null ? "__nv__" : o.service };
   return {
     slug: "demo",
@@ -372,6 +438,7 @@ function fakeCtx(o: { pay?: PayStub; service?: string | null; chapitre?: string;
     labels: { period: "janvier 2026", prev: "janvier 2025" },
     service: { axis: "Service", value: o.service, label: o.service === undefined ? "Tous les services" : (o.service ?? "Non ventilé"), options: [], reason: o.reason ?? null },
     query: { tri: null, sens: null },
+    settings: o.settings ?? NO_SETTINGS,
     affichage: "tout",
     href: (patch: Record<string, string | null> = {}, hash?: string) => croiseeHref(BASE, { ...state, ...patch }, hash),
     load: { payroll: async () => o.pay ?? PAY },
@@ -392,6 +459,17 @@ describe("serviceRows : mêmes lignes que le tableau Services de l'écran Masse 
   it("sans axe de service : aucune ligne", () => {
     expect(serviceRows({ ...JOURNAL, serviceAxis: null }, ["2026-01"], ["2025-01"])).toEqual([]);
   });
+  it("une seule règle : la fonction partagée, appelée aussi par l'écran Masse salariale (syntheseOf), mêmes lignes et même ordre", () => {
+    expect(serviceRows).toBe(sharedServiceRows);
+    expect(serviceLabel(null)).toBe("Non ventilé");
+    expect(serviceLabel("A")).toBe("A");
+    const payCtx = { input: JOURNAL, service: { axis: "Service", origin: "single-axis", updatedAt: null }, axes: ["Service"], etp: (ms: string[]) => ms.map((m) => ({ month: m, etp4: 10000, reason: null })), dsn: new Map() };
+    const s = syntheseOf(payCtx as never, { annee: "2026", de: "01", a: "01" });
+    if (s.kind !== "ready") throw new Error("contexte fictif incomplet");
+    expect(s.months).toEqual(["2026-01"]);
+    expect(s.serviceRows).toEqual(serviceRows(JOURNAL, ["2026-01"], ["2025-01"]));
+    expect(s.serviceRows.map((r) => r.value)).toEqual(["A", "B", null]);
+  });
 });
 
 describe("loadServicesInput + buildServices : tableau par service (colonnes de l'écran Masse salariale)", () => {
@@ -401,7 +479,7 @@ describe("loadServicesInput + buildServices : tableau par service (colonnes de l
     expect(input.data!.rows.map((r) => r.href)).toEqual([`${BASE}?chapitre=services&annee=2026&de=01&a=01&service=A`, `${BASE}?chapitre=services&annee=2026&de=01&a=01&service=B`, `${BASE}?chapitre=services&annee=2026&de=01&a=01&service=__nv__`]);
     const m = buildServices(input);
     const t = table(m, "services");
-    expect(t.columns.map((c) => c.header)).toEqual(["Service", "Coût 2026", "Coût 2025 (N-1)", "Écart", "Écart (%)", "Part du coût", "Hors primes", "Primes", "Cotisations", "Coût / personne-mois"]);
+    expect(t.columns.map((c) => c.header)).toEqual(["Service", "Coût janvier 2026", "Coût N-1 (janvier 2025)", "Écart", "Écart (%)", "Part du coût", "Hors primes", "Primes", "Cotisations", "Coût / personne-mois"]);
     expect(t.columns.every((c) => c.sortable)).toBe(true);
     expect(t.rows.map((r) => r.cells[0])).toEqual(["A", "B", "Non ventilé"]);
     // A : 1 400 € ; 1 260 € ; +140 € ; 140 ÷ 1 260 = 11,11 % ; part 1 400 ÷ 2 200 = 63,64 % ; hors primes 1 000 € ; primes 0 € ;
@@ -423,6 +501,7 @@ describe("loadServicesInput + buildServices : tableau par service (colonnes de l
     const c = chart(m, "services-contribution");
     expect(c.categories).toEqual(["A", "B", "Non ventilé"]);
     expect(c.series[0].values).toEqual([14000, 70000, 10000]);
+    expect(c.series[0].name).toBe("Écart à N-1, janvier 2026");
     expect(c.tableId).toBe("services");
     const ring = chart(m, "services-repartition");
     expect(ring.series.map((s) => [s.name, s.values[0]])).toEqual([
@@ -496,11 +575,26 @@ describe("loadFixeVariableInput : mêmes fonctions que l'onglet Fixe & variable"
       ["salaires", "compte 641100", 150000],
     ]);
     expect(Object.keys(all.data!.labelsByMonth)).toEqual(["2026-01"]);
-    const a = await loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", service: "A" }));
+    // Service A : un contrat rémunéré en janvier 2026 (c1) et en janvier 2025 (c1) ; seuil de confidentialité 1 → affiché.
+    const a = await loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", service: "A", settings: seuilSettings(1) }));
     expect(a.data!.cur).toMatchObject({ kind: "value", brut: 100000, masse: 140000 });
     const m = buildFixeVariable(a);
     expect(sp(tile(m, "fixe").value.text)).toBe("1 000,00 €");
-    expect(sp(tile(m, "fixe").variations![1].text!)).toBe("+100,00 € · +11,11 %");
+    expect(tile(m, "fixe").variations!.slice(1).map((v) => sp(v.text!))).toEqual(["+100,00 €", "+11,11 %"]);
+  });
+  it("service retenu : seuil de confidentialité absent, illisible ou non atteint → chapitre n.d. avec la raison et l'action", async () => {
+    const at = (settings: CroiseeSettings, service: string | null = "A") => loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", service, settings }));
+    expect(await at(NO_SETTINGS)).toEqual({ nd: { reason: "seuil de confidentialité non défini (Paramètres)", action: { href: "/e/demo/parametres#croisee", label: "Paramètres" } }, data: null });
+    expect((await at(seuilSettings("5"))).nd?.reason).toBe("seuil de confidentialité illisible : à ré-enregistrer (Paramètres)");
+    // Seuil 2 : A n'a qu'un contrat rémunéré en janvier 2026 → masqué ; le lien retire le filtre Service.
+    expect(await at(seuilSettings(2))).toEqual({
+      nd: { reason: "non affiché (seuil de confidentialité : 2 personnes) — service retenu par le filtre", action: { href: `${BASE}?chapitre=fixe-variable&annee=2026&de=01&a=01`, label: "Retirer le filtre Service" } },
+      data: null,
+    });
+    // Non ventilé : un contrat (c3) en janvier 2026, aucune ligne en janvier 2025 (groupe vide, non masqué) → masqué au seuil 2.
+    expect((await at(seuilSettings(2), null)).nd?.reason).toMatch(/^non affiché \(seuil de confidentialité : 2 personnes\)/);
+    // Sans filtre Service : chiffres de toute l'entreprise, jamais masqués (le paramètre n'est pas lu).
+    expect((await loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", settings: NO_SETTINGS }))).nd).toBeNull();
   });
   it("sans journal ou sans période : n.d. avec la raison", async () => {
     const dsn = await loadFixeVariableInput(fakeCtx({ pay: { ...PAY, input: null, source: "dsn" } }));
@@ -515,7 +609,7 @@ const TABLEAU = `${BASE}?chapitre=fixe-variable&affichage=tableau`;
 const renderFv = (m: FixeVariableModel, affichage: Affichage = "tout") => unescape(renderToStaticMarkup(h(FixeVariableChapter, { model: m, slug: "demo", affichage, tableauHref: TABLEAU })));
 
 describe("FixeVariableChapter : rendu du modèle", () => {
-  it("afficher tout : six cartes, graphiques, tableaux, « Prévu », limites ; aucun mot « rigidité »", () => {
+  it("afficher tout : six cartes, graphiques, tableaux, « Prévu », limites ; « rigidité » seulement dans la liste « Prévu »", () => {
     const html = renderFv(fv());
     for (const id of ["fixe", "variable", "primes", "stages", "part-primes", "part-salaires"]) expect(html).toContain(`data-testid="cx-tile-fixe-variable-${id}"`);
     for (const id of Object.values(FV)) if (id !== FV.repartition && id !== FV.structure) expect(html).toContain(`data-testid="cx-table-${id}"`);
@@ -523,8 +617,12 @@ describe("FixeVariableChapter : rendu du modèle", () => {
     for (const p of PREVU_FIXE_VARIABLE) expect(html).toContain(`data-testid="cx-prevu-${p.id}"`);
     for (const b of ["cartes", "composition", "mois", "primes", "libelles", "prevu", "limites"]) expect(html).toContain(`id="cx-fixe-variable-${b}"`);
     expect(html).toContain("Part des salaires dans le brut");
-    // Le mot n'apparaît que dans l'identifiant d'ancre du glossaire (croisee-rigidite), jamais dans le texte affiché.
-    expect(html.replace(/href="[^"]*"/g, "")).not.toMatch(/rigidit/i);
+    // La rigidité est un indicateur « Prévu » (avec sa raison) ; hors de cette ligne, le mot n'apparaît que dans l'ancre du glossaire
+    // (croisee-rigidite) : ni carte ni tableau ne l'affichent.
+    const prevu = html.match(/<li data-testid="cx-prevu-fixe-variable-rigidite">.*?<\/li>/s)?.[0] ?? "";
+    expect(prevu).toContain("Rigidité de la rémunération (fixe contractuel et avantages obligatoires)");
+    expect(prevu).toContain("classification fixe / avantages obligatoires absente des sources ; seule la part des salaires dans le brut est calculée");
+    expect(html.replace(prevu, "").replace(/href="[^"]*"/g, "")).not.toMatch(/rigidit/i);
     expect(html).toContain('data-testid="ms-trend-legend"');
     expect(html).toContain('href="/e/demo/glossaire#def-croisee-rigidite"');
   });
@@ -582,5 +680,171 @@ describe("ServicesChapter : rendu du modèle", () => {
     expect(html).toContain('data-testid="cx-services-nd"');
     expect(html).toContain("Aucun code analytique dans le journal PayFit");
     expect(html).toContain('href="/e/demo/parametres#masse-salariale"');
+  });
+});
+
+// --- Seuil de confidentialité sous le filtre Service (cas écrits à la main) -------------------------------------------------------
+
+describe("serviceConfidentiality : chaque mois connu du service retenu est un groupe de contrats rémunérés", () => {
+  const v = (brut: number, ...paid: string[]) => ({ kind: "value" as const, brut, paidContracts: paid });
+  const ND = { kind: "nd" as const };
+  it("seuil absent : n.d. avec la raison du paramètre", () => {
+    expect(serviceConfidentiality({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" }, [v(1000, "a")])).toEqual({ cause: "parametre", reason: "seuil de confidentialité non défini (Paramètres)" });
+  });
+  it("seuil 3 : trois et quatre contrats → affiché ; un mois n.d. ne compte pas ; un mois vide (aucun brut, aucun contrat) n'est pas masqué", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(1000, "a", "b", "c"), v(500, "a", "b", "c", "d"), ND, v(0)])).toBeNull();
+  });
+  it("seuil 3 : un mois à deux contrats → tout le chapitre n.d.", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(1000, "a", "b", "c"), v(400, "a", "b")])).toEqual({ cause: "seuil", reason: "non affiché (seuil de confidentialité : 3 personnes) — service retenu par le filtre" });
+  });
+  it("brut sans contrat rattaché : effectif non dénombré, seuil non vérifiable ; un mois sous le seuil l'emporte", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(1000, "a", "b", "c"), v(200)])).toEqual({ cause: "seuil", reason: "effectif du groupe non dénombré : seuil de confidentialité non vérifiable — service retenu par le filtre" });
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(200), v(400, "a")])!.reason).toMatch(/^non affiché/);
+  });
+  it("seuil 1 : un seul contrat suffit", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(1000, "a")])).toBeNull();
+  });
+});
+
+// --- Cas limites des parts et des écarts (cas écrits à la main) ----------------------------------------------------------------
+
+describe("N-1 négatif, brut nul, coût total nul : n.d. avec leur raison, jamais un pourcentage", () => {
+  it("chapitre 04 : indemnités N-1 négatives (régularisation de −100 €) → écart +600 €, % n.d. « N-1 négatif »", () => {
+    // N : indemnités 500 € ; N-1 : −100 € ; écart 500 − (−100) = +600 €.
+    const m = fv({ prev: { ...PREV, byRubric: R(750000, 50000, 20000, -10000) } as WindowIn });
+    const t = table(m, FV.composantes);
+    expect([raw(t, 3, "n"), raw(t, 3, "n1"), raw(t, 3, "ecart"), raw(t, 3, "ecart-pct")]).toEqual([50000, -10000, 60000, { nd: N1_NEGATIF }]);
+  });
+  it("chapitre 04 : brut nul sur la période → parts du brut n.d. « brut nul », listées sous les cartes", () => {
+    const Z: MonthIn = { ...N_JAN, brut: 0, cotisations: 0, masse: 0, byRubric: R(0, 0, 0, 0) };
+    const m = fv({ cur: { kind: "value", brut: 0, cotisations: 0, masse: 0, byRubric: R(0, 0, 0, 0), months: [Z, { ...Z, month: "2026-02" }], paidContractMonths: 0 }, labelsN: [] });
+    expect(tile(m, "part-salaires").value).toEqual({ text: "n.d.", kind: "nd", reason: BRUT_NUL });
+    expect(table(m, FV.parts).rows.map((r) => r.cells[1])).toEqual([{ nd: BRUT_NUL }, { nd: BRUT_NUL }]);
+    // L'écart en points est n.d. lui aussi (raison de N) ; N-1 reste lu : 7 500 ÷ 8 200 = 91,46 %.
+    expect(table(m, FV.parts).rows[0].cells.slice(2)).toEqual([{ exact: 750000 / 820000 }, { nd: BRUT_NUL }]);
+    expect(m.tileNd).toEqual([`Part des primes dans le brut, Part des salaires dans le brut : ${BRUT_NUL}`]);
+  });
+  it("chapitre 05 : N-1 négatif → % n.d. ; coût total nul (A +100 €, B −100 €) → parts n.d. « coût total nul »", () => {
+    const w = (masse: number): WindowIn => ({ kind: "value", brut: masse, cotisations: 0, masse, byRubric: R(masse, 0, 0, 0), months: [{ ...N_JAN, brut: masse, cotisations: 0, masse, byRubric: R(masse, 0, 0, 0) }], paidContractMonths: 1 });
+    const data: ServicesData = {
+      year: 2026,
+      prevYear: 2025,
+      labels: { period: "janvier 2026", prev: "janvier 2025" },
+      axis: "Service",
+      axisMissing: false,
+      rows: [
+        // A : 100 € face à −200 € → écart +300 €, N-1 négatif. B : −100 € face à 0 € → écart −100 €, N-1 nul.
+        { value: "A", cur: w(10000), prev: w(-20000), evo: { kind: "value", deltaCents: 30000, ratio: { num: 30000, den: -20000 } } },
+        { value: "B", cur: w(-10000), prev: w(0), evo: { kind: "value", deltaCents: -10000, ratio: null } },
+      ],
+      total: { cur: w(0), prev: w(-20000), evo: { kind: "value", deltaCents: 20000, ratio: { num: 20000, den: -20000 } } },
+      selected: null,
+    };
+    const t = table(buildServices({ nd: null, data }), "services");
+    expect(t.rows.map((r) => r.cells[0])).toEqual(["A", "B"]);
+    expect([raw(t, 0, "ecart"), raw(t, 0, "ecart-pct"), raw(t, 0, "part")]).toEqual([30000, { nd: N1_NEGATIF }, { nd: TOTAL_NUL }]);
+    expect([raw(t, 1, "ecart"), raw(t, 1, "ecart-pct"), raw(t, 1, "part")]).toEqual([-10000, { nd: N1_NUL }, { nd: TOTAL_NUL }]);
+    expect([raw(t, "foot", "ecart"), raw(t, "foot", "ecart-pct")]).toEqual([20000, { nd: N1_NEGATIF }]);
+  });
+});
+
+describe("légende des tendances : un ton écrit dans n'importe quel tableau suffit", () => {
+  it("totaux identiques à N-1 mais libellés différents → légende affichée", () => {
+    // Mêmes montants N et N-1, mois par mois ; seuls les libellés de salaire diffèrent : « Salaire de base » 8 000 € face à 7 000 €
+    // (+1 000 €, rouge), « Complément de salaire » 0 € face à 1 000 € (−1 000 €, vert).
+    const same: WindowIn = { ...CUR, months: [{ ...N_JAN, month: "2025-01" }, { ...N_FEB, month: "2025-02" }] } as WindowIn;
+    const m = fv({ prev: same, labelsN1: [L("salaires", "Salaire de base", 700000), L("salaires", "Complément de salaire", 100000), ...LABELS_N.slice(1)] });
+    expect(m.tiles.every((t) => (t.variations ?? []).every((v) => v.tone === "flat"))).toBe(true);
+    expect(table(m, FV.composantes).rows.every((r) => r.cells[3] === 0)).toBe(true);
+    const lib = table(m, FV.libelles);
+    expect(lib.rows.slice(0, 2).map((r, i) => [r.cells[0], shown(lib, i, "ecart")])).toEqual([
+      ["Complément de salaire", "−1 000,00 €"],
+      ["Salaire de base", "+1 000,00 €"],
+    ]);
+    expect(m.trend).toBe(true);
+  });
+});
+
+describe("plus de huit familles de prime : pas de graphique par famille, lien vers le tableau en « Graphiques »", () => {
+  // Neuf familles de 100 € chacune, toutes versées en janvier 2026.
+  const nine = Array.from({ length: 9 }, (_, i) => L("primes", `Prime fictive ${i + 1}`, 10000));
+  const m = fv({ labelsN: nine, labelsByMonth: { "2026-01": nine, "2026-02": [] } });
+  it("tableau par famille gardé, graphique non tracé, note d'une ligne", () => {
+    expect(table(m, FV.primesFamilles).columns).toHaveLength(11);
+    expect(m.charts.some((c) => c.id === FV.primesFamilles)).toBe(false);
+    expect(m.blocks.find((b) => b.id === "primes")!.graphLinks).toEqual([FV.primesFamilles]);
+  });
+  it("rendu : le lien n'existe qu'en « Graphiques » et mène au tableau exact", () => {
+    const g = renderFv(m, "graphique");
+    expect(g).toContain(`data-testid="cx-fixe-variable-primes-lien-${FV.primesFamilles}"`);
+    expect(g).toContain(`href="${TABLEAU}#cx-table-${FV.primesFamilles}"`);
+    expect(g).not.toContain(`data-testid="cx-chart-${FV.primesFamilles}"`);
+    expect(renderFv(m, "tout")).not.toContain(`data-testid="cx-fixe-variable-primes-lien-`);
+  });
+});
+
+describe("services : ordre par défaut = tri annoncé par aria-sort (coût de la période décroissant)", () => {
+  // Même journal, prime sans code portée à 1 000 € : sans code 1 000 € > B 700 €.
+  const J2: JournalInput = { ...JOURNAL, lines: JOURNAL.lines.map((l) => (l.key === "l5" ? { ...l, debitCents: 100000 } : l)) };
+  const ctx2 = () => fakeCtx({ pay: { ...PAY, input: J2 } });
+  it("l'écran Masse salariale garde « Non ventilé » en dernier ; le chapitre range par coût, comme son tri par défaut", async () => {
+    expect(serviceRows(J2, ["2026-01"], ["2025-01"]).map((r) => r.value)).toEqual(["A", "B", null]);
+    const m = buildServices(await loadServicesInput(ctx2()));
+    const t = table(m, "services");
+    expect(t.rows.map((r) => r.cells[0])).toEqual(["A", "Non ventilé", "B"]);
+    expect(sortRows(t, "n", "desc")).toEqual(t.rows);
+    expect(chart(m, "services-contribution").categories).toEqual(["A", "Non ventilé", "B"]);
+    expect(chart(m, "services-repartition").series.map((x) => x.name)).toEqual(["A", "Non ventilé", "B"]);
+  });
+  it("servicesSort : tri de l'adresse s'il vise une colonne triable du tableau, sinon coût de la période décroissant", async () => {
+    const t = table(buildServices(await loadServicesInput(ctx2())), "services");
+    expect(servicesSort(t, null, null)).toEqual({ tri: "services.n", sens: "desc" });
+    expect(servicesSort(t, "services.ecart", "asc")).toEqual({ tri: "services.ecart", sens: "asc" });
+    expect(servicesSort(t, "services.inconnue", "asc")).toEqual({ tri: "services.n", sens: "desc" });
+    expect(servicesSort(t, "autre.n", "asc")).toEqual({ tri: "services.n", sens: "desc" });
+  });
+  it("rendu sans tri dans l'adresse : aria-sort « descending » sur le coût de la période, flèche, lien vers le sens croissant", async () => {
+    const m = buildServices(await loadServicesInput(ctx2()));
+    const base = `${BASE}?chapitre=services&annee=2026&de=01&a=01`;
+    const html = unescape(renderToStaticMarkup(h(ServicesChapter, { model: m, slug: "demo", affichage: "tableau", tableauHref: "/t", sort: { base, tri: null, sens: null } })));
+    const sorts = [...html.matchAll(/aria-sort="(\w+)"/g)].map((x) => x[1]);
+    expect(sorts.filter((x) => x !== "none")).toEqual(["descending"]);
+    expect(html).toMatch(/aria-sort="descending"[^>]*>\s*<a class="cx-sort" href="[^"]*tri=services\.n&sens=asc#cx-table-services"/);
+    const order = [...html.matchAll(/<th scope="row"[^>]*>(?:<a href="[^"]*">)?([^<]+)/g)].map((x) => x[1]);
+    expect(order.slice(0, 3)).toEqual(["A", "Non ventilé", "B"]);
+  });
+});
+
+describe("services sans aucune ligne : la phrase est écrite une fois, sans graphique vide", () => {
+  const data: ServicesData = {
+    year: 2026,
+    prevYear: 2025,
+    labels: { period: "janvier 2026", prev: "janvier 2025" },
+    axis: "Service",
+    axisMissing: false,
+    rows: [],
+    total: { cur: CUR, prev: PREV, evo: { kind: "value", deltaCents: 182000, ratio: { num: 182000, den: 1148000 } } },
+    selected: null,
+  };
+  const m = buildServices({ nd: null, data });
+  it.each(["tout", "graphique", "tableau"] as Affichage[])("affichage %s", (affichage) => {
+    expect(m.charts).toEqual([]);
+    expect(m.blocks.map((b) => b.id)).toEqual(["tableau"]);
+    const html = renderToStaticMarkup(h(ServicesChapter, { model: m, slug: "demo", affichage, tableauHref: "/t" }));
+    expect(html.split(SANS_LIGNE).length - 1).toBe(1);
+  });
+});
+
+describe("un seul calcul par affichage : le modèle du chapitre est mémoïsé par contexte", () => {
+  it("fixeVariableModel et servicesModel renvoient la même promesse pour un même contexte, et le modèle de l'écran", async () => {
+    const ctx = fakeCtx({ chapitre: "fixe-variable" });
+    const p1 = fixeVariableModel(ctx);
+    expect(fixeVariableModel(ctx)).toBe(p1);
+    expect(await p1).toEqual(buildFixeVariable(await loadFixeVariableInput(ctx)));
+    const sctx = fakeCtx();
+    const s1 = servicesModel(sctx);
+    expect(servicesModel(sctx)).toBe(s1);
+    expect(servicesModel(fakeCtx())).not.toBe(s1);
+    expect(await s1).toEqual(buildServices(await loadServicesInput(sctx)));
   });
 });

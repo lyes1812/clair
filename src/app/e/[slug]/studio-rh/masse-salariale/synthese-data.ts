@@ -1,6 +1,7 @@
 import { formatMonth } from "@/lib/dates";
 import { costPerEtp, evolution, monthPayroll, servicesOf, shiftYear, windowPayroll, withService, type CostPerEtp, type EtpMonth, type Evolution, type JournalInput, type PayrollWindow } from "@/lib/payroll/engine";
 import { loadPayrollContext, type PayrollContext } from "@/lib/payroll/context";
+import { serviceRows as serviceRowsOf, type ServiceRow } from "@/lib/payroll/service-rows";
 import type { Affichage } from "./components";
 
 // Chargement commun de Masse salariale › Synthèse (page et export Excel) : période (année, premier et dernier mois), service, onglet
@@ -18,11 +19,11 @@ export const NV = "__nv__";
 // Onglets de l'écran (sous-vues de Masse salariale, pas des entrées de menu).
 export const VUES = { synthese: "Synthèse", "fixe-variable": "Fixe & variable", "paie-compta": "Paie & comptabilité" } as const;
 export type MsVue = keyof typeof VUES;
-export const serviceLabel = (v: string | null) => (v === null ? "Non ventilé" : v);
+// Lignes par service et leur libellé : règle partagée avec la Masse salariale croisée (src/lib/payroll/service-rows.ts).
+export { serviceLabel, type ServiceRow } from "@/lib/payroll/service-rows";
 // « janvier → mars 2026 », ou le mois seul.
 export const periodLabel = (ms: string[]) => (ms.length === 1 ? formatMonth(ms[0]) : `${MONTH_NAMES[Number(ms[0].slice(5)) - 1]} → ${MONTH_NAMES[Number(ms.at(-1)!.slice(5)) - 1]} ${ms[0].slice(0, 4)}`);
 
-export type ServiceRow = { value: string | null; cur: PayrollWindow; prev: PayrollWindow; evo: Evolution };
 export type SyntheseReady = {
   kind: "ready";
   ctx: PayrollContext;
@@ -109,19 +110,10 @@ export function syntheseOf(ctx: PayrollContext, sp: Search): Synthese {
   const cost = costPerEtp(cur, etpCur);
   const costPrev = costPerEtp(prev, etpPrev);
   // Table par service (toujours sur tout le journal) : la somme des services, non ventilé compris, égale le total.
-  const serviceRows: ServiceRow[] = ctx.service.axis
-    ? servicesOf(fullInput, [...months, ...prevMonths]).map((v) => {
-        const si = withService(fullInput, v);
-        const c = windowPayroll(si, months);
-        const p = windowPayroll(si, prevMonths);
-        return { value: v, cur: c, prev: p, evo: evolution(c, p, (w) => w.masse) };
-      })
-    : [];
+  const serviceRows: ServiceRow[] = ctx.service.axis ? serviceRowsOf(fullInput, months, prevMonths) : [];
   const totalCur = windowPayroll(fullInput, months);
   const totalPrev = windowPayroll(fullInput, prevMonths);
   const totalEvo = evolution(totalCur, totalPrev, (w) => w.masse);
-  const masseOf = (w: PayrollWindow) => (w.kind === "value" ? w.masse : -1);
-  serviceRows.sort((a, b) => (a.value === null ? 1 : b.value === null ? -1 : masseOf(b.cur) - masseOf(a.cur)));
   const serviceNd = ctx.service.origin === "setting" ? "ventilation par service désactivée par un administrateur" : ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`;
   // Contrôle DSN : affiché sur le total entreprise seulement (la DSN ne porte pas le code analytique du journal).
   const showDsn = serviceValue === undefined && [...months, ...prevMonths].some((m) => ctx.dsn.has(m));

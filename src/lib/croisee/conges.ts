@@ -1,22 +1,26 @@
 import { addMonths, monthEnd, monthStart, monthsBetween } from "@/lib/dates";
+import { monthRanges } from "@/lib/rh/headcount";
 import { absenteeism, absenteeismMonth } from "@/lib/rh/kpi/absence";
 import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import { absenceSlots } from "@/lib/rh/kpi/days";
 import { countedOpts } from "@/lib/rh/kpi/period";
-import type { AbsenceSlice, AbsenteeismMonth, Absenteeism, Kind, KpiInput, SlotKey, Window } from "@/lib/rh/kpi/types";
+import type { AbsenceSlice, AbsenteeismMonth, Absenteeism, Kind, KpiInput, KpiNd, SlotKey, Window } from "@/lib/rh/kpi/types";
 import type { AbsenceRow } from "@/lib/rh/referential/types";
 
 // Congés et absences par motif (Masse salariale croisée, chapitre 03). Fonctions pures, sans base ni horloge.
 //
-// 1. congesPris : jours pris par motif et par mois, avec le nombre de personnes concernées. Même moteur et même technique que
-//    l'absentéisme par motif (absenceByMotif) : pour chaque motif présent dans la lecture, le moteur de l'absentéisme est exécuté sur
-//    une copie de l'entrée qui ne garde que les absences de ce motif. Statuts retenus (params.absenceStatuses), base de jours, natures
-//    comptées, bornes du contrat, demi-journées incertaines (« ≥ ») et mois hors des mois lus (n.d.) sont donc ceux du moteur. Aucun
-//    motif n'est classé par son nom (congé payé, RTT, repos…) : chaque motif de la source a sa ligne.
-// 2. congesAVenir : congés posés (statut retenu) et demandes en attente d'approbation, datés après le dernier mois clos, en jours par
-//    mois lu. Les mois postérieurs au dernier mois clos ne sont pas encore couverts par le référentiel (jours théoriques n.d.) : les
-//    demi-journées se comptent ici directement sur les dates des absences (absenceSlots), bornées au mois et au contrat, une demi-journée
-//    couverte par deux absences du même contrat, du même motif et du même statut comptée une fois.
+// 1. congesPris : demi-journées prises par motif et par mois, avec le nombre de personnes concernées. Même moteur et même technique
+//    que l'absentéisme par motif (absenceByMotif) : pour chaque motif présent dans la lecture, le moteur de l'absentéisme est exécuté
+//    sur une copie de l'entrée qui ne garde que les absences de ce motif (motifInput). Statuts retenus (params.absenceStatuses), base
+//    de jours, natures comptées, bornes du contrat, demi-journées incertaines (« ≥ ») et mois hors des mois lus (n.d.) sont donc ceux
+//    du moteur. Aucun motif n'est classé par son nom (congé payé, RTT, repos…) : chaque motif de la source a sa ligne.
+// 2. congesAVenir : absences posées (statut retenu) et demandes en attente d'approbation, datées après le dernier mois clos, en
+//    demi-journées par mois lu. Les mois postérieurs au dernier mois clos ne sont pas encore couverts par le référentiel (jours
+//    théoriques n.d.) : les demi-journées se comptent ici directement sur les dates des absences (absenceSlots), bornées au mois et au
+//    contrat, une demi-journée couverte par deux absences du même contrat, du même motif et du même statut comptée une fois.
+// 3. Raisons publiques : le moteur nomme l'absence et le contrat en cause quand un mois est n.d. pour un contrat inconnu ou une date
+//    absente. La page croisée n'affiche aucun identifiant : ces raisons sont remplacées par une raison qui garde le mois et le nombre
+//    d'absences en cause (le détail reste dans KPI RH).
 //
 // Personnes concernées : collaborateur du contrat (clé de personne), à défaut le contrat lui-même ; elles servent au seuil de
 // confidentialité de l'écran. Aucun nom, aucun identifiant n'est renvoyé : des nombres.
@@ -26,18 +30,101 @@ export type CongeCell = CongeValue | { kind: "nd"; reason: string };
 export type CongeLine = { type: string; chosen: boolean; months: CongeCell[]; total: CongeCell };
 export type CongesPris = { window: Window; lines: CongeLine[]; emptyReason: string | null };
 
+const nf = new Intl.NumberFormat("fr-FR");
 const personOf = (x: { personKey: string | null; contractKey: string }) => x.personKey ?? `contrat:${x.contractKey}`;
 const personsOf = (slices: readonly AbsenceSlice[]): Set<string> => new Set(slices.filter((s) => s.half > 0).map(personOf));
 
-function monthCell(r: AbsenteeismMonth): CongeCell {
-  if (r.kind === "nd") return { kind: "nd", reason: r.nd.reason };
+// --- Copies de l'entrée (les mêmes que celles de absenceByMotif) ------------------------------------------------------------------
+
+// Un motif : ses seules absences, retenu seul.
+export function motifInput(input: KpiInput, type: string): KpiInput {
+  const a = input.absences;
+  return { ...input, absences: a.status === "read" ? { ...a, rows: a.rows.filter((r) => r.type === type) } : a, params: { ...input.params, absenceTypes: [type] } };
+}
+// Taux tous motifs : toutes les absences, tous les motifs présents dans la lecture retenus.
+export function allMotifsInput(input: KpiInput): KpiInput {
+  const rows = input.absences.status === "read" ? input.absences.rows : [];
+  return { ...input, params: { ...input.params, absenceTypes: [...new Set(rows.map((r) => r.type))].sort() } };
+}
+
+// --- Raisons publiques (aucun identifiant d'absence ni de contrat) ----------------------------------------------------------------
+
+export const ABSENCE_ISSUES = ["absence-unknown-contract", "absence-date-nd"] as const;
+export type AbsenceIssue = (typeof ABSENCE_ISSUES)[number];
+const isIssue = (code: string): code is AbsenceIssue => (ABSENCE_ISSUES as readonly string[]).includes(code);
+
+// L'absence que nomme une raison du moteur (rapprochement exact sur son texte ; aucune autre lecture du texte).
+const named = (reason: string, code: AbsenceIssue, rows: readonly AbsenceRow[]): AbsenceRow | undefined =>
+  code === "absence-unknown-contract" ? rows.find((x) => reason === `absence ${x.id} rattachée au contrat ${x.contractId} inconnu du référentiel`) : rows.find((x) => reason.startsWith(`absence ${x.id} : date de `));
+
+// Nombre d'absences en cause dans un mois que le moteur rend n.d. pour un contrat inconnu ou une date absente. Le moteur s'arrête à
+// la première : elle est retirée d'une copie de l'entrée et le mois est recalculé, tant que la raison garde le même code. count null :
+// une absence n'a pas pu être rapprochée de la raison (le nombre n'est alors pas écrit). null : le mois n'est pas dans ce cas.
+export function absencesEnCause(input: KpiInput, month: string): { code: AbsenceIssue; count: number | null } | null {
+  let r: AbsenteeismMonth = absenteeismMonth(input, month);
+  if (r.kind !== "nd" || !isIssue(r.nd.code)) return null;
+  const code = r.nd.code;
+  let cur = input;
+  let count = 0;
+  while (r.kind === "nd" && r.nd.code === code) {
+    const a = cur.absences;
+    if (a.status !== "read") return { code, count: null };
+    const hit = named(r.nd.reason, code, a.rows);
+    if (!hit) return { code, count: null };
+    count += 1;
+    cur = { ...cur, absences: { ...a, rows: a.rows.filter((x) => x !== hit) } };
+    r = absenteeismMonth(cur, month);
+  }
+  return { code, count };
+}
+
+// Raison publique d'un mois : le mois et le nombre d'absences en cause, sans identifiant.
+export function issueReason(code: AbsenceIssue, count: number | null, month: string): string {
+  const many = count !== null && count > 1;
+  const who = count === null ? "au moins une absence" : `${nf.format(count)} absence${many ? "s" : ""}`;
+  return code === "absence-unknown-contract"
+    ? `${who} rattachée${many ? "s" : ""} à un contrat inconnu du référentiel en ${month} (détail dans KPI RH)`
+    : `${who} sans date de début ou de fin dans PayFit en ${month} (détail dans KPI RH)`;
+}
+
+// Raison d'un mois n.d. du moteur, sans identifiant ; les autres raisons passent telles quelles. input : l'entrée (ou la copie) qui a
+// produit ce résultat.
+export function publicMonthReason(input: KpiInput, month: string, nd: KpiNd): string {
+  if (!isIssue(nd.code)) return nd.reason;
+  const c = absencesEnCause(input, month);
+  return issueReason(nd.code, c && c.code === nd.code ? c.count : null, month);
+}
+
+// Raison d'une période n.d. du moteur, sans identifiant : mois en cause, puis la raison publique du premier (même forme que la raison
+// de période du moteur, le mois étant écrit dans la raison du mois).
+export function publicWindowReason(input: KpiInput, nd: KpiNd): string {
+  const list = nd.months;
+  if ((nd.code !== "month-nd" && nd.code !== "month-lower-bound") || !list?.length) return nd.reason;
+  const first = absenteeismMonth(input, list[0]);
+  if (first.kind !== "nd" || !isIssue(first.nd.code)) return nd.reason;
+  const text = publicMonthReason(input, list[0], first.nd);
+  return list.length === 1 ? text : `${list.length} mois n.d. (${monthRanges(list)}) ; ${text}`;
+}
+
+// Résultats du moteur dont la raison n.d. est rendue publique (les valeurs ne changent pas).
+export function publicMonth<T extends { month: string; kind: string; nd?: KpiNd }>(input: KpiInput, r: T): T {
+  return r.kind === "nd" && r.nd ? ({ ...r, nd: { ...r.nd, reason: publicMonthReason(input, r.month, r.nd) } } as T) : r;
+}
+export function publicWindow<T extends { kind: string; nd?: KpiNd | null }>(input: KpiInput, r: T): T {
+  return r.kind === "nd" && r.nd ? ({ ...r, nd: { ...r.nd, reason: publicWindowReason(input, r.nd) } } as T) : r;
+}
+
+// --- Pris par motif et par mois -------------------------------------------------------------------------------------------------
+
+function monthCell(copy: KpiInput, r: AbsenteeismMonth): CongeCell {
+  if (r.kind === "nd") return { kind: "nd", reason: publicMonthReason(copy, r.month, r.nd) };
   return { kind: r.kind, half: r.ratio.num, persons: personsOf(r.slices).size };
 }
 
 // Total de la fenêtre : celui du moteur (absenteeism : un mois sans contrat compté n'y apporte rien, tout autre mois n.d. rend la
 // fenêtre n.d.) ; personnes = réunion des personnes des mois comptés.
-function totalCell(r: Absenteeism): CongeCell {
-  if (r.kind === "nd") return { kind: "nd", reason: r.nd.reason };
+function totalCell(copy: KpiInput, r: Absenteeism): CongeCell {
+  if (r.kind === "nd") return { kind: "nd", reason: publicWindowReason(copy, r.nd) };
   const persons = new Set<string>();
   for (const m of r.months) if (m.kind !== "nd") for (const p of personsOf(m.slices)) persons.add(p);
   return { kind: r.kind, half: r.ratio.num, persons: persons.size };
@@ -45,23 +132,23 @@ function totalCell(r: Absenteeism): CongeCell {
 
 export function congesPris(input: KpiInput, w: Window): CongesPris {
   const motifs = absenceByMotif(input, w);
-  const a = input.absences;
-  if (a.status !== "read" || motifs.lines.length === 0) return { window: w, lines: [], emptyReason: motifs.emptyReason ?? "aucun motif dans la lecture" };
+  if (input.absences.status !== "read" || motifs.lines.length === 0) return { window: w, lines: [], emptyReason: motifs.emptyReason ?? "aucun motif dans la lecture" };
   const lines = motifs.lines.map((l): CongeLine => {
-    const copy: KpiInput = { ...input, absences: { ...a, rows: a.rows.filter((r) => r.type === l.type) }, params: { ...input.params, absenceTypes: [l.type] } };
-    const months = w.months.map((m) => monthCell(absenteeismMonth(copy, m)));
-    return { type: l.type, chosen: l.chosen, months, total: totalCell(absenteeism(copy, w)) };
+    const copy = motifInput(input, l.type);
+    const months = w.months.map((m) => monthCell(copy, absenteeismMonth(copy, m)));
+    return { type: l.type, chosen: l.chosen, months, total: totalCell(copy, absenteeism(copy, w)) };
   });
   return { window: w, lines, emptyReason: null };
 }
 
-// --- Congés posés à venir et demandes en attente ------------------------------------------------------------------------------------
+// --- Absences posées à venir et demandes en attente ----------------------------------------------------------------------------------
 
 export type AVenirStatut = "pose" | "en-attente";
 export type AVenirLine = { type: string; statut: AVenirStatut; months: CongeCell[]; total: CongeCell };
 export type CongesAVenir =
-  // nonRattachees : absences posées ou en attente dont tout ou partie des jours ne se rattache à aucun mois lu (date absente, jours
-  // au-delà du dernier mois lu, contrat inconnu du référentiel) : ces jours ne sont pas comptés.
+  // nonRattachees : absences posées ou en attente, sur un contrat de la population comptée ou inconnu du référentiel, dont tout ou
+  // partie des jours ne se rattache à aucun mois lu (date absente, jours au-delà du dernier mois lu, contrat inconnu) : ces jours ne
+  // sont pas comptés.
   { kind: "value"; after: string; months: string[]; lines: AVenirLine[]; nonRattachees: number } | { kind: "nd"; reason: string };
 
 const max = (a: string, b: string) => (a > b ? a : b);
@@ -111,16 +198,17 @@ export function congesAVenir(input: KpiInput, after: string): CongesAVenir {
     const sd = r.start.date;
     const ed = r.end.date;
     if (ed !== null && ed < first) continue; // entièrement avant les mois à venir
-    if (sd === null || ed === null || sd > end) {
-      nonRattachees += 1;
-      continue;
-    }
+    if (ed === null && sd !== null && sd < first) continue; // commencée avant les mois à venir, fin inconnue : pas une absence à venir
     const c = byExternal.get(r.contractId);
     if (!c) {
-      nonRattachees += 1;
+      nonRattachees += 1; // contrat inconnu du référentiel : population non vérifiable, jours non rattachés
       continue;
     }
     if (c.startDate === null || c.nature === null || !opts.natures.includes(c.nature) || !inEst(c.establishmentId)) continue; // hors population comptée
+    if (sd === null || ed === null || sd > end) {
+      nonRattachees += 1; // date absente, ou absence entièrement après le dernier mois lu
+      continue;
+    }
     if (ed > end) nonRattachees += 1; // jours au-delà du dernier mois lu : non comptés
     const x = get(lineKey(r.type, statut));
     for (const m of months) {

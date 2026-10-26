@@ -305,8 +305,9 @@ export default async function CroiseePage({ params, searchParams }: { params: Pr
   const Chapter = CHAPTER_VIEWS[chapter.id];
   const hrefOf = chapterHref(ctx);
   const menu = CHAPTERS.map((c) => ({ id: c.id, num: c.num, title: c.title, description: c.description, href: hrefOf(c.id), prevu: c.statut === "prevu" }));
-  // Menu « Exporter » du chapitre : Excel du chapitre en premier, puis CSV de chaque tableau (même modèle et mêmes paramètres
-  // d'adresse que l'écran) ; rien pour un chapitre « Prévu » ou non calculable.
+  // Menu « Exporter » du chapitre : Excel du chapitre en premier, puis CSV de chaque tableau, puis « Exporter les services » quand un
+  // axe de service est retenu. Le modèle vient de la fonction mémoïsée que le chapitre appelle ensuite (un seul calcul par
+  // affichage) ; rien pour un chapitre « Prévu ».
   const exportOptions = await croiseeExportOptions(ctx);
   const exportsSlot: ReactNode = exportOptions.length > 0 ? <ExportMenu label="Exporter" testid="cx-exports" options={exportOptions} /> : null;
   return (

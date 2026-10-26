@@ -1,7 +1,8 @@
 /* Masse salariale croisée — chapitre 01 · Synthèse. Six cartes (gabarit .six de croisee.css), corps en deux colonnes (graphique
    principal et son tableau exact à gauche, points à surveiller à droite, 1,72fr / 1fr, une colonne sous 1180 px), composition de la
-   masse chargée, chiffres clés en tableau, liens vers les chapitres voisins. Variables de globals.css, typography.css et charts.css
-   uniquement : aucune couleur écrite en dur. Le bloc .cx-syn est celui qu'imprime « Synthèse en PDF · 1 page » (A4 paysage). */
+   masse chargée, cascade de l'écart, tableau par service, chiffres clés en tableau, liens vers les chapitres voisins. Variables de
+   globals.css, typography.css et charts.css uniquement : aucune couleur écrite en dur. Le bloc .cx-syn est celui qu'imprime
+   « Synthèse en PDF · 1 page » (A4 paysage). */
 
 .cx-syn { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 .cx-syn-cards { display: grid; gap: 10px; min-width: 0; scroll-margin-top: 72px; }
@@ -21,6 +22,8 @@
 .cx-syn-mention { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); line-height: 1.5; }
 .cx-syn-prevu { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding-top: 8px; border-top: 1px solid var(--line); }
 .cx-syn-limits { margin: 0; }
+/* « + k autres repères » : seulement dans la Synthèse en PDF d'une page (à l'écran, tous les repères sont listés). */
+.cx-syn-print-more { display: none; margin: 0; }
 
 /* Composition de la masse chargée : anneau et tableau côte à côte, puis l'un sous l'autre. */
 .cx-syn-composition { display: grid; gap: 12px; min-width: 0; margin: 0; scroll-margin-top: 72px; }
@@ -42,10 +45,15 @@
   .cx-syn-head h3 { font-size: 9.5pt; }
   .cx-syn .chart-plot svg { height: auto; }
   .cx-syn-links, .cx-syn-prevu, .cx-syn-tablelink { display: none !important; }
+  .cx-syn-nd { break-inside: avoid; }
   .cx-syn-under .ms-nd-lines, .cx-syn-mention, .cx-syn-limits { font-size: 7pt; }
   /* « Synthèse en PDF · 1 page » : cartes, graphique principal et points à surveiller seulement ; le tableau exact du graphique reste
-     à l'écran et dans l'impression du chapitre. Mini-courbes réduites, cartes resserrées, graphique borné en hauteur. */
-  body[data-print="synthese"] .cx-syn-table { display: none !important; }
+     à l'écran et dans l'impression du chapitre (il est imprimé quand l'affichage « Tableaux » ne trace pas le graphique). Mini-courbes
+     réduites, cartes resserrées, graphique borné en hauteur. Au-delà de trois repères (PRINT_REPERES_MAX de croisee-synthese.ts), les
+     repères suivants sont remplacés par la ligne « + k autres repères » ; un point défavorable ou à compléter est toujours imprimé. */
+  body[data-print="synthese"] .cx-syn-chart.with-graph .cx-syn-table { display: none !important; }
+  body[data-print="synthese"] .cx-syn .cx-alert-repere ~ .cx-alert-repere ~ .cx-alert-repere ~ .cx-alert-repere { display: none !important; }
+  body[data-print="synthese"] .cx-syn-print-more { display: block; font-size: 7pt; }
   body[data-print="synthese"] .cx-syn .cx-spark .tile-sparkline { height: 18px; }
   body[data-print="synthese"] .cx-syn .cx-tiles .ms-tile { gap: 2pt; }
   body[data-print="synthese"] .cx-syn .cx-tiles .ms-tile dd { font-size: 14pt; }

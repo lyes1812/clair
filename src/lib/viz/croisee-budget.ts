@@ -1,14 +1,18 @@
 import type { ChartSeries } from "@/components/charts/shared";
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
-import { journalReason } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { etpCascade, STEP_LABELS, type Cascade } from "@/lib/budget/cascade";
 import { landing, roundDiv, type Landing } from "@/lib/budget/engine";
 import { retraite, type Retraite } from "@/lib/budget/lot3";
 import { bridge, budgetSeries, gap, liveSeries, scenarioSeries, total, type Bridge, type Gap, type Layer, type Point, type Series } from "@/lib/budget/series";
+import type { BaseSnapshot, Projection } from "@/lib/budget/types";
 import { aggregate, alignedSeries, diff, nd as ndCell, reelVersion, val, type Agg, type ServiceFilter } from "@/lib/budget/versions";
 import { HORS_SALARIE, zoomOf } from "@/lib/budget/zoom";
-import { partitionCohorts, type CohortPartition } from "@/lib/croisee/cohortes";
-import { withService } from "@/lib/payroll/engine";
+import { maskCohorts, partitionCohorts, type CohortPartition, type CohortRowId } from "@/lib/croisee/cohortes";
+import { journalReason } from "@/lib/croisee/format";
+import { memoByContext } from "@/lib/croisee/memo";
+import { confidentialiteReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type Confidentialite, type MaskStatus } from "@/lib/croisee/structure";
+import { croiseeSettingReason, croiseeSettingsHref, settingValue } from "@/lib/croisee-settings";
+import { monthPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { costTone } from "@/lib/trend";
 import { costVariation, plainVariation, yearMonths, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeRow, type CroiseeTable, type TileSpec, type TileVariation } from "@/lib/viz/croisee";
@@ -23,8 +27,18 @@ import { landingView, nd, type TileValue } from "@/lib/viz/synthese";
 //   (versions.ts, cascade.ts, comme l'Analyse des écarts), détail par contrat (zoom.ts) ; aucun nouveau moteur ;
 // - build<Chapitre>(input), pure, met ces résultats en forme : cartes, graphiques, tableaux exacts, blocs « Prévu ». L'écran et les
 //   exports partent de ce même modèle.
-// Seul calcul nouveau : la partition des personnes observées (src/lib/croisee/cohortes.ts, testée). Montants en centimes, ETP en
-// dix-millièmes ; un n.d. reste n.d. avec sa raison, jamais zéro. Aucune identité de personne dans le modèle.
+// Seul calcul nouveau : la partition des contrats observés (src/lib/croisee/cohortes.ts, testée). Montants en centimes, ETP en
+// dix-millièmes ; un n.d. reste n.d. avec sa raison, jamais zéro.
+//
+// Aucune identité dans le modèle : ni nom, ni identifiant de contrat. Les raisons n.d. du moteur de projection, qui nomment le
+// contrat, sont remplacées par leur nombre (publicScenario) ; les libellés libres des éléments non récurrents ne sont pas repris
+// (le détail reste dans Hypothèses budgétaires).
+//
+// Seuil de confidentialité (rh.croisee.confidentialite ; absent ou illisible : bloc n.d. avec le lien vers les Paramètres) : il
+// s'applique aux groupes de contrats observés (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres d'un
+// service retenu par le filtre (réalisé, contrats observés, pont et ETP) quand ce service compte de 1 à (seuil − 1) contrats
+// rémunérés. Masquage secondaire par la fonction partagée maskGroups (structure.ts) : aucune valeur masquée ne se retrouve par
+// différence. Les totaux de toute l'entreprise ne sont jamais masqués.
 
 // Identifiants du glossaire vers lesquels renvoient les deux chapitres (un test vérifie que chacun existe).
 export const BUDGET_CX_TERMS = {
@@ -41,6 +55,7 @@ export const BUDGET_CX_TERMS = {
   nMoinsUn: "previous-period",
   prevu: "lecture-prevu",
   tuilage: "croisee-tuilage",
+  confidentialite: "croisee-confidentialite",
 } as const;
 export const EFFETS_CX_TERMS = {
   pont: "pont-volume-cout",
@@ -54,6 +69,7 @@ export const EFFETS_CX_TERMS = {
   effetsMasseNiveauReport: "croisee-effets-masse-niveau-report",
   tuilage: "croisee-tuilage",
   prevu: "lecture-prevu",
+  confidentialite: "croisee-confidentialite",
 } as const;
 const T = BUDGET_CX_TERMS;
 const E = EFFETS_CX_TERMS;
@@ -62,7 +78,6 @@ export const BUDGET_TABLE_IDS = {
   mensuel: "budget-mensuel",
   douzeMois: "budget-douze-mois",
   atterrissage: "budget-atterrissage",
-  nonRecurrents: "budget-non-recurrents",
   annuel: "budget-annuel",
   personnes: "budget-personnes",
 } as const;
@@ -130,6 +145,54 @@ const LAYER_TEXT: Record<Layer, string> = { reel: "réel", "projete-parent": "pr
 
 type Why = { label: string; reason: string | null | undefined };
 
+// --- Seuil de confidentialité : raisons et effectif d'un service ---------------------------------------------------------------
+
+// Chiffres d'un service retenu par le filtre quand il compte de 1 à (seuil − 1) contrats : la raison dit la règle, sans l'effectif.
+export const serviceSousSeuil = (seuil: number, what = "contrats rémunérés"): string => `non affiché : service de moins de ${seuil} ${what} (seuil de confidentialité)`;
+const sizeUnder = (n: number | null, seuil: number): boolean => n !== null && n > 0 && n < seuil;
+
+// Effectif d'un service : contrats rémunérés (au moins une ligne de brut, monthPayroll) du journal restreint au service, par mois et
+// sur l'ensemble des mois (contrats distincts) ; même décompte que la provision par service du chapitre 07. null : mois n.d. (effectif
+// non dénombré, seuil non vérifiable).
+export type PaidSizes = { months: (number | null)[]; period: number | null };
+export function paidSizes(journal: JournalInput, months: readonly string[]): PaidSizes {
+  const all = new Set<string>();
+  let known = true;
+  const list = months.map((m) => {
+    const r = monthPayroll(journal, m);
+    if (r.kind !== "value") {
+      known = false;
+      return null;
+    }
+    for (const k of r.paidContracts) all.add(k);
+    return r.paidContracts.length;
+  });
+  return { months: list, period: known ? all.size : null };
+}
+
+// --- Aucune identité : raisons n.d. de la projection -----------------------------------------------------------------------------
+
+// Le moteur de projection nomme le contrat dans ses raisons n.d. (« <libellé> : base n.d. (…) — saisir une correction de base »).
+// Dans la page croisée, chaque raison est remplacée par un décompte ; le détail nominatif reste dans Hypothèses budgétaires. Toute
+// autre raison du moteur est décomptée de la même façon : aucun texte de la projection ne passe dans la page.
+const BASE_ND = / : base n\.d\. \(.*\) — saisir une correction de base$/s;
+const DETAIL = "détail dans Hypothèses budgétaires";
+export function publicProjectionReasons(reasons: readonly string[]): string[] {
+  const base = reasons.filter((r) => BASE_ND.test(r)).length;
+  const other = reasons.length - base;
+  return [
+    ...(base ? [`${plural(base, "contrat", "contrats")} sans base de projection (${DETAIL})`] : []),
+    ...(other ? [`${plural(other, "autre raison", "autres raisons")} de n.d. de la projection (${DETAIL})`] : []),
+  ];
+}
+// Base figée et projection dont seules les raisons n.d. changent (montants identiques) : mois projetés n.d. et mois projetés par un
+// scénario parent n.d. (raisons du parent jointes par « ; »). Les objets d'origine ne sont pas modifiés.
+export function publicScenario(base: BaseSnapshot, proj: Projection): { base: BaseSnapshot; proj: Projection } {
+  const prior = base.prior?.map((p) => (p.kind === "nd" ? { ...p, reason: publicProjectionReasons(p.reason.split(" ; ")).join(" ; ") } : p));
+  const pub: Projection = proj.kind === "error" ? proj : { ...proj, months: proj.months.map((m) => (m.kind === "nd" ? { ...m, reasons: publicProjectionReasons(m.reasons) } : m)) };
+  return { base: prior ? { ...base, prior } : base, proj: pub };
+}
+
 // =================================================================================================================================
 // Chapitre 06 · Budget & prévisions
 // =================================================================================================================================
@@ -138,7 +201,9 @@ export type BudgetReading = { kind: "value"; name: string; series: Series } | { 
 export type LiveReading = { kind: "value"; series: Series } | { kind: "nd"; reason: string };
 export type ScenarioReading = { kind: "value"; name: string; refMonth: string; series: Series; landing: Landing; retraite: Retraite } | { kind: "nd" | "na"; reason: string };
 export type CohortReading = CohortPartition;
-export type BudgetHrefs = { hypotheses: string; comparaison: string; atterrissage: string; postes: string; embauches: string };
+// atterrissage : null quand l'écran Hypothèses › Atterrissage montrerait une autre année que celle de la période (il prend la première
+// année du scénario) : le lien n'est alors pas proposé.
+export type BudgetHrefs = { hypotheses: string; comparaison: string; atterrissage: string | null; postes: string; embauches: string; parametres: string };
 
 export type BudgetChapterInput =
   | { kind: "nd"; reason: string; action: Action }
@@ -147,20 +212,30 @@ export type BudgetChapterInput =
       year: number;
       months: string[]; // mois de la période
       labels: { period: string; prev: string };
-      filtered: boolean; // un service est choisi : réalisé et personnes du service ; budget et scénario globaux (n.d.)
+      filtered: boolean; // un service est choisi : réalisé et contrats observés du service ; budget et scénario globaux (n.d.)
       hrefs: BudgetHrefs;
       live: LiveReading; // réalisé du journal de paie (mois clos), filtré par service le cas échéant
       budget: BudgetReading;
       scenario: ScenarioReading; // scénario retenu, avec son atterrissage et son atterrissage retraité de l'année
       cohorts: CohortReading;
+      confidentialite: Confidentialite; // seuil de confidentialité de l'espace, ou la raison de son absence
+      serviceSizes: PaidSizes | null; // filtre de service : contrats rémunérés du service, par mois de la période et sur la période
     };
 
 export type BudgetModel = BlocksModel;
 
+// Lignes de la partition des contrats observés, dans l'ordre du tableau.
+const COHORT_LABELS: Record<CohortRowId, string> = {
+  onlyPrev: "Contrats observés seulement en N-1",
+  onlyCur: "Contrats observés seulement en N",
+  both: "Contrats observés dans les deux périodes",
+  outside: "Lignes du journal sans contrat",
+};
+
 export function buildBudget(input: BudgetChapterInput): BudgetModel {
   const base: BudgetModel = { chapter: "budget", tiles: [], alerts: [], tables: [], charts: [], limits: [], nd: null, terms: Object.values(T), blocks: [], prevu: [], tileNd: [], trend: false };
   if (input.kind === "nd") return { ...base, nd: { reason: capital(input.reason), action: input.action } };
-  const { year, months, labels, live, budget, scenario, cohorts, hrefs } = input;
+  const { year, months, labels, live, budget, scenario, cohorts, hrefs, confidentialite: conf } = input;
   const yearKey = String(year);
   const ym = yearMonths(year);
   const why: Why[] = [];
@@ -168,10 +243,44 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
   const charts: CroiseeChart[] = [];
   const blocks: CxBlock[] = [];
   const hypLink = { href: hrefs.hypotheses, label: "Hypothèses budgétaires" };
+  const paramLink = { href: hrefs.parametres, label: "Paramètres" };
+
+  // --- 0. Réalisé d'un service retenu par le filtre (seuil de confidentialité) : n.d. sans seuil ; n.d. quand le service compte de 1
+  // à (seuil − 1) contrats rémunérés sur la période ; sinon un mois de 1 à (seuil − 1) contrats est masqué, avec le masquage
+  // secondaire de la colonne dont le total (la carte « Réalisé ») est affiché.
+  const real = live.kind === "value" ? total(live.series, months) : ({ kind: "nd", reason: live.reason } as const);
+  let realGuard: string | null = null;
+  let monthMask: MaskStatus[] | null = null;
+  if (input.filtered) {
+    const sz = input.serviceSizes;
+    if (conf.kind === "nd") realGuard = conf.reason;
+    else if (sz && sizeUnder(sz.period, conf.value)) realGuard = serviceSousSeuil(conf.value);
+    else if (live.kind === "value") {
+      monthMask = maskGroups(
+        months.map((m, i) => {
+          const p = live.series.points.get(m);
+          return { size: sz ? sz.months[i] : null, value: p && p.kind === "value" ? Math.abs(p.cost) : null };
+        }),
+        conf.value,
+        real.kind === "value",
+      );
+      // Total affiché alors qu'un mois n'est pas dénombré : le total ne peut pas être vérifié non plus.
+      if (real.kind === "value" && (!sz || sz.period === null)) realGuard = SEUIL_NON_VERIFIABLE;
+    }
+  }
+  const seuil = conf.kind === "set" ? conf.value : 0;
+  const monthHidden = (i: number): string | null => (monthMask && isHidden(monthMask[i]) ? maskReason(monthMask[i], seuil) : null);
 
   // --- 1. Réalisé, budget saisi et écart sur la période : seuls les mois qui ont un montant de budget sont comparés.
-  const real = live.kind === "value" ? total(live.series, months) : ({ kind: "nd", reason: live.reason } as const);
-  const realTile: TileSpec = { id: "realise", label: "Réalisé", term: T.masse, sub: labels.period, value: real.kind === "value" ? money(real.cost) : nd(frDates(real.reason)), cost: true, main: true };
+  const realTile: TileSpec = {
+    id: "realise",
+    label: "Réalisé",
+    term: T.masse,
+    sub: labels.period,
+    value: realGuard ? nd(realGuard) : real.kind === "value" ? money(real.cost) : nd(frDates(real.reason)),
+    cost: true,
+    main: true,
+  };
   const withBudget = budget.kind === "value" ? months.filter((m) => pointOf(budget.series, m).kind === "value") : [];
   const excluded = budget.kind === "value" ? months.filter((m) => !withBudget.includes(m)) : [];
   const g: Gap | null = budget.kind !== "value" || withBudget.length === 0 ? null : live.kind === "nd" ? { kind: "nd", reason: `réalisé : ${live.reason}` } : gap(live.series, budget.series, withBudget);
@@ -219,8 +328,9 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
 
   // Tableau exact des trois cartes : chaque mois de la période, puis le total des mois comparés.
   const budgetNdOf = (): string => (budget.kind === "value" ? "montant du budget non saisi : mois exclu de l'écart" : budget.reason);
-  const mensuelRows: CroiseeRow[] = months.map((m) => {
-    const r: CroiseeCell = live.kind === "value" ? readingCell(live.series, m) : ndIn(live.reason);
+  const mensuelRows: CroiseeRow[] = months.map((m, i) => {
+    const hidden = realGuard ?? monthHidden(i);
+    const r: CroiseeCell = hidden ? ndIn(hidden) : live.kind === "value" ? readingCell(live.series, m) : ndIn(live.reason);
     const bp = budget.kind === "value" ? pointOf(budget.series, m) : null;
     const b: CroiseeCell = bp && bp.kind === "value" ? bp.cost : ndIn(budgetNdOf());
     const e: CroiseeCell = typeof r === "number" && typeof b === "number" ? r - b : typeof b !== "number" ? ndIn(budgetNdOf()) : ndIn((r as { nd: string }).nd);
@@ -235,7 +345,7 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
   const footRow: CroiseeRow = {
     cells: [
       footLabel,
-      footReal.kind === "value" ? footReal.cost : ndIn(frDates(footReal.reason)),
+      realGuard ? ndIn(realGuard) : footReal.kind === "value" ? footReal.cost : ndIn(frDates(footReal.reason)),
       footBudget.kind === "value" ? footBudget.cost : ndIn(frDates(footBudget.reason)),
       g && g.kind === "value" ? g.delta : ndIn(g ? frDates(g.reason) : noAmount),
     ],
@@ -253,11 +363,12 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     rows: mensuelRows,
     foot: footRow,
     notes: excluded.length && withBudget.length ? [`Sans montant de budget, exclus de l'écart : ${monthsText(excluded)}.`] : [],
-    terms: [T.masse, T.budgetSaisi, T.ecartBudget, T.tendances],
+    terms: [T.masse, T.budgetSaisi, T.ecartBudget, T.tendances, ...(input.filtered ? [T.confidentialite] : [])],
   });
-  blocks.push({ id: "ecart", title: "Écart au budget", term: T.ecartBudget, charts: [], tables: [BUDGET_TABLE_IDS.mensuel], nd: [], notes: [], links: [], trend: Boolean(g && g.kind === "value") || mensuelRows.some((r) => typeof r.cells[3] === "number" && r.cells[3] !== 0) });
+  blocks.push({ id: "ecart", title: "Écart au budget", term: T.ecartBudget, charts: [], tables: [BUDGET_TABLE_IDS.mensuel], nd: input.filtered && conf.kind === "nd" ? [{ label: "Réalisé du service", reason: conf.reason, action: paramLink }] : [], notes: [], links: [], trend: Boolean(g && g.kind === "value") || mensuelRows.some((r) => typeof r.cells[3] === "number" && r.cells[3] !== 0) });
 
   // --- 2. Douze mois : scénario retenu (réel figé puis projection), réalisé et budget saisi, comme Hypothèses › Résultat › Comparaison.
+  // Global : n.d. sous un filtre de service (la courbe du réalisé n'est donc jamais celle d'un service).
   const prevision: CxBlock = { id: "prevision", title: `Réalisé, projection et budget, ${yearKey}`, term: T.comparaison, charts: [], tables: [], nd: [], notes: [], links: [], trend: false };
   if (scenario.kind !== "value") {
     prevision.nd.push({ label: "Projection", reason: scenario.reason, action: scenario.kind === "nd" ? hypLink : undefined });
@@ -299,7 +410,9 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
   }
   blocks.push(prevision);
 
-  // --- 3. Atterrissage de l'année (réel + projection du scénario), atterrissage retraité, écart au budget saisi de l'année.
+  // --- 3. Atterrissage de l'année (réel + projection du scénario), atterrissage retraité, écart au budget saisi de l'année. Comme la
+  // Synthèse : valeur sur les douze mois ; comparaison au budget saisi sur les MÊMES mois (ceux qui ont un montant de budget) :
+  // atterrissage de ces mois − budget de ces mois = écart, le nombre de mois comparés écrit.
   const att: CxBlock = { id: "atterrissage", title: `Atterrissage ${yearKey}`, term: T.atterrissage, charts: [], tables: [], nd: [], notes: [], links: [], trend: false };
   let landTile: TileSpec;
   let annualTile: TileSpec;
@@ -328,31 +441,45 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     }
     const v = landingView(land.kind === "value" ? land : { kind: "nd", reason: frDates(land.reason) }, budgetIn, gapIn, yearKey);
     const parts = land.kind === "value" ? landingParts(land) : [];
-    const exclYNote = exclY.length && withY.length ? `Comparé sur ${plural(withY.length, "mois", "mois")} ; sans montant de budget, exclus : ${monthsText(exclY)}` : undefined;
+    const partial = exclY.length > 0 && withY.length > 0;
+    const nm = plural(withY.length, "mois", "mois");
+    const exclText = `sans montant de budget, exclus : ${monthsText(exclY)}`;
     landTile = {
       id: "atterrissage",
       label: `Atterrissage ${yearKey}`,
       term: T.atterrissage,
-      sub: `Scénario « ${scenario.name} »`,
+      sub: `Scénario « ${scenario.name} » · douze mois`,
       value: v.value,
       cost: true,
-      variations: [tileLine(budget.kind === "value" ? `Budget saisi « ${budget.name} »` : "Budget saisi", v.budget)],
-      note: parts.length ? parts.map((x) => `${x.label} : ${euros(x.value)}`).join(" · ") : undefined,
-      spark: { label: "Réel puis projection, par mois", values: ym.map((m) => {
-        const p = pointOf(scenario.series, m);
-        return p.kind === "value" ? p.cost : null;
-      }) },
+      variations: [
+        tileLine(budget.kind === "value" ? `Budget saisi « ${budget.name} »${partial ? ` (${nm})` : ""}` : "Budget saisi", v.budget),
+        ...(partial && gapIn?.kind === "value" ? [plainVariation(`Atterrissage ${yearKey}, mois avec budget (${nm})`, euros(gapIn.a))] : []),
+      ],
+      note: [parts.map((x) => `${x.label} : ${euros(x.value)}`).join(" · "), partial ? exclText : ""].filter(Boolean).join(" ; ") || undefined,
+      spark: {
+        label: "Réel puis projection, par mois",
+        values: ym.map((m) => {
+          const p = pointOf(scenario.series, m);
+          return p.kind === "value" ? p.cost : null;
+        }),
+      },
     };
     if (v.value.kind !== "nd") why.push({ label: "Budget saisi de l'année", reason: v.budget.kind === "nd" ? v.budget.reason : null });
-    const annualBase = { id: "ecart-annuel", label: "Écart annuel projeté", term: T.ecartBudget, sub: budget.kind === "value" ? `Atterrissage − budget saisi « ${budget.name} »` : undefined, cost: true };
-    if (!gapIn || gapIn.kind === "nd") annualTile = { ...annualBase, value: nd(gapIn?.kind === "nd" ? frDates(gapIn.reason) : (v.gap.reason ?? (budget.kind !== "value" ? budget.reason : "valeur absente"))), note: exclYNote };
+    const annualBase = {
+      id: "ecart-annuel",
+      label: "Écart annuel projeté",
+      term: T.ecartBudget,
+      sub: budget.kind === "value" ? `Atterrissage − budget saisi « ${budget.name} »${partial ? `, ${nm} comparés` : ""}` : undefined,
+      cost: true,
+      note: partial ? capital(exclText) : undefined,
+    };
+    if (!gapIn || gapIn.kind === "nd") annualTile = { ...annualBase, value: nd(gapIn?.kind === "nd" ? frDates(gapIn.reason) : (v.gap.reason ?? (budget.kind !== "value" ? budget.reason : "valeur absente"))) };
     else {
       annualTile = {
         ...annualBase,
         value: signedMoney(gapIn.delta),
         valueTone: costTone(gapIn.delta),
         variations: [costVariation("Écart (%)", gapIn.pct === null ? null : gapIn.delta, gapIn.pct === null ? null : `${pctText(gapIn.pct)} · ${word(gapIn.delta)}`, gapIn.pct === null ? "budget saisi nul ou négatif : pourcentage non défini" : null)],
-        note: exclYNote,
       };
       if (gapIn.pct === null) why.push({ label: "Écart annuel (%)", reason: "budget saisi nul ou négatif : pourcentage non défini" });
     }
@@ -369,7 +496,8 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
           }
         : { id: "retraite", label: `Atterrissage retraité ${yearKey}`, term: T.retraite, sub: "Hors éléments non récurrents", value: nd(frDates(r.reason)), cost: true };
 
-    // Tableau exact des deux cascades : composantes de l'atterrissage, éléments non récurrents retirés, atterrissage retraité.
+    // Tableau exact des deux cascades : composantes de l'atterrissage, éléments non récurrents retirés, atterrissage retraité. Le
+    // détail des éléments non récurrents (libellés saisis, motifs de départ) reste dans Hypothèses budgétaires.
     const attRows: CroiseeRow[] = [];
     if (land.kind === "value") {
       for (const x of parts) attRows.push({ cells: [x.label, x.value], style: "child" });
@@ -391,89 +519,94 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       terms: [T.atterrissage, T.retraite, T.cascades],
     });
     att.tables.push(BUDGET_TABLE_IDS.atterrissage);
-    const wf = (id: string, title: string, w: WaterfallIn) => {
-      if (w.kind !== "value") return;
-      charts.push(cascadeChart(id, title, "eur", { label: w.startLabel, value: w.start }, w.steps, { label: w.endLabel, value: w.end }, BUDGET_TABLE_IDS.atterrissage));
-      att.charts.push(id);
+    // Cascades : tracées quand les composantes le permettent ; sinon la raison est écrite (« vide » : une ligne ; n.d. : mention n.d.,
+    // une seule quand les deux cascades le sont pour la même raison).
+    const ndCharts: { label: string; reason: string }[] = [];
+    const wf = (id: string, title: string, label: string, w: WaterfallIn) => {
+      if (w.kind === "value") {
+        charts.push(cascadeChart(id, title, "eur", { label: w.startLabel, value: w.start }, w.steps, { label: w.endLabel, value: w.end }, BUDGET_TABLE_IDS.atterrissage));
+        att.charts.push(id);
+      } else if (w.kind === "vide") att.notes.push(w.text);
+      else ndCharts.push({ label, reason: frDates(w.reason) });
     };
-    wf(BUDGET_CHART_IDS.atterrissage, `Atterrissage ${yearKey} : réel puis projection`, landingWaterfall(land));
-    wf(BUDGET_CHART_IDS.retraite, `De l'atterrissage ${yearKey} à l'atterrissage retraité`, r.kind === "value" ? retraiteWaterfall(r) : { kind: "nd", reason: r.reason });
-    if (r.kind === "value") {
-      if (r.rows.length === 0) att.notes.push("Aucun élément non récurrent saisi ni prévu.");
-      else {
-        tables.push({
-          id: BUDGET_TABLE_IDS.nonRecurrents,
-          title: `Éléments non récurrents de ${yearKey}`,
-          columns: [
-            { key: "element", header: "Élément", kind: "text" },
-            { key: "realise", header: "Déjà dans les comptes", kind: "eur" },
-            { key: "prevu", header: "D'ici décembre (hypothèses)", kind: "eur" },
-            { key: "total", header: "Total", kind: "eur" },
-          ],
-          rows: r.rows.map((x) => ({ cells: [x.label, x.realised, x.projected, x.realised + x.projected] })),
-          foot: { cells: ["Total retiré de l'atterrissage", r.realised, r.projected, r.total] },
-          terms: [T.retraite],
-        });
-        att.tables.push(BUDGET_TABLE_IDS.nonRecurrents);
-      }
-    }
-    // Atterrissage face au budget saisi de l'année, sur les mois qui ont un montant de budget.
+    wf(BUDGET_CHART_IDS.atterrissage, `Atterrissage ${yearKey} : réel puis projection`, "Cascade de l'atterrissage", landingWaterfall(land));
+    wf(BUDGET_CHART_IDS.retraite, `De l'atterrissage ${yearKey} à l'atterrissage retraité`, "Cascade du retraité", r.kind === "value" ? retraiteWaterfall(r) : { kind: "nd", reason: r.reason });
+    const byReason = new Map<string, string[]>();
+    for (const x of ndCharts) byReason.set(x.reason, [...(byReason.get(x.reason) ?? []), x.label]);
+    for (const [reason, ls] of byReason) att.nd.push({ label: ls.length > 1 ? "Cascades de l'atterrissage et du retraité" : ls[0], reason });
+    // Atterrissage face au budget saisi de l'année, sur les mois qui ont un montant de budget (Valeur − Référence = Écart).
     if (budget.kind === "value") {
       const ndR = gapIn?.kind === "nd" ? frDates(gapIn.reason) : (v.gap.reason ?? `aucun montant de budget saisi « ${budget.name} » pour ${yearKey}`);
-      const compared = withY.length === 12 ? `année ${yearKey}` : withY.length ? `${plural(withY.length, "mois", "mois")} avec budget` : "aucun mois";
+      const compared = withY.length === 12 ? "Douze mois" : withY.length ? `${capital(nm)} avec budget (${exclText})` : "Aucun mois avec budget";
       const gv = gapIn?.kind === "value" ? gapIn : null;
+      const twelve: CroiseeRow = { cells: [`Atterrissage ${yearKey}`, "Douze mois", land.kind === "value" ? land.total : ndIn(frDates(land.reason)), "", "", ""] };
+      const budgetCell: CroiseeCell = gv ? gv.b : budgetIn && budgetIn.total.kind === "value" ? budgetIn.total.cost : ndIn(budgetIn && budgetIn.total.kind === "nd" ? frDates(budgetIn.total.reason) : ndR);
       tables.push({
         id: BUDGET_TABLE_IDS.annuel,
         title: `Atterrissage ${yearKey} face au budget saisi « ${budget.name} »`,
         columns: [
           { key: "ligne", header: "Lecture", kind: "text" },
           { key: "mois", header: "Mois comparés", kind: "text" },
-          { key: "montant", header: "Montant", kind: "eur" },
+          { key: "valeur", header: "Valeur", kind: "eur", term: T.atterrissage },
+          { key: "comparaison", header: "Comparé à", kind: "text" },
+          { key: "reference", header: "Référence", kind: "eur", term: T.budgetSaisi },
           { key: "ecart", header: "Écart", kind: "eur", signed: true, costTrend: true, term: T.tendances },
         ],
         rows: [
-          { cells: [`Atterrissage ${yearKey}`, compared, gv ? gv.a : ndIn(ndR), ""] },
-          { cells: [`Budget saisi « ${budget.name} »`, compared, gv ? gv.b : budgetIn && budgetIn.total.kind === "value" ? budgetIn.total.cost : ndIn(budgetIn && budgetIn.total.kind === "nd" ? frDates(budgetIn.total.reason) : ndR), ""] },
+          // Mois exclus : l'atterrissage des douze mois sur sa propre ligne, sans écart, puis celui des mois avec budget.
+          ...(partial ? [twelve] : []),
+          { cells: [partial ? `Atterrissage ${yearKey}, mois avec budget` : `Atterrissage ${yearKey}`, compared, gv ? gv.a : ndIn(ndR), `Budget saisi « ${budget.name} »`, budgetCell, gv ? gv.delta : ndIn(ndR)] },
         ],
-        foot: { cells: ["Écart atterrissage − budget", compared, "", gv ? gv.delta : ndIn(ndR)] },
-        notes: exclY.length && withY.length ? [`Sans montant de budget, exclus : ${monthsText(exclY)}.`] : [],
         terms: [T.atterrissage, T.budgetSaisi, T.ecartBudget],
       });
       att.tables.push(BUDGET_TABLE_IDS.annuel);
       att.trend = Boolean(gv);
     }
-    att.links.push({ href: hrefs.atterrissage, label: "Atterrissage dans Hypothèses budgétaires" });
+    if (hrefs.atterrissage) att.links.push({ href: hrefs.atterrissage, label: "Atterrissage et éléments non récurrents dans Hypothèses budgétaires" });
   }
   blocks.push(att);
 
-  // --- 4. Écart lié aux personnes observées : partition des contrats de paie observés en N-1 et en N (nombres et montants seulement).
-  const pers: CxBlock = { id: "personnes", title: "Écart lié aux personnes observées", term: T.personnes, charts: [], tables: [], nd: [], notes: [], links: [], trend: false };
-  if (cohorts.kind === "nd") pers.nd.push({ label: "Personnes observées", reason: frDates(cohorts.reason) });
-  else {
+  // --- 4. Écart lié aux personnes observées : partition des contrats de paie observés en N-1 et en N (nombres et montants seulement),
+  // soumise au seuil de confidentialité.
+  const pers: CxBlock = { id: "personnes", title: "Écart lié aux contrats observés", term: T.personnes, charts: [], tables: [], nd: [], notes: [], links: [], trend: false };
+  const persLabel = "Contrats observés";
+  if (conf.kind === "nd") pers.nd.push({ label: persLabel, reason: conf.reason, action: paramLink });
+  if (cohorts.kind === "nd") pers.nd.push({ label: persLabel, reason: frDates(cohorts.reason) });
+  if (conf.kind === "set" && cohorts.kind === "value") {
     const c = cohorts;
-    const rows: CroiseeRow[] = [
-      { cells: ["Observées seulement en N-1", c.onlyPrev.count, c.onlyPrev.prev, "", c.onlyPrev.delta] },
-      { cells: ["Observées seulement en N", c.onlyCur.count, "", c.onlyCur.cur, c.onlyCur.delta] },
-      { cells: ["Observées dans les deux périodes", c.both.count, c.both.prev, c.both.cur, c.both.delta] },
-    ];
-    if (c.outside) rows.push({ cells: ["Lignes du journal sans contrat", "", c.outside.prev ?? "", c.outside.cur ?? "", c.outside.delta] });
-    tables.push({
-      id: BUDGET_TABLE_IDS.personnes,
-      title: `Écart de masse lié aux personnes observées, ${labels.period} face à ${labels.prev}`,
-      columns: [
-        { key: "groupe", header: "Personnes du périmètre", kind: "text" },
-        { key: "nombre", header: "Nombre", kind: "nombre" },
-        { key: "n1", header: `Coût N-1 (${labels.prev})`, kind: "eur", term: T.nMoinsUn },
-        { key: "n", header: `Coût N (${labels.period})`, kind: "eur", term: T.masse },
-        { key: "contribution", header: "Contribution à l'écart", kind: "eur", signed: true, costTrend: true, term: T.tendances },
-      ],
-      rows,
-      foot: { cells: ["Total", c.total.count, c.total.prev, c.total.cur, c.total.delta] },
-      notes: ["Personne observée : contrat de paie présent dans le journal de la période ; une personne qui change de contrat entre les deux périodes compte dans deux groupes."],
-      terms: [T.personnes, T.masse, T.nMoinsUn],
-    });
-    pers.tables.push(BUDGET_TABLE_IDS.personnes);
-    pers.trend = true;
+    const s = conf.value;
+    // Service retenu par le filtre : il compte de 1 à (seuil − 1) contrats observés sur N ou sur N-1 → tout le tableau est n.d.
+    if (input.filtered && (sizeUnder(c.onlyCur.count + c.both.count, s) || sizeUnder(c.onlyPrev.count + c.both.count, s))) pers.nd.push({ label: persLabel, reason: serviceSousSeuil(s, "contrats observés sur N ou sur N-1") });
+    else {
+      const mask = maskCohorts(c, s);
+      const hiddenReason = confidentialiteReason(s);
+      // Ligne masquée : chaque cellule chiffrée devient n.d. avec la même raison (masquage principal ou secondaire, indiscernables) ;
+      // une cellule sans objet par construction (« — ») le reste.
+      const cell = (id: CohortRowId, v: number | "" | null): CroiseeCell => (v === "" || v === null ? "" : mask[id] === "shown" ? v : ndIn(hiddenReason));
+      const rows: CroiseeRow[] = [
+        { cells: [COHORT_LABELS.onlyPrev, cell("onlyPrev", c.onlyPrev.count), cell("onlyPrev", c.onlyPrev.prev), "", cell("onlyPrev", c.onlyPrev.delta)] },
+        { cells: [COHORT_LABELS.onlyCur, cell("onlyCur", c.onlyCur.count), "", cell("onlyCur", c.onlyCur.cur), cell("onlyCur", c.onlyCur.delta)] },
+        { cells: [COHORT_LABELS.both, cell("both", c.both.count), cell("both", c.both.prev), cell("both", c.both.cur), cell("both", c.both.delta)] },
+      ];
+      if (c.outside) rows.push({ cells: [COHORT_LABELS.outside, "", cell("outside", c.outside.prev), cell("outside", c.outside.cur), cell("outside", c.outside.delta)] });
+      tables.push({
+        id: BUDGET_TABLE_IDS.personnes,
+        title: `Écart de masse lié aux contrats observés, ${labels.period} face à ${labels.prev}`,
+        columns: [
+          { key: "groupe", header: "Groupe", kind: "text" },
+          { key: "nombre", header: "Contrats", kind: "nombre" },
+          { key: "n1", header: `Coût N-1 (${labels.prev})`, kind: "eur", term: T.nMoinsUn },
+          { key: "n", header: `Coût N (${labels.period})`, kind: "eur", term: T.masse },
+          { key: "contribution", header: "Contribution à l'écart", kind: "eur", signed: true, costTrend: true, term: T.tendances },
+        ],
+        rows,
+        foot: { cells: ["Total", c.total.count, c.total.prev, c.total.cur, c.total.delta] },
+        notes: ["Contrat observé : contrat de paie qui porte au moins une ligne de masse dans la période ; une personne qui change de contrat entre les deux périodes compte dans deux groupes."],
+        terms: [T.personnes, T.masse, T.nMoinsUn, T.confidentialite],
+      });
+      pers.tables.push(BUDGET_TABLE_IDS.personnes);
+      pers.trend = rows.some((r) => typeof r.cells[4] === "number" && r.cells[4] !== 0) || c.total.delta !== 0;
+    }
   }
   blocks.push(pers);
 
@@ -486,7 +619,8 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
 
   const tiles = [realTile, budgetTile, gapTile, landTile, annualTile, retraiteTile];
   const trend = tiles.some((t) => t.cost && ((t.valueTone && t.valueTone !== "flat") || (t.variations ?? []).some((x) => x.tone !== "flat" && x.text !== null)));
-  return { ...base, tiles, tables, charts, blocks, prevu, tileNd: reasonLines(why), trend, limits: input.filtered ? ["Budget saisi et scénario : globaux, non filtrables par service ; le réalisé et les personnes observées sont ceux du service choisi."] : [] };
+  const limits = input.filtered ? ["Budget saisi et scénario : globaux, non filtrables par service ; le réalisé et les contrats observés sont ceux du service choisi, soumis au seuil de confidentialité."] : [];
+  return { ...base, tiles, tables, charts, blocks, prevu, tileNd: reasonLines(why), trend, limits };
 }
 
 // --- Lecture du chapitre 06 ------------------------------------------------------------------------------------------------------
@@ -504,6 +638,13 @@ export function zoomReason(reason: string): string {
   return ndLines(ndGroups(items as { month: string; reason: string }[])).join(" ; ");
 }
 
+// Seuil de confidentialité de l'espace (paramètre sans valeur par défaut) : valeur, ou raison de son absence.
+export function confidentialiteOf(ctx: Pick<CroiseeContext, "settings">): Confidentialite {
+  const s = ctx.settings.confidentialite;
+  const v = settingValue(s);
+  return v !== null ? { kind: "set", value: v } : { kind: "nd", reason: croiseeSettingReason("confidentialite", s) ?? "seuil de confidentialité non défini (Paramètres)" };
+}
+
 export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapterInput> {
   const slug = ctx.slug;
   const dataAction = { href: `/e/${slug}/donnees`, label: ctx.canEdit ? "Choisir ou lire une source dans Données" : "Données" };
@@ -517,8 +658,9 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
   const journal = pay.input;
   const why = journalReason(pay) ?? "journal de paie indisponible";
 
-  // Réalisé : journal de paie de la lecture appliquée, mois clos ; restreint au service choisi.
-  const live: LiveReading = journal ? { kind: "value", series: liveSeries("reel", "Réalisé", filtered ? withService(journal, svc ?? null) : journal, pay.kpi.input) } : { kind: "nd", reason: why };
+  // Réalisé : journal de paie de la lecture appliquée, mois clos ; restreint au service choisi (même objet pour l'effectif du service).
+  const fj = journal && filtered ? withService(journal, svc ?? null) : journal;
+  const live: LiveReading = fj ? { kind: "value", series: liveSeries("reel", "Réalisé", fj, pay.kpi.input) } : { kind: "nd", reason: why };
 
   // Budget saisi et scénario retenus dans les filtres : globaux (aucune ventilation par service).
   const b = ctx.budget.selected;
@@ -529,6 +671,7 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
       : { kind: "absent", reason: ctx.budget.reason ?? `aucun budget saisi pour ${year}` };
   let scenario: ScenarioReading;
   let scenarioId: string | null = null;
+  let sameYear = false;
   if (filtered) scenario = { kind: "na", reason: `scénario global : ${NA}` };
   else {
     const s = await ctx.load.scenario();
@@ -536,18 +679,24 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
     else {
       const sc = s.full.scenario;
       scenarioId = sc.id;
+      sameYear = sc.firstMonth.slice(0, 4) === String(year);
+      // Raisons n.d. de la projection sans identité ; montants identiques à ceux des Hypothèses budgétaires.
+      const pub = publicScenario(s.full.base, s.proj);
+      const land = landing(pub.base, pub.proj, String(year));
+      const ret = retraite(pub.base, pub.proj, s.full.hypotheses, String(year));
       scenario = {
         kind: "value",
         name: sc.name,
         refMonth: s.full.base.refMonth,
-        series: scenarioSeries(sc.id, `Scénario « ${sc.name} »`, s.full.base, s.proj),
-        landing: landing(s.full.base, s.proj, String(year)),
-        retraite: retraite(s.full.base, s.proj, s.full.hypotheses, String(year)),
+        series: scenarioSeries(sc.id, `Scénario « ${sc.name} »`, pub.base, pub.proj),
+        // Raison n.d. de l'année (« AAAA-MM : raison » par mois) regroupée par raison identique.
+        landing: land.kind === "nd" ? { ...land, reason: zoomReason(land.reason) } : land,
+        retraite: ret.kind === "nd" ? { ...ret, reason: zoomReason(ret.reason) } : ret,
       };
     }
   }
 
-  // Personnes observées : détail par contrat du journal (zoomOf, masse chargée) sur la période et sur N-1, puis partition.
+  // Contrats observés : détail par contrat du journal (zoomOf, masse chargée) sur la période et sur N-1, puis partition.
   let cohorts: CohortReading;
   if (!journal) cohorts = { kind: "nd", reason: why };
   else {
@@ -568,60 +717,91 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
     hrefs: {
       hypotheses: hyp,
       comparaison: withScenario(`vue=resultat&sous=comparaison&annee=${year}`),
-      atterrissage: withScenario("vue=resultat&sous=atterrissage"),
+      // Hypothèses › Atterrissage montre la première année du scénario : lien proposé seulement quand c'est l'année de la période.
+      atterrissage: scenarioId && sameYear ? withScenario("vue=resultat&sous=atterrissage") : null,
       postes: withScenario("vue=postes"),
       embauches: withScenario("vue=embauches"),
+      parametres: croiseeSettingsHref(slug),
     },
     live,
     budget,
     scenario,
     cohorts,
+    confidentialite: confidentialiteOf(ctx),
+    serviceSizes: fj && filtered ? paidSizes(fj, months) : null,
   };
 }
+
+// Modèle du chapitre 06, calculé une fois par requête : l'écran (ChBudget) et l'export appellent cette même fonction.
+export const budgetModel = memoByContext((ctx: CroiseeContext) => loadBudgetInput(ctx).then(buildBudget));
 
 // =================================================================================================================================
 // Chapitre 08 · Effets d'évolution
 // =================================================================================================================================
 
-export type EffetsHrefs = { analyse: string; embauches: string; globales: string; fixeVariable: string };
+export type EffetsHrefs = { analyse: string; embauches: string; globales: string; fixeVariable: string; parametres: string };
 export type EffetsInput =
   | { kind: "nd"; reason: string; action: Action }
   | {
       kind: "value";
       year: number;
       labels: { period: string; prev: string };
+      masse: { cur: Agg; prev: Agg }; // masse salariale chargée de N et de N-1 (aggregate, comme l'Analyse des écarts) : sans ETP
       pont: Bridge; // pont volume / coût moyen de N-1 à N (bridge, comme l'Analyse des écarts)
       cascade: Cascade; // cascade d'ETP de N-1 à N (etpCascade)
       etp: { cur: Agg; prev: Agg }; // ETP moyens (moyenne des ETP de fin de mois)
+      confidentialite: Confidentialite;
+      serviceSizes: { cur: number | null; prev: number | null } | null; // filtre de service : contrats rémunérés du service sur N et N-1
       hrefs: EffetsHrefs;
     };
 export type EffetsModel = BlocksModel;
 
 const etpText = (a: Agg): TileValue => (a.kind === "value" ? { text: `${fmtFixed({ num: a.num, den: a.den })} ETP`, kind: "value", reason: null } : a.kind === "nd" ? nd(frDates(a.reason)) : nd("sans objet"));
+const aggMoney = (a: Agg): TileValue => (a.kind === "value" ? money(a.num) : a.kind === "nd" ? nd(frDates(a.reason)) : nd("sans objet"));
 
 export function buildEffets(input: EffetsInput): EffetsModel {
   const base: EffetsModel = { chapter: "effets", tiles: [], alerts: [], tables: [], charts: [], limits: [], nd: null, terms: Object.values(E), blocks: [], prevu: [], tileNd: [], trend: false };
   if (input.kind === "nd") return { ...base, nd: { reason: capital(input.reason), action: input.action } };
-  const { labels, pont, cascade, etp, hrefs } = input;
+  const { labels, masse, pont, cascade, etp, hrefs, confidentialite: conf } = input;
   const startLabel = `N-1 (${labels.prev})`;
   const endLabel = `N (${labels.period})`;
   const tables: CroiseeTable[] = [];
   const charts: CroiseeChart[] = [];
   const why: Why[] = [];
+  const paramLink = { href: hrefs.parametres, label: "Paramètres" };
 
-  // --- 1. Décomposition de l'écart de masse : effet volume (ETP-mois) et effet coût moyen (bridge, pontWaterfall).
+  // Service retenu par le filtre (seuil de confidentialité) : sans seuil, ou quand le service compte de 1 à (seuil − 1) contrats
+  // rémunérés sur N ou sur N-1, ses chiffres (cartes, pont) sont n.d. ; un effectif non dénombré ne permet pas de vérifier le seuil.
+  let guard: string | null = null;
+  const sz = input.serviceSizes;
+  if (sz) {
+    if (conf.kind === "nd") guard = conf.reason;
+    else if (sizeUnder(sz.cur, conf.value) || sizeUnder(sz.prev, conf.value)) guard = serviceSousSeuil(conf.value);
+    else if (sz.cur === null || sz.prev === null) guard = SEUIL_NON_VERIFIABLE;
+  }
+  // Carte gardée : une valeur déjà n.d. garde sa raison ; une valeur affichable devient n.d. avec la raison du seuil.
+  const guarded = (t: TileSpec): TileSpec => (guard === null ? t : { id: t.id, label: t.label, term: t.term, sub: t.sub, cost: t.cost, value: t.value.kind === "nd" ? t.value : nd(guard) });
+
+  // --- 1. Écart de masse N − N-1 (aggregate, indépendant de l'ETP) et décomposition en effet volume (ETP-mois) et effet coût moyen
+  // (bridge, pontWaterfall).
   const dec: CxBlock = { id: "decomposition", title: "Décomposer la variation du coût", term: E.pont, charts: [], tables: [], nd: [], notes: [], links: [{ href: hrefs.analyse, label: "Analyse des écarts" }], trend: false };
-  let ecartTile: TileSpec;
+  const dm = diff(masse.prev, masse.cur);
+  const ecartTile: TileSpec =
+    dm.kind === "value"
+      ? { id: "ecart", label: "Écart de coût observé", term: E.masse, sub: "Masse salariale chargée, N − N-1", value: signedMoney(dm.num), valueTone: costTone(dm.num), cost: true, variations: [tileLine(endLabel, aggMoney(masse.cur)), tileLine(startLabel, aggMoney(masse.prev))] }
+      : { id: "ecart", label: "Écart de coût observé", term: E.masse, sub: "Masse salariale chargée, N − N-1", value: nd(dm.kind === "nd" ? frDates(dm.reason) : "sans objet"), cost: true };
   let volumeTile: TileSpec;
   let coutTile: TileSpec;
-  if (pont.kind === "nd") {
+  if (guard !== null) {
+    volumeTile = { id: "volume", label: "Effet volume", term: E.pont, value: nd(guard), cost: true };
+    coutTile = { id: "cout-moyen", label: "Effet coût moyen", term: E.pont, value: nd(guard), cost: true };
+    dec.nd.push({ label: "Pont volume / coût moyen du service", reason: guard, action: conf.kind === "nd" ? paramLink : undefined });
+  } else if (pont.kind === "nd") {
     const r = frDates(pont.reason);
-    ecartTile = { id: "ecart", label: "Écart de coût observé", term: E.masse, value: nd(r), cost: true };
     volumeTile = { id: "volume", label: "Effet volume", term: E.pont, value: nd(r), cost: true };
     coutTile = { id: "cout-moyen", label: "Effet coût moyen", term: E.pont, value: nd(r), cost: true };
     dec.nd.push({ label: "Pont volume / coût moyen", reason: r });
   } else {
-    ecartTile = { id: "ecart", label: "Écart de coût observé", term: E.masse, sub: "Masse salariale chargée, N − N-1", value: signedMoney(pont.delta), valueTone: costTone(pont.delta), cost: true, variations: [plainVariation("N", euros(pont.a.cost)), plainVariation("N-1", euros(pont.b.cost))] };
     volumeTile = { id: "volume", label: "Effet volume", term: E.pont, sub: "Écart d'ETP-mois au coût moyen de N-1", value: signedMoney(pont.volume), valueTone: costTone(pont.volume), cost: true };
     coutTile = { id: "cout-moyen", label: "Effet coût moyen", term: E.pont, sub: "Écart de coût par ETP-mois, sur les ETP-mois de N", value: signedMoney(pont.averageCost), valueTone: costTone(pont.averageCost), cost: true };
     const w = pontWaterfall(pont);
@@ -678,19 +858,31 @@ export function buildEffets(input: EffetsInput): EffetsModel {
     term: E.etpMoyen,
     sub: labels.period,
     value: cur,
-    variations: [tileLine("N-1", prev), plainVariation("Écart", dText, d.kind === "nd" ? frDates(d.reason) : d.kind === "na" ? "sans objet" : null)],
+    variations: [tileLine(startLabel, prev), plainVariation("Écart", dText, d.kind === "nd" ? frDates(d.reason) : d.kind === "na" ? "sans objet" : null)],
   };
-  if (cur.kind !== "nd") why.push({ label: "ETP moyen N-1", reason: prev.kind === "nd" ? prev.reason : null });
+  if (guard === null && cur.kind !== "nd") why.push({ label: "ETP moyen N-1", reason: prev.kind === "nd" ? prev.reason : null });
 
-  // --- 2. Cascade d'ETP (etpCascade, comme l'Analyse des écarts) : entrées, sorties, effets de présence, changements de quotité.
+  // --- 2. Cascade d'ETP (etpCascade, comme l'Analyse des écarts) : entrées, sorties, effets de présence, changements de quotité. Chaque
+  // palier décrit un groupe de contrats : seuil de confidentialité, avec le masquage secondaire des paliers (l'écart total est affiché).
   const etpBlock: CxBlock = { id: "etp", title: "Cascade d'ETP", term: E.cascade, charts: [], tables: [], nd: [], notes: [], links: [], trend: false };
   if (cascade.kind === "nd") etpBlock.nd.push({ label: "Cascade d'ETP", reason: frDates(cascade.reason) });
+  else if (guard !== null) etpBlock.nd.push({ label: "Cascade d'ETP du service", reason: guard, action: conf.kind === "nd" ? paramLink : undefined });
+  else if (conf.kind === "nd") etpBlock.nd.push({ label: "Cascade d'ETP", reason: conf.reason, action: paramLink });
   else {
-    const w = etpWaterfall(cascade);
-    if (w.kind === "value") {
-      charts.push(cascadeChart(EFFETS_CHART_IDS.etp, "ETP moyen, de N-1 à N : entrées, sorties et changements de quotité", "etp", { label: startLabel, value: w.start }, w.steps, { label: endLabel, value: w.end }, EFFETS_TABLE_IDS.etp));
-      etpBlock.charts.push(EFFETS_CHART_IDS.etp);
-    }
+    const seuil = conf.value;
+    const status = maskGroups(
+      cascade.steps.map((s) => ({ size: s.people.length, value: Math.abs(s.etp4) })),
+      seuil,
+      true,
+    );
+    const hidden = status.some(isHidden);
+    if (!hidden) {
+      const w = etpWaterfall(cascade);
+      if (w.kind === "value") {
+        charts.push(cascadeChart(EFFETS_CHART_IDS.etp, "ETP moyen, de N-1 à N : entrées, sorties et changements de quotité", "etp", { label: startLabel, value: w.start }, w.steps, { label: endLabel, value: w.end }, EFFETS_TABLE_IDS.etp));
+        etpBlock.charts.push(EFFETS_CHART_IDS.etp);
+      }
+    } else etpBlock.nd.push({ label: "Graphique de la cascade d'ETP", reason: confidentialiteReason(seuil) });
     tables.push({
       id: EFFETS_TABLE_IDS.etp,
       title: `Cascade des ETP moyens, de ${startLabel} à ${endLabel}`,
@@ -701,12 +893,12 @@ export function buildEffets(input: EffetsInput): EffetsModel {
       ],
       rows: [
         { cells: [`ETP moyen ${startLabel}`, cascade.start, ""], style: "subtotal" },
-        ...cascade.steps.map((s): CroiseeRow => ({ cells: [STEP_LABELS[s.id], "", s.etp4], style: "child" })),
+        ...cascade.steps.map((s, i): CroiseeRow => ({ cells: [STEP_LABELS[s.id], "", isHidden(status[i]) ? ndIn(maskReason(status[i], seuil)!) : s.etp4], style: "child" })),
         { cells: ["Résiduel d'arrondi", "", cascade.residual], style: "child" },
         { cells: ["Écart total", "", cascade.end - cascade.start], style: "subtotal" },
       ],
       foot: { cells: [`ETP moyen ${endLabel}`, cascade.end, ""] },
-      terms: [E.cascade, E.residuel, E.etpMoyen],
+      terms: [E.cascade, E.residuel, E.etpMoyen, E.confidentialite],
     });
     etpBlock.tables.push(EFFETS_TABLE_IDS.etp);
   }
@@ -719,7 +911,7 @@ export function buildEffets(input: EffetsInput): EffetsModel {
     { id: "effets-masse-niveau-report", label: "Masse, niveau et report", reason: "simulation à dériver de la grille mensuelle des taux d'augmentation d'un scénario (Hypothèses globales).", term: E.effetsMasseNiveauReport, links: [{ href: hrefs.globales, label: "Hypothèses globales" }] },
   ];
 
-  const tiles = [ecartTile, volumeTile, coutTile, etpTile];
+  const tiles = [ecartTile, volumeTile, coutTile, etpTile].map(guarded);
   const trend = tiles.some((t) => t.cost && t.valueTone !== undefined && t.valueTone !== "flat");
   return {
     ...base,
@@ -755,10 +947,13 @@ export async function loadEffetsInput(ctx: CroiseeContext): Promise<EffetsInput>
     embauches: q("embauches"),
     globales: q("globales"),
     fixeVariable: ctx.href({ chapitre: "fixe-variable", tri: null, sens: null }),
+    parametres: croiseeSettingsHref(slug),
   };
+  const confidentialite = confidentialiteOf(ctx);
   if (!journal) {
     const r = journalReason(pay) ?? "journal de paie indisponible";
-    return { kind: "value", year, labels: ctx.labels, pont: { kind: "nd", reason: r }, cascade: { kind: "nd", reason: r }, etp: { cur: { kind: "nd", reason: r }, prev: { kind: "nd", reason: r } }, hrefs };
+    const n: Agg = { kind: "nd", reason: r };
+    return { kind: "value", year, labels: ctx.labels, masse: { cur: n, prev: n }, pont: { kind: "nd", reason: r }, cascade: { kind: "nd", reason: r }, etp: { cur: n, prev: n }, confidentialite, serviceSizes: null, hrefs };
   }
   // Mêmes versions que l'Analyse des écarts pour « Réel PayFit N-1 » et « Réel PayFit N » : mêmes mois, même filtre de service,
   // même ETP par service (lignes du journal rattachées au contrat).
@@ -772,13 +967,28 @@ export async function loadEffetsInput(ctx: CroiseeContext): Promise<EffetsInput>
   const b = reelVersion(`reel:${year}`, `Réel PayFit ${year}`, String(year), journal, kpi, filter, etpService);
   const monthsA = ctx.prevMonths;
   const monthsB = p.months;
+  // Le pont aligne les mois de N sur ceux de N-1 (comparaison mois à mois) : une raison n.d. y serait datée du mois de N-1. Elle est
+  // relue sur les mois réels de chaque période (même fonction bridge, chaque lecture face à elle-même).
+  let pont = bridge(alignedSeries(b, monthsB, monthsA), alignedSeries(a, monthsA, monthsA), monthsA);
+  if (pont.kind === "nd") {
+    const own = (v: typeof a, months: string[]) => bridge(alignedSeries(v, months, months), alignedSeries(v, months, months), months);
+    const dated = [own(b, monthsB), own(a, monthsA)].find((x) => x.kind === "nd");
+    if (dated) pont = dated;
+  }
+  const fj = filter ? withService(journal, filter.value) : null;
   return {
     kind: "value",
     year,
     labels: ctx.labels,
-    pont: bridge(alignedSeries(b, monthsB, monthsA), alignedSeries(a, monthsA, monthsA), monthsA),
+    masse: { cur: aggregate(b, monthsB, "masse"), prev: aggregate(a, monthsA, "masse") },
+    pont,
     cascade: etpCascade(a, b, monthsA, monthsB),
     etp: { cur: aggregate(b, monthsB, "etp"), prev: aggregate(a, monthsA, "etp") },
+    confidentialite,
+    serviceSizes: fj ? { cur: paidSizes(fj, monthsB).period, prev: paidSizes(fj, monthsA).period } : null,
     hrefs,
   };
 }
+
+// Modèle du chapitre 08, calculé une fois par requête : l'écran (ChEffets) et l'export appellent cette même fonction.
+export const effetsModel = memoByContext((ctx: CroiseeContext) => loadEffetsInput(ctx).then(buildEffets));

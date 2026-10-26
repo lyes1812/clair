@@ -177,4 +177,42 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   await expect(page.getByTestId("ms-tabs").getByRole("link", { name: "Masse salariale croisée" }).locator(".soon")).toHaveCount(0);
   await expect(page.getByTestId("cx-page")).toBeVisible();
   await expect(page.getByTestId("cx-chapter-head")).toContainText("01 / 10");
+
+  // Lot 11 — Masse salariale croisée : les dix chapitres s'ouvrent sans erreur de page, chacun avec ses blocs ou sa mention Prévu.
+  const pageErrors: string[] = [];
+  page.on("pageerror", (e) => pageErrors.push(e.message));
+  const CHAPTERS = [["synthese", "01"], ["effectifs", "02"], ["absences", "03"], ["fixe-variable", "04"], ["services", "05"], ["budget", "06"], ["paie-compta", "07"], ["effets", "08"], ["restructuration", "09"], ["juridique", "10"]] as const;
+  for (const [id, n] of CHAPTERS) {
+    const res = await page.goto(`${ms}/croisee?chapitre=${id}`);
+    expect(res?.status()).toBe(200);
+    await expect(page.getByTestId("cx-chapter-head")).toContainText(`${n} / 10`);
+    if (id === "restructuration" || id === "juridique") {
+      await expect(page.getByTestId(`cx-prevu-${id}`)).toContainText("Prévu");
+    } else {
+      await expect(page.getByTestId(`cx-${id}`)).toBeVisible();
+      await expect(page.locator("[data-testid^='cx-table-']").first()).toBeAttached();
+      await expect(page.getByTestId("cx-commun")).toBeAttached(); // sources, référence N-1, définitions
+    }
+    await page.screenshot({ path: `${CAPTURES}/6-05-croisee-${n}-${id}.png`, fullPage: true });
+  }
+  expect(pageErrors).toEqual([]);
+  // Synthèse : six cartes, bouton « Synthèse en PDF · 1 page », sommaire (Échap le referme).
+  await page.goto(`${ms}/croisee`);
+  await expect(page.locator(".cx-tiles.six")).toHaveCount(1);
+  await expect(page.getByTestId("cx-print-synthese")).toBeVisible();
+  await page.getByTestId("cx-chapter-menu").locator("summary").click();
+  await expect(page.getByTestId("cx-chapter-menu").getByRole("link", { name: /Paie & comptabilité/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("cx-chapter-menu")).not.toHaveAttribute("open", "");
+  // Filtres conservés en passant par un chapitre sans filtres (09) puis retour.
+  await page.goto(`${ms}/croisee?chapitre=restructuration&annee=2026&de=01&a=06`);
+  const back = await page.getByTestId("cx-pager").getByRole("link").first().getAttribute("href");
+  expect(back).toContain("annee=2026");
+  expect(back).toContain("a=06");
+  // Exports : classeur Excel du chapitre Services et CSV de son tableau.
+  const xl = await page.request.get(`${ms}/croisee/export?chapitre=services&format=xlsx`);
+  expect(xl.status()).toBe(200);
+  expect(xl.headers()["content-type"]).toContain("spreadsheetml");
+  expect((await xl.body()).subarray(0, 2).toString()).toBe("PK");
+  expect((await page.request.get(`${ms}/croisee/export?chapitre=juridique&format=xlsx`)).status()).toBe(404);
 });

@@ -13,6 +13,8 @@
 .cx-eff-block { gap: 14px; scroll-margin-top: 72px; }
 .cx-eff-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: var(--clair-type-subheading); font-weight: 600; color: var(--ink); }
 .cx-eff-chart { display: grid; gap: 12px; min-width: 0; }
+.cx-eff-subtable { display: grid; gap: 8px; min-width: 0; }
+.cx-eff-subtitle { margin: 0; font-size: var(--clair-type-form); font-weight: 600; color: var(--ink); }
 .cx-eff-link { margin: 0; }
 .cx-eff-link a { color: var(--blue); }
 
@@ -29,5 +31,6 @@
   .cx-eff-tiles .facts.ms-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6pt; }
   .cx-eff-block { break-inside: auto; }
   .cx-eff-chart, .cx-eff-prevu, .cx-eff-limits { break-inside: avoid; }
+  .cx-eff-subtitle { break-after: avoid; }
   .cx-eff-link { display: none; }
 }

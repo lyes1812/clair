@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { monthRange } from "@/lib/connectors/months";
-import { aVenirStatut, congesAVenir, congesPris, type CongesAVenir } from "@/lib/croisee/conges";
+import { absencesEnCause, allMotifsInput, aVenirStatut, congesAVenir, congesPris, issueReason, motifInput, publicMonthReason, publicWindowReason, type CongesAVenir } from "@/lib/croisee/conges";
+import { absenteeism, absenteeismMonth } from "@/lib/rh/kpi/absence";
 import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import type { Window } from "@/lib/rh/kpi/types";
 import { absence, DSN_ABSENCES, kpiInput, readAbsences } from "./helpers/kpi";
@@ -127,7 +128,78 @@ describe("congesPris : jours pris par motif et par mois (moteur de l'absentéism
 
   it("aucun nom ni identifiant dans le résultat : des nombres", () => {
     const json = JSON.stringify(congesPris(input, AVRIL_MAI));
-    for (const x of ["C-1", "C-2", "C-3", "P-1", "P-2", "P-3", "a1", "a3"]) expect(json.includes(`"${x}"`), x).toBe(false);
+    expect(json).not.toMatch(/\b[CP]-\d|\ba[1-5]\b/);
+  });
+
+  it("copies de l'entrée : celle d'un motif garde ses seules absences et le retient seul ; celle du taux tous motifs retient tous les motifs lus", () => {
+    const m = motifInput(input, "test_paid_leave");
+    expect(m.params.absenceTypes).toEqual(["test_paid_leave"]);
+    expect(m.absences.status === "read" && m.absences.rows.map((r) => r.id)).toEqual(["a1", "a2", "a3", "a5"]);
+    expect(allMotifsInput(input).params.absenceTypes).toEqual(["test_paid_leave", "test_sickness"]);
+    // Même résultat que le moteur par motif et que le taux tous motifs.
+    expect(absenteeism(m, AVRIL_MAI)).toMatchObject({ kind: "exact", ratio: { num: 27 } });
+    expect(absenteeism(allMotifsInput(input), AVRIL_MAI)).toEqual(absenceByMotif(input, AVRIL_MAI).all);
+  });
+});
+
+// Raisons sans identifiant (D2). Le moteur nomme l'absence et le contrat en cause ; la page croisée garde le mois et le nombre.
+//   x1, x2  C-9 (inconnu du référentiel)  test_paid_leave  avril, approuvées      deux absences en cause en avril
+//   x3      C-9                            test_paid_leave  avril, refusée          statut non retenu : jamais en cause
+//   x4      C-2                            test_sickness    sans date de début, fin le 20/05 : une absence en cause chaque mois jusqu'en mai
+describe("raisons publiques : aucun identifiant d'absence ni de contrat", async () => {
+  const data = await payfitEdgeBuild(edge);
+  const X = [
+    full("x1", "C-9", "2026-04-14", "2026-04-15", "test_paid_leave"),
+    full("x2", "C-9", "2026-04-21", "2026-04-22", "test_paid_leave"),
+    full("x3", "C-9", "2026-04-23", "2026-04-23", "test_paid_leave", "declined"),
+    absence("x4", "C-2", null, null, "2026-05-20", "end-of-day", { type: "test_sickness" }),
+  ];
+  const input = kpiInput(data, readAbsences([...ROWS, ...X]), { absenceTypes: ["test_sickness"] });
+  const leave = motifInput(input, "test_paid_leave");
+  const sick = motifInput(input, "test_sickness");
+  const UNKNOWN_AVRIL = "2 absences rattachées à un contrat inconnu du référentiel en 2026-04 (détail dans KPI RH)";
+
+  it("le moteur nomme l'absence et le contrat (raison brute, jamais affichée)", () => {
+    const r = absenteeismMonth(leave, "2026-04");
+    expect(r).toMatchObject({ kind: "nd", nd: { code: "absence-unknown-contract", reason: "absence x1 rattachée au contrat C-9 inconnu du référentiel" } });
+  });
+
+  it("absencesEnCause : le moteur s'arrête à la première ; on la retire et on recompte (x1, x2 ; x3 refusée n'est pas en cause)", () => {
+    expect(absencesEnCause(leave, "2026-04")).toEqual({ code: "absence-unknown-contract", count: 2 });
+    expect(absencesEnCause(sick, "2026-05")).toEqual({ code: "absence-date-nd", count: 1 });
+    expect(absencesEnCause(leave, "2026-05")).toBeNull(); // mai : aucune absence en cause, valeur exacte
+    // Tous motifs, avril : les deux absences du contrat inconnu (raison du moteur), x4 relève d'un autre code et n'est pas comptée.
+    expect(absencesEnCause(allMotifsInput(input), "2026-04")).toEqual({ code: "absence-unknown-contract", count: 2 });
+  });
+
+  it("issueReason : le mois et le nombre ; « au moins une » quand le nombre n'est pas établi", () => {
+    expect(issueReason("absence-unknown-contract", 1, "2026-04")).toBe("1 absence rattachée à un contrat inconnu du référentiel en 2026-04 (détail dans KPI RH)");
+    expect(issueReason("absence-date-nd", 3, "2026-05")).toBe("3 absences sans date de début ou de fin dans PayFit en 2026-05 (détail dans KPI RH)");
+    expect(issueReason("absence-unknown-contract", null, "2026-04")).toBe("au moins une absence rattachée à un contrat inconnu du référentiel en 2026-04 (détail dans KPI RH)");
+  });
+
+  it("raisons de mois et de période : même forme que le moteur (mois en cause, puis le premier), sans identifiant", () => {
+    const m = absenteeismMonth(sick, "2026-04");
+    if (m.kind !== "nd") throw new Error("avril devrait être n.d.");
+    expect(publicMonthReason(sick, "2026-04", m.nd)).toBe("1 absence sans date de début ou de fin dans PayFit en 2026-04 (détail dans KPI RH)");
+    const w = absenteeism(sick, AVRIL_MAI);
+    if (w.kind !== "nd") throw new Error("la période devrait être n.d.");
+    expect(w.nd.reason).toContain("absence x4"); // raison brute du moteur
+    expect(publicWindowReason(sick, w.nd)).toBe("2 mois n.d. (2026-04 → 2026-05) ; 1 absence sans date de début ou de fin dans PayFit en 2026-04 (détail dans KPI RH)");
+    // Une raison sans absence en cause passe telle quelle.
+    expect(publicMonthReason(sick, "2026-04", { code: "month-out-of-scope", reason: "absences non lues pour 2026-04" })).toBe("absences non lues pour 2026-04");
+  });
+
+  it("congesPris : cellules et totaux n.d. avec la raison publique ; aucun identifiant, même dans une raison", () => {
+    const c = congesPris(input, AVRIL_MAI);
+    const [l, s] = c.lines;
+    expect(l.months).toEqual([{ kind: "nd", reason: UNKNOWN_AVRIL }, { kind: "exact", half: 7, persons: 1 }]);
+    expect(l.total).toEqual({ kind: "nd", reason: UNKNOWN_AVRIL });
+    expect(s.months).toEqual([
+      { kind: "nd", reason: "1 absence sans date de début ou de fin dans PayFit en 2026-04 (détail dans KPI RH)" },
+      { kind: "nd", reason: "1 absence sans date de début ou de fin dans PayFit en 2026-05 (détail dans KPI RH)" },
+    ]);
+    expect(JSON.stringify(c)).not.toMatch(/\bx[1-4]\b|\bC-\d/);
   });
 });
 
@@ -220,6 +292,20 @@ describe("congesAVenir : congés posés et demandes en attente, en jours par moi
 
   it("aucun nom ni identifiant dans le résultat : des nombres", () => {
     const json = JSON.stringify(congesAVenir(kpiInput(data, readAbsences(FUTURE, READ_NOV)), "2026-09"));
-    for (const x of ["C-1", "C-2", "C-3", "P-1", "P-2", "b1", "b3"]) expect(json.includes(`"${x}"`), x).toBe(false);
+    expect(json).not.toMatch(/\b[CP]-\d|\bb\d\b/);
+  });
+
+  it("absence commencée avant les mois à venir, fin inconnue : ni comptée ni « hors des mois lus »", () => {
+    // b10 : C-3, arrêt approuvé depuis le 02/03, sans date de fin.
+    const b10 = absence("b10", "C-3", "2026-03-02", "beginning-of-day", null, null, { type: "test_sickness" });
+    const r = value(congesAVenir(kpiInput(data, readAbsences([...FUTURE, b10], READ_NOV)), "2026-09"));
+    expect(r.nonRattachees).toBe(3);
+    expect(r.lines.map((l) => l.type)).toEqual(["test_paid_leave", "test_paid_leave"]);
+  });
+
+  it("population vérifiée avant le décompte : hors natures comptées, b5 (sans date) n'est pas compté ; le contrat inconnu b8 l'est", () => {
+    const r = value(congesAVenir(kpiInput(data, readAbsences(FUTURE, READ_NOV), { natures: ["99"] }), "2026-09"));
+    expect(r.lines).toEqual([]);
+    expect(r.nonRattachees).toBe(1);
   });
 });

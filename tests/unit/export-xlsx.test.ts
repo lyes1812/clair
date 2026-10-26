@@ -153,12 +153,13 @@ describe("roundedRatio, rationalCell, percentCell : conversions exactes vers l'u
 });
 
 describe("safeText : texte jamais pris pour une formule", () => {
-  it("préfixe d'une apostrophe un texte qui commence par =, +, @, tabulation, retour chariot ou - (cas écrits à la main)", () => {
+  it("préfixe d'une apostrophe un texte qui commence par =, +, @, tabulation, retour chariot, saut de ligne ou - (cas écrits à la main)", () => {
     expect(safeText("=SOMME(A1:A9)")).toBe("'=SOMME(A1:A9)");
     expect(safeText("+1+1")).toBe("'+1+1");
     expect(safeText("@cmd")).toBe("'@cmd");
     expect(safeText("\tcellule")).toBe("'\tcellule");
     expect(safeText("\rcellule")).toBe("'\rcellule");
+    expect(safeText("\ncellule")).toBe("'\ncellule");
     expect(safeText("-cmd")).toBe("'-cmd");
     expect(safeText("- note")).toBe("'- note");
     expect(safeText("-")).toBe("'-");
@@ -168,6 +169,14 @@ describe("safeText : texte jamais pris pour une formule", () => {
   it("laisse tel quel un texte ordinaire et un nombre pur (entier ou décimal à virgule ou à point, signé)", () => {
     for (const ok of ["", "Alpha", "a=b", "x-y", "M-001", "123", "-5", "-5,25", "-5.25", "+7", "+0,5", "0,5", "1e5", "'déjà préfixé", "—", "−12,50"]) expect(safeText(ok), ok).toBe(ok);
     for (const notPure of ["-5,", "-,5", "-5,2,1", "-5.2.1", "- 5", "-5 "]) expect(safeText(notPure), notPure).toBe(`'${notPure}`);
+  });
+  it("saut de ligne : préfixé en tête (comme le retour chariot), jamais au milieu d'un texte ; « \\n12 » n'est pas un nombre pur", () => {
+    // Cas écrits à la main : un tableur peut lire la ligne suivant un saut de ligne de tête comme une formule.
+    expect(safeText("\n=SOMME(A1:A9)")).toBe("'\n=SOMME(A1:A9)");
+    expect(safeText("\r\n@cmd")).toBe("'\r\n@cmd");
+    expect(safeText("\n12")).toBe("'\n12");
+    expect(safeText("ligne 1\nligne 2")).toBe("ligne 1\nligne 2");
+    expect(safeText("Service\n=1+1")).toBe("Service\n=1+1");
   });
   it("est idempotent sur un texte déjà sûr", () => {
     expect(safeText(safeText("=1+1"))).toBe("'=1+1");

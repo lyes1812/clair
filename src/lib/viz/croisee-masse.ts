@@ -1,22 +1,26 @@
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
-import { journalReason } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { NV } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
 import type { ChartSeries } from "@/components/charts/shared";
-import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
-import { MASSE_TERMS as M } from "@/lib/glossary/masse";
-import { evolution, servicesOf, windowPayroll, withService, type Evolution, type JournalInput, type PayrollWindow } from "@/lib/payroll/engine";
+import { journalReason } from "@/lib/croisee/format";
+import { memoByContext } from "@/lib/croisee/memo";
+import { isHidden, maskGroups, maskReason, type Confidentialite } from "@/lib/croisee/structure";
+import { croiseeSettingReason, settingValue } from "@/lib/croisee-settings";
+import { evolution, windowPayroll, withService } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
 import { labelTotals, type LabelTotal } from "@/lib/payroll/lot2";
-import { cellView, costVariation, plainVariation, sparkValues, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeColumn, type CroiseeRow, type CroiseeTable, type TileSpec } from "@/lib/viz/croisee";
+import { serviceLabel, serviceRows, type ServiceRow } from "@/lib/payroll/service-rows";
+import { cellView, costVariation, plainVariation, sortRows, sortState, sparkValues, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeColumn, type CroiseeRow, type CroiseeTable, type SortDir, type TileSpec, type TileVariation } from "@/lib/viz/croisee";
 import { brutParts, capital, COLORS, euros, eurosSigned, fixeVariableMonths, fixeVariableSeries, monthLongLabel, monthsAxis, monthShortYear, ndGroups, ndLines, pluriel, primesSeries, reasonLines, servicesParts, type MonthIn, type PrimesMonth } from "@/lib/viz/masse";
 import { MONTH_NAMES, nd as ndTile, type TileValue } from "@/lib/viz/synthese";
 
 // Masse salariale croisée, chapitres 04 · Fixe & variable et 05 · Services (journal de paie PayFit). buildFixeVariable et
 // buildServices sont des fonctions PURES : elles mettent en forme des résultats déjà calculés par le moteur de la masse salariale
-// (windowPayroll, evolution, labelTotals, servicesOf) et par les adaptateurs de l'écran Masse salariale (brutParts,
+// (windowPayroll, evolution, labelTotals, serviceRows) et par les adaptateurs de l'écran Masse salariale (brutParts,
 // fixeVariableSeries, primesSeries, servicesParts). L'écran, le CSV et l'Excel partent du même modèle. Les chargeurs
 // (load…Input) appellent les MÊMES fonctions que l'écran Masse salariale, sur les mêmes mois et le même service : les chiffres sont
-// identiques. Montants en centimes ; un n.d. reste n.d. (raison écrite) jusqu'au tableau et au graphique, jamais un zéro.
+// identiques. Montants en centimes ; un n.d. reste n.d. (raison écrite) jusqu'au tableau et au graphique, jamais un zéro. Les
+// périodes s'écrivent avec les libellés du contexte (« janvier → mars 2026 », N-1 : « janvier → mars 2025 »), jamais l'année seule.
+// Aucun texte libre saisi dans Clair n'est affiché : les libellés viennent du journal de paie (comptes) et des codes de service.
 
 // --- Entrées minimales (les types du moteur y sont assignables) ------------------------------------------------------------------
 
@@ -34,8 +38,9 @@ export type BlockNd = { label?: string; reason: string; action?: Action };
 // Graphique du chapitre : contrat commun (CroiseeChart) plus la note d'une ligne du graphique et le libellé du centre d'un anneau.
 export type MasseChart = CroiseeChart & { note?: string; centerLabel?: string };
 // Bloc de l'écran : graphiques et tableaux (identifiants dans model.charts / model.tables), n.d. et lignes courtes. graph : bloc
-// affiché aussi en « Graphiques » ; half : bloc en demi-largeur ; badge : étiquette du titre ; trend : légende des tendances de coût.
-export type MasseBlock = { id: string; title: string; term?: string; graph: boolean; half?: boolean; badge?: string; trend?: boolean; nd: BlockNd[]; charts: string[]; tables: string[]; notes: string[] };
+// affiché aussi en « Graphiques » ; half : bloc en demi-largeur ; badge : étiquette du titre ; trend : légende des tendances de coût ;
+// graphLinks : tableaux du bloc qui n'ont pas de graphique, signalés par un lien en « Graphiques ».
+export type MasseBlock = { id: string; title: string; term?: string; graph: boolean; half?: boolean; badge?: string; trend?: boolean; nd: BlockNd[]; charts: string[]; tables: string[]; notes: string[]; graphLinks?: string[] };
 // Indicateur « Prévu » : aucun chiffre, la raison (matrice de correspondance) et l'entrée du glossaire.
 export type PrevuItem = { id: string; label: string; reason: string; term: string };
 type MasseModel = Omit<ChapterModel, "charts"> & { charts: MasseChart[]; blocks: MasseBlock[]; trend: boolean };
@@ -49,7 +54,7 @@ export const TOTAL_NUL = "coût total nul ou négatif : part non définie";
 export const SANS_CONTRAT = "aucun contrat rémunéré sur la période";
 export const SANS_LIGNE = "Aucune ligne de charges de personnel dans le journal sur la période.";
 
-// Identifiants du glossaire cités par les deux chapitres (lus par le garde-fou du glossaire).
+// Identifiants du glossaire cités par les deux chapitres (cartes, blocs, colonnes, « Prévu ») ; vérifiés par le garde-fou du glossaire.
 export const MASSE_CX_TERMS = {
   fixeVariable: "fixe-variable",
   primes: "primes",
@@ -63,7 +68,9 @@ export const MASSE_CX_TERMS = {
   partSalaires: "croisee-rigidite",
   nonRecurrents: "croisee-non-recurrents",
   calendrierPrimes: "croisee-calendrier-primes",
+  confidentialite: "croisee-confidentialite",
 } as const;
+const X = MASSE_CX_TERMS;
 
 export const FIXE_VARIABLE_IDS = {
   composantes: "fixe-variable-composantes",
@@ -83,25 +90,31 @@ export const PREVU_FIXE_VARIABLE: PrevuItem[] = [
     id: "fixe-variable-indemnites",
     label: "Indemnités de départ (ruptures conventionnelles, indemnités compensatrices de congés payés)",
     reason: "non distinguées par le journal de paie PayFit ; la lecture des DSN ne retient pas encore les éléments de revenu qui les portent",
-    term: T.nonRecurrents,
+    term: X.nonRecurrents,
   },
   {
     id: "fixe-variable-calendrier",
     label: "Calendrier de versement des primes et versements hors calendrier",
     reason: "le calendrier de versement par famille de prime est un paramètre de l'espace prévu dans une prochaine version",
-    term: T.calendrierPrimes,
+    term: X.calendrierPrimes,
   },
   {
     id: "fixe-variable-heures-sup",
     label: "Heures supplémentaires",
     reason: "aucune rubrique d'heures supplémentaires dans la grille de comptes ; aucune reconnaissance par libellé",
-    term: M.grille,
+    term: X.grille,
   },
   {
     id: "fixe-variable-fixe-contractuel",
     label: "Fixe contractuel de repère et rapprochement du brut",
     reason: "salaire de base contractuel absent du journal de paie et de l'API PayFit",
-    term: M.fixeVariable,
+    term: X.fixeVariable,
+  },
+  {
+    id: "fixe-variable-rigidite",
+    label: "Rigidité de la rémunération (fixe contractuel et avantages obligatoires)",
+    reason: "classification fixe / avantages obligatoires absente des sources ; seule la part des salaires dans le brut est calculée",
+    term: X.partSalaires,
   },
 ];
 
@@ -152,7 +165,7 @@ const PICK = {
 
 const text = (key: string, header: string, extra: Partial<CroiseeColumn> = {}): CroiseeColumn => ({ key, header, kind: "text", ...extra });
 const eur = (key: string, header: string, extra: Partial<CroiseeColumn> = {}): CroiseeColumn => ({ key, header, kind: "eur", ...extra });
-const gapCol = (extra: Partial<CroiseeColumn> = {}): CroiseeColumn => eur("ecart", "Écart", { signed: true, costTrend: true, term: M.evolution, ...extra });
+const gapCol = (extra: Partial<CroiseeColumn> = {}): CroiseeColumn => eur("ecart", "Écart", { signed: true, costTrend: true, term: X.evolution, ...extra });
 const pctCol = (extra: Partial<CroiseeColumn> = {}): CroiseeColumn => ({ key: "ecart-pct", header: "Écart (%)", kind: "pourcent", signed: true, costTrend: true, ...extra });
 
 // Formats des cartes : ceux des colonnes, pour qu'une carte et son tableau écrivent la même valeur au centime près.
@@ -181,6 +194,32 @@ function hasTrend(tables: CroiseeTable[]): boolean {
 function openLine(...windows: WindowIn[]): string | null {
   const open = windows.flatMap((w) => w.months.filter((m) => m.open).map((m) => m.month));
   return open.length ? `Mois non clos (montants provisoires) : ${[...new Set(open)].sort().map(monthShortYear).join(", ")}.` : null;
+}
+
+// En-têtes de la période et de N-1 : libellés du contexte (« Janvier → mars 2026 », « N-1 (janvier → mars 2025) »).
+export const periodHeads = (labels: { period: string; prev: string }) => ({ n: capital(labels.period), n1: `N-1 (${labels.prev})` });
+
+// --- Seuil de confidentialité sous le filtre Service ----------------------------------------------------------------------------
+
+// Mois d'une fenêtre du journal du service retenu : brut et contrats rémunérés (portant une ligne de brut), ou mois n.d.
+export type GuardMonth = { kind: "value"; brut: number; paidContracts: readonly string[] } | { kind: "nd" };
+export type ServiceGuard = { cause: "parametre" | "seuil"; reason: string };
+
+// Sous le filtre Service, tous les chiffres du chapitre 04 décrivent ce seul service : le seuil de confidentialité s'y applique.
+// Chaque mois connu de la période et de N-1 est un groupe (ses contrats rémunérés) ; un mois de 1 à (seuil − 1) contrats, ou un
+// mois qui porte du brut sans contrat rattaché (effectif non dénombré), rend tout le chapitre n.d. : aucun montant de ce service ne
+// se lit alors, ni directement ni par différence. Seuil absent ou illisible : n.d. avec la raison du paramètre. null : affiché.
+export function serviceConfidentiality(conf: Confidentialite, months: readonly GuardMonth[]): ServiceGuard | null {
+  if (conf.kind === "nd") return { cause: "parametre", reason: conf.reason };
+  const known = months.filter((m): m is Extract<GuardMonth, { kind: "value" }> => m.kind === "value");
+  const status = maskGroups(
+    known.map((m) => ({ size: m.paidContracts.length === 0 && m.brut !== 0 ? null : m.paidContracts.length, value: m.brut })),
+    conf.value,
+    false,
+  ).filter(isHidden);
+  const worst = status.includes("masked") ? "masked" : status[0];
+  if (!worst) return null;
+  return { cause: "seuil", reason: `${maskReason(worst, conf.value)} — service retenu par le filtre` };
 }
 
 // --- Chapitre 04 · Fixe & variable ----------------------------------------------------------------------------------------------------
@@ -213,20 +252,20 @@ function familiesOf(d: FixeVariableData): LabelIn[] {
 }
 
 export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
-  const terms = [M.fixeVariable, M.primes, M.stages, M.brut, M.cotisations, M.masse, M.evolution, M.grille, T.rigidite, T.nonRecurrents, T.calendrierPrimes];
+  const terms = [X.fixeVariable, X.primes, X.stages, X.brut, X.cotisations, X.masse, X.evolution, X.grille, X.partSalaires, X.nonRecurrents, X.calendrierPrimes, X.confidentialite];
   const empty = { chapter: "fixe-variable" as const, alerts: [], terms, prevu: PREVU_FIXE_VARIABLE };
   const d = input.data;
   if (input.nd || !d) return { ...empty, tiles: [], tables: [], charts: [], blocks: [], limits: [], tileNd: [], trend: false, nd: input.nd ?? { reason: "journal de paie indisponible" } };
   const { cur, prev, labels } = d;
   const ID = FIXE_VARIABLE_IDS;
-  const nHead = String(d.year);
-  const pHead = `${d.prevYear} (N-1)`;
+  const { n: nHead, n1: pHead } = periodHeads(labels);
   // Mois de la période ; la raison d'un mois n.d. est écrite avec le mois en clair (même texte dans le tableau et l'infobulle).
   const fv = fixeVariableMonths(cur.months.map((m): MonthIn => (m.kind === "nd" ? { ...m, nd: { reason: monthReason(m) } } : m)));
   const families = familiesOf(d);
   const ndList: { label: string; reason: string | null }[] = [];
 
-  // --- Cartes : montant, N-1, écart (ton de coût) ; parts du brut et écart en points (neutres).
+  // --- Cartes (période écrite sur chacune) : montant, N-1, écart et écart en % (ton de coût, neutre quand le % est n.d.) ; parts du
+  // brut et écart en points (neutres).
   const amountTile = (id: string, label: string, term: string, pick: (v: WindowValue) => number, extra: Partial<TileSpec> = {}): TileSpec => {
     const a = of(cur, pick);
     const b = of(prev, pick);
@@ -234,16 +273,16 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     const r = pct(a, b);
     if (isNum(g) && ndOf(r)) ndList.push({ label: `${label} — écart (%)`, reason: ndOf(r)!.nd });
     const value: TileValue = isNum(a) ? { text: euros(a), kind: "value", reason: null } : ndTile(a.nd);
+    const rv = cellView(r, F.pct);
+    const pctLine: TileVariation = rv.nd !== null ? plainVariation("Écart (%)", null, rv.nd) : { label: "Écart (%)", text: rv.text, reason: null, tone: rv.tone };
     return {
       id,
       label,
       term,
+      sub: labels.period,
       value,
       cost: true,
-      variations: [
-        plainVariation("N-1", isNum(b) ? euros(b) : null, isNum(b) ? null : b.nd),
-        isNum(g) ? costVariation("Écart", g, `${eurosSigned(g)} · ${ndOf(r) ? "% n.d." : show(r, F.pct)}`) : costVariation("Écart", null, null, g.nd),
-      ],
+      variations: [plainVariation("N-1", isNum(b) ? euros(b) : null, isNum(b) ? null : b.nd), isNum(g) ? costVariation("Écart", g, eurosSigned(g)) : costVariation("Écart", null, null, g.nd), pctLine],
       ...extra,
     };
   };
@@ -259,6 +298,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
       id,
       label,
       term,
+      sub: labels.period,
       value: nn ? ndTile(nn.nd) : { text: show(n, F.share), kind: "value", reason: null },
       variations: [plainVariation("N-1", pn ? null : show(p, F.share), pn?.nd ?? null), plainVariation("Écart", ndOf(e) || e === "" ? null : show(e, F.pts), ndOf(e)?.nd ?? null)],
     };
@@ -266,12 +306,12 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
   const spark = (label: string, pick: (m: Extract<(typeof fv)[number], { kind: "value" }>) => number) => ({ label: `${label} par mois sur la période`, values: sparkValues(fv.map((m) => (m.kind === "value" ? pick(m) : null))) });
   const hasStages = d.labelsN ? d.labelsN.some((t) => t.rubric === "stages") : null;
   const tiles: TileSpec[] = [
-    amountTile("fixe", "Fixe (salaires et congés payés)", M.fixeVariable, PICK.fixe, { spark: spark("Fixe", (m) => m.fixe) }),
-    amountTile("variable", "Variable (primes et indemnités)", M.fixeVariable, PICK.variable, { spark: spark("Variable", (m) => m.variable) }),
-    amountTile("primes", "dont primes", M.primes, PICK.primes, cur.kind === "value" ? { note: families.length ? `${pluriel(families.length, "famille")} de prime` : "aucune famille de prime" } : {}),
-    amountTile("stages", "Gratifications de stage", M.stages, PICK.stages, hasStages === false ? { note: "aucune ligne dans le journal sur la période" } : {}),
-    shareTile("part-primes", "Part des primes dans le brut", M.primes, PICK.primes),
-    shareTile("part-salaires", "Part des salaires dans le brut", T.rigidite, PICK.fixe),
+    amountTile("fixe", "Fixe (salaires et congés payés)", X.fixeVariable, PICK.fixe, { spark: spark("Fixe", (m) => m.fixe) }),
+    amountTile("variable", "Variable (primes et indemnités)", X.fixeVariable, PICK.variable, { spark: spark("Variable", (m) => m.variable) }),
+    amountTile("primes", "dont primes", X.primes, PICK.primes, cur.kind === "value" ? { note: families.length ? `${pluriel(families.length, "famille")} de prime` : "aucune famille de prime" } : {}),
+    amountTile("stages", "Gratifications de stage", X.stages, PICK.stages, hasStages === false ? { note: "aucune ligne dans le journal sur la période" } : {}),
+    shareTile("part-primes", "Part des primes dans le brut", X.primes, PICK.primes),
+    shareTile("part-salaires", "Part des salaires dans le brut", X.partSalaires, PICK.fixe),
   ];
   if (cur.kind === "nd") ndList.unshift({ label: `Période (${labels.period})`, reason: windowReason(cur) });
   if (prev.kind === "nd") ndList.unshift({ label: `N-1 (${labels.prev})`, reason: windowReason(prev) });
@@ -297,7 +337,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
       line("Cotisations patronales", PICK.cotisations),
     ],
     foot: line("Masse chargée", PICK.masse),
-    terms: [M.fixeVariable, M.primes, M.stages, M.brut, M.cotisations, M.masse, M.evolution],
+    terms: [X.fixeVariable, X.primes, X.stages, X.brut, X.cotisations, X.masse, X.evolution],
   };
   const partLine = (label: string, pick: (v: WindowValue) => number): CroiseeRow => {
     const n = share(of(cur, pick), of(cur, PICK.brut), BRUT_NUL);
@@ -309,7 +349,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     title: "Parts du brut",
     columns: [text("indicateur", "Indicateur"), { key: "n", header: nHead, kind: "pourcent" }, { key: "n1", header: pHead, kind: "pourcent" }, { key: "ecart", header: "Écart (points)", kind: "pourcent", signed: true, points: true }],
     rows: [partLine("Part des salaires dans le brut", PICK.fixe), partLine("Part des primes dans le brut", PICK.primes)],
-    terms: [T.rigidite, M.primes],
+    terms: [X.partSalaires, X.primes],
   };
   const ringReason = cur.kind === "nd" ? windowReason(cur) : null;
   const ring = brutParts(cur.kind === "value" ? { fixe: PICK.fixe(cur), variable: PICK.variable(cur), stages: PICK.stages(cur) } : { fixe: 0, variable: 0, stages: 0 });
@@ -332,8 +372,8 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     title: "Structure du brut, N-1 et N",
     kind: "barres",
     unit: "eur",
-    categories: [String(d.prevYear), String(d.year)],
-    categoryTitles: [`${labels.prev} (N-1)`, labels.period],
+    categories: ["N-1", "N"],
+    categoryTitles: [pHead, nHead],
     series: fixeVariableSeries(fixeVariableMonths([asMonth(prev, "n1"), asMonth(cur, "n")])),
     mode: "stacked",
     tableId: ID.composantes,
@@ -348,7 +388,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     columns: [text("mois", "Mois"), eur("brut", "Brut"), eur("fixe", "Fixe"), eur("variable", "Variable"), eur("primes", "dont primes"), eur("stages", "Gratifications de stage")],
     rows: cur.months.map((m) => ({ cells: [monthRow(m), ofMonth(m, (x) => x.brut), ofMonth(m, (x) => x.byRubric.salaires), ofMonth(m, (x) => x.byRubric.primes + x.byRubric.indemnites), ofMonth(m, (x) => x.byRubric.primes), ofMonth(m, (x) => x.byRubric.stages)] })),
     foot: { cells: ["Période", of(cur, PICK.brut), of(cur, PICK.fixe), of(cur, PICK.variable), of(cur, PICK.primes), of(cur, PICK.stages)] },
-    terms: [M.fixeVariable, M.primes, M.stages],
+    terms: [X.fixeVariable, X.primes, X.stages],
   };
   const moisChart: MasseChart = { id: ID.mois, title: "Brut par nature et par mois", kind: "barres", unit: "eur", categories: axisN.categories, categoryTitles: axisN.titles, series: fixeVariableSeries(fv), mode: "stacked", tableId: ID.mois };
 
@@ -366,7 +406,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
       return { cells: [monthName(m), a, b, gap(a, b)] };
     }),
     foot: { cells: ["Période", of(cur, PICK.primes), of(prev, PICK.primes), gap(of(cur, PICK.primes), of(prev, PICK.primes))] },
-    terms: [M.primes, M.evolution],
+    terms: [X.primes, X.evolution],
   };
   const point = (v: Val) => (isNum(v) ? { v, r: null } : { v: null, r: v.nd });
   const pts = (list: MonthIn[]) => d.months.map((_, i) => point(primeOf(list[i])));
@@ -380,8 +420,8 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     categories: axisNN1.categories,
     categoryTitles: axisNN1.titles,
     series: [
-      { key: "primes", name: `Primes ${d.year}`, values: nPts.map((p) => p.v), reasons: nPts.map((p) => p.r), color: COLORS.now },
-      { key: "primes-n1", name: `Primes ${d.prevYear} (N-1)`, values: pPts.map((p) => p.v), reasons: pPts.map((p) => p.r), color: COLORS.before },
+      { key: "primes", name: `Primes, ${labels.period}`, values: nPts.map((p) => p.v), reasons: nPts.map((p) => p.r), color: COLORS.now },
+      { key: "primes-n1", name: `Primes, N-1 (${labels.prev})`, values: pPts.map((p) => p.v), reasons: pPts.map((p) => p.r), color: COLORS.before },
     ],
     mode: "grouped",
     tableId: ID.primesMois,
@@ -402,7 +442,7 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
           return { cells: [monthRow(m), ofMonth(m, (x) => x.byRubric.primes), ...families.map((_, j): CroiseeCell => (pm.kind === "value" ? pm.byFamily[j] : { nd: pm.reason }))] };
         }),
         foot: { cells: ["Période", of(cur, PICK.primes), ...families.map((f): CroiseeCell => (cur.kind === "value" ? f.cents : { nd: windowReason(cur) }))] },
-        terms: [M.primes],
+        terms: [X.primes],
       }
     : null;
   const familiesChart: MasseChart | null =
@@ -430,14 +470,14 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     libelles = {
       id: ID.libelles,
       title: "Brut par libellé de paie",
-      columns: [text("libelle", "Libellé (PayFit)"), eur("n", nHead), eur("n1", pHead), gapCol(), pctCol(), text("rubrique", "Rubrique", { term: M.grille })],
+      columns: [text("libelle", "Libellé (PayFit)"), eur("n", nHead), eur("n1", pHead), gapCol(), pctCol(), text("rubrique", "Rubrique", { term: X.grille })],
       rows: keys.map((t) => {
         const a: Val = val(n, t.key);
         const b: Val = prevNd ?? val(p!, t.key);
         return { cells: [t.label, a, b, gap(a, b), pct(a, b), rubricLabel(t.rubric)] };
       }),
       foot: { cells: ["Brut", of(cur, PICK.brut), of(prev, PICK.brut), gap(of(cur, PICK.brut), of(prev, PICK.brut)), pct(of(cur, PICK.brut), of(prev, PICK.brut)), ""] },
-      terms: [M.grille, M.brut, M.evolution],
+      terms: [X.grille, X.brut, X.evolution],
     };
   }
 
@@ -446,19 +486,20 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
   const tables = [composantes, parts, moisTable, primesMoisTable, ...(familiesTable ? [familiesTable] : []), libelles];
   const charts = [repartition, structure, moisChart, primesMoisChart, ...(familiesChart ? [familiesChart] : [])];
   const blocks: MasseBlock[] = [
-    { id: "composition", title: "Composition du brut", term: M.fixeVariable, graph: true, nd: [], charts: [repartition.id, structure.id], tables: [composantes.id, parts.id], notes: [] },
-    { id: "mois", title: "Brut par nature et par mois", term: M.fixeVariable, graph: true, nd: [], charts: [moisChart.id], tables: [moisTable.id], notes: [] },
+    { id: "composition", title: "Composition du brut", term: X.fixeVariable, graph: true, nd: [], charts: [repartition.id, structure.id], tables: [composantes.id, parts.id], notes: [] },
+    { id: "mois", title: "Brut par nature et par mois", term: X.fixeVariable, graph: true, nd: [], charts: [moisChart.id], tables: [moisTable.id], notes: [] },
     {
       id: "primes",
       title: "Primes",
-      term: M.primes,
+      term: X.primes,
       graph: true,
       nd: [],
       charts: [primesMoisChart.id, ...(familiesChart ? [familiesChart.id] : [])],
       tables: [primesMoisTable.id, ...(familiesTable ? [familiesTable.id] : [])],
       notes: primesNotes,
+      ...(familiesTable && !familiesChart ? { graphLinks: [familiesTable.id] } : {}),
     },
-    { id: "libelles", title: "Brut par libellé de paie", term: M.grille, graph: false, nd: libellesNd, charts: [], tables: libellesNd.length ? [] : [libelles.id], notes: [] },
+    { id: "libelles", title: "Brut par libellé de paie", term: X.grille, graph: false, nd: libellesNd, charts: [], tables: libellesNd.length ? [] : [libelles.id], notes: [] },
   ];
   const limits = [
     ...(open ? [open] : []),
@@ -473,7 +514,8 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     blocks,
     limits,
     tileNd: reasonLines(ndList),
-    trend: hasTrend([composantes]) || tiles.some((t) => t.cost && (t.variations ?? []).some((v) => v.tone !== "flat")),
+    // Légende des tendances : un ton rouge ou vert écrit sur une carte ou dans l'un des tableaux (libellés et primes compris).
+    trend: hasTrend(tables) || tiles.some((t) => t.cost && (t.variations ?? []).some((v) => v.tone !== "flat")),
   };
 }
 
@@ -491,6 +533,17 @@ export async function loadFixeVariableInput(ctx: CroiseeContext): Promise<FixeVa
   const prevMonths = ctx.prevMonths;
   const cur = windowPayroll(input, months);
   const prev = windowPayroll(input, prevMonths);
+  // Service retenu : seuil de confidentialité sur ses contrats rémunérés de chaque mois (période et N-1).
+  if (svc !== undefined) {
+    const conf = ctx.settings.confidentialite;
+    const seuil = settingValue(conf);
+    const c: Confidentialite = seuil !== null ? { kind: "set", value: seuil } : { kind: "nd", reason: croiseeSettingReason("confidentialite", conf) ?? "seuil de confidentialité non défini (Paramètres)" };
+    const guard = serviceConfidentiality(c, [...cur.months, ...prev.months]);
+    if (guard) {
+      const action = guard.cause === "parametre" ? { href: `/e/${ctx.slug}/parametres#croisee`, label: "Paramètres" } : { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
+      return { nd: { reason: guard.reason, action }, data: null };
+    }
+  }
   const labelsByMonth: Record<string, LabelIn[]> = {};
   for (const r of cur.months) if (r.kind === "value") labelsByMonth[r.month] = labelTotals(input, [r.month]);
   return {
@@ -510,23 +563,14 @@ export async function loadFixeVariableInput(ctx: CroiseeContext): Promise<FixeVa
   };
 }
 
+// Modèle du chapitre 04, calculé une fois par requête : le composant du chapitre et l'export appellent cette même fonction.
+export const fixeVariableModel = memoByContext((ctx: CroiseeContext) => loadFixeVariableInput(ctx).then(buildFixeVariable));
+
 // --- Chapitre 05 · Services -----------------------------------------------------------------------------------------------------------
 
-// Lignes par service : exactement celles du tableau « Services » de l'écran Masse salariale (toujours sur tout le journal ; la
-// somme des services, non ventilé compris, égale le total) : masse de la période et de N-1 de chaque service présent sur l'une des
-// deux périodes, évolution de la masse ; classées par coût N décroissant, non ventilé en dernier. Réutilisé par la Synthèse.
-export type ServiceRow = { value: string | null; cur: PayrollWindow; prev: PayrollWindow; evo: Evolution };
-export function serviceRows(journal: JournalInput, months: string[], prevMonths: string[]): ServiceRow[] {
-  if (!journal.serviceAxis) return [];
-  const rows = servicesOf(journal, [...months, ...prevMonths]).map((v) => {
-    const si = withService(journal, v);
-    const c = windowPayroll(si, months);
-    const p = windowPayroll(si, prevMonths);
-    return { value: v, cur: c, prev: p, evo: evolution(c, p, (w) => w.masse) };
-  });
-  const masseOf = (w: PayrollWindow) => (w.kind === "value" ? w.masse : -1);
-  return rows.sort((a, b) => (a.value === null ? 1 : b.value === null ? -1 : masseOf(b.cur) - masseOf(a.cur)));
-}
+// Lignes par service : la règle partagée avec le tableau « Services » de l'écran Masse salariale (src/lib/payroll/service-rows.ts),
+// reprise telle quelle par la Synthèse.
+export { serviceLabel, serviceRows, type ServiceRow };
 
 export type ServiceRowIn = { value: string | null; cur: WindowIn; prev: WindowIn; evo: EvolutionIn; href?: string };
 export type ServicesData = {
@@ -541,7 +585,14 @@ export type ServicesData = {
 };
 export type ServicesInput = { nd: BlockNd | null; data: ServicesData | null };
 
-export const serviceLabel = (v: string | null): string => v ?? "Non ventilé";
+// Tri par défaut du tableau des services : coût de la période décroissant, n.d. en dernier (ordre des lignes du modèle).
+export const SERVICES_DEFAULT_SORT: { key: string; dir: SortDir } = { key: "n", dir: "desc" };
+// Tri effectif du tableau : celui de l'adresse s'il vise une colonne triable de ce tableau, sinon le tri par défaut. L'écran
+// l'annonce par aria-sort ; les lignes du modèle sont déjà dans l'ordre par défaut (même ordre à l'écran et dans les exports).
+export function servicesSort(table: CroiseeTable, tri: string | null, sens: SortDir | null): { tri: string; sens: SortDir } {
+  const s = sortState(table, tri, sens);
+  return s ? { tri: `${table.id}.${s.key}`, sens: s.dir } : { tri: `${table.id}.${SERVICES_DEFAULT_SORT.key}`, sens: SERVICES_DEFAULT_SORT.dir };
+}
 
 // Écart et écart en % d'une évolution du moteur : n.d. avec la raison de la fenêtre n.d. (mois en clair).
 function evoGap(e: EvolutionIn, cur: WindowIn, prev: WindowIn): CroiseeCell {
@@ -557,12 +608,12 @@ function evoPct(e: EvolutionIn, cur: WindowIn, prev: WindowIn): CroiseeCell {
 const perPerson = (w: WindowIn): CroiseeCell => (w.kind === "nd" ? { nd: windowReason(w) } : w.paidContractMonths > 0 ? { exact: w.masse / (w.paidContractMonths * 100) } : { nd: SANS_CONTRAT });
 
 export function buildServices(input: ServicesInput): ServicesModel {
-  const terms = [M.service, M.masse, M.evolution, M.primes, M.cotisations];
+  const terms = [X.service, X.masse, X.evolution, X.primes, X.cotisations];
   const empty = { chapter: "services" as const, alerts: [], terms, tiles: [] };
   const d = input.data;
   if (input.nd || !d) return { ...empty, tables: [], charts: [], blocks: [], limits: [], trend: false, count: null, selected: null, nd: input.nd ?? { reason: "journal de paie indisponible" } };
   const ID = SERVICES_IDS;
-  const { total } = d;
+  const { total, labels } = d;
   const cells = (label: string, cur: WindowIn, prev: WindowIn, evo: EvolutionIn, whole: WindowIn | null): CroiseeCell[] => [
     label,
     of(cur, PICK.masse),
@@ -576,29 +627,36 @@ export function buildServices(input: ServicesInput): ServicesModel {
     perPerson(cur),
   ];
   const sortable = { sortable: true };
+  const columns: CroiseeColumn[] = [
+    text("service", "Service", sortable),
+    eur("n", `Coût ${labels.period}`, { ...sortable, term: X.masse }),
+    eur("n1", `Coût N-1 (${labels.prev})`, sortable),
+    gapCol(sortable),
+    pctCol(sortable),
+    { key: "part", header: "Part du coût", kind: "pourcent", ...sortable },
+    eur("hors-primes", "Hors primes", { ...sortable, term: X.primes }),
+    eur("primes", "Primes", sortable),
+    eur("cotisations", "Cotisations", { ...sortable, term: X.cotisations }),
+    eur("cout-pm", "Coût / personne-mois", { ...sortable, term: X.service }),
+  ];
+  // Lignes dans l'ordre du tri par défaut (coût de la période décroissant, n.d. en dernier), le même que celui de l'écran : le
+  // tableau, les deux graphiques et les exports suivent cet ordre.
+  const draft = d.rows.map((r) => ({ r, row: { cells: cells(serviceLabel(r.value), r.cur, r.prev, r.evo, total.cur), ...(r.href ? { href: r.href } : {}) } as CroiseeRow }));
+  const sorted = sortRows({ id: ID.table, title: "", columns, rows: draft.map((x) => x.row) }, SERVICES_DEFAULT_SORT.key, SERVICES_DEFAULT_SORT.dir);
+  const source = new Map(draft.map((x) => [x.row, x.r]));
+  const rows = sorted.map((row) => source.get(row)!);
   const table: CroiseeTable = {
     id: ID.table,
     title: "Coût par service",
-    columns: [
-      text("service", "Service", sortable),
-      eur("n", `Coût ${d.year}`, { ...sortable, term: M.masse }),
-      eur("n1", `Coût ${d.prevYear} (N-1)`, sortable),
-      gapCol(sortable),
-      pctCol(sortable),
-      { key: "part", header: "Part du coût", kind: "pourcent", ...sortable },
-      eur("hors-primes", "Hors primes", { ...sortable, term: M.primes }),
-      eur("primes", "Primes", sortable),
-      eur("cotisations", "Cotisations", { ...sortable, term: M.cotisations }),
-      eur("cout-pm", "Coût / personne-mois", { ...sortable, term: M.service }),
-    ],
-    rows: d.rows.map((r) => ({ cells: cells(serviceLabel(r.value), r.cur, r.prev, r.evo, total.cur), ...(r.href ? { href: r.href } : {}) })),
+    columns,
+    rows: sorted,
     foot: { cells: cells("Total", total.cur, total.prev, total.evo, null) },
     terms,
   };
   const open = openLine(total.cur, total.prev);
 
   // Contribution des services à l'écart : l'écart de chaque service (colonne Écart du tableau), barres signées.
-  const pts = d.rows.map((r) => {
+  const pts = rows.map((r) => {
     const c = evoGap(r.evo, r.cur, r.prev);
     return isNum(c) ? { v: c, r: null } : { v: null, r: ndOf(c)?.nd ?? null };
   });
@@ -607,15 +665,15 @@ export function buildServices(input: ServicesInput): ServicesModel {
     title: "Contribution des services à l'écart",
     kind: "barres",
     unit: "eur",
-    categories: d.rows.map((r) => short(serviceLabel(r.value))),
-    categoryTitles: d.rows.map((r) => serviceLabel(r.value)),
-    series: [{ key: "ecart", name: `Écart ${d.year} − ${d.prevYear}`, values: pts.map((p) => p.v), reasons: pts.map((p) => p.r), color: COLORS.now }],
+    categories: rows.map((r) => short(serviceLabel(r.value))),
+    categoryTitles: rows.map((r) => serviceLabel(r.value)),
+    series: [{ key: "ecart", name: `Écart à N-1, ${labels.period}`, values: pts.map((p) => p.v), reasons: pts.map((p) => p.r), color: COLORS.now }],
     mode: "grouped",
     tableId: ID.table,
   };
   // Répartition du coût de la période : une part par service au coût positif (servicesParts, comme l'écran Masse salariale).
-  const ring = servicesParts(d.rows.map((r) => ({ value: r.value, cur: r.cur })));
-  const reasonOf = new Map(d.rows.map((r) => [r.value ?? NV, r.cur.kind === "nd" ? windowReason(r.cur) : null]));
+  const ring = servicesParts(rows.map((r) => ({ value: r.value, cur: r.cur })));
+  const reasonOf = new Map(rows.map((r) => [r.value ?? NV, r.cur.kind === "nd" ? windowReason(r.cur) : null]));
   const ringSeries: ChartSeries[] = ring.parts.map((p) => ({ key: p.key, name: p.name, values: [p.value], reasons: [p.value === null ? (reasonOf.get(p.key) ?? p.reason ?? null) : null], color: p.color }));
   const ringNote = [
     ring.omitted.length ? `Hors anneau (coût nul ou négatif) : ${ring.omitted.join(" ; ")}.` : null,
@@ -628,26 +686,30 @@ export function buildServices(input: ServicesInput): ServicesModel {
     title: "Répartition du coût de la période",
     kind: "anneau",
     unit: "eur",
-    categories: [d.labels.period],
+    categories: [labels.period],
     series: ringSeries,
     tableId: ID.table,
     centerLabel: "masse chargée",
     ...(ringNote ? { note: ringNote } : {}),
   };
 
-  const noRows = d.rows.length === 0;
   const trend = hasTrend([table]);
-  const blocks: MasseBlock[] = [
-    { id: "tableau", title: "Coût par service", term: M.service, graph: false, badge: pluriel(d.rows.length, "service"), trend, nd: [], charts: [], tables: [table.id], notes: noRows ? [SANS_LIGNE] : [] },
-    { id: "contribution", title: "Contribution des services à l'écart", term: M.evolution, graph: true, half: true, nd: [], charts: noRows ? [] : [contribution.id], tables: [], notes: noRows ? [SANS_LIGNE] : [] },
-    { id: "repartition", title: "Répartition du coût", term: M.service, graph: true, half: true, nd: [], charts: noRows ? [] : [repartition.id], tables: [], notes: noRows ? [SANS_LIGNE] : [] },
-  ];
+  const tableBlock: MasseBlock = { id: "tableau", title: "Coût par service", term: X.service, graph: false, badge: pluriel(rows.length, "service"), trend, nd: [], charts: [], tables: [table.id], notes: [] };
+  // Sans aucune ligne : la phrase est écrite une fois, dans le bloc du tableau (affiché aussi en « Graphiques »), sans graphique vide.
+  const blocks: MasseBlock[] =
+    rows.length === 0
+      ? [{ ...tableBlock, graph: true, notes: [SANS_LIGNE] }]
+      : [
+          tableBlock,
+          { id: "contribution", title: "Contribution des services à l'écart", term: X.evolution, graph: true, half: true, nd: [], charts: [contribution.id], tables: [], notes: [] },
+          { id: "repartition", title: "Répartition du coût", term: X.service, graph: true, half: true, nd: [], charts: [repartition.id], tables: [], notes: [] },
+        ];
   const limits = [
     ...(d.axisMissing ? [`L'axe « ${d.axis} » choisi dans Paramètres n'existe plus dans le journal appliqué : toutes les lignes sont « Non ventilé ».`] : []),
     ...(open ? [open] : []),
     "Coût / personne-mois : contrats rémunérés chaque mois ; ce n'est pas un coût par ETP.",
   ];
-  return { ...empty, nd: null, tables: [table], charts: noRows ? [] : [contribution, repartition], blocks, limits, trend, count: d.rows.length, selected: d.selected };
+  return { ...empty, nd: null, tables: [table], charts: rows.length === 0 ? [] : [contribution, repartition], blocks, limits, trend, count: rows.length, selected: d.selected };
 }
 
 export async function loadServicesInput(ctx: CroiseeContext): Promise<ServicesInput> {
@@ -681,3 +743,6 @@ export async function loadServicesInput(ctx: CroiseeContext): Promise<ServicesIn
     },
   };
 }
+
+// Modèle du chapitre 05, calculé une fois par requête : le composant du chapitre et l'export appellent cette même fonction.
+export const servicesModel = memoByContext((ctx: CroiseeContext) => loadServicesInput(ctx).then(buildServices));

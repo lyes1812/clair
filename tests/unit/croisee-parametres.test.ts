@@ -63,11 +63,19 @@ beforeAll(async () => {
   ]);
   await db.insert(user).values({ id: U, name: "Administrateur fictif", email: `${U}@test.invalid` });
 });
+// Nettoyage : l'utilisateur fictif est supprimé même si la suppression des espaces échoue, et la connexion est toujours fermée.
+// Délai porté à 60 s : la suppression des espaces entraîne celle de leurs réglages et événements.
 afterAll(async () => {
-  await db.delete(organization).where(sql`id in (${W}, ${B})`);
-  await db.delete(user).where(sql`id = ${U}`);
-  await pool.end();
-});
+  try {
+    await db.delete(organization).where(sql`id in (${W}, ${B})`);
+  } finally {
+    try {
+      await db.delete(user).where(sql`id = ${U}`);
+    } finally {
+      await pool.end();
+    }
+  }
+}, 60_000);
 beforeEach(() => {
   access.role = "admin";
   access.asked.length = 0;

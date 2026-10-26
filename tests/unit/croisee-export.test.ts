@@ -10,34 +10,47 @@ import {
   chapterExport,
   chapterWorkbook,
   CROISEE_EXPORTS,
+  croiseeExportOptions,
   croiseeFilters,
+  croiseeSources,
   CSV_BOM,
   csvCell,
   exportCell,
   exportOptions,
   exportTermIds,
+  JOURNAL_USAGE,
+  KEY_FIGURES_TITLE,
+  keyFiguresTable,
+  LOWER_BOUND,
   ND_SHEET,
+  ND_WITHOUT_REASON,
+  periodLead,
   screenRows,
   screenTables,
   SERVICES_EXPORT_LABEL,
   sheetName,
   sortedTables,
+  sourceUses,
   tableCsv,
   tableSheet,
+  tileNumber,
+  unavailableRows,
   type ExportModel,
   type FilterCtx,
+  type MenuCtx,
 } from "@/lib/croisee/export";
+import { journalReason } from "@/lib/croisee/format";
 import { safeText } from "@/lib/export/safe-text";
 import { buildWorkbook, EMPTY_CELL_NOTE } from "@/lib/export/xlsx";
 import { glossaryEntry } from "@/lib/glossary";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
-import { cellView, croiseeHref, parseQuery, type CroiseeCell, type CroiseeTable } from "@/lib/viz/croisee";
-import { buildAbsences, loadAbsencesInput } from "@/lib/viz/croisee-absences";
-import { buildBudget, buildEffets, loadBudgetInput, loadEffetsInput } from "@/lib/viz/croisee-budget";
-import { buildEffectifs, loadEffectifsInput } from "@/lib/viz/croisee-effectifs";
-import { buildFixeVariable, buildServices, loadFixeVariableInput, loadServicesInput, type ServicesInput, type WindowIn } from "@/lib/viz/croisee-masse";
-import { buildPaieCompta, loadPaieComptaInput } from "@/lib/viz/croisee-paie";
-import { buildSynthese, loadSyntheseInput } from "@/lib/viz/croisee-synthese";
+import { cellView, croiseeHref, parseQuery, type CroiseeCell, type CroiseeTable, type TileSpec } from "@/lib/viz/croisee";
+import { absencesModel } from "@/lib/viz/croisee-absences";
+import { budgetModel, effetsModel } from "@/lib/viz/croisee-budget";
+import { effectifsModel } from "@/lib/viz/croisee-effectifs";
+import { buildServices, fixeVariableModel, servicesModel, type ServicesInput, type WindowIn } from "@/lib/viz/croisee-masse";
+import { paieComptaModel } from "@/lib/viz/croisee-paie";
+import { syntheseModel } from "@/lib/viz/croisee-synthese";
 import type { MonthIn } from "@/lib/viz/masse";
 
 // Exports de la Masse salariale croisée. Données entièrement fictives, écrites à la main ; chaque valeur attendue est calculée à la
@@ -58,10 +71,12 @@ vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/croisee/context", async (orig)
   ...(await orig<typeof import("@/app/e/[slug]/studio-rh/masse-salariale/croisee/context")>()),
   loadCroiseeContext: (...args: unknown[]) => mocks.ctx(...args),
 }));
-vi.mock("@/lib/viz/croisee-masse", async (orig) => ({
-  ...(await orig<typeof import("@/lib/viz/croisee-masse")>()),
-  loadServicesInput: (...args: unknown[]) => mocks.services(...args),
-}));
+// Chapitre 05 : la fonction mémoïsée du chapitre, sur un chargeur simulé (même composition que dans croisee-masse.ts).
+vi.mock("@/lib/viz/croisee-masse", async (orig) => {
+  const m = await orig<typeof import("@/lib/viz/croisee-masse")>();
+  const { memoByContext } = await import("@/lib/croisee/memo");
+  return { ...m, servicesModel: memoByContext((ctx: object) => (mocks.services(ctx) as Promise<ServicesInput>).then(m.buildServices)) };
+});
 vi.mock("@/lib/connectors/sync", () => ({
   lastSync: (...args: unknown[]) => mocks.lastSync(...args),
   activeSync: (...args: unknown[]) => mocks.activeSync(...args),
@@ -227,9 +242,9 @@ describe("classeur Excel du chapitre", () => {
       sources: [],
     });
 
-  it("une feuille par tableau de l'écran, puis « Non disponibles », « Filtres », « Sources » et « Définitions »", async () => {
+  it("« Chiffres clés » (cartes), une feuille par tableau de l'écran, puis « Non disponibles », « Filtres », « Sources » et « Définitions »", async () => {
     const wb = await load(await buildWorkbook(spec().spec));
-    expect(wb.worksheets.map((w) => w.name)).toEqual(["Montants fictifs par équipe", "Montants par mois", ND_SHEET, "Filtres", "Sources", "Définitions"]);
+    expect(wb.worksheets.map((w) => w.name)).toEqual([KEY_FIGURES_TITLE, "Montants fictifs par équipe", "Montants par mois", ND_SHEET, "Filtres", "Sources", "Définitions"]);
   });
 
   it("mêmes lignes et mêmes cellules que l'écran : montants en vrais nombres, n.d. avec sa raison (jamais 0), texte protégé, écart négatif en nombre", async () => {
@@ -374,26 +389,61 @@ describe("feuille « Filtres »", () => {
 
 // --- Registre des chapitres ---------------------------------------------------------------------------------------------------------
 
-describe("registre : la même paire load…Input / build… que l'écran", () => {
-  it("chaque chapitre vivant a son entrée, avec les fonctions exportées par son fichier src/lib/viz/croisee-<chapitre>.ts", () => {
-    const pairs = {
-      synthese: [loadSyntheseInput, buildSynthese],
-      effectifs: [loadEffectifsInput, buildEffectifs],
-      absences: [loadAbsencesInput, buildAbsences],
-      "fixe-variable": [loadFixeVariableInput, buildFixeVariable],
-      services: [loadServicesInput, buildServices],
-      budget: [loadBudgetInput, buildBudget],
-      "paie-compta": [loadPaieComptaInput, buildPaieCompta],
-      effets: [loadEffetsInput, buildEffets],
+describe("registre : la fonction mémoïsée du chapitre, celle qu'appelle l'écran", () => {
+  it("chaque chapitre vivant pointe sur la fonction <chapitre>Model de son fichier src/lib/viz/croisee-<chapitre>.ts (aucun second calcul)", () => {
+    const models = {
+      synthese: syntheseModel,
+      effectifs: effectifsModel,
+      absences: absencesModel,
+      "fixe-variable": fixeVariableModel,
+      services: servicesModel,
+      budget: budgetModel,
+      "paie-compta": paieComptaModel,
+      effets: effetsModel,
     } as const;
-    expect(CHAPTERS.filter((c) => c.statut === "vivant").map((c) => c.id)).toEqual(Object.keys(pairs));
-    for (const [id, [l, b]] of Object.entries(pairs)) {
-      const e = CROISEE_EXPORTS[id as keyof typeof pairs]!;
-      expect(e.load, id).toBe(l);
-      expect(e.build, id).toBe(b);
-    }
+    expect(CHAPTERS.filter((c) => c.statut === "vivant").map((c) => c.id)).toEqual(Object.keys(models));
+    for (const [id, m] of Object.entries(models)) expect(CROISEE_EXPORTS[id as keyof typeof models]!.model, id).toBe(m);
     expect(CROISEE_EXPORTS.services!.sorted).toBe(true);
+    expect(CROISEE_EXPORTS.services!.defaultSort).toEqual({ table: "services", key: "n", dir: "desc" });
     expect(CROISEE_EXPORTS["fixe-variable"]!.sorted).toBe(false);
+  });
+
+  it("deux appels sur le même contexte ne relancent pas le chargement : même promesse que l'écran, journal lu une fois", async () => {
+    const payroll = vi.fn(async () => ({ input: null, unavailable: null, source: "dsn" }));
+    const ctx = routeCtx({ chapitre: "fixe-variable" }, payroll);
+    const a = CROISEE_EXPORTS["fixe-variable"]!.model(ctx);
+    expect(fixeVariableModel(ctx)).toBe(a); // l'appel du composant du chapitre reçoit la même promesse
+    expect((await a).nd?.reason).toBe("source RH retenue : DSN — journal de paie PayFit non lu");
+    expect(payroll).toHaveBeenCalledTimes(1);
+    // Menu de la page puis chapitre : toujours un seul chargement ; le modèle n.d. ne laisse que « Exporter les services ».
+    const payroll2 = vi.fn(async () => ({ input: null, unavailable: null, source: "dsn" }));
+    const ctx2 = routeCtx({ chapitre: "fixe-variable" }, payroll2);
+    expect((await croiseeExportOptions(ctx2)).map((o) => o.testid)).toEqual(["cx-export-services"]);
+    await fixeVariableModel(ctx2);
+    expect(payroll2).toHaveBeenCalledTimes(1);
+    // Un autre contexte (une autre requête) recalcule.
+    expect(fixeVariableModel(routeCtx({ chapitre: "fixe-variable" }, payroll))).not.toBe(a);
+  });
+
+  it("sources lues : filtre de service et journal lu ou non (Synthèse : comptabilité et DSN traitées de même ; Effets sans scénario)", async () => {
+    const u = (id: keyof typeof CROISEE_EXPORTS, filtered: boolean, journal: boolean) => CROISEE_EXPORTS[id]!.uses({ filtered, journal });
+    expect(u("synthese", false, true)).toEqual(["rh", "journal", "budget", "scenario", "compta", "dsn"]);
+    expect(u("synthese", false, false)).toEqual(["rh", "journal", "budget", "scenario"]);
+    expect(u("synthese", true, true)).toEqual(["journal"]);
+    expect(u("effectifs", true, true)).toEqual(["rh", "journal"]);
+    expect(u("absences", false, true)).toEqual(["rh"]);
+    expect(u("absences", true, true)).toEqual([]);
+    expect(u("fixe-variable", true, true)).toEqual(["journal"]);
+    expect(u("services", true, true)).toEqual(["journal"]);
+    expect(u("budget", false, true)).toEqual(["journal", "budget", "scenario"]);
+    expect(u("budget", true, true)).toEqual(["journal"]);
+    expect(u("paie-compta", false, true)).toEqual(["journal", "compta", "dsn"]);
+    expect(u("paie-compta", true, true)).toEqual(["journal"]);
+    expect(u("effets", false, true)).toEqual(["journal", "rh"]);
+    // Dérivé du contexte : service retenu, journal non lu (raison de la page).
+    const ctx = routeCtx({ chapitre: "synthese", service: "Atelier" }, async () => ({ input: null, unavailable: null, source: "dsn" }));
+    expect(await sourceUses(ctx, CROISEE_EXPORTS.synthese!)).toEqual(["journal"]);
+    expect(await sourceUses(routeCtx({ chapitre: "synthese" }, async () => ({ input: null, unavailable: null, source: "dsn" })), CROISEE_EXPORTS.synthese!)).toEqual(["rh", "journal", "budget", "scenario"]);
   });
   it("chapitre inconnu ou « Prévu » : refusé avec la raison ; absent : Synthèse", () => {
     expect(chapterExport("inconnu")).toEqual({ kind: "unknown", reason: "Chapitre inconnu : inconnu." });
@@ -407,7 +457,15 @@ describe("registre : la même paire load…Input / build… que l'écran", () =>
 // --- Menu « Exporter » --------------------------------------------------------------------------------------------------------------
 
 const BASE = "/e/demo/studio-rh/masse-salariale/croisee";
-const menuCtx = (axis: string | null) => ({ base: BASE, state: { chapitre: "fixe-variable", annee: "2026", de: "01", a: "03", affichage: "tableau", tri: null, sens: null }, service: { axis } }) as unknown as Parameters<typeof exportOptions>[0];
+const menuCtx = (axis: string | null, chapter: "fixe-variable" | "services" = "fixe-variable", period = true) =>
+  ({
+    base: BASE,
+    chapter: chapterDef(chapter),
+    period: period ? { year: 2026, from: "01", to: "03", months: ["2026-01", "2026-02", "2026-03"] } : null,
+    state: { chapitre: chapter, annee: "2026", de: "01", a: "03", affichage: "tableau", tri: null, sens: null },
+    service: { axis },
+  }) as unknown as MenuCtx;
+const SERVICES_OPTION = { label: SERVICES_EXPORT_LABEL, href: `${BASE}/export?chapitre=services&annee=2026&de=01&a=03&format=csv&tableau=services`, testid: "cx-export-services" };
 
 describe("menu « Exporter »", () => {
   it("Excel du chapitre en premier, puis le CSV de chaque tableau de l'écran, puis « Exporter les services » ; l'affichage n'est pas repris", () => {
@@ -427,7 +485,20 @@ describe("menu « Exporter »", () => {
   });
   it("sans axe de service : pas d'« Exporter les services » ; chapitre non calculable : aucun menu", () => {
     expect(exportOptions(menuCtx(null), MODEL).map((o) => o.testid)).toEqual(["cx-export-xlsx", "cx-export-csv-demo-montants", "cx-export-csv-demo-mensuel"]);
-    expect(exportOptions(menuCtx("Service"), { ...MODEL, nd: { reason: "journal de paie indisponible" } })).toEqual([]);
+    expect(exportOptions(menuCtx(null), { ...MODEL, nd: { reason: "journal de paie indisponible" } })).toEqual([]);
+  });
+  it("« Exporter les services » dès qu'un axe est retenu et qu'une période existe, même si le chapitre courant est n.d., vide ou en échec", () => {
+    const nd: ExportModel = { ...MODEL, nd: { reason: "journal de paie indisponible" } };
+    const empty: ExportModel = { ...MODEL, tiles: [], tables: [], charts: [], blocks: [] };
+    const allNd: ExportModel = { ...MODEL, tables: [ndShape("demo-libelles", "Brut par libellé", "non filtrable par service")], charts: [], blocks: [{ id: "x", title: "Bloc", tables: [], nd: [{ reason: "non filtrable par service" }] }] };
+    expect(exportOptions(menuCtx("Service"), nd)).toEqual([SERVICES_OPTION]);
+    expect(exportOptions(menuCtx("Service"), null)).toEqual([SERVICES_OPTION]); // modèle en échec
+    expect(exportOptions(menuCtx("Service"), empty)).toEqual([SERVICES_OPTION]);
+    // Blocs tous n.d. mais cartes présentes : l'Excel du chapitre (cartes, raisons) reste proposé.
+    expect(exportOptions(menuCtx("Service"), allNd).map((o) => o.testid)).toEqual(["cx-export-xlsx", "cx-export-services"]);
+    // Sans période, ou au chapitre 05 lui-même (son tableau porte déjà l'option) : rien de plus.
+    expect(exportOptions(menuCtx("Service", "fixe-variable", false), null)).toEqual([]);
+    expect(exportOptions(menuCtx("Service", "services"), null)).toEqual([]);
   });
 });
 
@@ -456,14 +527,25 @@ const SERVICES: ServicesInput = {
 };
 // Coût / personne-mois : 3 000 € ÷ 2 = 1 500 € ; 1 000 € ÷ 1 = 1 000 € ; 4 000 € ÷ 3 = 1 333,33 €. Parts : 75 % et 25 %.
 // Écarts : +500 € (+20 %) et −500 € (−33,33 %) ; total 0 € (0 %). Hors primes : 1 800 €, 700 €, 2 500 €.
+// En-têtes de période de l'écran (D4) : « Coût janvier 2026 », « Coût N-1 (janvier 2025) ».
 const SERVICES_CSV = [
-  '"Service";"Coût 2026";"Coût 2025 (N-1)";"Écart";"Écart (%)";"Part du coût";"Hors primes";"Primes";"Cotisations";"Coût / personne-mois"',
+  '"Service";"Coût janvier 2026";"Coût N-1 (janvier 2025)";"Écart";"Écart (%)";"Part du coût";"Hors primes";"Primes";"Cotisations";"Coût / personne-mois"',
   '"Atelier";"3000,00";"2500,00";"500,00";"20,00";"75,00";"1800,00";"200,00";"1000,00";"1500,00"',
   `"'=Bureau";"1000,00";"1500,00";"-500,00";"-33,33";"25,00";"700,00";"0,00";"300,00";"1000,00"`,
   '"Total";"4000,00";"4000,00";"0,00";"0,00";"";"2500,00";"200,00";"1300,00";"1333,33"',
 ];
+// CSV « Exporter les services » : les mêmes lignes, plus le début (1er janvier) et la fin (31 janvier) de la période après « Service ».
+const SERVICES_ROUTE_CSV = SERVICES_CSV.map((l, i) => {
+  const [first, ...rest] = split(l);
+  const lead = i === 0 ? ["Début de période", "Fin de période"] : ["01/01/2026", "31/01/2026"];
+  return [first, ...lead, ...rest].map((c) => `"${c.replace(/"/g, '""')}"`).join(";");
+});
 
-function routeCtx(sp: Record<string, string>): CroiseeContext {
+type PayrollLoader = () => Promise<unknown>;
+// Journal « lu » par défaut (input renseigné) : le chargeur du chapitre 05 est simulé, il ne lit pas cette entrée.
+const JOURNAL_LU: PayrollLoader = async () => ({ source: "payfit", input: { lignes: "simulées" }, unavailable: null });
+
+function routeCtx(sp: Record<string, string | string[]>, payroll: PayrollLoader = JOURNAL_LU): CroiseeContext {
   const q = parseQuery(sp);
   const state = { chapitre: q.chapitre, annee: "2026", de: "01", a: "01", tri: q.tri, sens: q.sens };
   return {
@@ -478,13 +560,15 @@ function routeCtx(sp: Record<string, string>): CroiseeContext {
     prevMonths: ["2025-01"],
     labels: { period: "janvier 2026", prev: "janvier 2025" },
     openMonths: [],
-    service: { axis: "Service", value: undefined, label: "Tous les services", options: [], reason: null },
+    service: { axis: "Service", value: q.service || undefined, label: q.service || "Tous les services", options: [], reason: null },
     budget: { selected: null, explicit: false, options: [], reason: "aucun budget saisi pour 2026" },
     scenario: { selected: null, explicit: false, options: [], reason: "aucun scénario ne couvre 2026" },
+    settings: { confidentialite: { kind: "absent" }, seuilsEffectif: { kind: "absent" }, margeAlerte: { kind: "absent" }, horizonEcheances: { kind: "absent" } },
+    canEdit: false,
     affichage: q.affichage,
     state,
     href: (patch = {}, hash?: string) => croiseeHref(BASE, { ...state, ...patch }, hash),
-    load: { payroll: async () => ({ source: "payfit" }), compta: async () => ({ source: null, reason: "aucune source comptable retenue" }) },
+    load: { payroll, compta: async () => ({ source: null, reason: "aucune source comptable retenue" }) },
   } as unknown as CroiseeContext;
 }
 
@@ -505,10 +589,11 @@ describe("route d'export de la Masse salariale croisée", () => {
     expect(res.headers.get("content-disposition")).toContain('filename="masse-salariale-croisee-services-2026-01-01.csv"');
     const bytes = Buffer.from(await res.arrayBuffer());
     expect(bytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))).toBe(true);
-    expect(csvLines(bytes.toString("utf8"))).toEqual(SERVICES_CSV);
-    // Même tableau que l'écran : le modèle construit par buildServices sur la même entrée.
+    expect(csvLines(bytes.toString("utf8"))).toEqual(SERVICES_ROUTE_CSV);
+    // Même tableau que l'écran : le modèle construit par buildServices sur la même entrée ; le CSV y ajoute la période.
     const screen = buildServices(SERVICES).tables[0];
     expect(csvLines(tableCsv(screen))).toEqual(SERVICES_CSV);
+    expect(csvLines(tableCsv(screen, screen.rows, periodLead({ months: ["2026-01"] })))).toEqual(SERVICES_ROUTE_CSV);
   });
 
   it("le tri de l'adresse est repris (coût croissant : =Bureau d'abord)", async () => {
@@ -535,10 +620,27 @@ describe("route d'export de la Masse salariale croisée", () => {
       ["Période", "janvier 2026"],
       ["N-1", "janvier 2025"],
       ["Service", "Tous les services (axe analytique « Service »)"],
+      ["Tri du tableau « Coût par service »", "Coût janvier 2026, ordre décroissant (par défaut)"],
       ["Limite de la lecture", "Coût / personne-mois : contrats rémunérés chaque mois ; ce n'est pas un coût par ETP."],
     ]);
     const sources = sheetRows(wb.getWorksheet("Sources")!, "Source", 4).map((r) => [r[0].value, r[1].value, r[2].value, r[3].value]);
     expect(sources).toEqual([["PayFit", "journal comptable de paie (masse, brut, cotisations, services) · aucune lecture appliquée", "n.d.", "Jamais synchronisée"]]);
+  });
+
+  it("chapitre 05 avec un service retenu : « Filtres » dit que le service ne restreint pas le chapitre (tous les services, total compris)", async () => {
+    const res = await call("chapitre=services&annee=2026&de=01&a=01&service=Atelier&format=xlsx");
+    expect(res.status).toBe(200);
+    const wb = await load(Buffer.from(await res.arrayBuffer()));
+    const filters = new Map(sheetRows(wb.getWorksheet("Filtres")!, "Paramètre", 2).map((r) => [r[0].value, r[1].value]));
+    expect(filters.get("Service")).toBe("Tous les services (le service « Atelier » retenu ne restreint pas ce chapitre)");
+    const rows = sheetRows(wb.getWorksheet("Coût par service")!, "Service", 10).map((r) => r[0].value);
+    expect(rows).toEqual(["Atelier", "'=Bureau", "Total"]);
+  });
+
+  it("paramètre répété : la première valeur, comme la page (parseQuery)", async () => {
+    const res = await call("chapitre=services&chapitre=inconnu&format=csv&format=pdf&tableau=services&tableau=absent&tri=services.n&sens=asc&sens=desc");
+    expect(res.status).toBe(200);
+    expect(csvLines(Buffer.from(await res.arrayBuffer()).toString("utf8")).map((l) => split(l)[0])).toEqual(["Service", "'=Bureau", "Atelier", "Total"]);
   });
 
   it("chapitre « Prévu » ou inconnu : 404 avec la raison, sans aucune lecture ; format inconnu ou CSV sans tableau : 400", async () => {
@@ -567,6 +669,152 @@ describe("route d'export de la Masse salariale croisée", () => {
     const res = await call("chapitre=services&format=xlsx");
     expect(res.status).toBe(422);
     expect(await res.text()).toBe("n.d. — aucun axe de service retenu");
+  });
+});
+
+// --- Chiffres clés : les cartes en vrais nombres ------------------------------------------------------------------------------------
+
+const NNBSP = "\u202f"; // espace fine insécable (séparateur de milliers fr-FR)
+const NBSP = "\u00a0";
+const TILES: TileSpec[] = [
+  {
+    id: "masse",
+    label: "Masse salariale chargée",
+    sub: "janvier → mars 2026",
+    value: { text: `1${NNBSP}234,56${NBSP}€`, kind: "value", reason: null },
+    cost: true,
+    note: "Coût par ETP-mois : 411,52 €",
+    variations: [
+      { label: "N-1", text: `1${NNBSP}000,00${NBSP}€`, tone: "flat" },
+      { label: "Évolution", text: `+234,56${NBSP}€ (+23,46${NBSP}%)`, tone: "bad" },
+    ],
+  },
+  { id: "etp", label: "ETP moyen", value: { text: "≥ 12,50", kind: "lower", reason: null }, variations: [{ label: "Écart", text: null, reason: "N-1 : quotité absente du référentiel", tone: "flat" }] },
+  { id: "budget", label: "Écart au budget", value: { text: "n.d.", kind: "nd", reason: "aucun budget saisi pour 2026" }, variations: [{ label: "Écart (%)", text: `+12,00${NBSP}% · défavorable`, tone: "bad" }, { label: "Taux", text: "−0,25 pts", tone: "flat" }] },
+  { id: "conges", label: "Congés pris", value: { text: "3,5 j sur 20 j théoriques", kind: "value", reason: null }, variations: [{ label: "Évolution", text: `+500,00${NBSP}€ (% n.d. : N-1 nul)`, tone: "bad" }, { label: "Sans raison", text: null, tone: "flat" }] },
+];
+
+describe("« Chiffres clés » : cartes du chapitre", () => {
+  it("relit un nombre affiché, sans le convertir autrement : cas de référence écrits à la main", () => {
+    expect(tileNumber(`1${NNBSP}234,56${NBSP}€`)).toEqual({ cell: 123456, kind: "eur", unit: "€", lower: false }); // 1 234,56 € = 123 456 centimes
+    expect(tileNumber("−25,00 €")).toEqual({ cell: -2500, kind: "eur", unit: "€", lower: false });
+    expect(tileNumber("+12,34 %")).toEqual({ cell: 1234, kind: "pourcent", unit: "%", lower: false }); // 12,34 % = 1 234 points de base
+    expect(tileNumber("12,3 %")).toEqual({ cell: 1230, kind: "pourcent", unit: "%", lower: false });
+    expect(tileNumber("−0,25 pts")).toEqual({ cell: { exact: -0.25 }, kind: "etp", unit: "points", lower: false });
+    expect(tileNumber("≥ 12,50")).toEqual({ cell: { exact: 12.5 }, kind: "etp", unit: "", lower: true });
+    expect(tileNumber(`1${NNBSP}234`)).toEqual({ cell: 1234, kind: "nombre", unit: "", lower: false });
+    expect(tileNumber("+2 personnes")).toEqual({ cell: 2, kind: "nombre", unit: "personnes", lower: false });
+    expect(tileNumber("+0,50 ETP")).toEqual({ cell: { exact: 0.5 }, kind: "etp", unit: "ETP", lower: false });
+    expect(tileNumber("3,5 j")).toEqual({ cell: { exact: 3.5 }, kind: "etp", unit: "jours", lower: false });
+    expect(Object.is(tileNumber("−0,00 %")!.cell, 0)).toBe(true); // jamais −0
+    for (const t of ["3,5 j sur 20 j théoriques", "janv. 2026", "", "n.d.", "12,345 %", "1,234 €", "12 mois"]) expect(tileNumber(t), t).toBeNull();
+  });
+
+  it("une ligne par valeur et par variation ; « A (B) » donne deux lignes ; « · » va en observation ; n.d. avec sa raison, jamais 0", () => {
+    const t = keyFiguresTable(TILES)!;
+    expect(t.title).toBe(KEY_FIGURES_TITLE);
+    expect(t.rows.map((r) => [r.cells, r.kind ?? null])).toEqual([
+      [["Masse salariale chargée", "Valeur", 123456, "€", "", "janvier → mars 2026", "Coût par ETP-mois : 411,52 €"], "eur"],
+      [["Masse salariale chargée", "N-1", 100000, "€", "", "", ""], "eur"],
+      [["Masse salariale chargée", "Évolution", 23456, "€", "", "", ""], "eur"], // +234,56 €
+      [["Masse salariale chargée", "Évolution (%)", 2346, "%", "", "", ""], "pourcent"], // +23,46 %
+      [["ETP moyen", "Valeur", { exact: 12.5 }, "", LOWER_BOUND, "", ""], "etp"],
+      [["ETP moyen", "Écart", { nd: "N-1 : quotité absente du référentiel" }, "", "", "", ""], null],
+      [["Écart au budget", "Valeur", { nd: "aucun budget saisi pour 2026" }, "", "", "", ""], null],
+      [["Écart au budget", "Écart (%)", 1200, "%", "", "", "défavorable"], "pourcent"],
+      [["Écart au budget", "Taux", { exact: -0.25 }, "points", "", "", ""], "etp"],
+      [["Congés pris", "Valeur", "3,5 j sur 20 j théoriques", "", "", "", ""], null], // deux nombres : texte repris tel quel
+      [["Congés pris", "Évolution", 50000, "€", "", "", "% n.d. : N-1 nul"], "eur"],
+      [["Congés pris", "Sans raison", { nd: ND_WITHOUT_REASON }, "", "", "", ""], null],
+    ]);
+    expect(keyFiguresTable([])).toBeNull();
+  });
+
+  it("dans le classeur : première feuille, vrais nombres (euros, pourcentages, décimaux), n.d. en commentaire et en observation", async () => {
+    const model: ExportModel = { chapter: "synthese", tiles: TILES, tables: [], charts: [], limits: [], nd: null, terms: [] };
+    const { spec } = chapterWorkbook({ title: "Masse salariale croisée — 01 Synthèse", workspaceName: "Espace fictif", generatedAt: "2026-10-26T09:30:00Z", model, sort: null, filters: [], sources: [] });
+    const wb = await load(await buildWorkbook(spec));
+    expect(wb.worksheets[0].name).toBe(KEY_FIGURES_TITLE);
+    const rows = sheetRows(wb.worksheets[0], "Carte", 7);
+    expect(rows.map((r) => r[2].value)).toEqual([1234.56, 1000, 234.56, 0.2346, 12.5, "n.d.", "n.d.", 0.12, -0.25, "3,5 j sur 20 j théoriques", 500, "n.d."]);
+    expect([rows[0][2].numFmt, rows[3][2].numFmt, rows[4][2].numFmt]).toEqual(['#,##0.00 "€"', "0.00%", "#,##0.00"]);
+    expect(noteOf(rows[5][2])).toBe("N-1 : quotité absente du référentiel");
+    expect(rows[5][6].value).toBe("Valeur : N-1 : quotité absente du référentiel");
+    expect(rows[0][6].value).toBe("Coût par ETP-mois : 411,52 €");
+    expect(rows[4][4].value).toBe(LOWER_BOUND);
+  });
+});
+
+describe("« Non disponibles » : raisons des cartes (tileNd), sans doublon", () => {
+  it("libellés et raison séparés ; une raison déjà donnée par un bloc n'est pas répétée ; « Prévu » du chapitre repris", () => {
+    const model: ExportModel = {
+      ...MODEL,
+      blocks: [{ id: "cartes", title: "Cartes de synthèse", tables: [], nd: [{ label: "ETP moyen N-1", reason: "quotité absente du référentiel" }] }, ...MODEL.blocks!],
+      tileNd: ["ETP moyen N-1 : quotité absente du référentiel", "Absentéisme, Turnover : seuil de confidentialité non défini (Paramètres)", "raison sans libellé"],
+      prevu: [{ label: "Commentaire du mois", reason: "prévu en version 1.1" }],
+    };
+    expect(unavailableRows(model)).toEqual([
+      ["Cartes de synthèse", "ETP moyen N-1", "Non disponible (n.d.)", "quotité absente du référentiel"],
+      ["Brut par libellé", "Brut par libellé", "Non disponible (n.d.)", "libellés de la période non lus"],
+      ["Brut par libellé", "Calendrier des primes", "Prévu", "aucun réglage dans cette version"],
+      ["Chapitre", "Commentaire du mois", "Prévu", "prévu en version 1.1"],
+      ["Cartes", "Absentéisme, Turnover", "Non disponible (n.d.)", "seuil de confidentialité non défini (Paramètres)"],
+      ["Cartes", "", "Non disponible (n.d.)", "raison sans libellé"],
+      ["Tableau caché", "", "Non disponible (n.d.)", "réglage illisible"],
+    ]);
+  });
+});
+
+describe("feuille « Sources » : journal de paie non lu", () => {
+  beforeEach(() => {
+    mocks.lastSync.mockReset().mockImplementation(async (_ws: string, p: string) => (p === "payfit" ? { status: "applied", startedAt: new Date("2026-10-01T07:55:00Z"), finishedAt: new Date("2026-10-01T08:00:00Z") } : null));
+    mocks.activeSync.mockReset().mockImplementation(async (_ws: string, p: string) => (p === "payfit" ? { decidedAt: new Date("2026-10-01T08:05:00Z") } : null));
+  });
+
+  it("source RH = DSN : ligne n.d. avec la raison de la page, dernière lecture PayFit mais aucune « lecture appliquée »", async () => {
+    const pay = { input: null, unavailable: null, source: "dsn" as const };
+    const ctx = { workspace: { id: "w1" }, load: { payroll: async () => pay } } as unknown as CroiseeContext;
+    expect(await croiseeSources(ctx, ["rh", "journal"])).toEqual([
+      { label: "Fichiers DSN", detail: "référentiel Collaborateurs : contrats et quotités déclarés · aucune lecture appliquée", syncedAt: null, status: "Jamais synchronisée" },
+      { label: "PayFit", detail: `${JOURNAL_USAGE} — n.d. : ${journalReason(pay)}`, syncedAt: "2026-10-01T08:00:00.000Z", status: "Appliquée (active)" },
+    ]);
+    expect(journalReason(pay)).toBe("source RH retenue : DSN — journal de paie PayFit non lu");
+  });
+
+  it("journal lu : une seule ligne PayFit (référentiel et journal), avec la lecture appliquée", async () => {
+    const ctx = { workspace: { id: "w1" }, load: { payroll: async () => ({ input: {}, unavailable: null, source: "payfit" }) } } as unknown as CroiseeContext;
+    expect(await croiseeSources(ctx, ["rh", "journal"])).toEqual([
+      { label: "PayFit", detail: `référentiel Collaborateurs : contrats, quotités et absences ; ${JOURNAL_USAGE} · lecture appliquée le 01/10/2026 10:05`, syncedAt: "2026-10-01T08:00:00.000Z", status: "Appliquée (active)" },
+    ]);
+  });
+});
+
+describe("feuille « Filtres » : service retenu et tri par défaut", () => {
+  it("hors chapitre 05, le service retenu restreint les chiffres : il est écrit avec son axe", () => {
+    const f = croiseeFilters(filterCtx({ chapter: chapterDef("fixe-variable"), service: { axis: "Service", value: "Atelier", label: "Atelier", options: [], reason: null } }), { limits: [] }, ["journal"]);
+    expect(f.find((x) => x.label === "Service")?.value).toBe("Atelier (axe analytique « Service »)");
+    const g = croiseeFilters(filterCtx({ chapter: chapterDef("services"), service: { axis: "Service", value: null, label: "Non ventilé", options: [], reason: null } }), { limits: [] }, ["journal"]);
+    expect(g.find((x) => x.label === "Service")?.value).toBe("Tous les services (le service « Non ventilé » retenu ne restreint pas ce chapitre)");
+  });
+  it("sans tri dans l'adresse : le tri par défaut du chapitre est écrit, marqué « par défaut »", () => {
+    const model: ExportModel = { chapter: "services", tiles: [], tables: [SORTABLE], charts: [], limits: [], nd: null, terms: [] };
+    const st = sortedTables(model, { tri: null, sens: null }, { table: "services", key: "n", dir: "desc" });
+    expect(croiseeFilters(filterCtx(), model, ["journal"], st).find((x) => x.label === "Tri du tableau « Coût par service »")?.value).toBe("Coût 2026, ordre décroissant (par défaut)");
+    expect(sortedTables(model, { tri: "services.service", sens: "asc" }, { table: "services", key: "n", dir: "desc" }).map((x) => [x.key, x.dir, x.byDefault ?? false])).toEqual([["service", "asc", false]]);
+  });
+});
+
+describe("cellules : la raison n.d. vient de l'écran (cellView)", () => {
+  it("valeur non finie, numérique dans une colonne de texte, hors limites, hors de l'unité de base : même raison que l'écran", () => {
+    const eur = MONTANTS.columns[2];
+    const pct = MONTANTS.columns[4];
+    const txt = MONTANTS.columns[0];
+    for (const [cell, col] of [[{ exact: Number.NaN }, eur], [{ exact: 1.5 }, txt], [{ exact: 1e300 }, pct], [1.5, eur], [2 ** 60, eur]] as const) {
+      const why = cellView(cell, col).nd;
+      expect(why).not.toBeNull();
+      expect(exportCell(cell, col)).toEqual({ nd: why });
+      expect(csvCell(cell, col)).toBe(`n.d. (${why})`);
+    }
   });
 });
 

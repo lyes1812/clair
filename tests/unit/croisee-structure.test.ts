@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { confidentialiteReason, effectifStructure, type StructureContract } from "@/lib/croisee/structure";
+import { confidentialiteReason, effectifStructure, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type StructureContract } from "@/lib/croisee/structure";
 
 // Structure de l'effectif (chapitre 02) : cas de référence écrits à la main, valeurs fictives. Six contrats de cinq personnes (la
 // personne p1 a deux contrats) :
@@ -51,6 +51,37 @@ const flat = (s: ReturnType<typeof effectifStructure>): Shown => {
   return out;
 };
 
+describe("maskGroups : seuil de confidentialité et masquage secondaire (cas écrits à la main)", () => {
+  const g = (size: number | null, value: number | null) => ({ size, value });
+  it("une seule cellule sous le seuil dans un ensemble dont le total est affiché : la plus petite cellule affichée est masquée aussi", () => {
+    // Seuil 2 : 1 personne < 2 → masquée ; plus petite affichée : 3 (et non 5).
+    expect(maskGroups([g(3, 3), g(1, 1), g(5, 5)], 2, true)).toEqual(["secondary", "masked", "shown"]);
+    // À égalité, la première dans l'ordre.
+    expect(maskGroups([g(3, 3), g(3, 3), g(1, 1)], 2, true)).toEqual(["secondary", "shown", "masked"]);
+    // Un groupe vide peut être retenu comme cellule secondaire (la plus petite affichée).
+    expect(maskGroups([g(0, 0), g(1, 1), g(5, 5)], 2, true)).toEqual(["secondary", "masked", "shown"]);
+  });
+  it("deux cellules masquées, ou total non affiché : aucun masquage secondaire", () => {
+    expect(maskGroups([g(1, 1), g(1, 1), g(4, 4)], 2, true)).toEqual(["masked", "masked", "shown"]);
+    expect(maskGroups([g(1, 1), g(4, 4)], 2, false)).toEqual(["masked", "shown"]);
+    // Une cellule déjà n.d. (raison propre) compte comme cachée : avec une cellule masquée, deux cellules cachées.
+    expect(maskGroups([g(3, null), g(1, 1), g(4, 4)], 2, true)).toEqual(["nd", "masked", "shown"]);
+  });
+  it("effectif non dénombré : non vérifiable, protégé comme une cellule masquée ; groupe vide jamais masqué au premier tour", () => {
+    expect(maskGroups([g(null, 7), g(4, 4), g(6, 6)], 2, true)).toEqual(["unverifiable", "secondary", "shown"]);
+    expect(maskGroups([g(0, 0), g(4, 4)], 2, true)).toEqual(["shown", "shown"]);
+    // Seul groupe : il vaut le total déjà publié, rien d'autre à masquer.
+    expect(maskGroups([g(1, 1)], 2, true)).toEqual(["masked"]);
+  });
+  it("raison : la même pour le masquage principal et secondaire (rien ne dit laquelle des deux cellules est sous le seuil)", () => {
+    expect(maskReason("masked", 2)).toBe(maskReason("secondary", 2));
+    expect(confidentialiteReason(2)).toBe("non affiché (seuil de confidentialité : 2 personnes)");
+    expect(confidentialiteReason(1)).toBe("non affiché (seuil de confidentialité : 1 personne)");
+    expect(maskReason("unverifiable", 2)).toBe(SEUIL_NON_VERIFIABLE);
+    expect(maskReason("shown", 2)).toBeNull();
+  });
+});
+
 describe("effectifStructure : cas de référence", () => {
   it("seuil de confidentialité à 1 : tous les groupes affichés, chaque caractéristique somme au total", () => {
     expect(flat(effectifStructure({ contracts: POP, confidentialite: { kind: "set", value: 1 } }))).toEqual({
@@ -66,35 +97,43 @@ describe("effectifStructure : cas de référence", () => {
     });
   });
 
-  it("seuil à 2 : les groupes d'une seule personne sont n.d., le total n'est pas modifié ; « statut non renseigné » vide n'apparaît pas", () => {
+  it("seuil à 2 : groupes d'une personne masqués, masquage secondaire dans chaque caractéristique, total inchangé", () => {
     const n2 = `n.d. : ${confidentialiteReason(2)}`;
+    // Temps : « non renseigné » (1 personne) masqué, seul masqué → le plus petit affiché (temps partiel, 2) l'est aussi.
+    // Modalité : forfait jours et modalité non renseignée (1 personne chacun) : deux masqués, rien de plus.
+    // Statut : cadres dirigeants (1) masqué, seul autre groupe (hors cadres dirigeants) masqué aussi.
     expect(flat(effectifStructure({ contracts: POP, confidentialite: { kind: "set", value: 2 } }))).toEqual({
       total: 6,
       "Temps plein": 3,
-      "Temps partiel": 2,
+      "Temps partiel": n2,
       "Temps de travail non renseigné": n2,
       "Forfait jours": n2,
       "Autres modalités du temps de travail": 4,
       "Modalité non renseignée": n2,
       "Cadres dirigeants": n2,
-      "Salariés hors cadres dirigeants": 5,
+      "Salariés hors cadres dirigeants": n2,
     });
-    expect(confidentialiteReason(2)).toBe("groupe de moins de 2 personnes : non affiché (seuil de confidentialité)");
   });
 
-  it("le seuil compte des personnes, pas des contrats : « autres modalités » (4 contrats, 3 personnes) est masqué à 4", () => {
+  it("le seuil compte des personnes, pas des contrats : à 4, « autres modalités » (4 contrats, 3 personnes) est masqué", () => {
+    const n4 = `n.d. : ${confidentialiteReason(4)}`;
     const s = flat(effectifStructure({ contracts: POP, confidentialite: { kind: "set", value: 4 } }));
-    expect(s["Autres modalités du temps de travail"]).toBe(`n.d. : ${confidentialiteReason(4)}`);
-    expect(s["Salariés hors cadres dirigeants"]).toBe(5); // 4 personnes
-    expect(s["Temps plein"]).toBe(`n.d. : ${confidentialiteReason(4)}`); // 3 personnes
+    expect(s["Autres modalités du temps de travail"]).toBe(n4);
+    expect(s["Temps plein"]).toBe(n4); // 3 personnes
+    // Hors cadres dirigeants (4 personnes) atteint le seuil, mais c'est le seul autre groupe : masquage secondaire.
+    expect(s["Salariés hors cadres dirigeants"]).toBe(n4);
     expect(s.total).toBe(6);
   });
 
-  it("un groupe vide reste à 0 (il ne désigne personne), jamais n.d.", () => {
+  it("un groupe vide reste à 0 quand rien n'est à protéger ; il peut être retenu par le masquage secondaire", () => {
     const sans = POP.filter((x) => x.contractKey !== "c4");
     const s = flat(effectifStructure({ contracts: sans, confidentialite: { kind: "set", value: 3 } }));
-    expect(s["Forfait jours"]).toBe(0);
+    // Statut : cadres dirigeants 0, hors cadres dirigeants 5 contrats (4 personnes ≥ 3) : rien de masqué.
     expect(s["Cadres dirigeants"]).toBe(0);
+    expect(s["Salariés hors cadres dirigeants"]).toBe(5);
+    // Modalité : non renseignée (1 personne) masquée, seule ; la plus petite affichée est forfait jours (0).
+    expect(s["Forfait jours"]).toBe(`n.d. : ${confidentialiteReason(3)}`);
+    expect(s["Autres modalités du temps de travail"]).toBe(4);
     expect(s.total).toBe(5);
   });
 
@@ -122,6 +161,7 @@ describe("effectifStructure : cas de référence", () => {
     const orphelins = [c("o1", null, false, "standard", false), c("o2", null, false, "standard", false)];
     const s = flat(effectifStructure({ contracts: orphelins, confidentialite: { kind: "set", value: 2 } }));
     expect(s["Temps partiel"]).toBe(2);
+    expect(s["Temps plein"]).toBe(0);
   });
 
   it("sans seuil de confidentialité : toute la structure est n.d. avec la raison (aucun masquage par défaut)", () => {

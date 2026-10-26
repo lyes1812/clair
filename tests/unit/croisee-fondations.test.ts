@@ -92,7 +92,8 @@ import {
 import { BudgetError } from "@/lib/budget/store";
 import CroiseePage from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/page";
 import { CHAPTER_TOTAL, CHAPTERS, chapterDef, chapterLinks, EN_CONSTRUCTION, neighbours } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/chapitres";
-import { journalReason, loadCroiseeContext, once, type CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
+import { loadCroiseeContext, once, type CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
+import { journalReason } from "@/lib/croisee/format";
 import { AlertList, ChapterPrevu, ModelTable, NdNote, Pliant, Spark, Tuile, Tuiles } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/atomes";
 import type { MonthPayroll, PayrollWindow } from "@/lib/payroll/engine";
 import type { ChapterId } from "@/lib/viz/croisee";

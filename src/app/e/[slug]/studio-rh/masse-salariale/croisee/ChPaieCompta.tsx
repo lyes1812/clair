@@ -4,7 +4,7 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { MoneyText } from "@/components/Money";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
-import { buildPaieCompta, loadPaieComptaInput, type PaieBlock, type PaieModel } from "@/lib/viz/croisee-paie";
+import { paieComptaModel, type PaieBlock, type PaieModel } from "@/lib/viz/croisee-paie";
 import { capital, hasNd } from "@/lib/viz/masse";
 import { ChartGuard, GraphFoot, NdKey, NdState, TrendLegend, type Affichage } from "../components";
 import { ModelTable } from "./atomes/ModelTable";
@@ -12,11 +12,11 @@ import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
 import type { CroiseeContext } from "./context";
 
-// Chapitre 07 · Paie & comptabilité. Le composant lit l'entrée du chapitre (lecteurs du contexte, mêmes fonctions que l'onglet Paie
-// & comptabilité de la Masse salariale), construit le modèle par la fonction pure buildPaieCompta (le même que celui des exports) et
-// le rend : cartes, blocs (graphiques suivis de leur tableau exact), blocs « Prévu » avec leur raison, limites de la lecture.
+// Chapitre 07 · Paie & comptabilité. Le composant prend le modèle du chapitre (paieComptaModel : lecture par les mêmes fonctions que
+// l'onglet Paie & comptabilité de la Masse salariale, puis fonction pure buildPaieCompta), calculé une fois par requête et partagé
+// avec les exports, et le rend : cartes, blocs (graphiques suivis de leur tableau exact), blocs « Prévu » avec leur raison, limites.
 export default async function ChPaieCompta({ ctx }: { ctx: CroiseeContext }) {
-  const model = buildPaieCompta(await loadPaieComptaInput(ctx));
+  const model = await paieComptaModel(ctx);
   return <PaieComptaChapter model={model} slug={ctx.slug} affichage={ctx.affichage} tableauHref={ctx.href({ affichage: "tableau" })} />;
 }
 

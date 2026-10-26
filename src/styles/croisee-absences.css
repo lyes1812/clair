@@ -9,7 +9,8 @@
 @media (max-width: 1100px) { .cx-abs-tiles .facts.ms-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .cx-abs-tiles .facts.ms-tiles { grid-template-columns: minmax(0, 1fr); } }
 
-/* Blocs : titre, n.d., graphique suivi de son tableau exact, tableaux, mentions « Prévu ». */
+/* Blocs : titre, n.d., graphiques (absentéisme par mois, demi-journées prises empilées par motif) chacun suivi de son tableau exact,
+   tableaux, mentions « Prévu ». */
 .cx-abs-block { gap: 14px; scroll-margin-top: 72px; }
 .cx-abs-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: var(--clair-type-subheading); font-weight: 600; color: var(--ink); }
 .cx-abs-chart { display: grid; gap: 12px; min-width: 0; }
@@ -17,7 +18,7 @@
 .cx-abs-prevu { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .cx-abs-prevu-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--clair-type-form); color: var(--muted); line-height: 1.5; }
 .cx-abs-prevu-list strong { color: var(--ink); font-weight: 600; }
-.cx-abs-prevu-list a { color: var(--blue); }
+.cx-abs-prevu-list a:not(.gloss-link) { color: var(--blue); }
 
 /* Limites de la lecture : une ligne chacune. */
 .cx-abs-limits { display: grid; gap: 6px; min-width: 0; }

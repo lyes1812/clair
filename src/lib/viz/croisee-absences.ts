@@ -1,5 +1,21 @@
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
-import { congesAVenir, congesPris, type AVenirStatut, type CongeCell, type CongesAVenir, type CongesPris } from "@/lib/croisee/conges";
+import type { ChartSeries } from "@/components/charts/shared";
+import {
+  allMotifsInput,
+  congesAVenir,
+  congesPris,
+  motifInput,
+  publicMonth,
+  publicWindow,
+  publicWindowReason,
+  type AVenirLine,
+  type AVenirStatut,
+  type CongeCell,
+  type CongesAVenir,
+  type CongesPris,
+} from "@/lib/croisee/conges";
+import { memoByContext } from "@/lib/croisee/memo";
+import { confidentialiteReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type MaskStatus } from "@/lib/croisee/structure";
 import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSettings } from "@/lib/croisee-settings";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { absenteeism, absenteeismMonth, theoreticalWindow } from "@/lib/rh/kpi/absence";
@@ -8,24 +24,32 @@ import { compareWindows, delta } from "@/lib/rh/kpi/compare";
 import { kpiDashboard } from "@/lib/rh/kpi/dashboard";
 import { fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { lastClosedMonth, rollingWindow } from "@/lib/rh/kpi/period";
-import { kpiNd, type Delta, type Kind, type KpiNd, type Ratio } from "@/lib/rh/kpi/types";
+import { kpiNd, type AbsenceMotifs, type Delta, type Kind, type KpiNd, type Ratio } from "@/lib/rh/kpi/types";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { plainVariation, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeColumn, type CroiseeTable, type TileSpec } from "@/lib/viz/croisee";
 import { absenceTypeText, absenteeismSeries, monthAxis, monthLongLabel, motifsRetenusLine, ratioBps, type RowIn } from "@/lib/viz/kpi";
 import { capital, COLORS, monthShortYear } from "@/lib/viz/masse";
-import { deltaView, kpiRefusal, nd as ndTile, periodLabel, rateTile, windowOf, type TileValue } from "@/lib/viz/synthese";
+import { deltaView, kpiRefusal, nd as ndTile, rateTile, windowOf, type TileValue } from "@/lib/viz/synthese";
 
 // Masse salariale croisée, chapitre 03 · Absences & congés. buildAbsences est une fonction PURE : elle met en forme des résultats déjà
 // calculés par le moteur des KPI RH (absentéisme, jours théoriques, absentéisme par motif, tableau de bord) et par les fonctions pures
-// du chapitre (src/lib/croisee/conges.ts : congés pris par motif et par mois, congés posés et demandes en attente). L'écran, le CSV et
-// l'Excel partent du même modèle. loadAbsencesInput lit les sources par les lecteurs du contexte et appelle ces fonctions : aucun
-// nouveau moteur. Un n.d. reste n.d. (raison écrite) jusqu'au tableau et au graphique ; aucun nom de personne.
+// du chapitre (src/lib/croisee/conges.ts : pris par motif et par mois, absences posées et demandes en attente). L'écran, le CSV et
+// l'Excel partent du même modèle (absencesModel, un seul calcul par requête). loadAbsencesInput lit les sources par les lecteurs du
+// contexte et appelle ces fonctions : aucun nouveau moteur. Un n.d. reste n.d. (raison écrite) jusqu'au tableau et au graphique.
 //
 // Tuile principale : l'absentéisme du moteur (motifs retenus dans Paramètres › Définitions des KPI). Tous les motifs de la lecture
 // restent dans le détail, et le « Taux d'absence, tous motifs » est un tableau à part, jamais présenté comme l'absentéisme.
-// Seuil de confidentialité (rh.croisee.confidentialite) : le tableau par motif et les congés par motif sont des données de santé
-// potentielles ; une cellule dont le nombre de personnes concernées est inférieur au seuil est n.d. ; sans seuil défini, ces blocs sont
-// n.d. avec la raison et le lien vers les Paramètres.
+//
+// Seuil de confidentialité (rh.croisee.confidentialite ; absent ou illisible : blocs n.d. avec le lien vers les Paramètres) : une
+// cellule par motif qui décrit de 1 à (seuil − 1) personnes est masquée, dans le tableau par motif, les demi-journées prises par motif
+// et par mois et les absences posées à venir. Exception : le seul motif retenu présent dans la lecture n'est pas masqué (sa ligne égale
+// la tuile Absentéisme, déjà publiée dans KPI RH). Masquage secondaire (fonction partagée maskGroups) dans chaque relation publiée :
+// mois d'une ligne et son total ; motifs retenus d'un mois ou de la période et la tuile ; autres motifs de la période et (tous motifs −
+// tuile) : aucune valeur masquée ne se retrouve par différence. Les cartes, le tableau mensuel et le taux tous motifs (entreprise
+// entière, mêmes valeurs que KPI RH) ne sont pas masqués.
+//
+// Aucun identifiant : les raisons du moteur qui nomment une absence ou un contrat sont remplacées à la lecture (conges.ts), et un
+// dernier filtre (publicText) passe sur tout le modèle.
 
 // --- Entrée ------------------------------------------------------------------------------------------------------------------------
 
@@ -56,7 +80,8 @@ export type AbsencesData = {
 
 export type AbsencesInput = {
   links: { parametres: string; parametresKpi: string; donnees: string; tableau: string; paieCompta: string };
-  period: { months: string[]; prevMonths: string[] } | null;
+  // labels : libellés de la période et de N-1 du contexte (ctx.labels), repris tels quels en en-tête de colonne et dans les exports.
+  period: { months: string[]; prevMonths: string[]; labels: { period: string; prev: string } } | null;
   service: { value: string | null | undefined; label: string }; // value undefined : tous les services
   settings: CroiseeSettings;
   nd: BlockNd | null; // chapitre entier non calculable (période, source RH, paramètres des KPI)
@@ -66,21 +91,23 @@ export type AbsencesInput = {
 // --- Modèle ------------------------------------------------------------------------------------------------------------------------
 
 export type AbsencesBlockId = "cartes" | "mensuel" | "motifs" | "tous-motifs" | "conges" | "a-venir" | "non-disponibles";
-export type PrevuItem = { id: string; label: string; reason: string; link?: Action };
+export type PrevuItem = { id: string; label: string; reason: string; link?: Action; term?: string };
 // Un bloc de l'écran : ses graphiques et tableaux (identifiants dans model.charts / model.tables), ses n.d. et ses mentions « Prévu ».
 // Un tableau de model.tables absent de tous les blocs est la forme exportable d'un bloc n.d. (une ligne, sa raison).
 export type AbsencesBlock = { id: AbsencesBlockId; title: string; term?: string; graph?: boolean; nd: BlockNd[]; charts: string[]; tables: string[]; prevu: PrevuItem[] };
 export type AbsencesModel = ChapterModel & { blocks: AbsencesBlock[] };
 
 export const NON_FILTRABLE = "non filtrable par service";
-export const SOUS_SEUIL = "sous le seuil de confidentialité";
-export const SEUIL_NON_VERIFIABLE = "personnes concernées non dénombrées : seuil de confidentialité non vérifiable";
+// Raison d'une cellule masquée (masquage principal ou secondaire) : la même que dans les autres chapitres (structure.ts).
+export const SOUS_SEUIL = (seuil: number): string => confidentialiteReason(seuil);
+export const SEUIL_NON_VERIFIABLE = GROUPE_NON_DENOMBRE;
 
 // Indicateurs du rapport d'origine que Clair ne calcule pas : « Prévu », avec la raison de la matrice (aucune valeur reconstituée).
 export const PREVU_ARRETS: Omit<PrevuItem, "link"> = {
   id: "absences-arrets",
   label: "Statistiques d'arrêts sur douze mois glissants",
-  reason: "règle de regroupement de deux arrêts et durée d'un arrêt court non paramétrées",
+  reason: "règle de regroupement de deux arrêts et durée d'un arrêt court non définies",
+  term: T.arrets,
 };
 export const PREVU_SOLDES: Omit<PrevuItem, "link"> = {
   id: "absences-soldes",
@@ -134,25 +161,26 @@ export function rateGap(cur: RateK, prev: RateK): CroiseeCell {
 }
 const lineRate = (l: MotifLineK): RateK => (l.kind === "nd" ? { kind: "nd", nd: l.nd } : { kind: l.kind, ratio: l.ratio });
 
-// Jours (demi-journées ÷ 2), écrits « 3,5 j » : une demi-journée n'est jamais arrondie.
+// Jours (demi-journées ÷ 2), écrits « 3,5 j » : une demi-journée n'est jamais arrondie (cartes seulement ; les tableaux sont en
+// demi-journées, cellules numériques).
 export const daysText = (half: number): string => fmtHalfDays(half);
-const dayCell = (c: CongeCell): CroiseeCell => (c.kind === "nd" ? { nd: c.reason } : c.kind === "lower_bound" ? `≥ ${daysText(c.half)}` : daysText(c.half));
-// Écart de jours entre deux totaux exacts (période − N-1) ; n.d. dès que l'un des deux n'est pas exact.
+// Demi-journées d'une cellule de congés : un nombre entier (exporté comme tel), « ≥ x » pour une borne basse, n.d. avec sa raison.
+const halfDayCell = (c: CongeCell): CroiseeCell => (c.kind === "nd" ? { nd: c.reason } : c.kind === "lower_bound" ? `≥ ${nf.format(c.half)}` : c.half);
+// Écart de demi-journées entre deux totaux exacts (période − N-1), nombre entier signé ; n.d. dès que l'un des deux n'est pas exact.
 export function dayGapCell(cur: CongeCell, prev: CongeCell): CroiseeCell {
   if (cur.kind === "nd") return { nd: ECART_ND.valeur };
   if (prev.kind === "nd") return { nd: ECART_ND.n1 };
   if (cur.kind === "lower_bound") return { nd: ECART_ND.borne };
   if (prev.kind === "lower_bound") return { nd: ECART_ND.n1Borne };
-  const d = cur.half - prev.half;
-  return d === 0 ? fmtHalfDays(0) : `${d > 0 ? "+" : "−"}${fmtHalfDays(Math.abs(d))}`;
+  return cur.half - prev.half;
 }
 
-// Seuil de confidentialité appliqué à une cellule de congés : moins de personnes concernées que le seuil ⇒ n.d. (aucune personne
-// concernée : rien à protéger, la valeur reste). Le n.d. du moteur garde sa raison.
+// Masquage principal d'une seule cellule : de 1 à (seuil − 1) personnes ⇒ n.d. (aucune personne : rien à protéger) ; personnes non
+// dénombrées ⇒ n.d. Le n.d. du moteur garde sa raison. Le masquage secondaire est fait par maskCells.
 export function masked(c: CongeCell | undefined, seuil: number): CongeCell {
   if (!c) return { kind: "nd", reason: SEUIL_NON_VERIFIABLE };
   if (c.kind === "nd") return c;
-  return c.persons > 0 && c.persons < seuil ? { kind: "nd", reason: SOUS_SEUIL } : c;
+  return c.persons > 0 && c.persons < seuil ? { kind: "nd", reason: SOUS_SEUIL(seuil) } : c;
 }
 
 const bpsOf = (r: RateK): number | null => (r.kind === "exact" && r.ratio.den > 0 ? ratioBps(r.ratio) : null);
@@ -171,11 +199,117 @@ export function ndTable(id: string, title: string, reason: string): CroiseeTable
   return { id, title, columns: [text("bloc", "Bloc"), text("valeur", "Valeur")], rows: [{ cells: [title, { nd: reason }] }] };
 }
 
-export const statutLabel = (s: AVenirStatut): string => (s === "pose" ? "Posé (statut retenu)" : "En attente d'approbation");
+export const statutLabel = (s: AVenirStatut): string => (s === "pose" ? "Posée (statut retenu)" : "En attente d'approbation");
+
+// --- Seuil de confidentialité : masquage principal et secondaire ----------------------------------------------------------------------
+
+// Une cellule soumise au seuil : personnes concernées (null : non dénombrées), valeur affichée (null : déjà n.d. pour une autre raison),
+// exempt : valeur déjà publiée ailleurs (seul motif retenu = tuile Absentéisme), jamais masquée.
+export type MaskCell = { size: number | null; value: number | null; exempt?: boolean };
+
+// Statuts des cellules après masquage. relations : ensembles de cellules dont la somme est publiée (total affiché, ou différence de deux
+// totaux affichés) ; une ligne et son total forment une relation dont la constante (0) est connue. Pour chaque relation, la fonction
+// partagée maskGroups décide du masquage secondaire (la plus petite cellule affichée, zéro compris), jusqu'à ce que plus rien ne change :
+// une cellule masquée par une relation peut en découvrir une autre par une seconde relation. Les cellules exemptes (valeur publique)
+// ne participent pas aux relations ; une cellule déjà masquée y compte comme une cellule à protéger.
+export function maskCells(cells: readonly MaskCell[], relations: readonly (readonly number[])[], seuil: number): MaskStatus[] {
+  const st: MaskStatus[] = cells.map((c) => (c.value === null ? "nd" : c.exempt ? "shown" : c.size === null ? "unverifiable" : c.size > 0 && c.size < seuil ? "masked" : "shown"));
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const rel of relations) {
+      const members = rel.filter((i) => !cells[i].exempt);
+      if (members.length === 0) continue;
+      const out = maskGroups(
+        members.map((i) => ({ size: st[i] === "secondary" || st[i] === "unverifiable" ? null : cells[i].size, value: st[i] === "nd" ? null : cells[i].value })),
+        seuil,
+        true,
+      );
+      out.forEach((s, k) => {
+        if (s === "secondary" && st[members[k]] === "shown") {
+          st[members[k]] = "secondary";
+          changed = true;
+        }
+      });
+    }
+  }
+  return st;
+}
+
+const maskCellOf = (c: CongeCell | undefined, exempt = false): MaskCell => (!c ? { size: null, value: 0 } : c.kind === "nd" ? { size: null, value: null } : { size: c.persons, value: c.half, exempt });
+
+// Grille « pris par motif » : pour chaque motif, les mois de la période, le total de la période et celui de N-1 (ce sont aussi les
+// colonnes du tableau par motif). published : totaux affichés ailleurs dans le chapitre (tableau mensuel des motifs retenus, tuile
+// Absentéisme de la période et de N-1, taux tous motifs).
+export type CongesGrid = {
+  lines: { chosen: boolean; months: CongeCell[]; total: CongeCell; prev: CongeCell | undefined }[];
+  exempt: number | null; // ligne du seul motif retenu présent dans la lecture
+  published: { months: boolean[]; retainedCur: boolean; allCur: boolean; retainedPrev: boolean; allPrev: boolean };
+};
+export type CongesGridMask = { months: MaskStatus[][]; cur: MaskStatus[]; prev: MaskStatus[] };
+
+export function congesMask(g: CongesGrid, seuil: number): CongesGridMask {
+  const k = g.published.months.length;
+  const width = k + 2;
+  const at = (r: number, j: number) => r * width + j;
+  const cells: MaskCell[] = g.lines.flatMap((l, r) => {
+    const ex = g.exempt === r;
+    return [...l.months.map((c) => maskCellOf(c, ex)), maskCellOf(l.total, ex), maskCellOf(l.prev, ex)];
+  });
+  const all = g.lines.map((_, r) => r);
+  const retained = all.filter((r) => g.lines[r].chosen);
+  const others = all.filter((r) => !g.lines[r].chosen);
+  const rel: number[][] = all.map((r) => Array.from({ length: k + 1 }, (_, j) => at(r, j)));
+  g.published.months.forEach((ok, j) => {
+    if (ok) rel.push(retained.map((r) => at(r, j)));
+  });
+  const column = (j: number, retainedShown: boolean, allShown: boolean) => {
+    if (retainedShown && allShown) rel.push(retained.map((r) => at(r, j)), others.map((r) => at(r, j)));
+    else if (allShown) rel.push(all.map((r) => at(r, j)));
+    else if (retainedShown) rel.push(retained.map((r) => at(r, j)));
+  };
+  column(k, g.published.retainedCur, g.published.allCur);
+  column(k + 1, g.published.retainedPrev, g.published.allPrev);
+  const st = maskCells(cells, rel, seuil);
+  return { months: all.map((r) => Array.from({ length: k }, (_, j) => st[at(r, j)])), cur: all.map((r) => st[at(r, k)]), prev: all.map((r) => st[at(r, k + 1)]) };
+}
+
+// Absences posées à venir : chaque ligne (motif × statut) et son total forment une relation ; aucun total de colonne n'est affiché.
+export function aVenirMask(lines: readonly Pick<AVenirLine, "months" | "total">[], seuil: number): { months: MaskStatus[][]; total: MaskStatus[] } {
+  const k = lines[0]?.months.length ?? 0;
+  const at = (r: number, j: number) => r * (k + 1) + j;
+  const cells = lines.flatMap((l) => [...l.months.map((c) => maskCellOf(c)), maskCellOf(l.total)]);
+  const st = maskCells(
+    cells,
+    lines.map((_, r) => Array.from({ length: k + 1 }, (_, j) => at(r, j))),
+    seuil,
+  );
+  return { months: lines.map((_, r) => Array.from({ length: k }, (_, j) => st[at(r, j)])), total: lines.map((_, r) => st[at(r, k)]) };
+}
+
+// --- Aucun identifiant dans le modèle (filet de sécurité) --------------------------------------------------------------------------
+
+// Formes des raisons du moteur qui nomment une absence ou un contrat : remplacées par une forme sans identifiant. Les raisons sont déjà
+// rendues publiques à la lecture (conges.ts) ; ce filtre ne laisse passer aucun identifiant oublié.
+const PUBLIC: [RegExp, string][] = [
+  [/absence \S+ rattachée au contrat \S+ inconnu du référentiel/g, "absence rattachée à un contrat inconnu du référentiel (détail dans KPI RH)"],
+  [/absence \S+ : date de (début et de fin|début|fin) non renseignée dans PayFit/g, "absence sans date de $1 renseignée dans PayFit (détail dans KPI RH)"],
+  [/ \(absences [^()]*\)/g, " (détail dans KPI RH)"],
+];
+export const publicText = (s: string): string => PUBLIC.reduce((t, [re, by]) => t.replace(re, by), s);
+function scrub<V>(x: V): V {
+  if (typeof x === "string") return publicText(x) as V;
+  if (Array.isArray(x)) return x.map(scrub) as V;
+  if (x !== null && typeof x === "object") return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, scrub(v)])) as V;
+  return x;
+}
 
 // --- Construction du modèle -------------------------------------------------------------------------------------------------------
 
 export function buildAbsences(input: AbsencesInput): AbsencesModel {
+  return scrub(buildChapter(input));
+}
+
+function buildChapter(input: AbsencesInput): AbsencesModel {
   const empty: AbsencesModel = { chapter: "absences", tiles: [], alerts: [], tables: [], charts: [], limits: [], nd: null, terms: ABSENCES_TERMS, blocks: [] };
   const p = input.period;
   const filtered = input.service.value !== undefined;
@@ -185,8 +319,8 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
     return { ...empty, nd: { reason: nd.reason, action: nd.action } };
   }
   const { months, prevMonths } = p;
-  const label = periodLabel(months);
-  const prevLabel = periodLabel(prevMonths);
+  const label = p.labels.period;
+  const prevLabel = p.labels.prev;
   const tiles: TileSpec[] = [];
   const tables: CroiseeTable[] = [];
   const charts: CroiseeChart[] = [];
@@ -201,9 +335,12 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
     tables.push(ndTable(tableId, title, nd.reason));
     return block({ id, title, ...extra, nd: [nd] });
   };
-
-  // --- Cartes
   const titles = { cur: "Absentéisme", prev: "Absentéisme N-1", roll: "Absentéisme, douze mois glissants", th: "Jours théoriques" };
+  const cTitle = "Demi-journées prises par motif et par mois";
+  const aBase = "Absences posées et demandes en attente";
+
+  // --- Filtre de service : le référentiel RH ne porte pas le service ; rien n'est lu, chaque bloc est n.d. (aucun chiffre de toute
+  // l'entreprise présenté sous un filtre).
   if (filtered || !d) {
     tiles.push(
       { id: "absenteisme", label: titles.cur, term: TERMS.absenteisme, sub: label, value: ndTile(NON_FILTRABLE) },
@@ -212,20 +349,20 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
       { id: "jours-theoriques", label: titles.th, term: TERMS.absenteisme, sub: label, value: ndTile(NON_FILTRABLE) },
     );
     block({ id: "cartes", title: "Absentéisme" });
-    const graphNd = { reason: NON_FILTRABLE };
-    ndBlock("mensuel", "Absentéisme par mois", TABLE_IDS.mensuel, graphNd, { term: TERMS.absenteisme, graph: true });
-    ndBlock("motifs", "Absences par motif", TABLE_IDS.motifs, graphNd, { term: TERMS.parMotif });
-    ndBlock("tous-motifs", ABSENCE_ALL_MOTIFS_LABEL, TABLE_IDS.tousMotifs, graphNd, { term: TERMS.tousMotifs });
-    ndBlock("conges", "Jours pris par motif et par mois", TABLE_IDS.conges, graphNd, { term: T.congesPris });
-    ndBlock("a-venir", "Congés posés et demandes en attente", TABLE_IDS.aVenir, graphNd, { term: T.congesPris });
+    const why = { reason: NON_FILTRABLE };
+    ndBlock("mensuel", "Absentéisme par mois", TABLE_IDS.mensuel, why, { term: TERMS.absenteisme, graph: true });
+    ndBlock("motifs", "Absences par motif", TABLE_IDS.motifs, why, { term: TERMS.parMotif });
+    ndBlock("tous-motifs", ABSENCE_ALL_MOTIFS_LABEL, TABLE_IDS.tousMotifs, why, { term: TERMS.tousMotifs });
+    ndBlock("conges", cTitle, TABLE_IDS.conges, why, { term: T.congesPris, graph: true });
+    ndBlock("a-venir", aBase, TABLE_IDS.aVenir, why, { term: T.congesPris });
     block({ id: "non-disponibles", title: "Indicateurs non disponibles", term: T.prevu, prevu: prevuItems(input) });
     return { ...empty, tiles, tables, blocks, limits: limitsOf(null) };
   }
 
+  // --- Cartes (entreprise entière, mêmes valeurs que KPI RH : non soumises au seuil)
   const cur = d.period.current;
   const prev = d.period.previous;
-  const dPeriod = delta(cur, prev, (x) => x.ratio, "points", prevLabel);
-  const dv = deltaView(dPeriod);
+  const dv = deltaView(delta(cur, prev, (x) => x.ratio, "points", prevLabel));
   tiles.push({
     id: "absenteisme",
     label: titles.cur,
@@ -235,7 +372,6 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
     variations: [plainVariation("Écart", dv.text, dv.reason)],
     note: motifsRetenusLine(d.absenceTypes),
     spark: { label: "Absentéisme par mois, douze mois glissants", values: d.rolling.months.map(bpsOf) },
-    main: true,
   });
   tiles.push({ id: "absenteisme-n1", label: titles.prev, term: TERMS.nMoinsUn, sub: prevLabel, value: rateTile(prev) });
   const r = d.rolling;
@@ -262,7 +398,7 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
   const cartes = block({ id: "cartes", title: "Absentéisme" });
   if (d.absenceTypes.length === 0) cartes.nd.push({ label: "Absentéisme", reason: "motifs d'absence non choisis (Paramètres › Définitions des KPI)", action: { href: input.links.parametresKpi, label: "Paramètres" } });
 
-  // --- Absentéisme par mois : graphique (barres groupées N et N-1) et son tableau exact
+  // --- Absentéisme par mois (motifs retenus) : graphique (barres groupées N et N-1) et son tableau exact
   const axis = monthAxis(months, prevMonths);
   const series = absenteeismSeries(d.rows).map((s, i) => ({ ...s, color: i === 0 ? COLORS.now : COLORS.before }));
   charts.push({ id: TABLE_IDS.mensuel, title: "Absentéisme par mois", kind: "barres", unit: "bps", categories: axis.categories, categoryTitles: axis.titles, series, mode: "grouped", tableId: TABLE_IDS.mensuel });
@@ -296,23 +432,50 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
   const s = input.settings.confidentialite;
   const seuil = settingValue(s);
   const seuilNd: BlockNd = { reason: croiseeSettingReason("confidentialite", s) ?? "seuil de confidentialité non défini (Paramètres)", action: { href: input.links.parametres, label: "Paramètres" } };
+  const mc = d.motifs.current;
+  const mp = d.motifs.previous;
+  const cc = d.conges.current;
+
+  // Masquage de la grille « pris par motif » (mois, période, N-1), partagé par le tableau par motif, le graphique et le tableau des
+  // demi-journées prises : une valeur masquée l'est partout.
+  const grid = (() => {
+    if (seuil === null || cc.lines.length === 0) return null;
+    const chosen = cc.lines.flatMap((l, i) => (l.chosen ? [i] : []));
+    const rowOf = new Map(d.rows.map((x) => [x.month, x]));
+    const prevOf = new Map(d.conges.previous.lines.map((l) => [l.type, l.total]));
+    const mask = congesMask(
+      {
+        lines: cc.lines.map((l) => ({ chosen: l.chosen, months: l.months, total: l.total, prev: prevOf.get(l.type) })),
+        exempt: chosen.length === 1 ? chosen[0] : null,
+        published: {
+          months: months.map((m) => (rowOf.get(m)?.absenteeism.kind ?? "nd") !== "nd"),
+          retainedCur: cur.kind !== "nd",
+          allCur: mc.all.kind !== "nd",
+          retainedPrev: prev.kind !== "nd",
+          allPrev: mp.all.kind !== "nd",
+        },
+      },
+      seuil,
+    );
+    const index = new Map(cc.lines.map((l, i) => [l.type, i]));
+    // Cellule après masquage : masquée ⇒ n.d. avec la raison du seuil ; sinon la cellule elle-même.
+    const shown = (c: CongeCell | undefined, st: MaskStatus | undefined): CongeCell => (!c || st === undefined ? { kind: "nd", reason: SEUIL_NON_VERIFIABLE } : isHidden(st) ? { kind: "nd", reason: maskReason(st, seuil)! } : c);
+    return { mask, index, prevOf, shown };
+  })();
 
   // --- Absences par motif (tous les motifs de la lecture, retenus ou non ; N-1 par un second appel du moteur)
   const mTitle = "Absences par motif";
-  const mc = d.motifs.current;
-  const mp = d.motifs.previous;
   if (seuil === null) ndBlock("motifs", mTitle, TABLE_IDS.motifs, seuilNd, { term: TERMS.parMotif });
   else if (mc.lines.length === 0) ndBlock("motifs", mTitle, TABLE_IDS.motifs, { reason: mc.emptyReason ?? "aucun motif dans la lecture" }, { term: TERMS.parMotif });
   else {
-    const persons = (c: CongesPris, type: string) => c.lines.find((l) => l.type === type)?.total;
-    // Un côté du tableau (période ou N-1) : le taux du moteur, ou n.d. (raison du moteur, motif absent, ou sous le seuil).
-    const side = (l: MotifLineK | undefined, who: CongeCell | undefined): { half: CroiseeCell; rate: CroiseeCell; gap: RateK } => {
+    // Un côté du tableau (période ou N-1) : le taux du moteur, ou n.d. (raison du moteur, motif absent, ou seuil).
+    const side = (l: MotifLineK | undefined, st: MaskStatus | undefined): { half: CroiseeCell; rate: CroiseeCell; gap: RateK } => {
       const nd = (reason: string) => ({ half: { nd: reason }, rate: { nd: reason }, gap: { kind: "nd", nd: kpiNd("month-nd", reason) } as RateK });
       if (!l) return nd("motif absent de la lecture");
       const rk = lineRate(l);
       if (rk.kind === "nd") return nd(rk.nd.reason);
-      const m = masked(who, seuil);
-      if (m.kind === "nd") return nd(m.reason);
+      if (st === undefined || st === "nd") return nd(SEUIL_NON_VERIFIABLE);
+      if (isHidden(st)) return nd(maskReason(st, seuil)!);
       return { half: halfOfRate(rk), rate: rateCell(rk), gap: rk };
     };
     tables.push({
@@ -328,10 +491,11 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
         points("ecart", "Écart (points)"),
       ],
       rows: mc.lines.map((l) => {
-        const a = side(l, persons(d.conges.current, l.type));
+        const i = grid?.index.get(l.type);
+        const a = side(l, i === undefined ? undefined : grid!.mask.cur[i]);
         const b = side(
           mp.lines.find((x) => x.type === l.type),
-          persons(d.conges.previous, l.type),
+          i === undefined ? undefined : grid!.mask.prev[i],
         );
         return { cells: [absenceTypeText(l.type), l.chosen ? "oui" : "non", a.half, a.rate, b.half, b.rate, rateGap(a.gap, b.gap)] };
       }),
@@ -352,51 +516,61 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
   });
   block({ id: "tous-motifs", title: ABSENCE_ALL_MOTIFS_LABEL, term: TERMS.tousMotifs, tables: [TABLE_IDS.tousMotifs] });
 
-  // --- Jours pris par motif et par mois (congés compris : aucun motif n'est classé par son nom)
-  const cTitle = "Jours pris par motif et par mois";
-  const cc = d.conges.current;
-  if (seuil === null) ndBlock("conges", cTitle, TABLE_IDS.conges, seuilNd, { term: T.congesPris });
-  else if (cc.lines.length === 0) ndBlock("conges", cTitle, TABLE_IDS.conges, { reason: cc.emptyReason ?? "aucun motif dans la lecture" }, { term: T.congesPris });
+  // --- Demi-journées prises par motif et par mois (congés compris : aucun motif n'est classé par son nom) : graphique empilé et son
+  // tableau exact, mêmes cellules masquées.
+  if (seuil === null) ndBlock("conges", cTitle, TABLE_IDS.conges, seuilNd, { term: T.congesPris, graph: true });
+  else if (cc.lines.length === 0 || !grid) ndBlock("conges", cTitle, TABLE_IDS.conges, { reason: cc.emptyReason ?? "aucun motif dans la lecture" }, { term: T.congesPris, graph: true });
   else {
+    const { mask, prevOf, shown } = grid;
+    const rows = cc.lines.map((l, i) => {
+      const monthsShown = l.months.map((c, j) => shown(c, mask.months[i][j]));
+      const total = shown(l.total, mask.cur[i]);
+      const prevTotal = shown(prevOf.get(l.type), mask.prev[i]);
+      return { type: l.type, monthsShown, total, prevTotal };
+    });
+    const ax = monthAxis(months);
+    const series: ChartSeries[] = rows.map((x, i) => {
+      const pts = x.monthsShown.map(congePoint);
+      return { key: `motif-${i + 1}`, name: absenceTypeText(x.type), values: pts.map((q) => q.value), reasons: pts.map((q) => q.reason), color: `var(--chart-${(i % 8) + 1})` };
+    });
+    charts.push({ id: TABLE_IDS.conges, title: cTitle, kind: "barres", unit: "nombre", categories: ax.categories, categoryTitles: ax.titles, series, mode: "stacked", tableId: TABLE_IDS.conges });
     tables.push({
       id: TABLE_IDS.conges,
       title: cTitle,
       columns: [
         text("motif", "Motif"),
         ...months.map((m) => num(m, capital(monthShortYear(m)))),
-        num("periode", `Période (${label})`),
-        num("n1", `N-1 (${prevLabel})`, { term: TERMS.nMoinsUn }),
-        num("ecart", "Écart"),
+        num("periode", `Demi-journées ${label}`),
+        num("n1", `Demi-journées ${prevLabel}`, { term: TERMS.nMoinsUn }),
+        num("ecart", "Écart (demi-journées)", { signed: true }),
       ],
-      rows: cc.lines.map((l) => {
-        const total = masked(l.total, seuil);
-        const prevTotal = masked(d.conges.previous.lines.find((x) => x.type === l.type)?.total, seuil);
-        return { cells: [absenceTypeText(l.type), ...l.months.map((c) => dayCell(masked(c, seuil))), dayCell(total), dayCell(prevTotal), dayGapCell(total, prevTotal)] };
-      }),
+      rows: rows.map((x) => ({ cells: [absenceTypeText(x.type), ...x.monthsShown.map(halfDayCell), halfDayCell(x.total), halfDayCell(x.prevTotal), dayGapCell(x.total, x.prevTotal)] })),
       terms: [T.congesPris, T.confidentialite, TERMS.parMotif],
     });
-    block({ id: "conges", title: cTitle, term: T.congesPris, tables: [TABLE_IDS.conges] });
+    block({ id: "conges", title: cTitle, term: T.congesPris, graph: true, charts: [TABLE_IDS.conges] });
   }
 
-  // --- Congés posés et demandes en attente, après le dernier mois clos
+  // --- Absences posées et demandes en attente, après le dernier mois clos
   const av = d.aVenir;
-  const aTitle = av.kind === "value" ? `Congés posés et demandes en attente après ${fin(av.after)}` : "Congés posés et demandes en attente";
+  const aTitle = av.kind === "value" ? `${aBase} après ${fin(av.after)} (demi-journées)` : aBase;
   if (seuil === null) ndBlock("a-venir", aTitle, TABLE_IDS.aVenir, seuilNd, { term: T.congesPris });
   else if (av.kind === "nd") ndBlock("a-venir", aTitle, TABLE_IDS.aVenir, { reason: av.reason }, { term: T.congesPris });
   else {
+    const st = aVenirMask(av.lines, seuil);
+    const cell = (c: CongeCell, x: MaskStatus): CroiseeCell => halfDayCell(isHidden(x) ? { kind: "nd", reason: maskReason(x, seuil)! } : c);
+    const n = av.nonRattachees;
     tables.push({
       id: TABLE_IDS.aVenir,
       title: aTitle,
       columns: [text("motif", "Motif"), text("statut", "Statut"), ...av.months.map((m) => num(m, capital(monthShortYear(m)))), num("total", "Total")],
-      rows: av.lines.map((l) => ({ cells: [absenceTypeText(l.type), statutLabel(l.statut), ...l.months.map((c) => dayCell(masked(c, seuil))), dayCell(masked(l.total, seuil))] })),
-      notes: av.lines.length === 0 ? [`Aucun congé posé ni demande en attente dans les mois lus après ${fin(av.after)}.`] : [],
+      rows: av.lines.map((l, i) => ({ cells: [absenceTypeText(l.type), statutLabel(l.statut), ...l.months.map((c, j) => cell(c, st.months[i][j])), cell(l.total, st.total[i])] })),
+      notes: [
+        ...(av.lines.length === 0 ? [`Aucune absence posée ni demande en attente dans les mois lus après ${fin(av.after)}.`] : []),
+        ...(n > 0 ? [`${nf.format(n)} absence${n > 1 ? "s" : ""} posée${n > 1 ? "s" : ""} ou en attente hors des mois lus (date absente, mois non lu ou contrat inconnu) : jours non comptés.`] : []),
+      ],
       terms: [T.congesPris, T.confidentialite],
     });
-    const prevu: PrevuItem[] =
-      av.nonRattachees > 0
-        ? [{ id: "absences-non-rattachees", label: "Jours posés ou en attente hors des mois lus", reason: `${nf.format(av.nonRattachees)} absence${av.nonRattachees > 1 ? "s" : ""} dont tout ou partie des jours ne se rattache à aucun mois lu (date absente, mois non lu ou contrat inconnu)` }]
-        : [];
-    block({ id: "a-venir", title: aTitle, term: T.congesPris, tables: [TABLE_IDS.aVenir], prevu });
+    block({ id: "a-venir", title: aTitle, term: T.congesPris, tables: [TABLE_IDS.aVenir] });
   }
 
   // --- Indicateurs non disponibles
@@ -405,20 +579,25 @@ export function buildAbsences(input: AbsencesInput): AbsencesModel {
   return { chapter: "absences", tiles, alerts: [], tables, charts, limits: limitsOf(d), nd: null, terms: ABSENCES_TERMS, blocks };
 }
 
+// Point du graphique empilé : une valeur exacte est tracée ; une borne basse ou un n.d. (moteur ou seuil) ne l'est pas, avec sa raison.
+function congePoint(c: CongeCell): { value: number | null; reason: string | null } {
+  if (c.kind === "nd") return { value: null, reason: c.reason };
+  if (c.kind === "lower_bound") return { value: null, reason: `borne basse (≥ ${nf.format(c.half)} demi-journées) : source incomplète, non tracée comme valeur exacte` };
+  return { value: c.half, reason: null };
+}
+
 function prevuItems(input: AbsencesInput): PrevuItem[] {
-  return [
-    { ...PREVU_ARRETS, link: { href: input.links.parametres, label: "Paramètres" } },
-    { ...PREVU_SOLDES, link: { href: input.links.paieCompta, label: "Paie & comptabilité" } },
-  ];
+  return [{ ...PREVU_ARRETS }, { ...PREVU_SOLDES, link: { href: input.links.paieCompta, label: "Paie & comptabilité" } }];
 }
 
 // Limites de la lecture, une ligne chacune (le détail est au glossaire).
 function limitsOf(d: AbsencesData | null): string[] {
   return [
     "Absentéisme, jours théoriques et taux tous motifs : entreprise entière, non soumis au seuil de confidentialité (mêmes valeurs que KPI RH).",
+    "Seuil de confidentialité : motifs et absences posées, avec masquage secondaire ; un motif retenu seul n'est pas masqué (il égale la tuile Absentéisme).",
     "Motifs tels que la source les nomme : aucun motif n'est classé en congé payé, RTT ou repos.",
-    "Une demi-journée couverte par deux motifs compte dans chacun : la somme des motifs peut dépasser le taux tous motifs.",
-    ...(d?.source === "payfit" ? ["Congés posés et demandes en attente : statut lu à la date de la lecture PayFit, jours des mois lus seulement."] : []),
+    "Une demi-journée couverte par deux motifs compte dans chacun : la somme des motifs (et une barre empilée) peut dépasser le taux tous motifs.",
+    ...(d?.source === "payfit" ? ["Absences posées et demandes en attente : statut lu à la date de la lecture PayFit, jours des mois lus seulement."] : []),
   ];
 }
 
@@ -435,7 +614,7 @@ export async function loadAbsencesInput(ctx: CroiseeContext): Promise<AbsencesIn
       tableau: ctx.href({ affichage: "tableau" }),
       paieCompta: ctx.href({ chapitre: "paie-compta", tri: null, sens: null }),
     },
-    period: p ? { months: p.months, prevMonths: ctx.prevMonths } : null,
+    period: p ? { months: p.months, prevMonths: ctx.prevMonths, labels: { period: ctx.labels.period, prev: ctx.labels.prev } } : null,
     service: { value: ctx.service.value, label: ctx.service.label },
     settings: ctx.settings,
   };
@@ -466,24 +645,35 @@ export async function loadAbsencesInput(ctx: CroiseeContext): Promise<AbsencesIn
   const to = months[months.length - 1];
   const roll = compareWindows(input, rollingWindow(to), absenteeism, (a) => a.ratio, "points");
   const after = lastClosedMonth(input.data, input.openMonths);
+  // Raisons publiques (aucun identifiant d'absence ni de contrat), chacune calculée sur l'entrée qui a produit le résultat.
+  const allIn = allMotifsInput(input);
+  const motifs = (m: AbsenceMotifs): MotifsK => ({
+    label: m.label,
+    lines: m.lines.map((l) => (l.kind === "nd" ? { ...l, nd: { ...l.nd, reason: publicWindowReason(motifInput(input, l.type), l.nd) } } : l)),
+    all: publicWindow(allIn, m.all),
+    emptyReason: m.emptyReason,
+  });
   const data: AbsencesData = {
     source: input.data.build.source,
     absenceTypes: input.params.absenceTypes,
-    rows: dash.rows,
-    period: { current: absenteeism(input, w), previous: absenteeism(input, pw) },
+    rows: dash.rows.map((x) => ({ ...x, absenteeism: publicMonth(input, x.absenteeism), previous: { ...x.previous, absenteeism: publicMonth(input, x.previous.absenteeism) } })),
+    period: { current: publicWindow(input, absenteeism(input, w)), previous: publicWindow(input, absenteeism(input, pw)) },
     theoretical: { current: dash.theoretical, previous: theoreticalWindow(input, pw) },
     rolling: {
       from: roll.window.from,
       to: roll.window.to,
       prevFrom: roll.previousWindow.from,
       prevTo: roll.previousWindow.to,
-      current: roll.current,
-      previous: roll.previous,
+      current: publicWindow(input, roll.current),
+      previous: publicWindow(input, roll.previous),
       months: roll.window.months.map((m) => absenteeismMonth(input, m)),
     },
-    motifs: { current: dash.motifs ?? absenceByMotif(input, w), previous: absenceByMotif(input, pw) },
+    motifs: { current: motifs(dash.motifs ?? absenceByMotif(input, w)), previous: motifs(absenceByMotif(input, pw)) },
     conges: { current: congesPris(input, w), previous: congesPris(input, pw) },
     aVenir: after ? congesAVenir(input, after) : { kind: "nd", reason: "aucun mois clos dans la source retenue" },
   };
   return { ...base, nd: null, data };
 }
+
+// Un seul calcul par requête : le composant du chapitre et l'export appellent cette fonction.
+export const absencesModel = memoByContext((ctx: CroiseeContext) => loadAbsencesInput(ctx).then(buildAbsences));

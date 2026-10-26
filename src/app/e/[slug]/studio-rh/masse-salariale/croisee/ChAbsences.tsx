@@ -3,30 +3,29 @@ import { BarChart } from "@/components/charts";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
-import { buildAbsences, loadAbsencesInput, type AbsencesBlock, type AbsencesModel, type PrevuItem } from "@/lib/viz/croisee-absences";
-import { capital } from "@/lib/viz/masse";
-import { ChartGuard, GraphFoot, NdState, type Affichage } from "../components";
+import { absencesModel, type AbsencesBlock, type AbsencesModel, type PrevuItem } from "@/lib/viz/croisee-absences";
+import { capital, hasData } from "@/lib/viz/masse";
+import { GraphFoot, NdState, type Affichage } from "../components";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
 import type { CroiseeContext } from "./context";
 
-// Chapitre 03 · Absences & congés. Le composant lit l'entrée du chapitre (lecteurs du contexte), construit le modèle par la fonction pure
-// buildAbsences (le même que celui des exports) et le rend : cartes, graphique mensuel suivi de son tableau exact, tableaux par motif,
-// congés, n.d. avec leur raison et « Prévu ». Aucun nom de personne : le détail nominatif reste dans Collaborateurs.
+// Chapitre 03 · Absences & congés. Le composant prend le modèle du chapitre par absencesModel (un seul calcul par requête, le même que
+// celui des exports) et le rend : cartes, graphiques chacun suivi de son tableau exact, tableaux par motif, n.d. avec leur raison et
+// « Prévu ». Aucun nom ni identifiant : le détail nominatif reste dans Collaborateurs et KPI RH.
 export default async function ChAbsences({ ctx }: { ctx: CroiseeContext }) {
-  const model = buildAbsences(await loadAbsencesInput(ctx));
+  const model = await absencesModel(ctx);
   return <AbsencesView model={model} slug={ctx.slug} affichage={ctx.affichage} tableauHref={ctx.href({ affichage: "tableau" })} />;
 }
 
 type ViewProps = { model: AbsencesModel; slug: string; affichage: Affichage; tableauHref: string };
 
-// Rendu synchrone du modèle (testé tel quel). « Graphiques » : cartes et bloc du graphique, avec un lien vers son tableau exact ;
-// « Tableaux » : cartes et tableaux, sans graphique ; « Afficher tout » : tout.
+// Rendu synchrone du modèle (testé tel quel). « Graphiques » : cartes et blocs de graphique, chacun avec un lien vers son tableau
+// exact ; « Tableaux » : cartes et tableaux, sans graphique ; « Afficher tout » : tout.
 export function AbsencesView({ model, slug, affichage, tableauHref }: ViewProps) {
-  if (model.nd) {
-    return <NdState testid="cx-absences-nd" heading="Absences & congés" reason={capital(model.nd.reason)} action={model.nd.action} />;
-  }
+  // Le titre du chapitre est déjà celui de la page (h2) : l'état n.d. ne le répète pas.
+  if (model.nd) return <NdState testid="cx-absences-nd" reason={capital(model.nd.reason)} action={model.nd.action} />;
   const tableOf = (id: string) => model.tables.find((t) => t.id === id);
   const chartOf = (id: string) => model.charts.find((c) => c.id === id);
   const showChart = affichage !== "tableau";
@@ -117,18 +116,36 @@ function Block(p: {
   );
 }
 
-// Graphique du modèle : barres groupées (séries déjà calculées, n.d. hachurés avec leur raison) ; sans aucune valeur connue, la raison
-// remplace le graphique (ChartGuard). Les props sont sérialisables (unité nommée, jamais de fonction).
+const UNIT_TEXT: Partial<Record<CroiseeChart["unit"], string>> = { bps: "en pourcentage", nombre: "en demi-journées" };
+
+// Graphique du modèle : barres groupées ou empilées (séries déjà calculées, n.d. hachurés ou absents de la pile, avec leur raison dans
+// l'infobulle). Sans aucune valeur connue, la raison remplace le graphique (le titre du bloc n'est pas répété). Les props sont
+// sérialisables (unité nommée, jamais de fonction).
 function ChartView({ c }: { c: CroiseeChart }) {
   const testid = `cx-chart-${c.id}`;
+  if (!hasData(c.series)) {
+    const reasons = [...new Set(c.series.flatMap((s) => (s.reasons ?? []).filter((r): r is string => Boolean(r))))];
+    const shown = reasons.slice(0, 3);
+    return <NdState testid={`${testid}-vide`} reason="Aucune valeur connue sur la période : graphique non tracé." reasons={shown} more={reasons.length - shown.length} />;
+  }
   return (
-    <ChartGuard testid={testid} title={c.title} series={c.series}>
-      <BarChart testid={testid} label={`${c.title}, en pourcentage`} title={c.title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} mode={c.mode} height={280} />
-    </ChartGuard>
+    <BarChart
+      testid={testid}
+      label={`${c.title}${UNIT_TEXT[c.unit] ? `, ${UNIT_TEXT[c.unit]}` : ""}`}
+      title={c.title}
+      categories={c.categories}
+      categoryTitles={c.categoryTitles}
+      series={c.series}
+      unit={c.unit}
+      mode={c.mode}
+      toggle={c.mode === "stacked"}
+      height={280}
+    />
   );
 }
 
-// Indicateurs que Clair ne calcule pas : mention « Prévu », chacun avec sa raison et, s'il y a lieu, l'écran qui s'en approche ; aucun chiffre.
+// Indicateurs que Clair ne calcule pas : mention « Prévu », chacun avec sa raison, sa définition et, s'il y a lieu, l'écran qui s'en
+// approche ; aucun chiffre.
 function PrevuList({ items, slug }: { items: PrevuItem[]; slug: string }) {
   return (
     <div className="cx-abs-prevu">
@@ -139,7 +156,8 @@ function PrevuList({ items, slug }: { items: PrevuItem[]; slug: string }) {
       <ul className="cx-abs-prevu-list">
         {items.map((x) => (
           <li key={x.id} data-testid={`cx-prevu-${x.id}`}>
-            <strong>{x.label}</strong> — {x.reason}
+            <strong>{x.label}</strong>
+            {x.term && <GlossaryLink slug={slug} term={x.term} label={x.label} />} — {x.reason}
             {x.link && (
               <>
                 {" "}

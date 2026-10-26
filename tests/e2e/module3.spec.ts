@@ -91,6 +91,18 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(page.getByTestId("kpi-read-limits")).toContainText("Quotités non historisées par PayFit");
   // ETP moyen exact : somme des ETP fin de mois ÷ 12 (effectif exact au jour près depuis R − 12 mois).
   await expect(page.getByTestId("kpi-tile-etp-avg").locator("dd")).toHaveText(fr2(window.reduce((s, m) => s + etp4(m), 0), 12 * 10000));
+  // Lot 11 — ETP contractuel proratisé (décision 6), à côté du stock de fin de mois conservé. Février 2026, base calendrier
+  // (28 jours) : six contrats tout le mois = 5,10 ETP, plus le contrat 004 du 15 au 28 (14 j × 1,00 ÷ 28) = 0,50 → 5,60 ;
+  // le stock de fin de mois reste 6,10.
+  await page.goto(`${kpi}?fin=2026-02`);
+  await expect(page.getByTestId("kpi-tile-etp-prorated")).toContainText("ETP contractuel proratisé — quotité actuelle");
+  await expect(page.getByTestId("kpi-tile-etp-prorated").locator("dd")).toHaveText("5,60");
+  await expect(page.getByTestId("kpi-tile-etp-end").locator("dd")).toHaveText("6,10");
+  // Export Excel du tableau mensuel (décision 7) : classeur OOXML.
+  const kx = await page.request.get(`${kpi}/export?format=xlsx&fin=2026-02`);
+  expect(kx.status()).toBe(200);
+  expect(kx.headers()["content-type"]).toContain("spreadsheetml");
+  await page.goto(kpi);
   // Septembre 2026 clos : turnover brut 12/83 = 14,46 % (comme la DSN, le transport fictif renvoie tous les contrats), N-1 7/13 ;
   // absentéisme avec le type par défaut (maladie ordinaire), absent de la lecture fictive : 0 j ÷ 2 510 j.
   await page.goto(`${kpi}?fin=2026-09`);

@@ -29,6 +29,11 @@ const gapClass = (base: string, delta: number | null | undefined): string => {
 
 export type Option = { value: string; label: string };
 
+// Aucune lecture retenue alors que l'adresse en demandait (lecture d'une autre année, budget ou scénario supprimé) : valeur de
+// « cmp » qui ne correspond à aucune option. L'écran rechargé et l'export restent alors sans lecture comparée, au lieu de
+// reprendre les lectures par défaut (réel courant, N-1, budgets de l'année).
+export const CMP_NONE = "aucune";
+
 // Onglet « Comparaison » : ce scénario face à d'autres lectures (réel courant, N-1, budgets saisis, autres scénarios),
 // mois par mois sur une année, écarts (ce scénario − lecture comparée) et pont volume / coût moyen. Les écarts de coût sont rouges
 // (hausse) ou verts (baisse), avec leur signe ; les définitions sont au glossaire.
@@ -40,8 +45,9 @@ export function ComparisonView({
   const done = months.filter((m) => m <= refMonth);
   const pv = (m: string) => principal.points.get(m);
   const aff = affichageOf(affichage);
-  // Adresse de l'écran : année et lectures choisies conservées ; l'affichage « tout » n'est pas écrit dans l'adresse.
-  const query = [`scenario=${encodeURIComponent(scenarioId)}`, "vue=resultat", "sous=comparaison", `annee=${encodeURIComponent(year)}`, ...selected.map((v) => `cmp=${encodeURIComponent(v)}`)].join("&");
+  // Adresse de l'écran et de l'export : année et lectures choisies conservées (CMP_NONE quand aucune n'est retenue) ; l'affichage
+  // « tout » n'est pas écrit dans l'adresse.
+  const query = [`scenario=${encodeURIComponent(scenarioId)}`, "vue=resultat", "sous=comparaison", `annee=${encodeURIComponent(year)}`, ...(selected.length ? selected : [CMP_NONE]).map((v) => `cmp=${encodeURIComponent(v)}`)].join("&");
   const here = `${hrefBase}?${query}`;
   const axis = monthAxis(months);
   const lines = comparisonSeries(principal, compared, months);
