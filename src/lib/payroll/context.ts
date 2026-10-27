@@ -118,11 +118,12 @@ export async function journalAxes(workspaceId: string): Promise<string[]> {
 export type ComptaSource = { source: "pennylane" | "fec" | null; reason: string; lines: ComptaLine[]; months: string[]; nd: Record<string, string>; error: boolean };
 // Date de lecture au calendrier de Paris (une lecture le 1er à 0 h 30 ne date pas du mois précédent).
 const paris = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" });
-async function loadCompta(workspaceId: string): Promise<ComptaSource> {
+export async function loadCompta(workspaceId: string): Promise<ComptaSource> {
   try {
     return await readCompta(workspaceId);
-  } catch (e) {
-    console.error("Masse salariale : lecture de la comptabilité en erreur", e);
+  } catch {
+    // Ni écritures ni paramètres SQL dans les journaux en cas d'échec.
+    console.error("Lecture de la comptabilité indisponible");
     return { source: null, reason: "lecture de la comptabilité en erreur", lines: [], months: [], nd: {}, error: true };
   }
 }
