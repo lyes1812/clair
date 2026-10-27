@@ -1,7 +1,7 @@
 import { expect, test, type Browser } from "@playwright/test";
 import { addMonthsToDate } from "../../src/lib/dates";
 import { fixtureDsnBytes } from "../../src/lib/dsn/fixture";
-import { CAPTURES, createWorkspaceAsAdmin, signUp } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, setConfidentialite } from "./helpers";
 
 // Module 3 : KPI RH sur le transport PayFit fictif puis sur les DSN fictives (aucune donnée réelle).
 // Les attentes PayFit dépendent de la date de lecture réelle : elles sont recalculées à partir des faits de la fixture.
@@ -50,6 +50,7 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   test.setTimeout(420_000);
   await signUp(page, { name: "Admin KPI", email: `kpi-${run}@test.invalid` });
   const { slug } = await createWorkspaceAsAdmin(page, `KPI fictifs ${run}`);
+  await setConfidentialite(page, slug, 1); // données fictives : répartitions complètes ; masquage vérifié à part
   const kpi = `/e/${slug}/studio-rh/kpi`;
 
   // Sans source : n.d. explicite.
@@ -244,6 +245,13 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(detail.getByTestId("kpi-detail-contracts")).toContainText("138,67 / 173,33");
   await expect(detail.getByTestId("kpi-detail-total")).toContainText("6,10");
   await page.screenshot({ path: `${CAPTURES}/3-03-kpi-dsn.png`, fullPage: true });
+  // Lot 12 — le tableau « Effectif et ETP par catégorie » suit le filtre Nature (défaut relevé par Lyes) : sous CDD en décembre 2025,
+  // le contrat 003 (50 %) est seul ; la tuile et le total du tableau disent la même chose, et la mention nomme la catégorie hors périmètre.
+  await page.goto(`${kpi}?fin=2025-12&nature=02`);
+  await expect(tile("etp-end").locator("dd")).toHaveText("0,50");
+  await expect(page.getByTestId("kpi-categories-scope")).toContainText("Filtres appliqués : nature CDD (02)");
+  await expect(page.getByTestId("kpi-categories-scope")).toContainText("sans colonne : CDI");
+  await expect(page.getByTestId("kpi-categories-table").locator("tr[data-month='2025-12'] td[data-col='total']")).toHaveText("1 · 0,5 ETP");
 
   // Détail N-1 de l'effectif moyen : retrace le 6,50 de la tuile (78/12).
   await page.getByTestId("kpi-tile-headcount-avg-detail-n1").click();

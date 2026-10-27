@@ -1,6 +1,6 @@
 import { expect, test, type Locator } from "@playwright/test";
 import { fixtureDsnBytes } from "../../src/lib/dsn/fixture";
-import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText, setConfidentialite } from "./helpers";
 
 // Module 4 (lot 1) : masse salariale réelle sur le journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle).
 // Valeurs attendues recalculées à la main depuis la fixture (voir tests/unit/payroll.test.ts).
@@ -17,6 +17,7 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   test.setTimeout(300_000);
   await signUp(page, { name: "Admin Masse salariale", email: `ms-${run}@test.invalid` });
   const { slug } = await createWorkspaceAsAdmin(page, `Masse salariale fictive ${run}`);
+  await setConfidentialite(page, slug, 1); // données fictives : répartitions complètes ; masquage vérifié à part
   const ms = `/e/${slug}/studio-rh/masse-salariale`;
 
   // Sans lecture PayFit : n.d. explicite.
@@ -175,4 +176,26 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   await page.goto(ms);
   await expect(page.getByTestId("ms-grid")).toContainText("Primes (brut) : 6413, 6418");
   expect(await txt(tile("masse").locator("dd"))).toBe("211 260,00 €");
+
+  // Lot 12 — confidentialité (règle de toute l'application) : au seuil de 3 personnes distinctes, le service A (deux personnes :
+  // contrats 003 et 006) est n.d., un second service est masqué dans chaque colonne pour que A ne se lise pas par différence, et le
+  // total de l'entreprise reste publié. Le filtre sur A rend la page du service n.d. avec la raison et le retour « Retirer le filtre ».
+  await setConfidentialite(page, slug, 3);
+  await page.goto(ms);
+  await expect(page.getByTestId("ms-services")).toContainText("Confidentialité : seuil de 3 personnes");
+  expect(await txt(svc("TEST-SVC-A", "n"))).toBe("n.d.");
+  expect(await page.getByTestId("ms-services-table").locator("tbody tr td[data-col='n'] abbr.nd").count()).toBeGreaterThanOrEqual(2);
+  expect(await txt(page.getByTestId("ms-services-total").locator("td[data-col='n']"))).toBe("211 260,00 €");
+  await page.goto(`${ms}?svc=TEST-SVC-A`);
+  await expect(page.getByTestId("ms-service-guard")).toContainText("seuil de confidentialité");
+  await page.screenshot({ path: `${CAPTURES}/4-05-confidentialite.png`, fullPage: true });
+  // Seuil absent : la répartition par service est n.d. avec la raison et le lien vers Paramètres, le total reste.
+  await page.goto(`/e/${slug}/parametres#confidentialite`);
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("setting-confidentialite-seuil").fill("");
+  await page.getByTestId("setting-confidentialite-save").click();
+  await expect(page.getByTestId("setting-confidentialite-status")).toContainText("non défini");
+  await page.goto(ms);
+  await expect(page.getByTestId("ms-services")).toContainText("seuil de confidentialité non défini");
+  expect(await txt(page.getByTestId("ms-services-total").locator("td[data-col='n']"))).toBe("211 260,00 €");
 });

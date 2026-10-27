@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText, setConfidentialite } from "./helpers";
 
 // Écart budgétaire et analyse des écarts sur le journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle).
 // Deux scénarios de la même base : « Base T4 » (aucune hypothèse) et « Variante T4 » (prime de décembre 1 000 € brut + 30 %
@@ -12,6 +12,7 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   test.setTimeout(300_000);
   await signUp(page, { name: "Admin Écart", email: `ecart-${run}@test.invalid` });
   const { slug } = await createWorkspaceAsAdmin(page, `Écart fictif ${run}`);
+  await setConfidentialite(page, slug, 1); // données fictives : répartitions complètes ; masquage vérifié à part
   const hyp = `/e/${slug}/studio-rh/hypotheses`;
   await page.goto(`/e/${slug}/donnees/payfit`);
   await page.getByLabel("Clé API PayFit").fill("fixture-A-1");

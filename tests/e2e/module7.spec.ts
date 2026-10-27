@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText } from "./helpers";
+import { CAPTURES, createWorkspaceAsAdmin, signUp, exactText, setConfidentialite } from "./helpers";
 
 // Entrées du cahier : KPI RH (turnover, absentéisme, effectifs mensuels), Collaborateurs (fiche), Reporting social — sur le
 // journal PayFit fictif (profil A, photographie 1 ; aucune donnée réelle). Septembre 2026 : 7 contrats CDI, 6,10 ETP.
@@ -11,6 +11,7 @@ test("Entrées du cahier : KPI RH par onglet, effectifs mensuels par axe, fiche 
   test.setTimeout(300_000);
   await signUp(page, { name: "Admin Cahier", email: `cahier-${run}@test.invalid` });
   const { slug } = await createWorkspaceAsAdmin(page, `Cahier fictif ${run}`);
+  await setConfidentialite(page, slug, 1); // données fictives : répartitions complètes ; masquage vérifié à part
   await page.goto(`/e/${slug}/donnees/payfit`);
   await page.getByLabel("Clé API PayFit").fill("fixture-A-1");
   await page.getByRole("button", { name: "Vérifier et enregistrer" }).click();
