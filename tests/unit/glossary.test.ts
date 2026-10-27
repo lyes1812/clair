@@ -19,6 +19,8 @@ import {
   type GlossaryEntry,
 } from "@/lib/glossary";
 import { GLOSSARY_ECRAN } from "@/lib/glossary/ecran";
+import { CONFIDENTIALITE_TERM, confidentialiteReason, SEUIL_ILLISIBLE, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE } from "@/lib/confidentialite";
+import { seuilText } from "@/lib/viz/kpi";
 
 // Accès : la page demande l'espace comme les autres pages (un non-membre est refusé, 404 côté application).
 const access = vi.hoisted(() => ({ asked: [] as string[] }));
@@ -159,6 +161,114 @@ describe("Glossaire : Lecture des écrans", () => {
     // Les ETP des tableaux et des infobulles ont deux décimales : l'entrée ne promet pas une valeur « exacte » au dix-millième.
     expect(glossaryEntry("lecture-tableau")!.definition).not.toContain("dix-millième");
     expect(glossaryEntry("lecture-unites")!.definition).toContain("Sur l'écran KPI RH, la valeur au dix-millième se lit au survol");
+  });
+});
+
+// --- Règle de confidentialité : une entrée générale, les entrées d'écran y renvoient -----------------------------------------------
+describe("Glossaire : Seuil de confidentialité (règle de l'application)", () => {
+  const general = glossaryEntry(CONFIDENTIALITE_TERM)!;
+
+  it("l'entrée « confidentialite » existe (identifiant cité par les écrans), dans la famille KPI RH, et cite les raisons du code", () => {
+    expect(general).toBeDefined();
+    expect(general.id).toBe("confidentialite");
+    expect(general.family).toBe("KPI RH");
+    expect(general.term).toBe("Seuil de confidentialité");
+    const d = general.definition;
+    // Cas de référence écrit à la main : seuil de 2 → « non affiché (seuil de confidentialité : 2 personnes) » ; l'entrée écrit « N ».
+    expect(confidentialiteReason(2)).toBe("non affiché (seuil de confidentialité : 2 personnes)");
+    expect(d).toContain(`« ${confidentialiteReason(2).replace("2 personnes", "N personnes")} »`);
+    expect(d).toContain(`« ${SEUIL_NON_VERIFIABLE} »`);
+    expect(d).toContain(`« ${SEUIL_NON_DEFINI} »`);
+    expect(d).toContain(`« ${SEUIL_ILLISIBLE} »`);
+    expect(d).toContain("Paramètres › Confidentialité");
+    expect(d).toContain("au moins égal à 1 (avec 1, aucun groupe dénombré n'est masqué)");
+    expect(d).toContain("aucune valeur par défaut");
+  });
+
+  it("la règle : personnes distinctes, contrat non relié, portée, totaux non masqués, masquage secondaire, exception unique, exports, écrans nominatifs", () => {
+    const d = general.definition;
+    expect(d).toContain("Unité : les personnes distinctes du référentiel Collaborateurs");
+    expect(d).toContain("une personne qui a deux contrats dans un même groupe y compte une fois");
+    expect(d).toContain("ne protège jamais");
+    expect(d).toContain("de 1 à (seuil − 1) personnes distinctes");
+    expect(d).toContain("Un groupe vide ne désigne personne");
+    expect(d).toContain("Les totaux de toute l'entreprise et les indicateurs globaux");
+    expect(d).toContain("Masquage secondaire");
+    expect(d).toContain("zéro compris");
+    expect(d).toContain("au moins « seuil » personnes distinctes");
+    expect(d).toContain("Masquage principal et masquage secondaire portent la même raison");
+    expect(d).toContain("Une seule exception : la ligne du motif retenu quand c'est le seul motif retenu présent dans la lecture");
+    expect(d).toContain("Les exports Excel et CSV des tableaux concernés portent exactement les mêmes cellules n.d. que l'écran, avec la même raison");
+    expect(d).toContain("« Retirer le filtre Service »");
+    expect(d).toContain("Collaborateurs, détail par salarié de l'Écart budgétaire et de l'Analyse des écarts, saisie des Hypothèses budgétaires");
+  });
+
+  it("les entrées d'écran renvoient à l'entrée générale (« Voir aussi ») sans la recopier ; la croisée ne garde que ses groupes", () => {
+    const citing = [
+      "croisee-confidentialite",
+      "croisee-vue-ensemble",
+      "croisee-periode-filtres",
+      "croisee-charges-personnel",
+      "croisee-personnes-observees",
+      "croisee-conges-pris",
+      "croisee-repartition-effectifs",
+      "service",
+      "primes",
+      "provision",
+      "fixe-variable",
+      "cascade",
+      "pont-volume-cout",
+      "analyse-ecarts",
+      "absence-par-motif",
+      "absence-all-motifs",
+      "kpi-types-absence",
+      "effectifs-ventilation",
+      "effectifs-repartition",
+      "effectifs-graphiques",
+      "lecture-nd",
+    ];
+    for (const id of citing) expect(glossaryEntry(id)!.see, id).toContain("confidentialite");
+    for (const id of general.see ?? []) expect(glossaryEntry(id), `confidentialite → ${id}`).toBeDefined();
+    const croisee = glossaryEntry("croisee-confidentialite")!;
+    expect(croisee.term).toBe("Seuil de confidentialité dans la Masse salariale croisée");
+    expect(croisee.definition).toContain("Cette entrée dit seulement comment chaque chapitre forme ses groupes.");
+    for (const chapter of ["Synthèse (01) et Services (05)", "Effectifs & mouvements (02)", "Absences & congés (03)", "Fixe & variable (04)", "Budget & prévisions (06)", "Paie & comptabilité (07)", "Effets d'évolution (08)"]) expect(croisee.definition, chapter).toContain(chapter);
+    // La règle n'est écrite qu'une fois : aucune autre entrée ne la recopie ni ne décrit une exception supprimée ou un comptage en contrats.
+    const others = GLOSSARY.filter((e) => e.id !== CONFIDENTIALITE_TERM);
+    for (const e of others) {
+      expect(e.definition, e.id).not.toContain("Masquage secondaire :");
+      for (const gone of ["suit une autre règle", "compté en contrats", "contrats par service et par mois", "dont les contrats ne sont pas comptés", "comptés en contrats distincts"]) expect(e.definition, `${e.id} : ${gone}`).not.toContain(gone);
+    }
+  });
+
+  it("les entrées d'écran disent ce que leur écran fait (ligne « Confidentialité », filtre Service, carte Atterrissage du Studio RH, catégories filtrées)", () => {
+    // Analyse des écarts : la ligne de l'écran est « Confidentialité : seuil de N personnes » (seuilText du module KPI, partagé).
+    expect(seuilText({ kind: "set", value: 2, updatedAt: null, updatedBy: null })).toBe("seuil de 2 personnes");
+    expect(seuilText({ kind: "set", value: 1, updatedAt: null, updatedBy: null })).toBe("seuil de 1 personne");
+    expect(glossaryEntry("analyse-ecarts")!.definition).toContain("« Confidentialité : seuil de N personnes »");
+    // Masse salariale : sous le filtre, un service masqué (principal ou secondaire) rend l'écran du service n.d.
+    expect(glossaryEntry("service")!.definition).toContain("au masquage principal ou secondaire, rend tout l'écran du service n.d. (« — service retenu par le filtre »)");
+    expect(glossaryEntry("provision")!.definition).toContain("ligne de dotation « Mois courant »");
+    expect(glossaryEntry("primes")!.definition).toContain("« Brut par libellé de paie »");
+    // Cascade d'ETP : un palier masqué empêche de tracer la cascade ; départ, arrivée, écart total et résiduel restent affichés.
+    expect(glossaryEntry("cascade")!.definition).toContain("Un palier n.d. empêche de tracer la cascade ; départ, arrivée, écart total et résiduel restent affichés.");
+    expect(glossaryEntry("pont-volume-cout")!.definition).toContain("Sans filtre de service, le pont porte sur toute l'entreprise et n'est jamais masqué.");
+    // Atterrissage : la carte de la Synthèse du Studio RH suit la règle de la croisée (scénario qui couvre l'année, mois dotés d'un budget).
+    expect(glossaryEntry("atterrissage")!.definition).toContain("le scénario le plus récemment créé parmi ceux qui couvrent l'année de la période");
+    expect(glossaryEntry("atterrissage")!.definition).toContain("« aucun scénario ne couvre »");
+    expect(glossaryEntry("atterrissage")!.definition).toContain("atterrissage des mois comparés − budget des mois comparés = écart");
+    expect(glossaryEntry("croisee-atterrissage")!.definition).toContain("La carte « Atterrissage » de la Synthèse du Studio RH suit la même règle");
+    expect(glossaryEntry("croisee-atterrissage")!.definition).not.toContain("Ses chiffres peuvent donc différer");
+    // KPI RH : le tableau par catégorie suit les filtres de l'écran ; une catégorie sans contrat est sans objet, jamais 0.
+    const cat = glossaryEntry("kpi-categories")!.definition;
+    expect(cat).toContain("Les filtres Établissement et Nature de l'écran s'appliquent au tableau, au graphique et à l'export Excel");
+    expect(cat).toContain("n'a pas de colonne ; la mention sous le tableau la nomme");
+    expect(cat).toContain("sans objet (tiret à l'écran, cellule vide dans l'export), jamais 0");
+    expect(cat).not.toContain("vaut 0");
+    // Effectifs mensuels : cellules masquées, total du mois conservé ; motifs : exception du seul motif retenu.
+    expect(glossaryEntry("effectifs-ventilation")!.definition).toContain("le total du mois reste affiché");
+    expect(glossaryEntry("absence-par-motif")!.definition).toContain("seule la ligne du motif retenu reste affichée quand c'est le seul motif retenu présent dans la lecture");
+    expect(glossaryEntry("absence-all-motifs")!.definition).toContain("n'est masqué par le seuil de confidentialité que lorsqu'il donnerait par différence un motif masqué");
   });
 });
 

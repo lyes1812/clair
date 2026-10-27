@@ -834,7 +834,7 @@ export function buildServices(input: ServicesInput): ServicesModel {
     ...(d.axisMissing ? [`L'axe « ${d.axis} » choisi dans Paramètres n'existe plus dans le journal appliqué : toutes les lignes sont « Non ventilé ».`] : []),
     ...(open ? [open] : []),
     "Coût / personne-mois : contrats rémunérés chaque mois ; ce n'est pas un coût par ETP.",
-    ...(conf.kind === "set" ? [`Seuil de confidentialité : ${pluriel(conf.value, "personne")} distinctes par service, sur la période et sur N-1 ; masquage secondaire ; la ligne « Total » reste complète.`] : []),
+    ...(conf.kind === "set" ? [`Seuil de confidentialité : ${pluriel(conf.value, "personne")} distincte${conf.value > 1 ? "s" : ""} par service, sur la période et sur N-1 ; masquage secondaire ; la ligne « Total » reste complète.`] : []),
   ];
   return { ...empty, nd: null, tables: [table], charts: rows.length === 0 ? [] : [contribution, repartition], blocks, limits, trend, count: rows.length, selected: d.selected };
 }

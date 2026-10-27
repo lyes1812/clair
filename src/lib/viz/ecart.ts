@@ -1,7 +1,11 @@
-import type { Cascade, masseByRubric } from "@/lib/budget/cascade";
+import { cascadePersons, type Cascade, type CascadeStep, type masseByRubric } from "@/lib/budget/cascade";
 import type { Bridge } from "@/lib/budget/series";
-import { ROW_LABELS, ROW_UNIT, type Cell, type Diff, type RowKey, type Version } from "@/lib/budget/versions";
+import { aggregate, ROW_LABELS, ROW_UNIT, type Cell, type Diff, type RowKey, type Version } from "@/lib/budget/versions";
+import type { ZoomSource } from "@/lib/budget/zoom";
+import { isHidden, maskGroups, maskReason, personsOfContracts, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { groupInput, masseContracts, masseGroup, type Confidentialite, type JournalGroup } from "@/lib/croisee/confidentialite";
 import { formatEuros } from "@/lib/money";
+import { withService } from "@/lib/payroll/engine";
 import { costTone, type TrendTone } from "@/lib/trend";
 import type { ChartSeries } from "@/components/charts/shared";
 
@@ -141,3 +145,98 @@ export { waterfallAxisBadge } from "./waterfall-axis";
 export const neg = (text: string) => (text.startsWith("-") ? `−${text.slice(1)}` : text);
 // Montant en centimes avec son signe écrit : « +3 550,00 € », « −79,51 € », « 0,00 € ».
 export const eurosSigned = (cents: number) => `${cents > 0 ? "+" : ""}${neg(formatEuros(cents))}`;
+
+// --- Seuil de confidentialité (règle de toute l'application : src/lib/confidentialite ; même lecture que la croisée 08) ----------
+// Unité : les personnes distinctes du référentiel Collaborateurs (lien contrat → jeton de personne, croiseeLink). Le masquage lui-même
+// (principal et secondaire) est celui du module partagé (maskGroups / maskReason) : rien n'est recodé ici, les fonctions ci-dessous
+// forment les groupes et rangent les raisons. Un contrat non relié (embauche prévue d'un scénario, contrat sans personne rattachée)
+// ne protège jamais. Les totaux (départ, arrivée, écart total, résiduel ; pont de toute l'entreprise) ne sont jamais masqués.
+
+export type { Confidentialite } from "@/lib/croisee/confidentialite";
+
+// Raison d'un n.d. dû au seuil ; param : le n.d. vient du paramètre absent ou illisible (l'écran ajoute le lien vers les Paramètres).
+export type SeuilNd = { reason: string; param: boolean };
+
+// Paliers de la cascade après seuil : un palier de 1 à (seuil − 1) personnes est masqué ; l'écart total étant publié, les paliers
+// masqués doivent compter ensemble au moins « seuil » personnes distinctes (masquage secondaire, maskGroups) ; une personne présente
+// dans deux paliers masqués (effet report et changement d'ETP, par exemple) n'y compte qu'une fois. `chart` : raison pour laquelle la
+// cascade n'est pas tracée (un palier masqué suffit : une cascade ne se trace pas avec un n.d.) ; null : tracée.
+export type CascadeMask = { status: MaskStatus[]; reasons: (string | null)[]; chart: string | null };
+export function maskCascade(c: Pick<Extract<Cascade, { kind: "value" }>, "steps">, link: PersonLink, seuil: number): CascadeMask {
+  const groups = cascadePersons(c, link);
+  const status = maskGroups(c.steps.map((s, i) => groupInput(groups[i], seuil, Math.abs(s.etp4), s.people.length > 0)), seuil, true);
+  const reasons = status.map((st) => (isHidden(st) ? maskReason(st, seuil) : null));
+  // Un palier sous le seuil (ou masqué pour le protéger) l'emporte sur un palier non dénombré dans la raison du graphique.
+  const worst = status.find((st) => st === "masked" || st === "secondary") ?? status.find(isHidden);
+  return { status, reasons, chart: worst === undefined ? null : maskReason(worst, seuil) };
+}
+
+// Cascade telle que l'écran la présente. Dans l'ordre : cascade n.d. (sa raison) ; service retenu par le filtre sous le seuil ou non
+// dénombré (guard : tout le bloc est n.d.) ; seuil non défini ou illisible (les paliers sont n.d. avec la raison, départ, arrivée,
+// écart total et résiduel restent affichés : ce sont des totaux) ; sinon masquage des paliers. `nd` d'un palier : null s'il est
+// affiché, sinon la raison ; `chart` : raison pour laquelle la cascade n'est pas tracée.
+export type CascadeStepView = CascadeStep & { nd: string | null };
+export type CascadeView =
+  | { kind: "value"; months: number; start: number; end: number; residual: number; steps: CascadeStepView[]; chart: string | null; param: boolean }
+  | { kind: "nd"; reason: string; param: boolean };
+export function cascadeView(c: Cascade, conf: Confidentialite, link: PersonLink, guard: SeuilNd | null): CascadeView {
+  if (c.kind === "nd") return { kind: "nd", reason: c.reason, param: false };
+  if (guard) return { kind: "nd", reason: guard.reason, param: guard.param };
+  const { months, start, end, residual } = c;
+  if (conf.kind === "nd") return { kind: "value", months, start, end, residual, steps: c.steps.map((s) => ({ ...s, nd: conf.reason })), chart: conf.reason, param: true };
+  const m = maskCascade(c, link, conf.value);
+  return { kind: "value", months, start, end, residual, steps: c.steps.map((s, i) => ({ ...s, nd: m.reasons[i] })), chart: m.chart, param: false };
+}
+
+// Cascade d'ETP tracée (etpWaterfall) seulement quand aucun palier n'est n.d. ; sinon la raison, jamais une barre reconstituée.
+export function etpWaterfallOf(v: CascadeView): WaterfallData {
+  if (v.kind === "nd") return { kind: "nd", reason: v.reason };
+  if (v.chart !== null) return { kind: "nd", reason: v.chart };
+  return etpWaterfall({ kind: "value", months: v.months, start: v.start, end: v.end, residual: v.residual, steps: v.steps.map(({ nd: _nd, ...s }) => s) });
+}
+
+// Côté d'un pont ou d'une cascade sous un filtre de service : les personnes du service sur les mois d'une version, et la présence
+// d'une valeur affichée sur ce côté (masse ou ETP de la version non nuls : une valeur non nulle sans personne dénombrée n'est pas
+// vérifiable). Les personnes : contrats qui portent une ligne de masse du journal restreint au service (version réelle, et mois
+// réels figés d'un scénario : masseGroup / masseContracts, comme la croisée 08) ; contrats et embauches de la composition projetée
+// (people) pour les mois projetés d'un scénario ; aucune pour un budget saisi (global : n.d. sous un filtre, rien à protéger).
+// group null : un mois non dénombré (mois n.d. du journal, composition projetée n.d., mois projeté par un scénario parent).
+export type ServiceSide = { group: JournalGroup | null; shown: boolean };
+export function serviceSide(v: Version, src: ZoomSource, months: readonly string[], service: string | null, link: PersonLink): ServiceSide {
+  const shown = (["masse", "etp"] as const).some((k) => {
+    const a = aggregate(v, [...months], k);
+    return a.kind === "value" && a.num !== 0;
+  });
+  if (src.kind === "budget") return { group: { persons: [], unlinked: 0, nonZero: false }, shown };
+  if (src.kind === "reel") return { group: masseGroup(withService(src.journal, service), months, link), shown };
+  const journal = src.journal ? withService(src.journal, service) : null;
+  const ids = new Set<string>();
+  let nonZero = false;
+  for (const m of months) {
+    const f = v.months.get(m);
+    if (!f) return { group: null, shown };
+    if (f.layer === "reel") {
+      const g = journal ? masseContracts(journal, m) : null;
+      if (!g) return { group: null, shown };
+      for (const c of g.contracts) ids.add(c);
+      if (g.nonZero) nonZero = true;
+      continue;
+    }
+    if (f.people.kind === "nd") return { group: null, shown };
+    for (const k of Object.keys(f.people.map)) ids.add(k);
+    if (f.masse.kind === "value" && f.masse.v !== 0) nonZero = true;
+  }
+  return { group: { ...personsOfContracts(ids, link), nonZero }, shown };
+}
+
+// Service retenu par le filtre : ses chiffres (cascade, contributions de masse, pont) décrivent les personnes du service sur chaque
+// version. Sans seuil défini : n.d. « non défini » avec le lien. Un côté de 1 à (seuil − 1) personnes : n.d. ; un côté non dénombré
+// (mois n.d., contrats non reliés sous le seuil, valeur non nulle sans contrat) : n.d. Un côté sous le seuil l'emporte sur un côté
+// non dénombré. Un côté sans aucune valeur affichée et sans personne n'a rien à protéger. null : rien n'est masqué.
+export function serviceGuard(sides: readonly ServiceSide[], conf: Confidentialite): SeuilNd | null {
+  if (conf.kind === "nd") return { reason: conf.reason, param: true };
+  const seuil = conf.value;
+  const st = sides.map(({ group: g, shown }) => maskGroups([g ? groupInput(g, seuil, 1, g.nonZero || shown) : shown ? { size: null, value: 1 } : { size: 0, value: 0 }], seuil, false)[0]);
+  const worst = st.find((x) => x === "masked") ?? st.find(isHidden);
+  return worst === undefined ? null : { reason: maskReason(worst, seuil)!, param: false };
+}

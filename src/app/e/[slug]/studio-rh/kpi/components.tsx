@@ -34,7 +34,8 @@ import type { KpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
-import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, monthAxis, motifRows, movementSeries, ndSummary, readingQualifiers, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
+import { CONFIDENTIALITE_TERM, confidentialiteHref, isHidden, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type PersonsOfContracts } from "@/lib/confidentialite";
+import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, maskMotifRows, monthAxis, motifMask, motifRows, movementSeries, ndSummary, readingQualifiers, seuilOf, seuilText, typeCountMask, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
 // Composants de l'écran KPI RH : en-tête, tuiles (valeur, N-1, écart, « ? » vers le glossaire), tableau mensuel, détail d'un chiffre.
@@ -180,11 +181,33 @@ export function AbsenceTypes({ codes }: { codes: string[] }) {
   return <>{codes.map((c, i) => <span key={c}>{i > 0 ? ", " : ""}<AbsenceType code={c} /></span>)}</>;
 }
 
+// Ligne « Confidentialité : seuil de N personnes » au-dessus d'une répartition soumise au seuil de l'espace (module partagé, sans
+// valeur par défaut) ; seuil absent ou illisible : le lien vers Paramètres › Confidentialité ; le « ? » renvoie à l'entrée générale du
+// glossaire. Un paramètre non transmis par l'écran est traité comme non défini.
+export function ConfidentialiteNote({ slug, setting, testid = "kpi-confidentialite", inline = false }: { slug: string; setting: ConfidentialiteSetting | undefined; testid?: string; inline?: boolean }) {
+  const Tag = inline ? "span" : "p"; // dans une ligne de tuile (span), jamais un paragraphe dans un span
+  return (
+    <Tag className="tile-foot kpi-confidentialite" data-testid={testid}>
+      Confidentialité : {seuilText(setting)}
+      {setting?.kind !== "set" && <> (<a href={confidentialiteHref(slug)}>Paramètres</a>)</>}
+      <GlossaryLink slug={slug} term={CONFIDENTIALITE_TERM} />
+    </Tag>
+  );
+}
+
 // Tuile Absentéisme : motifs retenus, motifs présents non retenus, retenus mais sans aucune absence dans la lecture.
-// Le nombre entre parenthèses (absences de toute la lecture) est expliqué au glossaire.
-export function AbsenceTypeNotes({ chosen, other, missing, slug }: { chosen: { type: string; count: number }[]; other: { type: string; count: number }[]; missing: { type: string }[]; slug: string }) {
+// Le nombre entre parenthèses (absences de toute la lecture) est expliqué au glossaire ; c'est une répartition par motif : il suit
+// le seuil de confidentialité (mask : paramètre de l'espace et personnes distinctes de chaque motif, absenceTypePersons), n.d. avec la
+// raison sous le seuil, ou quand le paramètre n'est pas défini (ou pas transmis par l'écran).
+export type AbsenceTypeMask = { setting: ConfidentialiteSetting | undefined; sizes: Readonly<Record<string, PersonsOfContracts>> };
+export function AbsenceTypeNotes({ chosen, other, missing, slug, mask }: { chosen: { type: string; count: number }[]; other: { type: string; count: number }[]; missing: { type: string }[]; slug: string; mask?: AbsenceTypeMask }) {
+  const read = seuilOf(mask?.setting);
+  const count = (x: { type: string; count: number }) => {
+    const reason = read.seuil === null ? read.reason : typeCountMask(mask?.sizes ?? {}, x.type, x.count, read.seuil);
+    return reason ? <abbr className="nd" title={reason}>n.d.</abbr> : x.count;
+  };
   const list = (xs: { type: string; count: number }[]) =>
-    xs.length ? xs.map((x, i) => <span key={x.type}>{i > 0 ? ", " : ""}<AbsenceType code={x.type} /> ({x.count})</span>) : "aucun";
+    xs.length ? xs.map((x, i) => <span key={x.type}>{i > 0 ? ", " : ""}<AbsenceType code={x.type} /> ({count(x)})</span>) : "aucun";
   return (
     <details className="tile-more">
       <summary>Motifs de la lecture</summary>
@@ -196,6 +219,7 @@ export function AbsenceTypeNotes({ chosen, other, missing, slug }: { chosen: { t
           <a href={`/e/${slug}/parametres#kpi`}>Paramètres</a>
           <GlossaryLink slug={slug} term={KPI_TERMS.absenceTypes} />
         </span>
+        <ConfidentialiteNote slug={slug} setting={mask?.setting} testid="kpi-absence-types-confidentialite" inline />
       </span>
     </details>
   );
@@ -819,9 +843,18 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
 
 // Absentéisme par motif (période) : TOUS les motifs présents dans la lecture, retenus ou non, puis, à part, le taux tous motifs.
 // Un motif n.d. garde sa raison (jamais 0) ; le taux tous motifs est nommé comme tel et n'est jamais présenté comme la tuile.
-export function AbsenceMotifsDetail({ motifs, slug }: { motifs: AbsenceMotifs; slug: string }) {
-  const rows = motifRows(motifs.lines);
+// Seuil de confidentialité (paramètre de l'espace, module partagé, même règle que la croisée 03) : une ligne qui concerne de 1 à
+// (seuil − 1) personnes distinctes est n.d. (exception : le seul motif retenu présent dans la lecture, qui égale la tuile) ; masquage
+// secondaire entre motifs retenus (tuile publiée : tileShown) et autres motifs ; le taux tous motifs, indicateur de l'entreprise,
+// n'est masqué que lorsqu'il donnerait une ligne masquée par différence. Paramètre absent, illisible ou non transmis : lignes n.d.
+// avec la raison et le lien vers Paramètres ; le taux tous motifs reste affiché.
+export function AbsenceMotifsDetail({ motifs, slug, confidentialite, tileShown = true }: { motifs: AbsenceMotifs; slug: string; confidentialite?: ConfidentialiteSetting; tileShown?: boolean }) {
+  const read = seuilOf(confidentialite);
+  const mask = read.seuil === null || motifs.lines.length === 0 ? null : motifMask(motifs.lines, { tile: tileShown, all: motifs.all.kind !== "nd" }, read.seuil);
+  const rows = maskMotifRows(motifRows(motifs.lines), mask, read.seuil, read.reason);
+  const allReason = mask && read.seuil !== null && isHidden(mask.all) ? maskReason(mask.all, read.seuil) : null;
   const all = motifs.all;
+  const link = <> (<a href={confidentialiteHref(slug)}>Paramètres</a>)</>;
   return (
     <>
       <h3>
@@ -838,17 +871,28 @@ export function AbsenceMotifsDetail({ motifs, slug }: { motifs: AbsenceMotifs; s
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.type} data-motif={r.type} data-retained={r.retained ? "oui" : "non"}>
+                <tr key={r.type} data-motif={r.type} data-retained={r.retained ? "oui" : "non"} data-masque={r.masked ? "oui" : undefined}>
                   <td><AbsenceType code={r.type} withCode /></td>
-                  <td className="num">{fmtInt(r.count)}</td>
-                  <td className="num">{fmtInt(r.inWindow)}</td>
-                  <td>{r.retained ? "oui" : "non"}</td>
-                  {r.kind === "nd" ? (
-                    <td colSpan={2} className="nd wrap">n.d. — {r.reason}</td>
+                  {r.masked ? (
+                    <>
+                      <td colSpan={2} className="nd wrap">n.d. — {r.masked}{read.seuil === null && link}</td>
+                      <td>{r.retained ? "oui" : "non"}</td>
+                      <td colSpan={2} className="nd wrap">n.d. — {r.masked}</td>
+                    </>
                   ) : (
                     <>
-                      <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.halfText}</td>
-                      <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.rateText}</td>
+                      {/* Ligne n.d. du moteur : ses personnes ne sont pas dénombrées, les nombres d'absences ne sont pas vérifiables. */}
+                      <td className="num">{r.kind === "nd" ? <abbr className="nd" title={SEUIL_NON_VERIFIABLE}>n.d.</abbr> : fmtInt(r.count)}</td>
+                      <td className="num">{r.kind === "nd" ? <abbr className="nd" title={SEUIL_NON_VERIFIABLE}>n.d.</abbr> : fmtInt(r.inWindow)}</td>
+                      <td>{r.retained ? "oui" : "non"}</td>
+                      {r.kind === "nd" ? (
+                        <td colSpan={2} className="nd wrap">n.d. — {r.reason}</td>
+                      ) : (
+                        <>
+                          <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.halfText}</td>
+                          <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.rateText}</td>
+                        </>
+                      )}
                     </>
                   )}
                 </tr>
@@ -857,6 +901,7 @@ export function AbsenceMotifsDetail({ motifs, slug }: { motifs: AbsenceMotifs; s
           </table>
         </div>
       )}
+      <ConfidentialiteNote slug={slug} setting={confidentialite} testid="kpi-detail-motifs-confidentialite" />
       <div className="kpi-motif-all" data-testid="kpi-detail-motifs-all-block">
         <h3>
           {motifs.label}
@@ -864,6 +909,8 @@ export function AbsenceMotifsDetail({ motifs, slug }: { motifs: AbsenceMotifs; s
         </h3>
         {all.kind === "nd" ? (
           <p className="nd" data-testid="kpi-detail-motifs-all">n.d. — {all.nd.reason}</p>
+        ) : allReason ? (
+          <p className="nd" data-testid="kpi-detail-motifs-all">n.d. — {allReason}</p>
         ) : (
           <p className="desc" data-testid="kpi-detail-motifs-all">
             <strong>
@@ -878,7 +925,9 @@ export function AbsenceMotifsDetail({ motifs, slug }: { motifs: AbsenceMotifs; s
   );
 }
 
-export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, slug }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; slug?: string }) {
+// confidentialite : seuil de l'espace (getConfidentialite), transmis par la page au détail par motif ; la tuile de la période (v) est
+// publiée dès qu'elle n'est pas n.d.
+export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, slug, confidentialite }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; slug?: string; confidentialite?: ConfidentialiteSetting }) {
   // Une ligne par mois : jours théoriques (toujours calculés s'ils le peuvent) et absences (n.d. avec la raison de la période
   // quand l'absentéisme s'arrête avant le calcul mensuel : arrêts DSN non extraits, types non choisis, absences non lues).
   const abs = new Map(v.months.map((m) => [m.month, m]));
@@ -925,7 +974,7 @@ export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, sl
           {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
         </Total>
       )}
-      {motifs && slug && <AbsenceMotifsDetail motifs={motifs} slug={slug} />}
+      {motifs && slug && <AbsenceMotifsDetail motifs={motifs} slug={slug} confidentialite={confidentialite} tileShown={v.kind !== "nd"} />}
     </>
   );
 }

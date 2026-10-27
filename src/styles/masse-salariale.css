@@ -179,3 +179,4 @@ th[scope="row"] > .ms-detail-link::after { content: " ›"; content: " ›" / ""
 .ms-confidentialite { margin: 0 0 8px; line-height: 1.5; color: var(--muted); }
 .ms-confidentialite a { color: var(--blue); }
 .ms-confidentialite .gloss-link { margin-left: 6px; }
+.ms-table abbr.nd { cursor: help; }

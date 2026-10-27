@@ -193,20 +193,23 @@ export type EffectifsGridIn = {
 const gridCell = (c: Cell): ExportCell => (c.kind === "value" ? c.v : c.kind === "nd" ? { nd: c.reason } : "");
 export const monthHeader = (m: string, layer: "reel" | "projete" | undefined) => `${monthShortLabel(m)} ${m.slice(0, 4)}${layer === "projete" ? " (projeté)" : ""}`;
 
-// Répartition mensuelle : une ligne par groupe de l'axe, une colonne par mois, puis le total ; unité de la rubrique.
+// Répartition mensuelle : une ligne par groupe de l'axe, une colonne par mois, puis le total ; unité de la rubrique. La grille reçue est
+// celle de l'écran, déjà masquée par le seuil de confidentialité : mêmes cellules n.d., même raison (en commentaire de la cellule).
 export function effectifsGridSheet(grid: EffectifsGridIn, unit: "etp" | "nombre" | "eur"): SheetSpec {
   const columns: ColumnSpec[] = [{ header: "Groupe", key: "groupe", kind: "text", width: 28 }, ...grid.months.map((m): ColumnSpec => ({ header: monthHeader(m, grid.layers.get(m)), key: m, kind: unit })), { header: "Observations", key: "observations", kind: "text" }];
   const rows: ExportCell[][] = [...grid.groups.map((g) => [g, ...grid.months.map((m) => gridCell(grid.cell(g, m))), ""]), ["Total", ...grid.months.map((m) => gridCell(grid.total(m))), ""]];
   return { name: "Répartition mensuelle", columns, rows, note: unit === "eur" ? "Montants en euros." : unit === "etp" ? "ETP affichés au centième." : "Nombres." };
 }
 
-// Répartition par groupe (stocks au dernier mois connu, flux sur le cumul des mois connus) et part de chaque groupe.
-export function effectifsShareSheet(repart: { items: { group: string; v: number }[]; total: number }, unit: "etp" | "nombre" | "eur", basis: string): SheetSpec {
+// Répartition par groupe (stocks au dernier mois connu, flux sur le cumul des mois connus) et part de chaque groupe. Un groupe masqué
+// par le seuil de confidentialité (v null) est n.d. avec la même raison que l'écran, valeur et part ; le total reste.
+export function effectifsShareSheet(repart: { items: { group: string; v: number | null; reason?: string | null }[]; total: number }, unit: "etp" | "nombre" | "eur", basis: string): SheetSpec {
   const share = (v: number): ExportCell => (repart.total > 0 ? { exact: exactRatio(v, repart.total) } : { nd: "total nul : une part n'est pas définie" });
+  const row = (it: { group: string; v: number | null; reason?: string | null }): ExportCell[] => (it.v === null ? [it.group, { nd: it.reason ?? "non affiché" }, { nd: it.reason ?? "non affiché" }, ""] : [it.group, it.v, share(it.v), ""]);
   return {
     name: "Répartition",
     columns: [{ header: "Groupe", key: "groupe", kind: "text", width: 28 }, { header: "Valeur", key: "valeur", kind: unit }, { header: "Part", key: "part", kind: "pourcent" }, { header: "Observations", key: "observations", kind: "text" }],
-    rows: [...repart.items.map((it) => [it.group, it.v, share(it.v), ""]), ["Total", repart.total, share(repart.total), ""]],
+    rows: [...repart.items.map(row), ["Total", repart.total, share(repart.total), ""]],
     note: `Base : ${basis}.`,
   };
 }

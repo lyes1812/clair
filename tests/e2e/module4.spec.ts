@@ -186,7 +186,7 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   expect(await txt(svc("TEST-SVC-A", "n"))).toBe("n.d.");
   expect(await page.getByTestId("ms-services-table").locator("tbody tr td[data-col='n'] abbr.nd").count()).toBeGreaterThanOrEqual(2);
   expect(await txt(page.getByTestId("ms-services-total").locator("td[data-col='n']"))).toBe("211 260,00 €");
-  await page.goto(`${ms}?svc=TEST-SVC-A`);
+  await page.goto(`${ms}?service=TEST-SVC-A`);
   await expect(page.getByTestId("ms-service-guard")).toContainText("seuil de confidentialité");
   await page.screenshot({ path: `${CAPTURES}/4-05-confidentialite.png`, fullPage: true });
   // Seuil absent : la répartition par service est n.d. avec la raison et le lien vers Paramètres, le total reste.

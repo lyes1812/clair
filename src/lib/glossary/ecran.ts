@@ -15,8 +15,9 @@ export const GLOSSARY_ECRAN: GlossaryEntry[] = [
       "Un n.d. n'est jamais un zéro : zéro est une valeur connue, n.d. est une valeur inconnue. Il n'est jamais remplacé par une estimation ni par une répartition reconstituée. Un total, un écart, un taux ou une moyenne calculé à partir d'une valeur n.d. est n.d. à son tour, sauf exception écrite dans la définition de l'indicateur. Exemple d'exception : un chiffre précédé de « ≥ » est une borne basse, parce que des données manquent ; la valeur réelle est au moins égale à celle qui est affichée.",
       "Une raison qui commence par « sans objet » dit que la valeur n'existe pas pour ce mois ou cette ligne (par exemple un mois réel dans la série des mois projetés) : ce n'est pas une donnée manquante.",
       "Quand une règle de calcul requise n'est pas renseignée dans les Paramètres de l'espace, Clair refuse de calculer et dit laquelle manque : il n'applique aucune valeur par défaut cachée.",
+      "Une valeur masquée par le seuil de confidentialité de l'espace est aussi un n.d., avec la raison « non affiché (seuil de confidentialité : N personnes) » ; sans seuil défini, la raison est « seuil de confidentialité non défini (Paramètres) » (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
-    see: ["lecture-hachure", "lecture-prevu"],
+    see: ["lecture-hachure", "lecture-prevu", "confidentialite"],
   },
   {
     id: "lecture-hachure",

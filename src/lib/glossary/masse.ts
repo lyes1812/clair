@@ -55,13 +55,20 @@ const MORE: Record<string, string> = {
   grille:
     "La grille en vigueur de l'espace (rubriques, rôle brut, cotisations ou hors masse, et comptes) est listée dans les détails de la lecture, en haut de l'écran. Une valeur par défaut validée est proposée ; un administrateur peut la modifier dans Paramètres.",
   "fixe-variable":
-    "Le fixe regroupe la rubrique « Salaires et appointements » (salaires et congés payés). Le variable regroupe les rubriques « Primes » et « Indemnités et avantages ». Les gratifications de stage sont une rubrique à part, comptée dans le brut. « dont primes » est une part de la colonne Variable.",
+    "Le fixe regroupe la rubrique « Salaires et appointements » (salaires et congés payés). Le variable regroupe les rubriques « Primes » et « Indemnités et avantages ». Les gratifications de stage sont une rubrique à part, comptée dans le brut. « dont primes » est une part de la colonne Variable.\n\nLes tuiles et le tableau par mois portent sur l'entreprise entière : ils ne sont jamais masqués. Le brut par libellé de paie et les primes par famille suivent le seuil de confidentialité (voir « Primes et familles de prime » et « Seuil de confidentialité ») ; sous le filtre Service, l'écran du service est n.d. quand sa ligne du tableau Services est masquée.",
   provision:
-    "Congés payés + charges sociales = provision du mois. Une part sans ligne de dotation reconnue est n.d. et rend le total n.d. ; sa raison est donnée sous le tableau. L'écart est la provision de fin de mois moins celle de la même fin de mois un an plus tôt (N-1).",
+    "Congés payés + charges sociales = provision du mois. Une part sans ligne de dotation reconnue est n.d. et rend le total n.d. ; sa raison est donnée sous le tableau. L'écart est la provision de fin de mois moins celle de la même fin de mois un an plus tôt (N-1).\n\nPar service, la provision d'une fin de mois décrit les personnes distinctes dont un contrat porte une ligne de dotation « Mois courant » : sous le seuil de confidentialité, la ligne est n.d., avec masquage secondaire dans le mois vers la provision de l'entreprise, qui reste affichée ; sous le filtre Service, la provision du service retenu est n.d. quand sa ligne l'est (voir « Seuil de confidentialité »).",
   rapprochement:
     "L'écart est calculé par rubrique et par mois ; les libellés complets des rubriques sont dans l'infobulle du graphique. Avec le filtre Service, le rapprochement n'est pas calculé : la comptabilité ne porte pas le code analytique du journal de paie.",
   service:
-    "Le coût d'un service est sa masse chargée (brut + cotisations patronales). Le coût par personne-mois compte les contrats rémunérés (portant une ligne de brut) chaque mois : ce n'est pas un coût par ETP. Un service n.d. n'est pas compté dans le « Total affiché » de l'infobulle. Le filtre Service ne s'applique pas aux graphiques par service : tous les services y sont montrés, comme dans le tableau Services. L'anneau ne montre que les services au coût positif ; les parts sont calculées sur les services tracés et un service sans coût positif est nommé sous l'anneau, son montant restant dans le tableau. Au-delà de huit services au coût positif, l'anneau est remplacé par des barres horizontales classées ; au-delà de huit services, l'empilement par mois n'est pas tracé : les montants sont dans l'affichage Tableau. Cliquer le nom d'un service dans le tableau filtre l'écran sur ce service.",
+    "Le coût d'un service est sa masse chargée (brut + cotisations patronales). Le coût par personne-mois compte les contrats rémunérés (portant une ligne de brut) chaque mois : ce n'est pas un coût par ETP. Un service n.d. n'est pas compté dans le « Total affiché » de l'infobulle. Le filtre Service ne s'applique pas aux graphiques par service : tous les services y sont montrés, comme dans le tableau Services. L'anneau ne montre que les services au coût positif ; les parts sont calculées sur les services tracés et un service sans coût positif est nommé sous l'anneau, son montant restant dans le tableau. Au-delà de huit services au coût positif, l'anneau est remplacé par des barres horizontales classées ; au-delà de huit services, l'empilement par mois n'est pas tracé : les montants sont dans l'affichage Tableau. Cliquer le nom d'un service dans le tableau filtre l'écran sur ce service.\n\nChaque ligne de service (période, N-1, chaque mois) décrit les personnes distinctes reliées aux contrats qui portent ses lignes de masse : une ligne qui en compte moins que le seuil de confidentialité est n.d., avec masquage secondaire dans chaque colonne et vers la période de la ligne ; son évolution est n.d. ; le total de l'entreprise reste affiché. Sous le filtre Service, un service dont la ligne est masquée sans filtre, au masquage principal ou secondaire, rend tout l'écran du service n.d. (« — service retenu par le filtre »), avec l'action « Retirer le filtre Service » ; sans seuil défini, de même, avec le lien vers les Paramètres (voir « Seuil de confidentialité »).",
+};
+
+// Entrées voisines (« Voir aussi ») des définitions reprises du code : la règle de confidentialité de l'application est écrite une fois.
+const SEE: Record<string, string[]> = {
+  service: ["confidentialite", "cout-etp"],
+  provision: ["confidentialite", "hors-masse"],
+  "fixe-variable": ["primes", "confidentialite"],
 };
 
 const FROM_CODE: GlossaryEntry[] = PAYROLL_DEFINITIONS.map((d) => ({
@@ -70,6 +77,7 @@ const FROM_CODE: GlossaryEntry[] = PAYROLL_DEFINITIONS.map((d) => ({
   family: FAMILY,
   definition: MORE[d.id] ? `${d.text}\n\n${MORE[d.id]}` : d.text,
   ...(FORMULAS[d.id] ? { formula: FORMULAS[d.id] } : {}),
+  ...(SEE[d.id] ? { see: SEE[d.id] } : {}),
 }));
 
 const MOVED: GlossaryEntry[] = [
@@ -77,12 +85,14 @@ const MOVED: GlossaryEntry[] = [
     id: "primes",
     term: "Primes et familles de prime",
     family: FAMILY,
+    see: ["fixe-variable", "confidentialite"],
     formula: "hors primes = brut − primes",
     definition: [
       "Les primes sont le solde de la rubrique « Primes » de la grille de comptes (par défaut, comptes 6413 hors gratifications de stage 64137). « Hors primes » est le brut moins les primes.",
       "Une famille de prime est un libellé de ligne de prime du journal PayFit (par exemple « Primes sur objectif », « Primes de vacances »), regroupé par la rubrique de la grille : la somme des familles est le total des primes du mois.",
       "Dans le graphique mensuel, un mois sans colonne n'a aucune prime (0,00 €) : il n'est pas absent. Au-delà de huit familles, le graphique n'est pas tracé : les montants de chaque famille, mois par mois, sont dans le tableau « Primes par famille et par mois ».",
       "Les éléments non récurrents (indemnités de rupture conventionnelle, indemnités compensatrices de congés payés) ne sont pas distingués par le journal PayFit, qui les passe avec les autres lignes du compte 6414 « Indemnités et avantages divers » : ils restent dans la rubrique « Indemnités et avantages ».",
+      "Chaque famille de prime, par mois et sur la période, et chaque libellé du tableau « Brut par libellé de paie » décrivent les personnes distinctes reliées aux contrats qui portent leurs lignes : une cellule qui en compte moins que le seuil de confidentialité est n.d., son écart aussi, avec masquage secondaire dans chaque mois, sur la période et vers la cellule de période de la famille ; les totaux (primes du mois, brut de la période et de N-1) restent affichés. Sans seuil défini, ces répartitions sont n.d. (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
   {

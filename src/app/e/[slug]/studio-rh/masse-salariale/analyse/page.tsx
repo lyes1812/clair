@@ -5,13 +5,16 @@ import { formatEuros } from "@/lib/money";
 import { bridge, type Series } from "@/lib/budget/series";
 import { etpCascade, masseByRubric, STEP_LABELS } from "@/lib/budget/cascade";
 import { aggregate, alignedSeries, diff, type RowKey } from "@/lib/budget/versions";
+import { confidentialiteHref, getConfidentialite } from "@/lib/confidentialite";
+import { confidentialiteOf, croiseeLink } from "@/lib/croisee/confidentialite";
 import { ECART_TERMS, STEP_TERMS } from "@/lib/glossary/ecart";
 import { costTone, trendClass } from "@/lib/trend";
-import { etpWaterfall, gapTone, masseWaterfall, pontWaterfall } from "@/lib/viz/ecart";
+import { cascadeView, etpWaterfallOf, gapTone, masseWaterfall, pontWaterfall, serviceGuard, serviceSide, type SeuilNd, type WaterfallData } from "@/lib/viz/ecart";
 import { fmtFixed } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
+import { ConfidentialiteLine } from "../components";
 import { loadVersions } from "../ecart-data";
 import { GapPct, MsHeader, MsTabs, neg, PanelTitle, periodText, pctSign, PickerForm, scopeText, signOf, TBL, toneClass, TrendLegend } from "../EcartParts";
 import { peopleIndex } from "../people-index";
@@ -30,6 +33,8 @@ const etp = (n: number) => fmtFixed({ num: n, den: 10000 }, 2);
 const eur = (n: number) => neg(formatEuros(n));
 const sg = (n: number, f: (x: number) => string) => `${n > 0 ? "+" : ""}${f(n)}`;
 const RUBRIC_OPTIONS = [{ key: "etp", label: "ETP (moyenne des ETP de fin de mois)" }, { key: "masse", label: "Masse salariale chargée" }];
+// Les raisons du paramètre absent ou illisible finissent par « (Paramètres) » : ce mot devient le lien vers la section Confidentialité.
+const PARAM = " (Paramètres)";
 
 export default async function AnalysePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
@@ -66,15 +71,33 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
   const showGraph = !!(a && b) && aff !== "tableau";
   const showTables = !!(a && b) && aff !== "graphique";
 
+  // Seuil de confidentialité de l'espace (règle de toute l'application, sans valeur par défaut) et lien contrat → personne du
+  // référentiel Collaborateurs. Sous un filtre de service, les chiffres du service (cascade, contributions de masse, pont) décrivent
+  // ses personnes sur chaque version : sous le seuil ou non dénombré, tout le bloc est n.d. Sans filtre, seuls les paliers de la
+  // cascade sont masqués ; les totaux et le pont de toute l'entreprise ne le sont jamais.
+  const setting = await getConfidentialite(workspace.id);
+  const conf = confidentialiteOf(setting);
+  const kpiData = loaded.ctx.kpi.input?.data ?? null;
+  const link = kpiData ? croiseeLink(kpiData) : new Map<string, string>();
+  const guard = a && b && loaded.filter ? serviceGuard([serviceSide(a, loaded.sources[0], monthsA, loaded.filter.value, link), serviceSide(b, loaded.sources[1], monthsB, loaded.filter.value, link)], conf) : null;
+  const cv = cascade ? cascadeView(cascade, conf, link, guard) : null;
+  const masseNd: SeuilNd | null = !masse ? null : (guard ?? (masse.kind === "nd" ? { reason: masse.reason, param: false } : null));
+  const masseOk = masse && masse.kind === "value" && !masseNd ? masse : null;
+  const pontNd: SeuilNd | null = !pont ? null : (guard ?? (pont.kind === "nd" ? { reason: pont.reason, param: false } : null));
+  const pontOk = pont && pont.kind === "value" && !pontNd ? pont : null;
+  const paramHref = confidentialiteHref(slug);
+  const ndText = (nd: SeuilNd) =>
+    !nd.param ? nd.reason : nd.reason.endsWith(PARAM) ? <>{nd.reason.slice(0, -PARAM.length)} (<a href={paramHref}>Paramètres</a>)</> : <>{nd.reason} (<a href={paramHref}>Paramètres</a>)</>;
+
   // Pourcentages d'écart repris des agrégats de l'écart budgétaire (mêmes valeurs que sur cette page) : par rubrique de masse,
   // total de la masse et ETP moyen. Une contribution d'ETP n'a pas de valeur de départ propre : pas de pourcentage.
   const pctOf = (k: RowKey) => (a && b ? diff(aggregate(a, monthsA, k), aggregate(b, monthsB, k)) : null);
   const etpPct = pctOf("etp");
   const massePct = pctOf("masse");
 
-  const wfEtp = cascade ? etpWaterfall(cascade) : null;
-  const wfMasse = masse ? masseWaterfall(masse) : null;
-  const wfPont = pont ? pontWaterfall(pont) : null;
+  const wfEtp = cv ? etpWaterfallOf(cv) : null;
+  const wfMasse: WaterfallData | null = !masse ? null : masseNd ? { kind: "nd", reason: masseNd.reason } : masseWaterfall(masse);
+  const wfPont = pontOk ? pontWaterfall(pontOk) : null;
   const items: Record<string, AnalyseItem> | null = wfEtp && wfMasse
     ? {
         etp: { label: RUBRIC_OPTIONS[0].label, title: `ETP — de ${s0} à ${s1}`, ariaLabel: `Cascade des ETP de ${s0} à ${s1}, ${period}, ${scope} : ETP de départ, contributions des entrées et des sorties, ETP d'arrivée`, startLabel: s0, endLabel: s1, trend: "neutral", data: wfEtp },
@@ -84,7 +107,12 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
   const help = (term: string, label: string) => <GlossaryLink slug={slug} term={term} label={label} />;
   const axisHelp = <GlossaryLink slug={slug} term={ECART_TERMS.axeAjuste} label="Lecture d'un graphique à axe ajusté" />;
   // La légende des couleurs est écrite une fois, au-dessus du tableau de masse ; le pont ne la répète que si ce tableau est absent.
-  const legendInMasse = showTables && !!masse && masse.kind === "value";
+  const legendInMasse = showTables && !!masseOk;
+  // Cascade n.d. faute de seuil (service retenu ou paliers) : le graphique écrit la raison, la page ajoute le lien vers les Paramètres.
+  const paramNd = guard?.param ? guard : cv && cv.kind === "value" && cv.param ? { reason: cv.chart ?? "", param: true } : null;
+  // Paliers n.d. de la cascade, groupés par raison (la raison est écrite sous le tableau, jamais seulement au survol).
+  const ndSteps = cv && cv.kind === "value" ? cv.steps.filter((s) => s.nd !== null) : [];
+  const ndByReason = [...new Set(ndSteps.map((s) => s.nd as string))].map((reason) => ({ reason, labels: ndSteps.filter((s) => s.nd === reason).map((s) => STEP_LABELS[s.id]) }));
 
   return (
     <MoneyText><>
@@ -107,7 +135,10 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
         {loaded.notices.map((n) => <p key={n} className="notice">{n}</p>)}
         <PickerForm path={base} loaded={loaded} columns={2} hidden={hidden} slug={slug} />
         {!a || !b ? <p className="desc" data-testid="analyse-empty">Choisissez deux versions à comparer.</p> : (
-          <p className="desc" data-testid="analyse-vers-ecart"><a href={ecartHref}>Écart par rubrique</a></p>
+          <>
+            <p className="desc" data-testid="analyse-vers-ecart"><a href={ecartHref}>Écart par rubrique</a></p>
+            <ConfidentialiteLine slug={slug} setting={setting} testid="analyse-confidentialite" />
+          </>
         )}
       </section>
 
@@ -117,16 +148,17 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
             <PanelTitle title="Cascade de l'écart" slug={slug} term={ECART_TERMS.cascades} label="Lecture d'une cascade" />
           </div>
           <AnalyseChart initial={rub} options={RUBRIC_OPTIONS} items={items} axisHelp={axisHelp} />
+          {paramNd && <p className="nd" data-testid="analyse-graph-param"><a href={paramHref}>Définir le seuil de confidentialité (Paramètres)</a></p>}
         </section>
       )}
 
-      {showTables && a && b && cascade && (
+      {showTables && a && b && cascade && cv && (
         <section className="panel" data-testid="analyse-etp" id="tableau">
           <div className="panel-head">
             <PanelTitle title="Cascade d'ETP" slug={slug} term={ECART_TERMS.cascade} label="Cascade d'ETP" />
           </div>
-          {cascade.kind === "nd" ? (
-            <p className="nd" data-testid="analyse-etp-nd">n.d. — {cascade.reason}</p>
+          {cv.kind === "nd" ? (
+            <p className="nd" data-testid="analyse-etp-nd">n.d. — {ndText(cv)}</p>
           ) : (
             <>
               <div className="table-wrap scroll">
@@ -134,26 +166,31 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
                   <caption className="ecart-sr">Cascade des ETP de {s0} à {s1}, {period}, {scope} : départ, contributions, écart total, arrivée</caption>
                   <thead {...TBL.group}><tr {...TBL.row}><th scope="col" {...TBL.head}>Rubrique</th><th scope="col" className="num" {...TBL.head}>ETP (valeur ou écart)</th><th scope="col" className="num" {...TBL.head}>Poids des écarts{help(ECART_TERMS.poids, "Poids des écarts")}</th><th scope="col" className="num" {...TBL.head}>Écart (%){help(ECART_TERMS.ecartPourcentage, "Écart en pourcentage")}</th></tr></thead>
                   <tbody {...TBL.group}>
-                    <tr data-step="start" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>ETP {s0}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{etp(cascade.start)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
-                    {cascade.steps.map((s) => (
+                    <tr data-step="start" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>ETP {s0}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{etp(cv.start)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
+                    {cv.steps.map((s) => (
                       <tr key={s.id} data-step={s.id} className="child" {...TBL.row}>
                         <th scope="row" {...TBL.rowhead}>{STEP_LABELS[s.id]}{help(STEP_TERMS[s.id], STEP_LABELS[s.id])}</th>
-                        <td className="num" data-col="valeur" data-sign={signOf(s.etp4)} data-label="Écart" {...TBL.cell}>{sg(s.etp4, etp)}</td>
-                        <td className="num" data-label="Poids des écarts" {...TBL.cell}><Weight n={s.etp4} total={cascade.end - cascade.start} /></td>
+                        <td className="num" data-col="valeur" data-sign={s.nd === null ? signOf(s.etp4) : undefined} data-label="Écart" {...TBL.cell}>{s.nd === null ? sg(s.etp4, etp) : <abbr className="nd" title={s.nd}>n.d.</abbr>}</td>
+                        <td className="num" data-label="Poids des écarts" {...TBL.cell}><Weight n={s.nd === null ? s.etp4 : null} total={cv.end - cv.start} reason={s.nd} /></td>
                         <td className="num" data-label="Écart (%)" {...TBL.cell}>—</td>
                       </tr>
                     ))}
-                    <tr data-step="residual" className="child" {...TBL.row}><th scope="row" {...TBL.rowhead}>Résiduel d'arrondi{help(ECART_TERMS.residuel, "Résiduel d'une cascade")}</th><td className="num" data-col="valeur" data-label="Écart" {...TBL.cell}>{sg(cascade.residual, etp)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
-                    <tr data-step="total" className="subtotal" {...TBL.row}><th scope="row" {...TBL.rowhead}>Écart total{help(ECART_TERMS.ecart, "Écart")}</th><td className="num" data-col="valeur" data-sign={signOf(cascade.end - cascade.start)} data-label="Écart" {...TBL.cell}>{sg(cascade.end - cascade.start, etp)}</td><td {...TBL.cell} /><td className="num" data-col="pct" data-sign={etpPct ? pctSign(etpPct) : undefined} data-label="Écart (%)" {...TBL.cell}>{etpPct ? <GapPct d={etpPct} /> : "—"}</td></tr>
-                    <tr data-step="end" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>ETP {s1}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{etp(cascade.end)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
+                    <tr data-step="residual" className="child" {...TBL.row}><th scope="row" {...TBL.rowhead}>Résiduel d'arrondi{help(ECART_TERMS.residuel, "Résiduel d'une cascade")}</th><td className="num" data-col="valeur" data-label="Écart" {...TBL.cell}>{sg(cv.residual, etp)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
+                    <tr data-step="total" className="subtotal" {...TBL.row}><th scope="row" {...TBL.rowhead}>Écart total{help(ECART_TERMS.ecart, "Écart")}</th><td className="num" data-col="valeur" data-sign={signOf(cv.end - cv.start)} data-label="Écart" {...TBL.cell}>{sg(cv.end - cv.start, etp)}</td><td {...TBL.cell} /><td className="num" data-col="pct" data-sign={etpPct ? pctSign(etpPct) : undefined} data-label="Écart (%)" {...TBL.cell}>{etpPct ? <GapPct d={etpPct} /> : "—"}</td></tr>
+                    <tr data-step="end" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>ETP {s1}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{etp(cv.end)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
                   </tbody>
                 </table>
               </div>
+              {ndByReason.length > 0 && (
+                <p className="nd" data-testid="analyse-etp-nd-list">
+                  Paliers n.d. ({ndSteps.length}) : {ndByReason.map((r, i) => <span key={r.reason}>{i > 0 ? " ; " : ""}{r.labels.join(", ")} — {ndText({ reason: r.reason, param: cv.param })}</span>)}
+                </p>
+              )}
               {canZoom ? (
                 <details data-testid="analyse-etp-who">
                   <summary>Salariés derrière chaque contribution</summary>
                   <ul className="list">
-                    {cascade.steps.filter((s) => s.people.length).map((s) => <li key={s.id} className="desc"><strong>{STEP_LABELS[s.id]}</strong> : {s.people.slice(0, 30).map((p) => `${nameOf(p.key)} ${sg(p.etp4, etp)}`).join(" · ")}{s.people.length > 30 ? ` · … (${s.people.length - 30} autres)` : ""}</li>)}
+                    {cv.steps.filter((s) => s.people.length).map((s) => <li key={s.id} className="desc"><strong>{STEP_LABELS[s.id]}</strong> : {s.people.slice(0, 30).map((p) => `${nameOf(p.key)} ${sg(p.etp4, etp)}`).join(" · ")}{s.people.length > 30 ? ` · … (${s.people.length - 30} autres)` : ""}</li>)}
                   </ul>
                 </details>
               ) : <p className="tile-foot">Le détail nominatif est réservé aux administrateurs et aux éditeurs.</p>}
@@ -167,8 +204,8 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
           <div className="panel-head">
             <PanelTitle title="Masse salariale chargée" slug={slug} term={ECART_TERMS.contributions} label="Contributions de la masse salariale" />
           </div>
-          {masse.kind === "nd" ? (
-            <p className="nd" data-testid="analyse-masse-nd">n.d. — {masse.reason}</p>
+          {!masseOk ? (
+            <p className="nd" data-testid="analyse-masse-nd">n.d. — {masseNd ? ndText(masseNd) : ""}</p>
           ) : (
             <>
               <TrendLegend slug={slug} />
@@ -177,28 +214,28 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
                   <caption className="ecart-sr">Contribution de chaque rubrique à l'écart de masse salariale chargée de {s0} à {s1}, {period}, {scope}</caption>
                   <thead {...TBL.group}><tr {...TBL.row}><th scope="col" {...TBL.head}>Rubrique</th><th scope="col" className="num" {...TBL.head}>Montant (valeur ou écart)</th><th scope="col" className="num" {...TBL.head}>Poids des écarts{help(ECART_TERMS.poids, "Poids des écarts")}</th><th scope="col" className="num" {...TBL.head}>Écart (%){help(ECART_TERMS.ecartPourcentage, "Écart en pourcentage")}</th></tr></thead>
                   <tbody {...TBL.group}>
-                    <tr data-step="start" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>{s0}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{eur(masse.start)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
-                    {masse.steps.map((s) => {
+                    <tr data-step="start" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>{s0}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{eur(masseOk.start)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
+                    {masseOk.steps.map((s) => {
                       const pct = pctOf(s.key as RowKey);
                       return (
                         <tr key={s.key} data-step={s.key} className="child" {...TBL.row}>
                           <th scope="row" {...TBL.rowhead}>{s.label}</th>
                           <td className={toneClass("num", s.delta === null ? "flat" : costTone(s.delta))} data-col="valeur" data-sign={s.delta === null ? undefined : signOf(s.delta)} data-label="Écart" {...TBL.cell}>{s.delta === null ? <abbr className="nd" title={s.reason ?? undefined}>n.d.</abbr> : sg(s.delta, eur)}</td>
-                          <td className="num" data-label="Poids des écarts" {...TBL.cell}><Weight n={s.delta} total={masse.end - masse.start} reason={s.reason} /></td>
+                          <td className="num" data-label="Poids des écarts" {...TBL.cell}><Weight n={s.delta} total={masseOk.end - masseOk.start} reason={s.reason} /></td>
                           <td className={toneClass("num", pct ? gapTone(s.key as RowKey, pct, "pct") : "flat")} data-sign={pct ? pctSign(pct) : undefined} data-label="Écart (%)" {...TBL.cell}>{pct ? <GapPct d={pct} /> : "—"}</td>
                         </tr>
                       );
                     })}
-                    <tr data-step="residual" className="child" {...TBL.row}><th scope="row" {...TBL.rowhead}>{masse.steps.some((s) => s.delta === null) ? "Résiduel (rubriques n.d.)" : "Résiduel"}{help(ECART_TERMS.residuel, "Résiduel d'une cascade")}</th><td className={toneClass("num", costTone(masse.residual ?? 0))} data-col="valeur" data-label="Écart" {...TBL.cell}>{sg(masse.residual ?? 0, eur)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
-                    <tr data-step="total" className="subtotal" {...TBL.row}><th scope="row" {...TBL.rowhead}>Écart total{help(ECART_TERMS.ecart, "Écart")}</th><td className={toneClass("num", costTone(masse.end - masse.start))} data-col="valeur" data-sign={signOf(masse.end - masse.start)} data-label="Écart" {...TBL.cell}>{sg(masse.end - masse.start, eur)}</td><td {...TBL.cell} /><td className={toneClass("num", massePct ? gapTone("masse", massePct, "pct") : "flat")} data-col="pct" data-sign={massePct ? pctSign(massePct) : undefined} data-label="Écart (%)" {...TBL.cell}>{massePct ? <GapPct d={massePct} /> : "—"}</td></tr>
-                    <tr data-step="end" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>{s1}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{eur(masse.end)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
+                    <tr data-step="residual" className="child" {...TBL.row}><th scope="row" {...TBL.rowhead}>{masseOk.steps.some((s) => s.delta === null) ? "Résiduel (rubriques n.d.)" : "Résiduel"}{help(ECART_TERMS.residuel, "Résiduel d'une cascade")}</th><td className={toneClass("num", costTone(masseOk.residual ?? 0))} data-col="valeur" data-label="Écart" {...TBL.cell}>{sg(masseOk.residual ?? 0, eur)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
+                    <tr data-step="total" className="subtotal" {...TBL.row}><th scope="row" {...TBL.rowhead}>Écart total{help(ECART_TERMS.ecart, "Écart")}</th><td className={toneClass("num", costTone(masseOk.end - masseOk.start))} data-col="valeur" data-sign={signOf(masseOk.end - masseOk.start)} data-label="Écart" {...TBL.cell}>{sg(masseOk.end - masseOk.start, eur)}</td><td {...TBL.cell} /><td className={toneClass("num", massePct ? gapTone("masse", massePct, "pct") : "flat")} data-col="pct" data-sign={massePct ? pctSign(massePct) : undefined} data-label="Écart (%)" {...TBL.cell}>{massePct ? <GapPct d={massePct} /> : "—"}</td></tr>
+                    <tr data-step="end" className="total" {...TBL.row}><th scope="row" {...TBL.rowhead}>{s1}</th><td className="num" data-col="valeur" data-label="Valeur" {...TBL.cell}>{eur(masseOk.end)}</td><td {...TBL.cell} /><td {...TBL.cell} /></tr>
                   </tbody>
                 </table>
               </div>
-              {masse.steps.some((s) => s.delta === null) && (
+              {masseOk.steps.some((s) => s.delta === null) && (
                 <details data-testid="analyse-masse-nd-list">
-                  <summary>Rubriques n.d. ({masse.steps.filter((s) => s.delta === null).length})</summary>
-                  <ul className="list">{masse.steps.filter((s) => s.delta === null).map((s) => <li key={s.key} className="desc">{s.label} : {s.reason ?? "valeur absente"}</li>)}</ul>
+                  <summary>Rubriques n.d. ({masseOk.steps.filter((s) => s.delta === null).length})</summary>
+                  <ul className="list">{masseOk.steps.filter((s) => s.delta === null).map((s) => <li key={s.key} className="desc">{s.label} : {s.reason ?? "valeur absente"}</li>)}</ul>
                 </details>
               )}
             </>
@@ -211,17 +248,17 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
           <div className="panel-head">
             <PanelTitle title="Pont volume / coût moyen" slug={slug} term={ECART_TERMS.pont} label="Pont volume / coût moyen" />
           </div>
-          {pont.kind === "nd" ? (
-            <p className="nd" data-testid="analyse-pont-nd">n.d. — {pont.reason}</p>
+          {!pontOk ? (
+            <p className="nd" data-testid="analyse-pont-nd">n.d. — {pontNd ? ndText(pontNd) : ""}</p>
           ) : (
             <>
               {aff !== "graphique" && !legendInMasse && <TrendLegend slug={slug} />}
               <div className="pont">
                 {aff !== "graphique" && (
                   <dl className="pont-tiles">
-                    <div data-testid="pont-delta"><dt>Écart de masse salariale</dt><dd className={trendClass(costTone(pont.delta))} data-sign={signOf(pont.delta)}>{sg(pont.delta, eur)}</dd></div>
-                    <div data-testid="pont-volume"><dt>Effet volume</dt><dd className={trendClass(costTone(pont.volume))} data-sign={signOf(pont.volume)}>{sg(pont.volume, eur)}</dd></div>
-                    <div data-testid="pont-cout"><dt>Effet coût moyen</dt><dd className={trendClass(costTone(pont.averageCost))} data-sign={signOf(pont.averageCost)}>{sg(pont.averageCost, eur)}</dd></div>
+                    <div data-testid="pont-delta"><dt>Écart de masse salariale</dt><dd className={trendClass(costTone(pontOk.delta))} data-sign={signOf(pontOk.delta)}>{sg(pontOk.delta, eur)}</dd></div>
+                    <div data-testid="pont-volume"><dt>Effet volume</dt><dd className={trendClass(costTone(pontOk.volume))} data-sign={signOf(pontOk.volume)}>{sg(pontOk.volume, eur)}</dd></div>
+                    <div data-testid="pont-cout"><dt>Effet coût moyen</dt><dd className={trendClass(costTone(pontOk.averageCost))} data-sign={signOf(pontOk.averageCost)}>{sg(pontOk.averageCost, eur)}</dd></div>
                   </dl>
                 )}
                 {aff !== "tableau" && wfPont && wfPont.kind === "value" && (

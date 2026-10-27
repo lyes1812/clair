@@ -269,7 +269,7 @@ describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", 
   });
 
   it("sans élément non récurrent : lignes à 0 (jamais « −0 »), pas de cascade du retraité, mention écrite", () => {
-    const z = buildBudget(budgetInput({ scenario: scenarioOf({ retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [], realised: 0, projected: 0, total: 0, retraite: 13_230_000 }, contributors: { realised: 0, projected: 0 } }) }));
+    const z = buildBudget(budgetInput({ scenario: scenarioOf({ retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [], realised: 0, projected: 0, total: 0, retraite: 13_230_000 }, contributors: { realised: G([]), projected: G([]) } }) }));
     const t = table(z, BUDGET_TABLE_IDS.atterrissage);
     expect(Object.is(t.rows[3].cells[1], 0)).toBe(true);
     expect(Object.is(t.rows[4].cells[1], 0)).toBe(true);
@@ -279,7 +279,7 @@ describe("buildBudget — atterrissage, atterrissage retraité, écart annuel", 
   });
 
   it("des lignes non récurrentes à 0 : même phrase (cascade « vide »), pas de cascade du retraité", () => {
-    const z = buildBudget(budgetInput({ scenario: scenarioOf({ retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [{ label: "Saisie annulée", realised: 0, projected: 0 }], realised: 0, projected: 0, total: 0, retraite: 13_230_000 }, contributors: { realised: 0, projected: 0 } }) }));
+    const z = buildBudget(budgetInput({ scenario: scenarioOf({ retraite: { kind: "value", year: "2026", atterrissage: 13_230_000, rows: [{ label: "Saisie annulée", realised: 0, projected: 0 }], realised: 0, projected: 0, total: 0, retraite: 13_230_000 }, contributors: { realised: G([]), projected: G([]) } }) }));
     expect(z.charts.some((c) => c.id === BUDGET_CHART_IDS.retraite)).toBe(false);
     expect(z.blocks.find((b) => b.id === "atterrissage")!.notes).toEqual(["Aucun élément non récurrent : l'atterrissage retraité 2026 égale l'atterrissage."]);
   });
@@ -827,9 +827,11 @@ describe("buildEffets — seuil de confidentialité sur la cascade d'ETP", () =>
     // (k1) masqué ; ensemble une personne : sorties masquées en second.
     const partial = buildEffets(effetsInput({ cascade: twice, etp: { cur: { kind: "value", num: 36_000, den: 20_000 }, prev: { kind: "value", num: 40_000, den: 20_000 } }, confidentialite: { kind: "set", value: 3 }, link: new Map(["k1", "k3", "k4", "k5", "k6"].map((k) => [k, `personne-${k}`])) }));
     expect(table(partial, EFFETS_TABLE_IDS.etp).rows.map((r) => r.cells[2])).toEqual(["", 0, N3, N3, 0, { nd: SEUIL_NON_VERIFIABLE }, { exact: 0 }, { exact: -0.2 }]);
-    // Sans lien : chaque palier non vide est non dénombré, même au seuil 1.
+    // Sans lien : chaque palier non vide est non dénombré, même au seuil 1 ; l'écart total étant affiché sans qu'aucune personne ne
+    // soit comptée, la protection est impossible : toute la cascade est n.d., les paliers vides compris (raison du seuil).
     const none = buildEffets(effetsInput({ cascade: twice, etp: { cur: { kind: "value", num: 36_000, den: 20_000 }, prev: { kind: "value", num: 40_000, den: 20_000 } }, link: new Map() }));
-    expect(table(none, EFFETS_TABLE_IDS.etp).rows.map((r) => r.cells[2])).toEqual(["", 0, { nd: SEUIL_NON_VERIFIABLE }, { nd: SEUIL_NON_VERIFIABLE }, 0, { nd: SEUIL_NON_VERIFIABLE }, { exact: 0 }, { exact: -0.2 }]);
+    const N1 = { nd: confidentialiteReason(1) };
+    expect(table(none, EFFETS_TABLE_IDS.etp).rows.map((r) => r.cells[2])).toEqual(["", N1, { nd: SEUIL_NON_VERIFIABLE }, { nd: SEUIL_NON_VERIFIABLE }, N1, { nd: SEUIL_NON_VERIFIABLE }, { exact: 0 }, { exact: -0.2 }]);
   });
 
   it("seuil 1 : rien n'est masqué, la cascade est tracée ; seuil non défini : bloc n.d. avec le lien vers les Paramètres", () => {
@@ -1041,7 +1043,7 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
     const m = buildBudget(input);
     // TECH, N : alpha 2 × 2 940 + gamma 2 × 1 400 = 8 680,00 € (2 contrats ≥ seuil 2 : affiché).
     expect(sp(tile(m, "realise").value.text)).toBe("8 680,00 €");
-    expect(input.cohorts.kind === "value" && input.cohorts.total).toEqual({ count: 2, prev: 560_000, cur: 868_000, delta: 308_000 });
+    expect(input.cohorts.kind === "value" && input.cohorts.total).toEqual({ count: 2, prev: 560_000, cur: 868_000, delta: 308_000, persons: ["personne-alpha", "personne-gamma"], unlinked: 0 });
     // N-1 : alpha seul (1 personne < 2) : le tableau du service n'est pas affiché, avec la seule raison du seuil.
     expect(m.blocks.find((b) => b.id === "personnes")!.nd).toEqual([{ label: "Contrats observés", reason: confidentialiteReason(2) }]);
     expect(m.tables.some((t) => t.id === BUDGET_TABLE_IDS.personnes)).toBe(false);
@@ -1299,7 +1301,7 @@ describe("rendu du chapitre", () => {
     expect(out).not.toContain('data-testid="cx-table-budget-personnes"');
     const masked = render(buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 } })));
     expect(masked).toContain('data-testid="cx-table-budget-personnes"');
-    expect(masked).toContain("non affiché (seuil de confidentialité : 2 contrats)");
+    expect(masked).toContain("non affiché (seuil de confidentialité : 2 personnes)");
   });
 
   it("chapitre n.d. : une seule mention avec la raison et l'action", () => {

@@ -60,6 +60,8 @@ const MORE: Record<string, string> = {
     "Les versions sont numérotées 1, 2 et 3 dans l'ordre des champs de choix : la version 1 est le départ de la première comparaison, la version 2 son arrivée. La raison d'une valeur n.d. s'affiche au survol de la valeur et dans la liste « Données absentes » sous le tableau.",
   zoom:
     "Dans le tableau d'écart, un écart souligné en pointillés et suivi d'un chevron (›) ouvre ce détail. Il n'existe que pour la masse salariale chargée, le total brut, la rémunération de base, les primes, les indemnités et les charges patronales.",
+  cascade:
+    "Chaque palier décrit les personnes distinctes de ses contrats : un palier de 1 à (seuil de confidentialité − 1) personnes est n.d., avec masquage secondaire puisque l'écart total est publié ; un palier porté seulement par des contrats non reliés au référentiel (embauche prévue) est non vérifiable. Un palier n.d. empêche de tracer la cascade ; départ, arrivée, écart total et résiduel restent affichés. Sans seuil défini, tous les paliers sont n.d., avec un lien vers les Paramètres (voir « Seuil de confidentialité »).",
 };
 
 // Formules d'une ligne, ajoutées aux définitions existantes.
@@ -119,6 +121,7 @@ const MOVED: GlossaryEntry[] = [
     definition: [
       "L'analyse décompose l'écart entre deux versions de même période et de même service : la version 1 est le départ, la version 2 l'arrivée. Trois lectures, chacune rapprochée de l'écart du tableau d'écart budgétaire : la cascade d'ETP (qui entre, qui sort, quelles quotités changent), les contributions de chaque rubrique à l'écart de masse salariale chargée et le pont volume / coût moyen.",
       "Chaque graphique est une lecture : les valeurs exactes de chaque contribution sont dans les tableaux et les tuiles de l'affichage « Tableau », qui restent la référence. Le détail nominatif des salariés derrière chaque contribution est réservé aux administrateurs et aux éditeurs.",
+      "La ligne « Confidentialité : seuil de N personnes » rappelle le seuil de l'espace, qui s'applique aux paliers de la cascade d'ETP et au service retenu par le filtre (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
   {
@@ -172,6 +175,7 @@ const MOVED: GlossaryEntry[] = [
     definition: [
       "Le pont décompose l'écart de masse salariale chargée entre deux versions en deux effets : l'effet volume, qui mesure ce que coûte l'écart d'ETP-mois au coût par ETP-mois de la version 1, et l'effet coût moyen, qui est le reste. L'effet volume est arrondi au centime : la somme des deux effets égale exactement l'écart. L'écart d'ETP-mois est la différence des cumuls d'ETP de fin de mois de la période.",
       "L'effet de structure (mélange de statuts et de rémunérations) n'est pas calculé : il est compris dans l'effet coût moyen.",
+      "Sans filtre de service, le pont porte sur toute l'entreprise et n'est jamais masqué. Sous un filtre, les chiffres du service (pont, cascade d'ETP, contributions de masse) sont n.d. dès que le service compte de 1 à (seuil de confidentialité − 1) personnes sur l'une des deux versions, ou n'est pas dénombré ; sans seuil défini, ils sont n.d. avec un lien vers les Paramètres (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
     formula: "effet volume = (ETP-mois v2 − ETP-mois v1) × coût par ETP-mois v1 ; effet coût moyen = écart − effet volume",
   },
@@ -228,13 +232,13 @@ const SEE: Record<string, string[]> = {
   rubriques: ["contributions"],
   effectifs: ["cascade"],
   zoom: ["ecart"],
-  cascade: [...Object.values(STEP_TERMS), "residuel", "ecart-cascades"],
+  cascade: [...Object.values(STEP_TERMS), "residuel", "ecart-cascades", "confidentialite"],
   contributions: ["rubriques", "residuel", "poids-ecarts", "ecart-pourcentage"],
-  "analyse-ecarts": ["cascade", "contributions", "pont-volume-cout", "ecart-cascades"],
+  "analyse-ecarts": ["cascade", "contributions", "pont-volume-cout", "ecart-cascades", "confidentialite"],
   "ecart-courbes": ["rubriques", "effectifs", "rangs-de-mois", "axe-ajuste"],
   "ecart-cascades": ["axe-ajuste", "ecart-couleurs", "residuel"],
   "axe-ajuste": ["ecart-courbes", "ecart-cascades"],
-  "pont-volume-cout": ["contributions"],
+  "pont-volume-cout": ["contributions", "confidentialite"],
   residuel: ["cascade", "contributions"],
   "ecart-couleurs": ["ecart"],
   "rangs-de-mois": ["versions"],

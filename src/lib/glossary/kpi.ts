@@ -138,37 +138,39 @@ export const GLOSSARY_KPI: GlossaryEntry[] = [
     id: "kpi-types-absence",
     term: "Motifs retenus pour l'absentéisme",
     family: "KPI RH",
-    see: ["absenteeism", "absence-par-motif"],
+    see: ["absenteeism", "absence-par-motif", "confidentialite"],
     definition: [
       "Motifs retenus : motifs d'absence PayFit dont les jours entrent dans la tuile Absentéisme. À défaut de choix enregistré, la valeur par défaut validée s'applique (son origine est indiquée dans Paramètres) ; l'administrateur coche explicitement les motifs à compter dans Paramètres › Définitions des KPI ; le calcul ne reconnaît aucun motif par son nom.",
       "Non retenus : motifs lus dans PayFit mais non cochés. Ils restent visibles dans le détail de l'absentéisme, avec leur propre taux.",
       "Retenus absents de la lecture : aucune absence de ce motif n'a été lue, ils ne comptent aucun jour.",
-      "Entre parenthèses : nombre d'absences dans toute la lecture, tous mois et tous contrats. Un motif sans libellé français est affiché tel que reçu de PayFit.",
+      "Entre parenthèses : nombre d'absences dans toute la lecture, tous mois et tous contrats. Un motif sans libellé français est affiché tel que reçu de PayFit. Ce nombre est une répartition par motif : il est n.d. quand le motif décrit moins de personnes distinctes que le seuil de confidentialité (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
   {
     id: "absence-par-motif",
     term: "Absentéisme par motif",
     family: "KPI RH",
-    see: ["kpi-types-absence", "absence-all-motifs", "absenteeism"],
+    see: ["kpi-types-absence", "absence-all-motifs", "absenteeism", "confidentialite"],
     formula: "demi-journées d'absence du motif ÷ demi-journées théoriques",
     definition: [
       "Détail de l'absentéisme sur la période affichée : une ligne par motif d'absence présent dans la lecture PayFit, retenu ou non dans Paramètres. Chaque taux se calcule comme celui de la tuile, mêmes statuts et même base de jours, en ne comptant que les absences du motif.",
       "Absences de la lecture : nombre d'absences du motif dans toute la lecture, tous mois et tous contrats. Absences de la période : celles qui touchent la période affichée. Retenu : le motif entre dans la tuile Absentéisme.",
       "Une demi-journée couverte par des absences de deux motifs compte dans chacun : la somme des lignes peut dépasser le taux tous motifs. Un taux « ≥ x » signale des demi-journées incertaines ; un motif dont le taux n'est pas calculable est n.d., avec sa raison.",
+      "Une ligne qui décrit moins de personnes distinctes que le seuil de confidentialité est n.d. (nombres d'absences, demi-journées et taux), avec masquage secondaire entre les motifs retenus, dont la somme est la tuile, et entre les autres motifs ; seule la ligne du motif retenu reste affichée quand c'est le seul motif retenu présent dans la lecture. Sans seuil défini, le tableau est n.d. (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
   {
     id: "absence-all-motifs",
     term: "Taux d'absence, tous motifs",
     family: "KPI RH",
-    see: ["absence-par-motif", "kpi-types-absence", "absenteeism"],
+    see: ["absence-par-motif", "kpi-types-absence", "absenteeism", "confidentialite"],
     formula: "demi-journées d'absence de tous les motifs ÷ demi-journées théoriques",
     definition: [
       "Taux calculé sur tous les motifs d'absence présents dans la lecture PayFit, quels que soient les motifs retenus dans Paramètres. Il figure dans le détail de l'absentéisme, à part du tableau par motif.",
       "Ce n'est pas l'absentéisme : la tuile Absentéisme ne compte que les motifs retenus par l'espace, et ce taux ne la remplace pas.",
       "Une demi-journée couverte par plusieurs absences, y compris de motifs différents, est comptée une seule fois : la somme des taux par motif peut donc dépasser ce taux.",
       "Mêmes règles que l'absentéisme pour les statuts retenus, la base de jours et les parties incertaines (« ≥ x »). Il est n.d. dès qu'une absence de n'importe quel motif est rattachée à un contrat inconnu, quand aucune absence n'a été lue, et en source DSN (arrêts non extraits).",
+      "C'est un indicateur de l'entreprise : il n'est masqué par le seuil de confidentialité que lorsqu'il donnerait par différence un motif masqué du tableau par motif (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
   {
@@ -208,6 +210,23 @@ export const GLOSSARY_KPI: GlossaryEntry[] = [
     ].join("\n\n"),
   },
   {
+    // Règle de confidentialité de toute l'application (src/lib/confidentialite ; moteur maskGroups / maskRelations). L'identifiant est
+    // celui de CONFIDENTIALITE_TERM : les écrans et les exports y renvoient par un « ? », les entrées d'écran par « Voir aussi ».
+    id: "confidentialite",
+    term: "Seuil de confidentialité",
+    family: "KPI RH",
+    see: ["croisee-confidentialite", "absence-par-motif", "effectifs-repartition", "service", "cascade", "lecture-nd"],
+    definition: [
+      "Nombre minimal de personnes distinctes qu'un groupe doit décrire pour que ses chiffres soient affichés, afin qu'aucune personne ne puisse être reconnue dans une répartition. C'est un seul paramètre pour toute l'application, saisi par un administrateur dans Paramètres › Confidentialité : un nombre entier, au moins égal à 1 (avec 1, aucun groupe dénombré n'est masqué). Il n'a aucune valeur par défaut, et « aucun masquage » n'est pas une valeur possible : tant qu'il n'est pas défini, chaque répartition concernée est n.d. avec la raison « seuil de confidentialité non défini (Paramètres) » et un lien vers cette section ; s'il est illisible, « seuil de confidentialité illisible : à ré-enregistrer (Paramètres) ». Les totaux de toute l'entreprise et les indicateurs globaux restent affichés. La section écrit l'origine du seuil (non défini, modifié le … par un administrateur, illisible) ; tant qu'aucun seuil n'y est enregistré, l'ancien réglage de la Masse salariale croisée, s'il existe, est repris et l'origine l'indique. Un champ vidé supprime le seuil, qui redevient « non défini », jamais 0.",
+      "Unité : les personnes distinctes du référentiel Collaborateurs. Un groupe issu du journal de paie, des absences ou d'une projection est un ensemble de contrats, reliés un à un à leur personne par le référentiel : une personne qui a deux contrats dans un même groupe y compte une fois, et une personne présente dans deux groupes masqués n'est comptée qu'une fois. Un contrat qu'aucune personne du référentiel ne relie (contrat inconnu, embauche prévue d'un scénario) ne protège jamais : s'il manque des personnes reliées pour atteindre le seuil, le groupe n'est pas dénombré et sa valeur est n.d. « effectif du groupe non dénombré : seuil de confidentialité non vérifiable ». Une valeur non nulle qu'aucun contrat ne porte (lignes de paie sans contrat, « Non ventilé » par exemple) n'est pas vérifiable non plus, quel que soit le seuil.",
+      "Portée : toute cellule, ligne, carte, série ou point d'une répartition (par service, catégorie, nature, statut, motif d'absence, libellé ou famille de prime, cohorte, palier d'une cascade, mois d'un service filtré, service retenu par un filtre) qui décrit de 1 à (seuil − 1) personnes distinctes est n.d. avec la raison « non affiché (seuil de confidentialité : N personnes) ». Un groupe vide ne désigne personne : il n'est pas masqué pour lui-même. L'écart N − N-1, l'évolution et le pourcentage d'une valeur masquée sont masqués. Les totaux de toute l'entreprise et les indicateurs globaux (effectifs, ETP, masse, absentéisme, turnover, atterrissage, départ, arrivée et écart total d'une cascade, pont sans filtre) ne sont jamais masqués.",
+      "Masquage secondaire : dans chaque ensemble dont la somme est publiée (une colonne dont le total est affiché, les mois d'une ligne et sa période, les natures d'un mois, les familles d'un mois et leur total), une seule valeur masquée se lirait par différence. D'autres valeurs sont donc masquées, la plus petite d'abord, zéro compris, jusqu'à ce que l'ensemble masqué compte au moins « seuil » personnes distinctes et deux valeurs qui décrivent quelqu'un ; un groupe vide, une valeur déjà n.d. ou un groupe non dénombré n'apporte aucune personne comptée et ne suffit jamais à en protéger un autre. Quand c'est impossible, toute la répartition est n.d., seul le total de l'entreprise restant affiché ; un total qui est lui-même une ligne masquable (la période d'un service, le taux tous motifs) est alors masqué à sa place. Masquage principal et masquage secondaire portent la même raison : on ne peut pas savoir lequel des groupes est sous le seuil. Un seul moteur de masquage sert à toute l'application.",
+      "Sous un filtre (Service, par exemple), les chiffres du service retenu décrivent un seul groupe : masse et composition, coût par ETP-mois, pont et cascade, contrats observés, provision et passage du service sont n.d. dès que le service compte de 1 à (seuil − 1) personnes sur la période, sur N-1 ou sur l'un de leurs mois, ou n'est pas dénombré. L'écran le dit, avec l'action « Retirer le filtre Service » ; sans seuil défini, de même, avec le lien vers les Paramètres.",
+      "Où la règle s'applique : les lignes par service de la Masse salariale (Synthèse, Services et, dans la Masse salariale croisée, les chapitres Synthèse et Services), la provision de congés payés par service (Paie & comptabilité), les primes par famille et le brut par libellé (Fixe & variable), le détail de l'absentéisme par motif et les nombres d'absences des motifs de la lecture (KPI RH, Absences & congés), les répartitions des Effectifs mensuels (KPI RH) et d'Effectifs & mouvements, les contrats observés et les éléments non récurrents (Budget & prévisions), les paliers de la cascade d'ETP (Analyse des écarts, Effets d'évolution) et le service retenu par un filtre. L'entrée « Seuil de confidentialité dans la Masse salariale croisée » dit comment chaque chapitre forme ses groupes. Une seule exception : la ligne du motif retenu quand c'est le seul motif retenu présent dans la lecture (elle égale alors la tuile Absentéisme, déjà publiée). Le taux d'absence tous motifs, indicateur de l'entreprise, n'est masqué que lorsqu'il donnerait par différence un motif masqué.",
+      "Les exports Excel et CSV des tableaux concernés portent exactement les mêmes cellules n.d. que l'écran, avec la même raison (en commentaire de cellule dans l'Excel, entre parenthèses dans le CSV) ; l'onglet Filtres de l'Excel des Effectifs mensuels, de la Masse salariale et de la Masse salariale croisée écrit le seuil appliqué. Ne sont pas concernés : les écrans nominatifs par construction, réservés par rôle (Collaborateurs, détail par salarié de l'Écart budgétaire et de l'Analyse des écarts, saisie des Hypothèses budgétaires).",
+    ].join("\n\n"),
+  },
+  {
     id: "kpi-detail",
     term: "Détail d'un chiffre",
     family: "KPI RH",
@@ -238,8 +257,8 @@ export const GLOSSARY_KPI: GlossaryEntry[] = [
     definition: [
       "Effectif de fin de mois (personnes, puis ETP) ventilé par catégorie de contrat : CDI, CDD, apprenti, stagiaire. Chaque cellule indique le nombre de personnes puis l'ETP.",
       "La catégorie est proposée depuis la nature du contrat, puis corrigée contrat par contrat dans Paramètres › Catégories de contrat (PayFit code certains apprentis en CDD). « Non classé » : nature sans catégorie.",
-      "La somme des catégories est l'ETP contractuel de fin de mois des indicateurs.",
-      "Une catégorie sans contrat un mois connu vaut 0 ; un ETP n.d. (contrat sans quotité) et un mois en borne basse ne sont pas tracés dans le graphique.",
+      "Les filtres Établissement et Nature de l'écran s'appliquent au tableau, au graphique et à l'export Excel : la somme des catégories est l'ETP contractuel de fin de mois des indicateurs, dans le même périmètre. Une catégorie présente dans l'entreprise mais sans contrat dans ce périmètre n'a pas de colonne ; la mention sous le tableau la nomme.",
+      "Une catégorie sans contrat un mois connu est sans objet (tiret à l'écran, cellule vide dans l'export), jamais 0 ; un ETP n.d. (contrat sans quotité) et un mois en borne basse ne sont pas tracés dans le graphique.",
     ].join("\n\n"),
   },
   {
@@ -316,11 +335,12 @@ export const GLOSSARY_KPI: GlossaryEntry[] = [
     id: "effectifs-ventilation",
     term: "Ventilation par axe",
     family: "KPI RH",
-    see: ["natures"],
+    see: ["natures", "confidentialite"],
     definition: [
       "Catégorie : CDI, CDD, apprenti, stagiaire (nature du contrat corrigée contrat par contrat dans Paramètres). Contrat : nature DSN. Établissement : SIRET du contrat. Statut : cadre dirigeant ou non, tel que déclaré dans PayFit (le statut cadre / non-cadre de la classification n'est pas fourni). Service : code analytique des lignes de paie (masse et ETP seulement ; effectif et mouvements par service ne sont pas historisés).",
       "Direction, métier, motif d'embauche, sexe : absents des données lues, listés comme indisponibles avec leur raison.",
       "Un groupe sans salarié un mois connu vaut 0 ; un mois n.d. reste n.d. avec sa raison. La somme des groupes est le total du mois.",
+      "Une cellule qui décrit moins de personnes distinctes que le seuil de confidentialité est n.d., avec masquage secondaire dans la colonne du mois ; le total du mois reste affiché et le nombre de cellules non affichées est écrit sous le tableau. Dans un scénario, une embauche prévisionnelle n'est reliée à aucune personne : elle ne protège jamais. Sans seuil défini, chaque cellule de groupe est n.d. (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
   {
@@ -338,21 +358,23 @@ export const GLOSSARY_KPI: GlossaryEntry[] = [
     id: "effectifs-repartition",
     term: "Répartition par groupe",
     family: "KPI RH",
-    see: ["effectifs-mesures", "lecture-hachure"],
+    see: ["effectifs-mesures", "lecture-hachure", "confidentialite"],
     definition: [
       "Stocks : part de chaque groupe au dernier mois connu de l'année. Flux : part de chaque groupe dans le cumul des mois connus ; les mois n.d. ne sont pas comptés et sont signalés. Une part n'est pas définie quand le total est nul : elle est alors n.d.",
       "Un anneau n'est utilisé que jusqu'à huit parts : au-delà, la répartition se lit en barres horizontales classées. Un groupe à zéro n'a pas de part dans l'anneau ; il reste dans le tableau.",
+      "Une part masquée par le seuil de confidentialité (groupe de moins de « seuil » personnes distinctes au dernier mois connu, ou sur les mois cumulés d'un flux) est n.d. : absente de l'anneau, listée avec sa raison ; le total reste affiché (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
   {
     id: "effectifs-graphiques",
     term: "Lecture des graphiques des effectifs mensuels",
     family: "KPI RH",
-    see: ["lecture-empiler", "lecture-hachure", "lecture-axe", "lecture-tableau"],
+    see: ["lecture-empiler", "lecture-hachure", "lecture-axe", "lecture-tableau", "confidentialite"],
     definition: [
       "Les barres reprennent, mois par mois, les cellules du tableau « Répartition mensuelle » : une barre par mois et un groupe par teinte, la même teinte que dans l'anneau et le tableau. « Empiler » superpose les groupes (la hauteur est le total du mois) et « Désempiler » les place côte à côte ; la disposition ne change aucune valeur.",
       "L'axe vertical part toujours de zéro. Un mois n.d. est une colonne hachurée et sa raison s'affiche dans l'infobulle ; il n'est jamais tracé à zéro. Au-delà de huit groupes les teintes se répètent : l'infobulle et le tableau nomment chaque groupe.",
       "La masse salariale chargée d'un mois n'est pas une tendance : ces graphiques n'utilisent ni rouge ni vert.",
+      "Une cellule masquée par le seuil de confidentialité n'est pas tracée, comme un n.d. ; sa raison est dans l'infobulle (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
   },
 ];

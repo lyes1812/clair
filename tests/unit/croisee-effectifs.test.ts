@@ -762,17 +762,19 @@ describe("buildEffectifs : structure, échéances et seuils selon les réglages"
   it("réglages absents : blocs n.d. avec la raison écrite et le lien Paramètres ; tableau d'une ligne pour l'export ; aucune alerte", () => {
     const m = buildEffectifs(input({ settings: ABSENT }));
     const param = { href: LINKS.parametres, label: "Paramètres" };
+    // Le seuil de confidentialité a sa propre section des Paramètres (#confidentialite) ; les réglages de la croisée gardent #croisee.
+    const confParam = { href: LINKS.confidentialite, label: "Paramètres" };
     const conf = "seuil de confidentialité non défini (Paramètres)";
-    expect(block(m, "structure").nd).toEqual([{ reason: conf, action: param }]);
+    expect(block(m, "structure").nd).toEqual([{ reason: conf, action: confParam }]);
     expect(block(m, "structure").tables).toEqual([]);
     expect(block(m, "structure").prevu).toEqual(PREVU_STRUCTURE);
     expect(block(m, "echeances").nd).toEqual([{ reason: "horizon des échéances non défini (Paramètres)", action: param }]);
     expect(block(m, "seuils").nd).toEqual([{ label: "Seuils d'effectif", reason: "seuils d'effectif non définis (Paramètres)", action: param }]);
     expect(block(m, "seuils").tables).toEqual(["effectif-moyen-annuel"]);
     // Répartitions et journal : n.d. (seuil non défini) ; les totaux de l'entreprise (cartes, graphiques) restent affichés.
-    expect(block(m, "repartition").nd).toEqual([{ label: "Par service, par catégorie de contrat, par statut de cadre dirigeant", reason: conf, action: param }]);
+    expect(block(m, "repartition").nd).toEqual([{ label: "Par service, par catégorie de contrat, par statut de cadre dirigeant", reason: conf, action: confParam }]);
     expect(block(m, "repartition").tables).toEqual(["axes-indisponibles"]);
-    expect(block(m, "journal").nd).toEqual([{ reason: conf, action: param }]);
+    expect(block(m, "journal").nd).toEqual([{ reason: conf, action: confParam }]);
     expect(block(m, "journal").link).toBeDefined();
     expect(m.charts.map((c) => c.id)).toEqual(["effectif-mensuel", "mouvements"]);
     expect(m.alerts).toEqual([]);

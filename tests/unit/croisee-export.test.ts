@@ -717,6 +717,7 @@ describe("route d'export de la Masse salariale croisée", () => {
       ...SETTINGS_ND.map((x) => [x.label, x.value]),
       ["Tri du tableau « Coût par service »", "Coût janvier 2026, ordre décroissant (par défaut)"],
       ["Limite de la lecture", "Coût / personne-mois : contrats rémunérés chaque mois ; ce n'est pas un coût par ETP."],
+      ["Limite de la lecture", "Seuil de confidentialité : 1 personne distincte par service, sur la période et sur N-1 ; masquage secondaire ; la ligne « Total » reste complète."],
     ]);
     const sources = sheetRows(wb.getWorksheet("Sources")!, "Source", 4).map((r) => [r[0].value, r[1].value, r[2].value, r[3].value]);
     expect(sources).toEqual([["PayFit", "journal comptable de paie (masse, brut, cotisations, services) · aucune lecture appliquée", "n.d.", "Jamais synchronisée"]]);

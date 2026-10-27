@@ -126,7 +126,10 @@ export type Absenteeism = { kind: Kind; ratio: Ratio; months: AbsenteeismMonth[]
 
 // Absentéisme par motif : une ligne par type présent dans la lecture, sur une fenêtre ; le taux « tous motifs » est un autre
 // calcul (jamais la tuile principale) et compte une demi-journée couverte par plusieurs motifs une seule fois.
-export type AbsenceMotifLine = { type: string; count: number; inWindow: number; chosen: boolean } & (
+// persons : personnes distinctes (clé de personne du référentiel, via le contrat de l'absence) dont au moins une demi-journée du
+// motif est comptée dans la fenêtre, triées ; unlinked : contrats distincts sans personne rattachée qui en portent une. Ils servent
+// au seuil de confidentialité (src/lib/confidentialite) ; absents sur une ligne n.d.
+export type AbsenceMotifLine = { type: string; count: number; inWindow: number; chosen: boolean; persons?: string[]; unlinked?: number } & (
   | { kind: Kind; half: number; ratio: Ratio; qualifiers: string[] }
   | { kind: "nd"; half: null; ratio: null; nd: KpiNd }
 );

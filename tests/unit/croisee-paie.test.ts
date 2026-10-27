@@ -772,13 +772,15 @@ describe("provision par service : seuil de confidentialité et masquage secondai
 });
 
 describe("filtre de service : chiffres du service soumis au même seuil (carte, tableau mensuel, séries, passage)", () => {
-  it("service A, seuil 1 : passage et provision du service ; comptabilité et DSN n.d. « non filtrables par service » avec retrait du filtre", async () => {
+  it("service A, seuil 1 : passage du service ; provision non vérifiable (dotations sans contrat) ; comptabilité et DSN n.d. « non filtrables par service » avec retrait du filtre", async () => {
     const m = await model({ service: "A", seuil: SEUIL(1) });
     // A, 2026-01 : salaires 1 200 € + cotisations 400 € = 1 600 € ; provisions 80 − 50 + 30 = 60 € ; total 1 660 €.
     const t = table(m, ID.charges);
     expect(raw(t, 8, "n")).toBe(160000);
     expect(raw(t, "foot", "n")).toBe(166000);
-    expect(sp(tile(m, "provision").value.text)).toBe("110,00 €");
+    // Provision 80 + 30 = 110 € : les lignes de dotation de ce journal ne portent aucun contrat → effectif non dénombré, non vérifiable
+    // quel que soit le seuil (valeur non nulle sans contrat rattaché) ; le passage, lui, est compté sur les contrats de brut (2 personnes).
+    expect(tile(m, "provision").value).toMatchObject({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
     const href = croiseeHref(BASE, { chapitre: "paie-compta", annee: "2026", de: "01", a: "01" });
     expect(block(m, "comptabilite").nd[0]).toEqual({ reason: NON_FILTRABLE_COMPTA, action: { href, label: "Retirer le filtre Service" } });
     expect(block(m, "dsn").nd[0].reason).toBe(NON_FILTRABLE_DSN);

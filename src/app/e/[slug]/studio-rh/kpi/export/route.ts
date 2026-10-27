@@ -5,11 +5,13 @@ import { contractNatureLabel } from "@/lib/dsn/labels";
 import { xlsxResponse } from "@/lib/export/response";
 import { loadSourceInputs, sourceRows, type SourceInput, type SourceRequest } from "@/lib/export/sources";
 import { buildWorkbook, definitionsFor, type FilterSpec, type SheetSpec } from "@/lib/export/xlsx";
+import { CONFIDENTIALITE_TERM } from "@/lib/confidentialite";
+import { glossaryEntry } from "@/lib/glossary";
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
-import { splitAxisLabel, unitLabel } from "@/lib/viz/kpi";
+import { seuilFilterText, splitAxisLabel, unitLabel } from "@/lib/viz/kpi";
 import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
-import { effectifsShare, loadEffectifs } from "../effectifs-data";
+import { effectifsShareOf, loadEffectifs } from "../effectifs-data";
 import { CATEGORY_TABLE_LABELS, categoryScopeNote, loadCategoryMonths, loadKpiSuivi, suiviColumnOn, type KpiSuivi } from "../suivi-data";
 import { KPI_VUES } from "../tabs";
 import { categoriesSheet, effectifsGridSheet, effectifsShareSheet, suiviSheet } from "./sheets";
@@ -100,10 +102,12 @@ async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABL
   return xlsxResponse(buffer, `kpi-rh-${vue}`);
 }
 
+// Effectifs mensuels : la grille et la répartition sont celles de l'écran, déjà masquées par le seuil de confidentialité (mêmes
+// cellules n.d., même raison) ; l'onglet Filtres dit le seuil appliqué, l'onglet Définitions renvoie à la règle.
 async function effectifsXlsx(workspace: WorkspaceAccess, slug: string, s: Ready, sp: Search): Promise<Response> {
   const e = await loadEffectifs(slug, workspace.id, s.ctx.input, { mesure: one(sp.mesure), axe: one(sp.axe), version: one(sp.version), annee: one(sp.annee) });
   if (e.grid.kind === "nd") return text(`n.d. — ${e.grid.reason}`, 422);
-  const { repart, basis } = effectifsShare(e.grid, e.stock, e.year);
+  const { repart, basis } = effectifsShareOf(e);
   const axisLabel = splitAxisLabel(AXES.find((a) => a.key === e.axis)!.label).name;
   const buffer = await buildWorkbook({
     title: `Effectifs mensuels — ${e.mdef.label} par ${axisLabel.toLowerCase()}`,
@@ -116,10 +120,12 @@ async function effectifsXlsx(workspace: WorkspaceAccess, slug: string, s: Ready,
       { label: "Année", value: e.year },
       { label: "Unité", value: unitLabel(e.unit) },
       { label: "Base de la répartition", value: basis },
+      { label: "Confidentialité", value: `${seuilFilterText(e.confidentialite)}${e.masked > 0 ? ` ; ${e.masked} cellule${e.masked > 1 ? "s" : ""} non affichée${e.masked > 1 ? "s" : ""}` : ""}` },
     ],
     sheets: [effectifsGridSheet(e.grid, e.unit), effectifsShareSheet(repart!, e.unit, basis)],
     sources: await sourcesOf(s, workspace.id, { journal: e.measure === "masse" || e.axis === "service" ? "journal comptable de paie (masse salariale, codes analytiques)" : undefined, scenario: e.full !== null }),
-    definitions: definitionsOf([e.full ? KPI_TERMS.effectifsVersion : KPI_TERMS.effectifs, KPI_TERMS.effectifsMeasures, KPI_TERMS.effectifsBreakdown, KPI_TERMS.effectifsShare]),
+    // L'entrée générale « confidentialite » du glossaire est jointe dès qu'elle existe (aucun avertissement tant qu'elle manque).
+    definitions: definitionsOf([e.full ? KPI_TERMS.effectifsVersion : KPI_TERMS.effectifs, KPI_TERMS.effectifsMeasures, KPI_TERMS.effectifsBreakdown, KPI_TERMS.effectifsShare, ...(glossaryEntry(CONFIDENTIALITE_TERM) ? [CONFIDENTIALITE_TERM] : [])]),
   });
   return xlsxResponse(buffer, `effectifs-mensuels-${e.measure}-${e.axis}-${e.year}`);
 }

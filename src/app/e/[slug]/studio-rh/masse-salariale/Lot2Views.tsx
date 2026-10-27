@@ -35,6 +35,8 @@ function ServiceNd({ testid, slug, guard, unfilterHref }: { testid: string; slug
 }
 const NO_LINK: PersonLink = new Map();
 const ABSENT: ConfidentialiteSetting = { kind: "absent" };
+// Cellule n.d. d'une répartition (seuil de confidentialité, mois n.d.) : la raison au survol, et listée sous le tableau.
+const ndCell = (reason: string) => <abbr className="nd" title={reason}>n.d.</abbr>;
 
 // --- Onglet « Fixe & variable » : brut par rubrique et par libellé de paie PayFit, N et N-1, primes par famille et par mois.
 // Seuil de confidentialité : chaque libellé et chaque famille de prime (par mois et sur la période) décrit les personnes reliées
@@ -123,7 +125,6 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
   const mask = maskLabels({ input, months, prevMonths, keys: keys.map((t) => t.key), families: families.map((f) => f.key), link, conf: confidentialite, prevNd: prev.kind === "nd" });
   const famNd = (f: { key: string }, i: number): string | null => mask.families[f.key]?.[i] ?? null;
   const labelNd = (k: string): { cur: string | null; prev: string | null } => mask.labels[k] ?? { cur: null, prev: null };
-  const ndCell = (reason: string) => <span className="nd" title={reason}>n.d.</span>;
   // Mêmes séries que le tableau des primes : une famille masquée un mois est n.d. ce mois-là (colonne hachurée avec sa raison).
   const primesSeriesList: ChartSeries[] = families.map((f, j) => {
     const pts = primesMonths.map((m, i) => (m.kind === "nd" ? { v: null, reason: m.reason } : famNd(f, i) !== null ? { v: null, reason: famNd(f, i) } : { v: m.byFamily[j], reason: null }));
@@ -291,7 +292,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
                       return (
                         <tr key={r.month} data-month={r.month}>
                           <th scope="row">{formatMonth(r.month)}</th>
-                          <td className="num">{r.kind === "value" ? euros(r.byRubric.primes) : <span className="nd" title={r.nd.reason}>n.d.</span>}</td>
+                          <td className="num">{r.kind === "value" ? euros(r.byRubric.primes) : ndCell(r.nd.reason)}</td>
                           {families.map((f, j) => <td key={f.key} className="num">{pm.kind !== "value" ? ndCell(pm.reason) : famNd(f, i) !== null ? ndCell(famNd(f, i)!) : euros(pm.byFamily[j])}</td>)}
                         </tr>
                       );
@@ -532,14 +533,18 @@ export function PaieComptaView(props: {
                         const lastPrev = shiftYear(last, -1);
                         const a = provNd(s, last) !== null ? { month: last, kind: "nd" as const, reason: provNd(s, last)! } : provisionMonth(withService(fullInput, s), last);
                         const b = provNd(s, lastPrev) !== null ? { month: lastPrev, kind: "nd" as const, reason: provNd(s, lastPrev)! } : provisionMonth(withService(fullInput, s), lastPrev);
+                        // Fin de mois n.d. (seuil, ou provision n.d. pour sa propre raison) : la raison au survol ; une part n.d. seule reste « n.d. »
+                        // (sa raison est sous le tableau).
+                        const cellOf = (x: ProvisionMonth, pick: (v: PV) => number | null) => (x.kind === "nd" ? ndCell(x.reason) : show(x, pick));
+                        const gapCell = a.kind === "nd" ? ndCell(a.reason) : b.kind === "nd" ? ndCell(b.reason) : gapOf(a, b);
                         return (
                           <tr key={s ?? "__nv__"} data-service={s ?? "__nv__"}>
                             <th scope="row">{s ?? "Non ventilé"}</th>
-                            <td className="num" data-col="total">{show(a, (v) => v.total)}</td>
-                            <td className="num n1">{show(b, (v) => v.total)}</td>
-                            <td className={numTrend(gapC(a, b))}>{gapOf(a, b)}</td>
-                            <td className="num">{show(a, (v) => v.conges)}</td>
-                            <td className="num">{show(a, (v) => v.charges)}</td>
+                            <td className="num" data-col="total">{cellOf(a, (v) => v.total)}</td>
+                            <td className="num n1">{cellOf(b, (v) => v.total)}</td>
+                            <td className={numTrend(gapC(a, b))}>{gapCell}</td>
+                            <td className="num">{cellOf(a, (v) => v.conges)}</td>
+                            <td className="num">{cellOf(a, (v) => v.charges)}</td>
                           </tr>
                         );
                       })}

@@ -126,21 +126,28 @@ describe("maskCohorts — seuil de confidentialité", () => {
   });
 
   it("une personne à deux contrats dans deux groupes compte une fois ; un contrat non relié ne protège pas", () => {
-    // Seuil 3. Seulement N-1 : A ; seulement N : D ; les deux : B, C. A et D portés par la même personne p-AD : colonne Contrats, A (1)
-    // et D (1) masqués ne décrivent qu'une personne (1 < 3) → « les deux » (p-B, p-C) masqué aussi : 3 ≥ 3.
+    // Seuil 2. Seulement N-1 : A ; seulement N : D ; les deux : B, C (2 personnes ≥ 2 : affiché pour lui-même). A et D portés par la
+    // même personne p-AD : colonne Contrats, A (1) et D (1) masqués ne décrivent qu'une personne (1 < 2) → « les deux » (p-B, p-C)
+    // masqué en second : 3 ≥ 2. Additionner les tailles (1 + 1 = 2) l'aurait laissé affiché.
     const same = partitionCohorts(map({ A: 100_000, B: 200_000, C: 50_000 }), map({ B: 210_000, C: 45_000, D: 120_000 }), HORS, link({ A: "p-AD", D: "p-AD", B: "p-B", C: "p-C" })) as Extract<CohortPartition, { kind: "value" }>;
-    expect(maskCohorts(same, 3)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "shown" });
-    // Seuil 2, mêmes groupes, personnes toutes distinctes : A (1) et D (1) masqués, 2 personnes ≥ 2 ; « les deux » (2 personnes) affiché.
+    expect(maskCohorts(same, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "shown" });
+    // Seuil 2, mêmes groupes, personnes toutes distinctes : colonne Contrats, A (1) et D (1) masqués décrivent 2 personnes ≥ 2 ; mais
+    // dans la colonne Coût N-1, A est seul masqué avec « les deux » (de même D en coût N) : « les deux » est masqué en second dans les
+    // deux cas. Le compte en personnes distinctes se lit sur la partition (total.persons), jamais sur une ligne affichée de plus.
     const own = partitionCohorts(map({ A: 100_000, B: 200_000, C: 50_000 }), map({ B: 210_000, C: 45_000, D: 120_000 }), HORS, OWN) as Extract<CohortPartition, { kind: "value" }>;
-    expect(maskCohorts(own, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "shown", outside: "shown" });
+    expect(maskCohorts(own, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "secondary", outside: "shown" });
+    expect(same.total.persons).toEqual(["p-AD", "p-B", "p-C"]);
+    expect(own.total.persons).toEqual(["p-A", "p-B", "p-C", "p-D"]);
     // « Les deux » = B (p-B) + C non relié : 1 personne reliée < 2 et un contrat non relié → non dénombré (non vérifiable), quel que
     // soit le seuil ≥ 2 ; A et D masqués, 2 ≥ 2.
     const part = partitionCohorts(map({ A: 100_000, B: 200_000, C: 50_000 }), map({ B: 210_000, C: 45_000, D: 120_000 }), HORS, link({ A: "p-A", D: "p-D", B: "p-B" })) as Extract<CohortPartition, { kind: "value" }>;
     expect(part.both).toEqual({ count: 2, prev: 250_000, cur: 255_000, delta: 5_000, persons: ["p-B"], unlinked: 1 });
     expect(maskCohorts(part, 2)).toEqual({ onlyPrev: "masked", onlyCur: "masked", both: "unverifiable", outside: "shown" });
-    // Sans aucun lien : chaque groupe est non dénombré (contrats non reliés), même au seuil 1.
+    // Sans aucun lien : le groupe est non dénombré (contrat non relié), même au seuil 1 ; aucune personne comptée ne pouvant le
+    // protéger dans ses colonnes (les lignes vides ne décrivent personne), la protection est impossible : toute la partition est n.d.,
+    // les lignes vides comprises (raison du seuil) ; seul le total reste affiché.
     const none = partitionCohorts(map({ A: 100_000 }), map({ A: 110_000 })) as Extract<CohortPartition, { kind: "value" }>;
-    expect(maskCohorts(none, 1)).toEqual({ onlyPrev: "shown", onlyCur: "shown", both: "unverifiable", outside: "shown" });
+    expect(maskCohorts(none, 1)).toEqual({ onlyPrev: "secondary", onlyCur: "secondary", both: "unverifiable", outside: "shown" });
   });
 
   it("sans lignes sans contrat : un groupe masqué entraîne l'autre groupe de sa colonne", () => {
@@ -201,10 +208,11 @@ describe("nonRecurringContributors — cas de référence", () => {
     ],
   };
 
-  const LINK = link({ c1: "p-c1", c2: "p-c2", c9: "p-c9" });
+  // Jetons de personne sans la clé du contrat (le test vérifie qu'aucune clé ne sort de la fonction).
+  const LINK = link({ c1: "personne-un", c2: "personne-deux", c9: "personne-neuf" });
 
   it("2 hypothèses « réalisé » (sans contrat : non reliées) ; 2 contributeurs prévus : c1 (relié, une fois) et l'embauche (non reliée) ; l'enveloppe compensée ne compte pas", () => {
-    expect(nonRecurringContributors(base, proj, hyps, "2026", LINK)).toEqual({ realised: G([], 2), projected: G(["p-c1"], 1) });
+    expect(nonRecurringContributors(base, proj, hyps, "2026", LINK)).toEqual({ realised: G([], 2), projected: G(["personne-un"], 1) });
     // Sans lien : c1 est un contrat non relié.
     expect(nonRecurringContributors(base, proj, hyps, "2026")).toEqual({ realised: G([], 2), projected: G([], 2) });
   });
@@ -212,7 +220,7 @@ describe("nonRecurringContributors — cas de référence", () => {
   it("aucune clé ne sort de la fonction ; une autre année ne lit que ses éléments", () => {
     expect(JSON.stringify(nonRecurringContributors(base, proj, hyps, "2026", LINK))).not.toMatch(/c1|e1|v1|r1/);
     // 2027 : aucune hypothèse « réalisé » avant la bascule de mars 2026 ; c9 → 1 contributeur prévu (relié).
-    expect(nonRecurringContributors(base, proj, hyps, "2027", LINK)).toEqual({ realised: G([]), projected: G(["p-c9"]) });
+    expect(nonRecurringContributors(base, proj, hyps, "2027", LINK)).toEqual({ realised: G([]), projected: G(["personne-neuf"]) });
   });
 
   it("une part non récurrente sans contrat ni hypothèse : contributeurs prévus non dénombrés (null), jamais devinés", () => {

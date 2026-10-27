@@ -39,6 +39,8 @@ const evoEuros = (e: MaskedEvolution) => (e.kind === "nd" ? "" : eurosSigned(e.d
 const delta = (cents: number, text: string) => <span className={`ms-delta ${trendOf(cents)}`.trim()}>{text}</span>;
 const costText = (c: CostPerEtp) => (c.kind === "nd" ? "n.d." : eurosOf(c.costCents));
 const cell = (r: MaskedMonth | MonthPayroll, pick: (x: Extract<MonthPayroll, { kind: "value" }>) => number) => (r.kind === "nd" ? "n.d." : euros(pick(r)));
+// Cellule n.d. d'une répartition (seuil de confidentialité, mois hors journal) : la raison au survol, et listée sous le tableau.
+const ndCell = (reason: string) => <abbr className="nd" title={reason}>n.d.</abbr>;
 
 export default async function MasseSalarialePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
@@ -466,15 +468,15 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                             return (
                               <tr key={r.value ?? NV} data-service={r.value ?? NV} className={isCurrent ? "selected" : undefined} aria-current={isCurrent ? "true" : undefined}>
                                 <th scope="row"><a className="ms-detail-link" href={href({ svc: `&service=${encodeURIComponent(r.value ?? NV)}` })}>{serviceLabel(r.value)}</a></th>
-                                <td className="num" data-col="n">{money(c, (w) => w.masse)}</td>
-                                <td className="num n1" data-col="n1">{money(r.prev, (w) => w.masse)}</td>
-                                <td className={numTrend(evoDelta(r.evo))} data-col="ecart">{r.evo.kind === "value" ? evoEuros(r.evo) : "n.d."}</td>
-                                <td className={numTrend(evoPctDelta(r.evo))} data-col="ecart-pct">{r.evo.kind === "value" ? evoText(r.evo) : "n.d."}</td>
-                                <td className="num" data-col="part">{c.kind === "value" && totalCur.kind === "value" && totalCur.masse > 0 ? fmtPercent({ num: c.masse, den: totalCur.masse }) : "n.d."}</td>
-                                <td className="num" data-col="hors-primes">{c.kind === "value" ? euros(c.brut - c.byRubric.primes) : "n.d."}</td>
-                                <td className="num" data-col="primes">{c.kind === "value" ? euros(c.byRubric.primes) : "n.d."}</td>
-                                <td className="num" data-col="cotisations">{c.kind === "value" ? euros(c.cotisations) : "n.d."}</td>
-                                <td className="num" data-col="cout-pm">{c.kind === "value" && c.paidContractMonths > 0 ? eurosOf({ num: c.masse, den: c.paidContractMonths }) : "n.d."}</td>
+                                <td className="num" data-col="n">{c.kind === "nd" ? ndCell(c.nd.reason) : euros(c.masse)}</td>
+                                <td className="num n1" data-col="n1">{r.prev.kind === "nd" ? ndCell(r.prev.nd.reason) : euros(r.prev.masse)}</td>
+                                <td className={numTrend(evoDelta(r.evo))} data-col="ecart">{r.evo.kind === "value" ? evoEuros(r.evo) : ndCell(r.evo.nd.reason)}</td>
+                                <td className={numTrend(evoPctDelta(r.evo))} data-col="ecart-pct">{r.evo.kind === "value" ? evoText(r.evo) : ndCell(r.evo.nd.reason)}</td>
+                                <td className="num" data-col="part">{c.kind === "nd" ? ndCell(c.nd.reason) : totalCur.kind === "value" && totalCur.masse > 0 ? fmtPercent({ num: c.masse, den: totalCur.masse }) : "n.d."}</td>
+                                <td className="num" data-col="hors-primes">{c.kind === "nd" ? ndCell(c.nd.reason) : euros(c.brut - c.byRubric.primes)}</td>
+                                <td className="num" data-col="primes">{c.kind === "nd" ? ndCell(c.nd.reason) : euros(c.byRubric.primes)}</td>
+                                <td className="num" data-col="cotisations">{c.kind === "nd" ? ndCell(c.nd.reason) : euros(c.cotisations)}</td>
+                                <td className="num" data-col="cout-pm">{c.kind === "nd" ? ndCell(c.nd.reason) : c.paidContractMonths > 0 ? eurosOf({ num: c.masse, den: c.paidContractMonths }) : "n.d."}</td>
                               </tr>
                             );
                           })}
@@ -514,9 +516,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                               <tr key={r.value ?? NV} data-service={r.value ?? NV}>
                                 <th scope="row">{serviceLabel(r.value)}</th>
                                 {r.cur.months.map((m) => (
-                                  <td key={m.month} className="num" data-col={m.month}>{m.kind === "nd" ? <span className="nd" title={m.nd.reason}>n.d.</span> : euros(m.masse)}</td>
+                                  <td key={m.month} className="num" data-col={m.month}>{m.kind === "nd" ? ndCell(m.nd.reason) : euros(m.masse)}</td>
                                 ))}
-                                <td className="num" data-col="periode">{r.cur.kind === "value" ? euros(r.cur.masse) : "n.d."}</td>
+                                <td className="num" data-col="periode">{r.cur.kind === "value" ? euros(r.cur.masse) : ndCell(r.cur.nd.reason)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -524,9 +526,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                             <tr className="total" data-testid="ms-services-months-total">
                               <th scope="row">Total</th>
                               {totalCur.months.map((m) => (
-                                <td key={m.month} className="num" data-col={m.month}>{m.kind === "nd" ? <span className="nd" title={m.nd.reason}>n.d.</span> : euros(m.masse)}</td>
+                                <td key={m.month} className="num" data-col={m.month}>{m.kind === "nd" ? ndCell(m.nd.reason) : euros(m.masse)}</td>
                               ))}
-                              <td className="num" data-col="periode">{totalCur.kind === "value" ? euros(totalCur.masse) : "n.d."}</td>
+                              <td className="num" data-col="periode">{totalCur.kind === "value" ? euros(totalCur.masse) : ndCell(totalCur.nd.reason)}</td>
                             </tr>
                           </tfoot>
                         </table>

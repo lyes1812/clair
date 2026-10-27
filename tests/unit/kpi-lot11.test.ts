@@ -9,6 +9,7 @@ import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
 import { GLOSSARY_KPI, KPI_TERMS } from "@/lib/glossary/kpi";
 import { ABSENCE_ALL_MOTIFS_LABEL } from "@/lib/rh/kpi/absence-motifs";
 import { ETP_PRORATED_LABEL, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
+import type { ConfidentialiteSetting } from "@/lib/confidentialite";
 import type { AbsenceMotifs, EtpProrated } from "@/lib/rh/kpi/types";
 import { etpProratedNotes, motifRows, motifsRetenusLine, readingQualifiers, type MotifLineIn } from "@/lib/viz/kpi";
 
@@ -17,6 +18,8 @@ import { etpProratedNotes, motifRows, motifsRetenusLine, readingQualifiers, type
 vi.mock("@/app/e/[slug]/parametres/actions", () => ({ saveKpiSettings: async () => undefined }));
 
 const read = (path: string) => readFileSync(path, "utf8");
+// Seuil de confidentialité de 1 personne : aucun groupe dénombré n'est masqué (les lignes de ces tests portent leurs personnes).
+const SEUIL_1: ConfidentialiteSetting = { kind: "set", value: 1, updatedAt: null, updatedBy: null };
 const render = (el: React.ReactElement) => {
   const html = renderToStaticMarkup(el);
   for (const bad of ["NaN", "undefined", "[object"]) expect(html).not.toContain(bad);
@@ -174,7 +177,8 @@ describe("motifs retenus sous la valeur de la tuile Absentéisme", () => {
     expect(html.indexOf("8,33 %")).toBeLessThan(html.indexOf("Motifs retenus"));
   });
   it("bloc replié des motifs de la lecture : retenus, non retenus, retenus absents ; plus de « types »", () => {
-    const html = render(h(AbsenceTypeNotes, { chosen: [{ type: "test_sickness", count: 3 }], other: [{ type: "test_paid_leave", count: 5 }], missing: [{ type: "fr_maladie_ordinaire" }], slug: "demo" }));
+    const sizes = { test_sickness: { persons: ["P1"], unlinked: 0 }, test_paid_leave: { persons: ["P1", "P2"], unlinked: 0 } };
+    const html = render(h(AbsenceTypeNotes, { chosen: [{ type: "test_sickness", count: 3 }], other: [{ type: "test_paid_leave", count: 5 }], missing: [{ type: "fr_maladie_ordinaire" }], slug: "demo", mask: { setting: SEUIL_1, sizes } }));
     const t = text(html);
     expect(t).toContain("Retenus : test_sickness (3)");
     expect(t).toContain("Présents dans la lecture, non retenus : test_paid_leave (5)");
@@ -222,8 +226,8 @@ describe("détail de l'absentéisme : tableau par motif et taux tous motifs, à 
     window: win as never,
     label: ABSENCE_ALL_MOTIFS_LABEL,
     lines: [
-      { type: "fr_maladie_ordinaire", count: 2, inWindow: 1, chosen: true, kind: "exact", half: 10, ratio: { num: 10, den: 120 }, qualifiers: [] },
-      { type: "test_paid_leave", count: 3, inWindow: 2, chosen: false, kind: "exact", half: 18, ratio: { num: 18, den: 120 }, qualifiers: [] },
+      { type: "fr_maladie_ordinaire", count: 2, inWindow: 1, chosen: true, kind: "exact", half: 10, ratio: { num: 10, den: 120 }, qualifiers: [], persons: ["P1"], unlinked: 0 },
+      { type: "test_paid_leave", count: 3, inWindow: 2, chosen: false, kind: "exact", half: 18, ratio: { num: 18, den: 120 }, qualifiers: [], persons: ["P1", "P2"], unlinked: 0 },
       { type: "test_orphan", count: 1, inWindow: 1, chosen: false, kind: "nd", half: null, ratio: null, nd: { code: "absence-unknown-contract", reason: "absence rattachée à un contrat inconnu", months: [], keys: [] } as never },
     ],
     // Tous motifs : 10 demi-journées de maladie ∪ 18 de congés avec 6 en commun = 22 (comptées une fois) ; 22/120 = 18,33 %.
@@ -232,7 +236,8 @@ describe("détail de l'absentéisme : tableau par motif et taux tous motifs, à 
   };
   const v = { kind: "exact", ratio: { num: 10, den: 120 }, months: [], qualifiers: [] } as never;
   const theoretical = { kind: "exact", half: 120, months: [], contributions: [] } as never;
-  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") => render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m, slug: slug ?? undefined }));
+  // Seuil de 1 personne : le tableau est celui du lot 11 (le masquage est testé dans kpi-confidentialite.test.ts).
+  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") => render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m, slug: slug ?? undefined, confidentialite: SEUIL_1 }));
 
   it("tous les motifs présents : libellé et code, nombres d'absences, retenu oui / non, demi-journées, taux", () => {
     const html = detail(motifs);

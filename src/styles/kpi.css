@@ -68,6 +68,13 @@
 .kpi-motif-all { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .kpi-motif-all h3 { margin-top: 0; }
 
+/* Ligne « Confidentialité : seuil de N personnes » d'une répartition soumise au seuil (détail par motif, motifs de la lecture,
+   effectifs mensuels) : texte courant atténué, lien vers Paramètres en bleu, « ? » vers le glossaire. */
+.kpi-confidentialite { display: block; margin: 8px 0 0; line-height: 1.5; color: var(--muted); }
+.kpi-confidentialite a { color: var(--blue); }
+.kpi-confidentialite .gloss-link { margin-left: 6px; }
+.tile-types .kpi-confidentialite { margin-top: 0; }
+
 /* Lecture graphique : deux colonnes, une seule sous 960 px ; un graphique « large » prend toute la ligne. */
 .kpi-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 32px; }
 .kpi-chart { min-width: 0; }

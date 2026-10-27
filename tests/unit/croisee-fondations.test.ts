@@ -207,7 +207,14 @@ describe("glossaire de la Masse salariale croisée", () => {
     // ne suffit pas et reste affiché, le suivant (5 personnes) est masqué en second.
     expect(maskServices([{ group: { persons: ["p1"], unlinked: 0 }, value: 100 }, { group: { persons: [], unlinked: 0 }, value: 0 }, { group: { persons: ["a", "b", "c", "d", "e"], unlinked: 0 }, value: 500 }, { group: { persons: ["f", "g", "h", "i", "j", "k", "l", "m"], unlinked: 0 }, value: 800 }], 3)).toEqual(["masked", "shown", "secondary", "shown"]);
     expect(conf).toContain("un service sans contrat rattaché (« Non ventilé », par exemple) ne suffit jamais à en protéger un autre");
-    expect(conf).toContain("zéro compris");
+    // La règle elle-même (masquage secondaire, plus petite valeur affichée, zéro compris) est écrite une fois, dans l'entrée générale
+    // « confidentialite » ; l'entrée de la croisée y renvoie et ne liste plus d'exception par écran ni de comptage en contrats.
+    const general = glossaryEntry("confidentialite")!.definition;
+    expect(general).toContain("zéro compris");
+    expect(general).toContain(`« ${confidentialiteReason(2).replace("2 personnes", "N personnes")} »`);
+    expect(glossaryEntry("croisee-confidentialite")!.see).toContain("confidentialite");
+    expect(conf).toContain("voir « Seuil de confidentialité »");
+    for (const gone of ["Ne sont pas masqués", "compté en contrats", "contrats par service et par mois", "dont les contrats ne sont pas comptés"]) expect(conf, gone).not.toContain(gone);
   });
 
   it("seuils d'effectif : prochain seuil strictement supérieur, distance inférieure ou égale à la marge ; libellé du repère et limites de saisie", () => {

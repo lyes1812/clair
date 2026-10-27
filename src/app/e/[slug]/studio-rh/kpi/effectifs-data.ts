@@ -1,16 +1,34 @@
 import { monthRange } from "@/lib/connectors/months";
-import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
+import { getCategoryNatures, getContractCategories, categoryOfContract, type CategoryNatures, type ContractCategories } from "@/lib/budget/categories";
 import { project } from "@/lib/budget/engine";
-import { AXES, MEASURES, monthlyGrid, type Axis, type Grid, type Measure, type RealSource } from "@/lib/budget/monthly";
+import { flowsOf } from "@/lib/budget/flows";
+import { AXES, MEASURES, monthlyGrid, type Axis, type Grid, type Measure, type RealSource, type ScenarioSource } from "@/lib/budget/monthly";
 import { getScenario, KIND_LABELS, listScenarios, type ScenarioFull } from "@/lib/budget/store";
+import { CATEGORY_LABELS, type CategoryId, type Hypothesis, type PresentPerson } from "@/lib/budget/types";
 import { nd, val } from "@/lib/budget/versions";
+import { getConfidentialite, linkFromReferential, personsOfContracts, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
+import { monthEnd } from "@/lib/dates";
+import { contractNatureLabel } from "@/lib/dsn/labels";
 import { loadPayrollContext } from "@/lib/payroll/context";
-import { selectableYears } from "@/lib/rh/kpi/period";
+import { serviceOf, type JournalInput } from "@/lib/payroll/engine";
+import { classify, gridRubrics } from "@/lib/payroll/grid";
+import { buildContractServiceMap } from "@/lib/payroll/service-map";
+import { headcountAt } from "@/lib/rh/headcount";
+import { etpMonthEnd } from "@/lib/rh/kpi/etp";
+import { countedOpts, selectableYears } from "@/lib/rh/kpi/period";
+import { monthMovements } from "@/lib/rh/kpi/turnover";
 import type { KpiInput } from "@/lib/rh/kpi/types";
-import { monthShortLabel, repartition } from "@/lib/viz/kpi";
+import type { ContractDraft } from "@/lib/rh/referential/types";
+import { gridMask, maskedCount, maskedGrid, monthShortLabel, repartition, repartitionMasked, seuilOf, type GridMask, type GridSizes, type MaskedRepartition } from "@/lib/viz/kpi";
 
 // Chargement commun des Effectifs mensuels (écran et export) : rubrique, axe, version (réel PayFit ou scénario) et année lus dans
 // l'adresse ; une valeur inconnue prend le défaut de l'écran. La grille vient de monthlyGrid, sans autre calcul.
+//
+// Seuil de confidentialité (paramètre de l'espace, module partagé src/lib/confidentialite, sans valeur par défaut) : chaque cellule
+// (groupe × mois) d'une répartition est comptée en PERSONNES DISTINCTES — les contrats qui portent la valeur affichée, reliés à leur
+// personne par le référentiel Collaborateurs — et masquée par le moteur partagé (gridMask : masquage secondaire dans la colonne du
+// mois, dont le total est publié). Le total du mois n'est jamais masqué. `grid` est la grille APRÈS masquage (écran, graphiques et
+// export lisent les mêmes cellules) ; `raw` la grille du calcul, qui sert à la répartition par groupe (repartitionMasked).
 export type EffectifsSearch = { mesure: string; axe: string; version: string; annee: string };
 export type EffectifsData = {
   measure: Measure;
@@ -22,14 +40,137 @@ export type EffectifsData = {
   full: ScenarioFull | null;
   years: string[];
   year: string;
-  grid: Grid;
+  grid: Grid; // après masquage
+  raw: Grid; // avant masquage (jamais affichée telle quelle)
   unit: "etp" | "nombre" | "eur";
   stock: boolean; // ETP et inscrits : stocks (répartition au dernier mois connu) ; entrées, sorties, masse : flux (cumul)
+  confidentialite: ConfidentialiteSetting;
+  seuil: number | null; // seuil utilisable, ou null (absent, illisible) avec seuilReason
+  seuilReason: string | null;
+  sizes: GridSizes;
+  mask: GridMask | null;
+  masked: number; // cellules masquées par le seuil (hors paramètre absent)
 };
+
+const NO_CATEGORY = "Non classé";
+const OUT = "Hors salarié";
+const NON_VENTILE = "Non ventilé";
+type Members = Map<string, Set<string>>; // groupe → identifiants de contrat (externalId pour le réel, clé de contrat ou d'embauche pour un scénario)
+const add = (m: Members, group: string, id: string | null) => {
+  let s = m.get(group);
+  if (!s) m.set(group, (s = new Set()));
+  if (id !== null) s.add(id);
+};
+
+// Groupe d'un contrat du référentiel sur un axe, pour les mois réalisés : mêmes libellés que la grille (budget/monthly.ts) ; une
+// divergence rendrait le groupe non dénombré (valeur sans personne : non vérifiable), jamais une valeur affichée à tort.
+function realGroupOf(c: ContractDraft, axis: Exclude<Axis, "service">, natures: CategoryNatures, overrides: ContractCategories): string {
+  if (axis === "categorie") {
+    const id = categoryOfContract(c.externalId, c.nature, natures, overrides);
+    return id ? CATEGORY_LABELS[id] : NO_CATEGORY;
+  }
+  if (axis === "contrat") return c.nature ? contractNatureLabel(c.nature) : "Nature n.d.";
+  if (axis === "etablissement") return c.establishmentId ?? "Établissement n.d.";
+  return c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "Statut n.d.";
+}
+
+// Contrats qui portent la valeur de chaque groupe d'un mois réalisé (mêmes moteurs que la grille) ; null : mois non dénombré (la
+// grille est alors n.d. ou en borne basse pour ce mois).
+function realMembers(src: { kpi: KpiInput | null; journal: JournalInput | null; natures: CategoryNatures; overrides: ContractCategories; serviceMap: Map<string, string | null> | null }, m: string, measure: Measure, axis: Axis): Members | null {
+  const { kpi, journal } = src;
+  const out: Members = new Map();
+  if (measure === "masse") {
+    if (!journal) return null;
+    if (axis === "service" && !journal.serviceAxis) return null;
+    if (axis !== "service" && !kpi) return null;
+    const byExternal = kpi ? new Map(kpi.data.contracts.map((c) => [c.externalId, c])) : null;
+    const rubrics = gridRubrics(journal.grid);
+    for (const l of journal.lines) {
+      if (l.month !== m) continue;
+      const c = classify(l.accountId, rubrics);
+      if (!c.rubric || c.rubric.role === "hors-masse") continue;
+      if (axis === "service") add(out, serviceOf(l, journal.serviceAxis) ?? NON_VENTILE, l.contractId);
+      else {
+        const ct = l.contractId ? byExternal!.get(l.contractId) : undefined;
+        add(out, ct ? realGroupOf(ct, axis, src.natures, src.overrides) : OUT, l.contractId);
+      }
+    }
+    return out;
+  }
+  if (!kpi) return null;
+  if (measure === "etp" && axis === "service") {
+    if (!src.serviceMap) return null;
+    const e = etpMonthEnd(kpi, m);
+    if (e.kind !== "exact") return null;
+    for (const c of e.contributions) add(out, src.serviceMap.get(`${m}|${c.externalId}`) ?? NON_VENTILE, c.externalId);
+    return out;
+  }
+  if (axis === "service") return null;
+  if (measure === "entrees" || measure === "sorties") {
+    const mv = monthMovements(kpi, m);
+    if ((measure === "entrees" ? mv.entries : mv.exits).kind !== "exact") return null;
+    for (const x of mv.events) if (x.why === "counted" && x.row.event.kind === (measure === "entrees" ? "entry" : "exit")) add(out, realGroupOf(x.row.contract, axis, src.natures, src.overrides), x.row.contract.externalId);
+    return out;
+  }
+  const h = headcountAt(kpi.data, monthEnd(m), countedOpts(kpi));
+  if (h.kind !== "exact") return null;
+  if (measure === "etp" && etpMonthEnd(kpi, m).kind !== "exact") return null;
+  const byKey = new Map(kpi.data.contracts.map((c) => [c.contractKey, c]));
+  for (const key of h.contractKeys) {
+    const c = byKey.get(key);
+    if (c) add(out, realGroupOf(c, axis, src.natures, src.overrides), c.externalId);
+  }
+  return out;
+}
+
+// Contrats et embauches qui portent la valeur de chaque groupe d'un mois projeté : mêmes règles de groupe que la grille
+// (budget/monthly.ts, mois projetés) ; une embauche prévisionnelle n'a pas de personne (non reliée : elle ne protège jamais).
+function scenarioMembers(src: ScenarioSource, m: string, measure: Measure, axis: Axis): Members | null {
+  const { base, hyps, proj } = src;
+  if (proj.kind === "error" || axis === "etablissement") return null;
+  const pm = proj.months.find((x) => x.month === m);
+  if (!pm || pm.kind === "nd") return null;
+  const baseBy = new Map(base.contracts.map((c) => [c.contractKey, c]));
+  const catOverride = new Map(hyps.flatMap((h) => (h.kind === "categorie" ? [[h.contractKey, h.category] as const] : [])));
+  const hireBy = new Map<string, Extract<Hypothesis, { kind: "embauche" }>>(hyps.flatMap((h) => (h.kind === "embauche" ? [[`embauche:${h.id}`, h] as [string, Extract<Hypothesis, { kind: "embauche" }>]] : [])));
+  const label = (c: CategoryId | null | undefined) => (c ? CATEGORY_LABELS[c] : NO_CATEGORY);
+  const keyGroup = (key: string, person?: PresentPerson): string => {
+    if (axis === "service") return person ? (person.service ?? NON_VENTILE) : (baseBy.get(key)?.service ?? hireBy.get(key)?.service ?? NON_VENTILE);
+    if (axis === "categorie") return person ? label((person.category as CategoryId | null) ?? null) : label(catOverride.get(key) ?? baseBy.get(key)?.category ?? hireBy.get(key)?.category);
+    const c = baseBy.get(key);
+    if (axis === "statut") return c?.executive === true ? "Cadre dirigeant" : c?.executive === false ? "Hors cadre dirigeant" : "Statut n.d.";
+    return c ? (c.nature ? contractNatureLabel(c.nature) : "Nature n.d.") : hireBy.has(key) ? "Embauche prévisionnelle" : "Nature n.d.";
+  };
+  const out: Members = new Map();
+  if (measure === "masse") {
+    for (const c of pm.contributions) add(out, c.contractKey ? keyGroup(c.contractKey) : axis === "service" ? (c.service ?? NON_VENTILE) : OUT, c.contractKey);
+    return out;
+  }
+  if (measure === "etp" || measure === "inscrit") {
+    if (measure === "etp" && pm.etp4 === null) return null;
+    for (const [k, p] of Object.entries(pm.people ?? {})) add(out, keyGroup(k, p), k);
+    return out;
+  }
+  const f = flowsOf(base, proj).find((x) => x.month === m);
+  if (!f || f.kind === "nd") return null;
+  const idx = proj.months.findIndex((x) => x.month === m);
+  const prevPeople: Record<string, PresentPerson> = idx > 0 ? ((proj.months[idx - 1] as { people?: Record<string, PresentPerson> }).people ?? {}) : Object.fromEntries(base.contracts.filter((c) => c.counted).map((c) => [c.contractKey, { etp4: c.etp4, category: c.category ?? null, service: c.service }]));
+  const cur = pm.people ?? {};
+  for (const k of measure === "entrees" ? f.entrees : f.sorties) add(out, keyGroup(k, measure === "entrees" ? cur[k] : prevPeople[k]), k);
+  return out;
+}
+
+// Lien contrat → personne du référentiel, par identifiant dans la source (lignes de paie, contributions de l'ETP) et par clé de
+// contrat (base d'un scénario) ; une embauche prévisionnelle ou un contrat inconnu n'y figure pas.
+function personLink(kpi: KpiInput | null): PersonLink {
+  const link = kpi ? linkFromReferential(kpi.data) : new Map<string, string>();
+  if (kpi) for (const c of kpi.data.contracts) if (c.personKey !== null) link.set(c.contractKey, c.personKey);
+  return link;
+}
 
 export async function loadEffectifs(slug: string, workspaceId: string, kpi: KpiInput | null, search: EffectifsSearch): Promise<EffectifsData> {
   const pay = await loadPayrollContext(slug);
-  const [{ natures }, overrides, rows] = await Promise.all([getCategoryNatures(workspaceId), getContractCategories(workspaceId), listScenarios(workspaceId)]);
+  const [{ natures }, overrides, rows, confidentialite] = await Promise.all([getCategoryNatures(workspaceId), getContractCategories(workspaceId), listScenarios(workspaceId), getConfidentialite(workspaceId)]);
   const measure: Measure = (MEASURES.some((m) => m.key === search.mesure) ? search.mesure : "etp") as Measure;
   const axis: Axis = (AXES.some((a) => a.key === search.axe) ? search.axe : "categorie") as Axis;
   const mdef = MEASURES.find((m) => m.key === measure)!;
@@ -45,15 +186,45 @@ export async function loadEffectifs(slug: string, workspaceId: string, kpi: KpiI
     return e.etp4 === null ? nd(e.reason ?? "ETP par service n.d.") : val(e.etp4);
   };
   const real: RealSource = { kpi, journal: pay.input, natures, overrides, etpService };
-  const grid = monthlyGrid({ measure, axis, year, real, scenario: full ? { base: full.base, hyps: full.hypotheses, proj: project(full.base, full.scenario.firstMonth, full.scenario.lastMonth, full.hypotheses, full.scenario.conventions) } : null });
-  return { measure, axis, mdef, versions, version, versionLabel: versions.find((v) => v.value === version)!.label, full, years, year, grid, unit: mdef.unit, stock: measure === "etp" || measure === "inscrit" };
+  const scenario: ScenarioSource | null = full ? { base: full.base, hyps: full.hypotheses, proj: project(full.base, full.scenario.firstMonth, full.scenario.lastMonth, full.hypotheses, full.scenario.conventions) } : null;
+  const raw = monthlyGrid({ measure, axis, year, real, scenario });
+
+  // Personnes distinctes de chaque cellule (groupe × mois) : contrats qui portent la valeur, reliés par le référentiel (mémo par mois).
+  const journal = pay.input;
+  const serviceMap = journal?.serviceAxis ? buildContractServiceMap(journal.lines, journal.grid, journal.serviceAxis) : null;
+  const link = personLink(kpi);
+  const members = new Map<string, Members | null>();
+  const membersOf = (m: string): Members | null => {
+    if (!members.has(m)) {
+      const useReal = !scenario || m <= scenario.base.refMonth;
+      members.set(m, useReal ? realMembers({ kpi, journal, natures, overrides, serviceMap }, m, measure, axis) : scenarioMembers(scenario!, m, measure, axis));
+    }
+    return members.get(m)!;
+  };
+  const sizes: GridSizes = (group, m) => {
+    const mem = membersOf(m);
+    return mem ? personsOfContracts(mem.get(group) ?? [], link) : null;
+  };
+  const read = seuilOf(confidentialite);
+  const mask = raw.kind === "value" && read.seuil !== null ? gridMask(raw, sizes, read.seuil) : null;
+  const grid: Grid = raw.kind === "value" ? maskedGrid(raw, mask, read.seuil, read.reason) : raw;
+  return { measure, axis, mdef, versions, version, versionLabel: versions.find((v) => v.value === version)!.label, full, years, year, grid, raw, unit: mdef.unit, stock: measure === "etp" || measure === "inscrit", confidentialite, seuil: read.seuil, seuilReason: read.reason, sizes, mask, masked: maskedCount(mask) };
 }
 
-// Répartition par groupe et sa base, en clair : stocks au dernier mois connu, flux sur le cumul des mois connus.
+// Base de la répartition, en clair : stocks au dernier mois connu, flux sur le cumul des mois connus.
+function basisText(r: { known: string[]; used: string[] }, stock: boolean, year: string): string {
+  return stock ? (r.used[0] ? `fin ${monthShortLabel(r.used[0])} ${year}` : "aucun mois connu") : `cumul des ${r.used.length} mois connus (${r.known.length < 12 ? `${12 - r.known.length} mois n.d. non comptés` : "année complète"})`;
+}
+
+// Répartition par groupe et sa base, sans seuil (grille telle quelle).
 export function effectifsShare(grid: Grid, stock: boolean, year: string) {
   const repart = grid.kind === "value" ? repartition(grid, stock) : null;
-  const basis = repart && grid.kind === "value"
-    ? stock ? (repart.used[0] ? `fin ${monthShortLabel(repart.used[0])} ${year}` : "aucun mois connu") : `cumul des ${repart.used.length} mois connus (${repart.known.length < 12 ? `${12 - repart.known.length} mois n.d. non comptés` : "année complète"})`
-    : "";
-  return { repart, basis };
+  return { repart, basis: repart ? basisText(repart, stock, year) : "" };
+}
+
+// Répartition par groupe après seuil de confidentialité (écran et export) : calculée sur la grille du calcul, masquée en personnes
+// distinctes des mois utilisés ; le total reste celui de l'entreprise.
+export function effectifsShareOf(e: Pick<EffectifsData, "raw" | "stock" | "year" | "sizes" | "seuil" | "seuilReason">): { repart: MaskedRepartition | null; basis: string } {
+  const repart = e.raw.kind === "value" ? repartitionMasked(e.raw, e.stock, e.sizes, e.seuil, e.seuilReason) : null;
+  return { repart, basis: repart ? basisText(repart, e.stock, e.year) : "" };
 }

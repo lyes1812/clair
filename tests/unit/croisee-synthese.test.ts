@@ -935,7 +935,8 @@ describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources a
     if (one.kind !== "value" || one.pay.kind !== "value") throw new Error("journal attendu");
     expect(sp(tile(buildSynthese(one), "masse").value.text)).toBe("1 400,00 €");
     // c1 non relié à une personne : non vérifiable, même au seuil 1.
-    const unlinked = await loadSyntheseInput(fakeCtx({ service: svc, settings: settingsOf(set(1)), load: { payroll: async () => ({ ...(await fakeCtx({}, JOURNAL).load.payroll()) }), persons: async () => new Map(), compta: async () => ({ source: null, reason: "aucune source comptable retenue", lines: [], months: [], nd: {}, error: false }), scenario: async () => scenario } }, JOURNAL));
+    const base = fakeCtx({ service: svc, settings: settingsOf(set(1)) }, JOURNAL);
+    const unlinked = await loadSyntheseInput({ ...base, load: { ...base.load, persons: async () => new Map() } } as CroiseeContext);
     expect(unlinked.kind === "value" && unlinked.pay.kind === "nd" && unlinked.pay.reason).toBe(SEUIL_NON_VERIFIABLE);
     // Seuil non défini : raison du paramètre, lien vers Paramètres › Confidentialité.
     const no = await loadSyntheseInput(fakeCtx({ service: svc, settings: settingsOf({ kind: "absent" }) }, JOURNAL));

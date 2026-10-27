@@ -11,8 +11,8 @@ import { formatEuros } from "@/lib/money";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import type { KpiInput } from "@/lib/rh/kpi/types";
 import { barNote, donutNote, gridSeries, groupColor, monthAxis, monthShortLabel, splitAxisLabel, unitLabel } from "@/lib/viz/kpi";
-import { PanelTitle } from "./components";
-import { effectifsShare, loadEffectifs } from "./effectifs-data";
+import { ConfidentialiteNote, PanelTitle } from "./components";
+import { effectifsShareOf, loadEffectifs } from "./effectifs-data";
 
 type Unit = "etp" | "nombre" | "eur";
 // Part d'un groupe : sans total positif, elle n'est pas définie (n.d. avec sa raison, jamais 0 %).
@@ -23,13 +23,16 @@ const text = (v: number, unit: Unit) => (unit === "eur" ? formatEuros(v) : unit 
 // Mise en page : volet « J'analyse mes… / Par… / Répartis par… » à gauche, filtres Version et Année en haut, puis
 // le panneau « Graphiques » (anneau de répartition et barres par mois), la répartition et le tableau mensuel exact.
 // Aucune explication sur l'écran : rubriques, ventilation, versions, répartition et graphiques sont au glossaire (« ? »).
+// Seuil de confidentialité (paramètre de l'espace) : la grille et la répartition arrivent déjà masquées de loadEffectifs (cellules
+// n.d. avec la raison, totaux conservés) ; les graphiques lisent les mêmes cellules (null + raison) ; une ligne dit le seuil.
 export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { slug: string; workspaceId: string; kpi: KpiInput | null; search: { mesure: string; axe: string; version: string; annee: string } }) {
   // Chargement commun avec l'export Excel (mêmes paramètres d'adresse, même grille).
-  const { measure, axis, mdef, versions, version, versionLabel, full, years, year, grid, unit, stock } = await loadEffectifs(slug, workspaceId, kpi, search);
+  const e = await loadEffectifs(slug, workspaceId, kpi, search);
+  const { measure, axis, mdef, versions, version, versionLabel, full, years, year, grid, unit, stock, confidentialite } = e;
   const axisParts = splitAxisLabel(AXES.find((a) => a.key === axis)!.label);
   const axisLabel = axisParts.name.toLowerCase();
-  // Répartition : stocks au dernier mois connu, flux sur le cumul des mois connus.
-  const { repart, basis } = effectifsShare(grid, stock, year);
+  // Répartition : stocks au dernier mois connu, flux sur le cumul des mois connus ; groupes masqués n.d. avec la raison.
+  const { repart, basis } = effectifsShareOf(e);
   const ndReasons = grid.kind === "value" ? [...new Set(grid.months.flatMap((m) => { const t = grid.total(m); return t.kind === "nd" ? [`${m} : ${t.reason}`] : []; }))] : [];
   const base = `/e/${slug}/studio-rh/kpi`;
 
@@ -38,12 +41,16 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
   const axisMonths = grid.kind === "value" ? monthAxis(grid.months) : null;
   const projected = grid.kind === "value" ? grid.months.filter((m) => grid.layers.get(m) === "projete") : [];
   const nGroups = grid.kind === "value" ? grid.groups.length : 0;
-  const omitted = repart ? repart.items.filter((x) => x.v <= 0).map((x) => x.group) : [];
+  const omitted = repart ? repart.items.filter((x) => x.v !== null && x.v <= 0).map((x) => x.group) : [];
   const barNotes = grid.kind === "value" ? barNote(projected, nGroups) : undefined;
   // Au-delà de huit parts positives, l'anneau cède la place à des barres horizontales : classées de la plus grande à la plus petite.
-  const donutParts = repart ? repart.items.map((x) => ({ key: x.group, name: x.group, value: x.v, color: color(x.group) })) : [];
-  const ranked = donutParts.filter((x) => x.value > 0).length > 8 ? [...donutParts].sort((a, b) => b.value - a.value) : donutParts;
+  // Une part masquée (seuil) est n.d. : absente de l'anneau, listée avec sa raison par le composant.
+  const donutParts = repart ? repart.items.map((x) => ({ key: x.group, name: x.group, value: x.v, reason: x.reason, color: color(x.group) })) : [];
+  const ranked = donutParts.filter((x) => x.value !== null && x.value > 0).length > 8 ? [...donutParts].sort((a, b) => (b.value ?? -1) - (a.value ?? -1)) : donutParts;
   const donutNoteText = repart ? donutNote(omitted) : undefined;
+  const allMasked = repart !== null && repart.items.length > 0 && repart.items.every((x) => x.v === null);
+  // Cellule n.d. (seuil, mois n.d.) : « n.d. » avec la raison au survol.
+  const ndCell = (reason: string | null) => <abbr className="nd" title={reason ?? undefined}>n.d.</abbr>;
 
   return (
     <>
@@ -98,6 +105,7 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
             {mdef.label} · par {axisLabel} · {versionLabel} · {year} · {unit === "eur" ? <MoneyUnitLabel /> : unitLabel(unit)}
             <GlossaryLink slug={slug} term={full ? KPI_TERMS.effectifsVersion : KPI_TERMS.effectifs} label={full ? "Version et mois projetés" : "Effectifs mensuels"} />
           </p>
+          <ConfidentialiteNote slug={slug} setting={confidentialite} testid="em-confidentialite" />
 
           <MoneyText>{grid.kind === "nd" || !repart || !axisMonths ? (
             <section className="panel">
@@ -111,7 +119,12 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
                 </div>
                 <div className="em-charts">
                   <div className="em-donut">
-                    {repart.items.some((x) => x.v > 0) ? (
+                    {allMasked ? (
+                      <figure className="chart" data-testid="em-donut" data-state="nd">
+                        <figcaption className="chart-head"><span className="chart-title">Répartition — {basis}</span></figcaption>
+                        <p className="nd">n.d. — {repart.items[0].reason}</p>
+                      </figure>
+                    ) : repart.items.some((x) => x.v !== null && x.v > 0) ? (
                       <DonutChart
                         testid="em-donut"
                         label={`Répartition de ${mdef.label.toLowerCase()} par ${axisLabel}, ${basis}`}
@@ -156,10 +169,10 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
                     <thead><tr><th>Groupe</th><th className="num">Valeur</th><th className="num">Part</th></tr></thead>
                     <tbody>
                       {repart.items.map((it) => (
-                        <tr key={it.group} data-group={it.group}>
+                        <tr key={it.group} data-group={it.group} data-masque={it.v === null ? "oui" : undefined}>
                           <td><i className="swatch" style={{ background: color(it.group), marginRight: 8 }} aria-hidden="true" />{it.group}</td>
-                          <td className="num" data-col="valeur">{text(it.v, unit)}</td>
-                          <td className="num" data-col="part">{share(it.v, repart.total)}</td>
+                          <td className="num" data-col="valeur">{it.v === null ? ndCell(it.reason) : text(it.v, unit)}</td>
+                          <td className="num" data-col="part">{it.v === null ? ndCell(it.reason) : share(it.v, repart.total)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -199,7 +212,7 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
                     <td title={g}><i className="swatch" style={{ background: color(g), marginRight: 8 }} aria-hidden="true" />{g}</td>
                     {grid.months.map((m) => {
                       const c = grid.cell(g, m);
-                      return <td key={m} className="num" data-month={m}>{c.kind === "value" ? text(c.v, unit) : <abbr className="nd" title={c.kind === "nd" ? c.reason : undefined}>n.d.</abbr>}</td>;
+                      return <td key={m} className="num" data-month={m}>{c.kind === "value" ? text(c.v, unit) : ndCell(c.kind === "nd" ? c.reason : null)}</td>;
                     })}
                   </tr>
                 ))}
@@ -214,6 +227,7 @@ export async function EffectifsMensuels({ slug, workspaceId, kpi, search }: { sl
             </table>
           </div>
           {ndReasons.length > 0 && <details data-testid="em-nd-list"><summary>Mois n.d. ({ndReasons.length})</summary><ul className="list">{ndReasons.map((r) => <li key={r} className="desc">{r}</li>)}</ul></details>}
+          {e.masked > 0 && <p className="desc" data-testid="em-masked">{e.masked} cellule{e.masked > 1 ? "s" : ""} non affichée{e.masked > 1 ? "s" : ""} (seuil de confidentialité : {e.seuil} personne{e.seuil !== null && e.seuil > 1 ? "s" : ""}) ; le total du mois reste affiché.</p>}
         </section>
       )}</MoneyText>
     </>

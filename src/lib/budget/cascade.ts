@@ -1,3 +1,4 @@
+import { personsOfContracts, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
 import { aggregate, type PeopleCell, type Version } from "./versions";
 
 // Analyse des écarts d'ETP entre deux versions sur la même période (mois de même rang dans l'année de chaque version).
@@ -106,6 +107,14 @@ export function etpCascade(a: Version, b: Version, monthsA: string[], monthsB: s
   }
   const end = round(frac(sumB, n));
   return { kind: "value", months: monthsA.length, start, end, steps, residual: end - start - steps.reduce((s, x) => s + x.etp4, 0) };
+}
+
+// Personnes distinctes décrites par chaque palier (unité du seuil de confidentialité) : les contrats du palier (clé de référentiel
+// d'un contrat, clé d'une embauche prévue) reliés à leur personne par le lien du référentiel Collaborateurs. Un contrat que le lien
+// ne relie pas (embauche prévue d'un scénario, contrat sans personne rattachée) est compté à part : il ne protège jamais. Un palier
+// vide ne décrit personne. Aucune clé de personne n'est interprétée ici : la fonction rend ce que le lien lui donne.
+export function cascadePersons(c: Pick<Extract<Cascade, { kind: "value" }>, "steps">, link: PersonLink): PersonsOfContracts[] {
+  return c.steps.map((s) => personsOfContracts(s.people.map((p) => p.key), link));
 }
 
 // Écart de masse salariale par rubrique entre deux versions : chaque rubrique est une contribution ; si une rubrique est n.d.

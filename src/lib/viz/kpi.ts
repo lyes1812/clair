@@ -1,4 +1,6 @@
 import type { ChartSeries } from "@/components/charts/shared";
+import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, maskRelations, maskSize, type ConfidentialiteSetting, type MaskCell, type MaskInput, type MaskRelation, type MaskStatus, type PersonsOfContracts } from "@/lib/confidentialite";
+import { groupInput, unionGroups } from "@/lib/croisee/confidentialite";
 import { fmtEtp4, fmtFixed, fmtFraction, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 
@@ -245,4 +247,124 @@ export function ndSummary(list: ChartSeries[]): string | null {
   if (list.some((s) => s.values.some((v) => v !== null && v !== undefined))) return null;
   const reasons = [...new Set(list.flatMap((s) => (s.reasons ?? []).filter((r): r is string => !!r)))];
   return reasons.length ? reasons.slice(0, 3).join(" ; ") + (reasons.length > 3 ? ` ; … (${reasons.length} raisons)` : "") : "aucune valeur disponible";
+}
+
+// --- Seuil de confidentialité (module partagé src/lib/confidentialite ; moteur maskGroups / maskRelations, jamais recodé) -----------
+// Unité : personnes distinctes (clé de personne du référentiel). Un contrat non relié ne protège jamais (maskSize). Une valeur non
+// nulle qui ne décrit aucune personne dénombrée est « non vérifiable » (groupInput). La raison d'un masquage principal ou secondaire
+// est la même (maskReason). Paramètre absent ou illisible : n.d. avec la raison du paramètre (confidentialiteSettingReason).
+
+// Seuil utilisable, ou la raison de son absence ; un paramètre non transmis par l'écran vaut « non défini » (jamais une valeur de repli).
+export type SeuilRead = { seuil: number; reason: null } | { seuil: null; reason: string };
+export function seuilOf(setting: ConfidentialiteSetting | undefined): SeuilRead {
+  if (!setting) return { seuil: null, reason: confidentialiteSettingReason({ kind: "absent" })! };
+  const reason = confidentialiteSettingReason(setting);
+  return reason === null && setting.kind === "set" ? { seuil: setting.value, reason: null } : { seuil: null, reason: reason ?? confidentialiteSettingReason({ kind: "absent" })! };
+}
+
+// Ligne « Confidentialité : seuil de N personnes » (écran) ; valeur de la ligne « Confidentialité » d'un onglet Filtres (export).
+export const seuilText = (setting: ConfidentialiteSetting | undefined): string =>
+  setting?.kind === "set" ? `seuil de ${setting.value} ${setting.value > 1 ? "personnes" : "personne"}` : setting?.kind === "invalid" ? "seuil illisible, à ré-enregistrer" : "seuil non défini";
+export const seuilFilterText = (setting: ConfidentialiteSetting | undefined): string =>
+  setting?.kind === "set" ? `${seuilText(setting)} distinctes` : setting?.kind === "invalid" ? "seuil illisible : à ré-enregistrer (Paramètres)" : "seuil non défini (Paramètres)";
+
+// --- Tableau par motif du détail de l'absentéisme (même règle que la croisée 03, colonne de la période de congesMask) -------------
+// Cellule d'un motif : personnes comptées (une borne basse sans personne comptée n'est pas dénombrée : non vérifiable, comme
+// congeSize) ; exempt : le seul motif retenu présent dans la lecture (sa ligne égale la tuile Absentéisme, déjà publiée). Relations
+// dont la somme est publiée : les motifs retenus (tuile Absentéisme de la période) ; les autres motifs, dont la somme se déduit du
+// taux tous motifs (cellule onlyAsTotal : masquée seulement quand rien d'autre ne protège un motif masqué).
+export type MotifMaskLine = { chosen: boolean; kind: "exact" | "lower_bound" | "nd"; half: number | null; persons?: string[]; unlinked?: number };
+export type MotifMask = { lines: MaskStatus[]; all: MaskStatus; exempt: number | null };
+export function motifMask(lines: readonly MotifMaskLine[], published: { tile: boolean; all: boolean }, seuil: number): MotifMask {
+  const chosen = lines.flatMap((l, i) => (l.chosen ? [i] : []));
+  const exempt = chosen.length === 1 ? chosen[0] : null;
+  const cells: MaskCell[] = lines.map((l, i): MaskCell => {
+    if (l.kind === "nd" || l.half === null) return { size: null, value: null };
+    const g: PersonsOfContracts = { persons: l.persons ?? [], unlinked: l.unlinked ?? 0 };
+    const s = maskSize(g, seuil);
+    const size = s === 0 && (l.half > 0 || l.kind === "lower_bound") ? null : s;
+    return { size, value: l.half, members: size === null ? [] : g.persons, exempt: i === exempt };
+  });
+  const allAt = cells.length;
+  cells.push({ size: null, value: published.all ? 0 : null, onlyAsTotal: true });
+  const all = lines.map((_, i) => i);
+  const others = all.filter((i) => !lines[i].chosen);
+  const rel: MaskRelation[] = [];
+  if (published.tile && published.all) rel.push({ cells: chosen }, { cells: others, total: allAt });
+  else if (published.all) rel.push({ cells: all, total: allAt });
+  else if (published.tile) rel.push({ cells: chosen });
+  const st = maskRelations(cells, rel, seuil);
+  return { lines: st.slice(0, allAt), all: st[allAt], exempt };
+}
+
+// Lignes du tableau par motif après masquage : une ligne masquée garde son motif et « retenu » ; ses quatre nombres (absences de la
+// lecture et de la période, demi-journées, taux) sont n.d. avec la raison du seuil, jamais 0.
+export type MaskedMotifRow = MotifRow & { masked: string | null };
+export function maskMotifRows(rows: MotifRow[], mask: MotifMask | null, seuil: number | null, settingReason: string | null): MaskedMotifRow[] {
+  return rows.map((r, i): MaskedMotifRow => {
+    const reason = settingReason ?? (mask && seuil !== null && isHidden(mask.lines[i]) ? maskReason(mask.lines[i], seuil) : null);
+    return reason ? { ...r, kind: "nd", halfText: "n.d.", rateText: "n.d.", reason, masked: reason } : { ...r, masked: null };
+  });
+}
+
+// Nombre d'absences par motif de toute la lecture (bloc « Motifs de la lecture » de la tuile) : masquage principal seulement (aucun
+// total publié), en personnes distinctes des contrats des absences. null : nombre affiché ; sinon la raison du n.d.
+export function typeCountMask(sizes: Readonly<Record<string, PersonsOfContracts>>, type: string, count: number, seuil: number): string | null {
+  const g = sizes[type] ?? { persons: [], unlinked: 0 };
+  const [st] = maskGroups([groupInput(g, seuil, count)], seuil, false);
+  return isHidden(st) ? maskReason(st, seuil) : null;
+}
+
+// --- Effectifs mensuels : cellules d'une répartition (groupe × mois), masquage secondaire par colonne (total du mois publié) ------
+// sizes : personnes distinctes d'un groupe un mois donné (contrats reliés par le référentiel), null quand elles ne sont pas dénombrées.
+export type GridSizes = (group: string, month: string) => PersonsOfContracts | null;
+export type GridMask = Map<string, MaskStatus[]>; // mois → statut de chaque groupe (ordre de g.groups) ; mois absent : total n.d.
+const sizeInput = (g: PersonsOfContracts | null, seuil: number, value: number | null): MaskInput => (g ? groupInput(g, seuil, value) : { size: null, value });
+export function gridMask(g: GridIn, sizes: GridSizes, seuil: number): GridMask {
+  const out: GridMask = new Map();
+  for (const m of g.months) {
+    if (g.total(m).kind !== "value") continue;
+    const cells = g.groups.map((grp) => {
+      const c = g.cell(grp, m);
+      return sizeInput(sizes(grp, m), seuil, c.kind === "value" ? c.v : null);
+    });
+    out.set(m, maskGroups(cells, seuil, true));
+  }
+  return out;
+}
+
+// Grille après masquage : même forme, une cellule masquée est n.d. avec la raison du seuil ; le total du mois n'est jamais modifié.
+// seuil null : toute cellule de groupe d'un mois connu est n.d. avec la raison du paramètre (reason).
+export function maskedGrid<G extends GridIn>(g: G, mask: GridMask | null, seuil: number | null, reason: string | null): G {
+  const cell = (grp: string, m: string): CellIn => {
+    const c = g.cell(grp, m);
+    if (c.kind !== "value") return c;
+    if (seuil === null) return { kind: "nd", reason: reason ?? "seuil de confidentialité non défini (Paramètres)" };
+    const st = mask?.get(m)?.[g.groups.indexOf(grp)];
+    return st !== undefined && isHidden(st) ? { kind: "nd", reason: maskReason(st, seuil)! } : c;
+  };
+  return { ...g, cell } as G;
+}
+
+// Nombre de cellules masquées par le seuil (information de l'écran et de l'export).
+export const maskedCount = (mask: GridMask | null): number => (mask ? [...mask.values()].reduce((n, st) => n + st.filter(isHidden).length, 0) : 0);
+
+// Répartition par groupe après masquage : un stock se lit au dernier mois connu (mêmes cellules, même masquage que la colonne) ; un
+// flux se cumule sur les mois connus, et le cumul d'un groupe est masqué selon les personnes distinctes de ces mois réunis (le total
+// du cumul est publié : masquage secondaire). v null : n.d. avec sa raison. Sans seuil : chaque groupe est n.d. avec la raison du
+// paramètre, le total reste.
+export type MaskedRepartition = { known: string[]; used: string[]; items: { group: string; v: number | null; reason: string | null }[]; total: number };
+export function repartitionMasked(g: GridIn, stock: boolean, sizes: GridSizes, seuil: number | null, reason: string | null): MaskedRepartition {
+  const r = repartition(g, stock);
+  if (seuil === null) return { ...r, items: r.items.map((it) => ({ group: it.group, v: null, reason: reason ?? "seuil de confidentialité non défini (Paramètres)" })) };
+  const union = (group: string): PersonsOfContracts | null => {
+    const parts = r.used.map((m) => sizes(group, m));
+    return parts.some((p) => p === null) ? null : unionGroups(...(parts as PersonsOfContracts[]));
+  };
+  const st = maskGroups(
+    r.items.map((it) => sizeInput(r.used.length ? union(it.group) : { persons: [], unlinked: 0 }, seuil, it.v)),
+    seuil,
+    true,
+  );
+  return { ...r, items: r.items.map((it, i) => (isHidden(st[i]) ? { group: it.group, v: null, reason: maskReason(st[i], seuil)! } : { group: it.group, v: it.v, reason: null })) };
 }

@@ -28,6 +28,9 @@ const link = linkFromReferential(DATA);
 const set = (value: number): ConfidentialiteSetting => ({ kind: "set", value, updatedAt: null, updatedBy: null });
 const ABSENT: ConfidentialiteSetting = { kind: "absent" };
 const R3 = confidentialiteReason(3); // « non affiché (seuil de confidentialité : 3 personnes) »
+// Cellule masquée telle que l'écran la rend : « n.d. » avec la raison au survol (même balise que la croisée et KPI RH).
+const ABBR3 = `<abbr class="nd" title="${R3}">n.d.</abbr>`;
+const rx = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 let n = 0;
 const an = (code: string | null) => (code ? [{ type: "Service", code, value: code }] : []);
@@ -201,7 +204,7 @@ describe("libellés de paie : contrats et seuil (cas écrits à la main)", () =>
     const html = renderToStaticMarkup(h(FixeVariableView, { slug: "demo", input: FV, months: MONTHS, prevMonths: PREV, link, confidentialite: set(3) }));
     expect(html).toContain('data-testid="fv-labels-confidentialite"');
     expect(html).toContain("Confidentialité : seuil de 3 personnes");
-    expect(html).toMatch(/data-label="Primes sur objectif"><th[^>]*>Primes sur objectif<\/th><td class="num" data-col="n"><span class="nd" title="non affiché \(seuil de confidentialité : 3 personnes\)">n\.d\.<\/span><\/td>/);
+    expect(html).toMatch(new RegExp(`data-label="Primes sur objectif"><th[^>]*>Primes sur objectif</th><td class="num" data-col="n">${rx(ABBR3)}</td>`));
     expect(html).toMatch(/data-label="Salaires"><th[^>]*>Salaires<\/th><td class="num" data-col="n"><span class="money-display" data-money-cents="1200000"/);
     expect(html).toMatch(/data-testid="fv-labels-total"><th scope="row">Brut<\/th><td class="num" data-col="n"><span class="money-display" data-money-cents="1280000"/);
     expect(html).toContain(R3);
@@ -257,7 +260,7 @@ describe("provision par service : contrats et seuil (cas écrits à la main)", (
     expect(html).toContain('data-testid="pc-provision-services-confidentialite"');
     const table = html.slice(html.indexOf('data-testid="pc-provision-services"'), html.indexOf("</table>", html.indexOf('data-testid="pc-provision-services"')));
     expect(table).toMatch(/data-service="A"><th scope="row">A<\/th><td class="num" data-col="total"><span class="money-display" data-money-cents="42000"/);
-    expect(table).toMatch(/data-service="B"><th scope="row">B<\/th><td class="num" data-col="total">n\.d\.<\/td><td class="num n1">n\.d\.<\/td><td class="num">n\.d\.<\/td><td class="num">n\.d\.<\/td><td class="num">n\.d\.<\/td>/);
+    expect(table).toContain(`data-service="B"><th scope="row">B</th><td class="num" data-col="total">${ABBR3}</td><td class="num n1">${ABBR3}</td><td class="num">${ABBR3}</td><td class="num">${ABBR3}</td><td class="num">${ABBR3}</td>`);
     expect(table).not.toContain('data-money-cents="14000"');
     expect(html).toContain(`B 2026-01 : ${R3}`);
     // Sous le filtre Service B : toute la provision du service est n.d. (tuile et tableau mensuel), avec l'action pour retirer le filtre.
@@ -307,7 +310,9 @@ describe("Synthèse : tableau par service, graphiques, filtre Service, export (s
     expect(html).toContain('data-testid="ms-services-months-confidentialite"');
     const t = tableOf(html, "ms-services-table");
     expect(t).toMatch(/data-service="A"[^]*?data-col="n"><span class="money-display" data-money-cents="1800000"/);
-    expect(t).toMatch(/data-service="B"[^]*?<td class="num" data-col="n">n\.d\.<\/td><td class="num n1" data-col="n1">n\.d\.<\/td><td class="num" data-col="ecart">n\.d\.<\/td><td class="num" data-col="ecart-pct">n\.d\.<\/td><td class="num" data-col="part">n\.d\.<\/td><td class="num" data-col="hors-primes">n\.d\.<\/td><td class="num" data-col="primes">n\.d\.<\/td><td class="num" data-col="cotisations">n\.d\.<\/td><td class="num" data-col="cout-pm">n\.d\.<\/td>/);
+    // Chaque cellule de la ligne masquée est « n.d. » avec la raison au survol (abbr.nd, ce que la spec e2e compte dans la colonne N).
+    expect(t).toMatch(new RegExp(`data-service="B"[^]*?<td class="num" data-col="n">${rx(ABBR3)}</td><td class="num n1" data-col="n1">${rx(ABBR3)}</td><td class="num" data-col="ecart">${rx(ABBR3)}</td><td class="num" data-col="ecart-pct">${rx(ABBR3)}</td><td class="num" data-col="part">${rx(ABBR3)}</td><td class="num" data-col="hors-primes">${rx(ABBR3)}</td><td class="num" data-col="primes">${rx(ABBR3)}</td><td class="num" data-col="cotisations">${rx(ABBR3)}</td><td class="num" data-col="cout-pm">${rx(ABBR3)}</td>`));
+    expect((t.match(/<td class="num" data-col="n"><abbr class="nd"/g) ?? []).length).toBe(3); // B, E, C : trois lignes masquées dans la colonne N
     expect(t).toMatch(/data-testid="ms-services-total">[^]*?data-col="n"><span class="money-display" data-money-cents="3750000"/);
     // Aucun montant dans les lignes masquées (B, E, C), ni leur N-1 (810 000, 540 000, 405 000 centimes).
     for (const svc of ["B", "E", "C"]) expect(t.slice(t.indexOf(`data-service="${svc}"`), t.indexOf("</tr>", t.indexOf(`data-service="${svc}"`)))).not.toContain("data-money-cents");
@@ -315,7 +320,7 @@ describe("Synthèse : tableau par service, graphiques, filtre Service, export (s
     expect(html).toMatch(/data-testid="ms-services-nd-reasons"[^]*?B, B \(N-1\), E, E \(N-1\), C, C \(N-1\) : non affiché \(seuil de confidentialité : 3 personnes\)/);
     // Service × mois : les mois de B, E, C n.d. ; le total du mois (18 750,00 €) reste ; les parts de l'anneau n.d. sont listées avec la raison.
     const m = tableOf(html, "ms-services-months");
-    expect(m).toMatch(/data-service="B"><th scope="row">B<\/th><td class="num" data-col="2026-01"><span class="nd" title="non affiché \(seuil de confidentialité : 3 personnes\)">n\.d\.<\/span><\/td>/);
+    expect(m).toContain(`data-service="B"><th scope="row">B</th><td class="num" data-col="2026-01">${ABBR3}</td><td class="num" data-col="2026-02">${ABBR3}</td><td class="num" data-col="periode">${ABBR3}</td>`);
     expect(m).toMatch(/data-testid="ms-services-months-total">[^]*?data-col="2026-01"><span class="money-display" data-money-cents="1875000"/);
     expect(html).toContain('data-testid="ms-services-months-nd"');
     expect((html.match(/non affiché \(seuil de confidentialité : 3 personnes\)/g) ?? []).length).toBeGreaterThan(0);

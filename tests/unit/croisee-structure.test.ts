@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PersonLink } from "@/lib/confidentialite";
 import { maskCohorts, partitionCohorts, type CohortPartition } from "@/lib/croisee/cohortes";
 import { confidentialiteReason, effectifStructure, maskGroups, maskReason, maskRelations, membersByGroup, personOf, personsByGroup, SEUIL_NON_VERIFIABLE, type MaskCell, type StructureContract } from "@/lib/croisee/structure";
 
@@ -156,7 +157,9 @@ describe("maskRelations : plusieurs relations, total masquable, lignes en bloc (
       prev.set(`B${i}`, 300_000);
       cur.set(`B${i}`, 315_000);
     }
-    const p = partitionCohorts(prev, cur, "hors") as Extract<CohortPartition, { kind: "value" }>;
+    // Lien contrat → personne : chaque contrat est sa propre personne (sans lien, aucun groupe ne serait dénombré).
+    const own: PersonLink = new Map([...prev.keys(), ...cur.keys()].filter((k) => k !== "hors").map((k) => [k, `p-${k}`]));
+    const p = partitionCohorts(prev, cur, "hors", own) as Extract<CohortPartition, { kind: "value" }>;
     expect([p.onlyPrev.count, p.onlyCur.count, p.both.count, p.onlyPrev.prev, p.both.prev, p.both.cur]).toEqual([1, 0, 20, 300_000, 6_000_000, 6_300_000]);
     expect(maskCohorts(p, 3)).toEqual({ onlyPrev: "masked", onlyCur: "shown", both: "secondary", outside: "unverifiable" });
   });

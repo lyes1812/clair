@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { project } from "@/lib/budget/engine";
-import { etpCascade, masseByRubric } from "@/lib/budget/cascade";
+import { cascadePersons, etpCascade, masseByRubric } from "@/lib/budget/cascade";
 import { monthsOfYear, scenarioVersion, type MonthFacts, type Version } from "@/lib/budget/versions";
 import type { BaseContract, BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 
@@ -47,6 +47,19 @@ describe("cascade d'ETP entre 2025 et 2026 (12 mois)", () => {
     expect(s.end).toBe(37333);
     expect(s.steps.reduce((x, y) => x + y.etp4, 0)).toBe(s.end - s.start);
     expect(s.residual).toBe(0);
+  });
+  it("personnes distinctes de chaque palier (seuil de confidentialité) : contrats reliés par le lien, un contrat non relié compté à part", () => {
+    if (c.kind !== "value") throw new Error(c.reason);
+    // Lien contrat → personne : P1 et P6 sont deux contrats d'une même personne « a » ; P5 n'est relié à personne (il ne protège jamais).
+    const link = new Map([["P1", "a"], ["P6", "a"], ["P2", "b"], ["P3", "c"], ["P4", "d"]]);
+    expect(cascadePersons(c, link)).toEqual([
+      { persons: ["c"], unlinked: 0 }, // entrées nouvelles : P3
+      { persons: ["b"], unlinked: 0 }, // effet report : P2
+      { persons: ["d"], unlinked: 0 }, // sorties : P4
+      { persons: [], unlinked: 1 }, // effet déport : P5, non relié
+      { persons: ["a"], unlinked: 0 }, // changement d'ETP : P6 (même personne que P1)
+    ]);
+    expect(cascadePersons(c, new Map())).toEqual(Array(5).fill({ persons: [], unlinked: 1 })); // sans lien : rien n'est dénombré
   });
   it("un mois n.d. d'une version rend l'analyse n.d. (composition jamais supposée) ; périodes de longueur différente refusées", () => {
     const bad = ver("2026", "2026", { P1: span("2026", 1, 12, 10000) });

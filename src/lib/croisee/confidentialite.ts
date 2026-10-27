@@ -42,10 +42,12 @@ export const NO_GROUP: PersonsOfContracts = { persons: [], unlinked: 0 };
 // Entrée de masquage (maskGroups / maskRelations) d'un groupe de contrats du journal : taille = personnes reliées (maskSize : null,
 // effectif non dénombré, quand des contrats non reliés existent et que les personnes reliées sont sous le seuil) ; null aussi quand
 // aucun contrat ne décrit une valeur non nulle (lignes sans contrat : rien ne permet de vérifier le seuil). value : la valeur affichée
-// (null : déjà n.d. pour une autre raison). members : les personnes, comptées une fois d'une cellule masquée à l'autre.
+// (null : déjà n.d. pour une autre raison). members : les personnes, comptées une fois d'une cellule masquée à l'autre ; une cellule
+// n.d. ou non dénombrée n'apporte aucune personne comptée (règle du masquage secondaire) : ses membres ne sont pas transmis.
 export function groupInput(g: PersonsOfContracts, seuil: number, value: number | null, nonZero: boolean = value !== null && value !== 0): MaskInput {
-  const size = maskSize(g, seuil);
-  return { size: size === 0 && nonZero ? null : size, value, members: g.persons };
+  const s = maskSize(g, seuil);
+  const size = s === 0 && nonZero ? null : s;
+  return { size, value, members: size === null || value === null ? [] : g.persons };
 }
 
 // Personnes de plusieurs groupes réunis (distinctes), contrats non reliés additionnés.
