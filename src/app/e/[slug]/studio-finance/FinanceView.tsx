@@ -1,8 +1,10 @@
+import "@/styles/masse-salariale.css";
 import "@/styles/finance.css";
 import { Money, MoneyUnitLabel } from "@/components/Money";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { ExportMenu } from "@/components/ExportMenu";
 import { SourceBadge } from "@/components/SourceBadge";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { BarChart, LineChart, type ChartSeries } from "@/components/charts";
 import { formatMonth } from "@/lib/dates";
 import { FINANCE_ROWS, type FinanceCell, type FinanceMonth, type FinancePlan, type FinanceRowId } from "@/lib/finance/types";
@@ -10,6 +12,7 @@ import { FINANCE_VIEWS, type FinanceViewProps } from "@/lib/finance/view-types";
 import { ActionForm } from "../studio-rh/hypotheses/ActionForm";
 import { Field } from "../studio-rh/hypotheses/shared";
 import { FinancePlanGrid } from "./FinancePlanGrid";
+import { ReadDetails, Tile } from "../studio-rh/masse-salariale/components";
 
 const QUESTIONS = {
   overview: "Où en est le résultat, et que prévoit-on pour la fin de l’année ?",
@@ -66,15 +69,15 @@ function Filters({ p }: { p: FinanceViewProps }) {
     <Field id="finance-year" label="Année"><select id="finance-year" name="annee" className="select" defaultValue={p.year}>{years.map((year) => <option key={year}>{year}</option>)}</select></Field>
     <Field id="finance-from" label="Premier mois"><select id="finance-from" name="debut" className="select" defaultValue={p.from}>{wholeYear(p.year).map((month) => <option key={month} value={month}>{formatMonth(month).split(" ")[0]}</option>)}</select></Field>
     <Field id="finance-to" label="Dernier mois"><select id="finance-to" name="fin" className="select" defaultValue={p.to}>{wholeYear(p.year).map((month) => <option key={month} value={month}>{formatMonth(month).split(" ")[0]}</option>)}</select></Field>
-    <Field id="finance-selected-plan" label="Plan affiché"><select id="finance-selected-plan" name="plan" className="select" defaultValue={p.selectedPlan?.id ?? ""}><option value="">Aucun plan sélectionné</option>{p.plans.filter((plan) => plan.year === p.year).map((plan) => <option key={plan.id} value={plan.id}>{labelOfPlan(plan)}</option>)}</select></Field>
-    <Field id="finance-selected-budget" label="Budget de comparaison"><select id="finance-selected-budget" name="budget" className="select" defaultValue={p.selectedBudget?.id ?? ""}><option value="">Aucun budget sélectionné</option>{p.plans.filter((plan) => plan.year === p.year && plan.kind === "budget").map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}</select></Field>
+    <Field id="finance-selected-plan" label="Plan affiché"><SearchableSelect id="finance-selected-plan" name="plan" className="select" defaultValue={p.selectedPlan?.id ?? ""} searchLabel="Plans financiers" options={[{ value: "", label: "Aucun plan sélectionné" }, ...p.plans.filter((plan) => plan.year === p.year).map((plan) => ({ value: plan.id, label: labelOfPlan(plan) }))]} /></Field>
+    <Field id="finance-selected-budget" label="Budget de comparaison"><SearchableSelect id="finance-selected-budget" name="budget" className="select" defaultValue={p.selectedBudget?.id ?? ""} searchLabel="Budgets financiers" options={[{ value: "", label: "Aucun budget sélectionné" }, ...p.plans.filter((plan) => plan.year === p.year && plan.kind === "budget").map((plan) => ({ value: plan.id, label: plan.name }))]} /></Field>
     <button className="btn primary" type="submit">Appliquer</button>
   </form>;
 }
 
 function MonthlyTable({ rows, months, title, testid }: { rows: FinanceMonth[]; months: string[]; title: string; testid: string }) {
   return <div className="table-wrap scroll" tabIndex={0} role="region" aria-label={title}>
-    <table className="data-table finance-table" data-testid={testid}>
+    <table className="data-table sticky sticky-first finance-table" data-testid={testid}>
       <caption>{title} · <MoneyUnitLabel /></caption>
       <thead><tr><th scope="col">Ligne financière</th>{months.map((month) => <th scope="col" className="num" key={month}>{formatMonth(month)}</th>)}<th scope="col" className="num">Cumul</th></tr></thead>
       <tbody>{[...FINANCE_ROWS, { id: "result" as const, label: "Résultat", kind: "income" }].map((row) => <tr key={row.id} className={row.id === "result" ? "finance-result" : undefined}><th scope="row">{row.label}</th>{months.map((month) => <td className="num" key={month}><Amount cell={valueAt(rows, month, row.id)} /></td>)}<td className="num"><Amount cell={periodTotal(rows, months, row.id)} /></td></tr>)}</tbody>
@@ -86,10 +89,10 @@ function Overview({ p }: { p: FinanceViewProps }) {
   const cards = [FINANCE_ROWS[0], FINANCE_ROWS[2], FINANCE_ROWS[3], { id: "result" as const, label: "Résultat" }];
   const previousMonths = p.months.map(previousMonth);
   return <>
-    <dl className="finance-kpis" data-testid="finance-overview-kpis">{cards.map((row) => {
+    <dl className="facts ms-tiles four finance-kpis" data-testid="finance-overview-kpis">{cards.map((row) => {
       const current = periodTotal(p.actuals.months, p.months, row.id);
       const prior = periodTotal(p.previous.months, previousMonths, row.id);
-      return <div key={row.id} className="finance-kpi"><dt>{row.label}</dt><dd><Amount cell={current} /></dd><p className="desc">N−1 : <Amount cell={prior} /></p><div className="finance-spark"><LineChart testid={`finance-spark-${row.id}`} label={`${row.label}, réel et année précédente`} categories={p.months.map((month) => formatMonth(month).split(" ")[0])} series={[series(p.actuals.months, p.months, row.id, "actual", "Réel"), series(p.previous.months, p.months, row.id, "previous", "N−1", true)]} unit="eur" height={100} /></div></div>;
+      return <Tile key={row.id} testid={`finance-kpi-${row.id}`} label={row.label} value={<Amount cell={current} />} nd={current.cents === null} ndLong={current.cents === null} main={row.id === "result"} sparkline={p.months.map((month) => valueAt(p.actuals.months, month, row.id).cents)} compare={<span className="tile-foot">N−1 : <Amount cell={prior} /></span>} />;
     })}</dl>
     <section className="panel finance-section"><h2>Produits et charges par mois</h2><BarChart testid="finance-overview-months" label="Produits et charges comptables par mois" categories={p.months.map((month) => formatMonth(month).split(" ")[0])} categoryTitles={p.months.map(formatMonth)} series={FINANCE_ROWS.map((row) => series(p.actuals.months, p.months, row.id, row.id, row.label))} unit="eur" mode="grouped" note="Les charges sont présentées positives ; elles sont soustraites des produits pour calculer le résultat." /></section>
     <section className="panel finance-section"><h2>Résultat : réel, plan et budget</h2><LineChart testid="finance-result-chart" label="Résultat réel, plan et budget sélectionnés" categories={p.months.map((month) => formatMonth(month).split(" ")[0])} categoryTitles={p.months.map(formatMonth)} series={[series(p.actuals.months, p.months, "result", "actual", "Réel"), ...(p.projection ? [series(p.projection, p.months, "result", "plan", p.selectedPlan?.name ?? "Plan")] : []), ...(p.budgetMonths ? [series(p.budgetMonths, p.months, "result", "budget", p.selectedBudget?.name ?? "Budget")] : [])]} unit="eur" />{!p.selectedPlan ? <p className="desc">Sélectionne un plan pour afficher la prévision ; aucune hypothèse n’est choisie à ta place.</p> : <p className="desc">{p.selectedPlan.name} : {p.selectedPlan.kind === "forecast" ? `réel comptable avant ${formatMonth(p.selectedPlan.firstForecastMonth!)}, hypothèses ensuite.` : "hypothèses budgétaires sur les douze mois."} Personnel projeté : {p.selectedPlan.personnelSource === "rh" ? p.rhOptions.find((option) => option.id === p.selectedPlan!.rhScenarioId)?.name ?? "scénario RH sélectionné indisponible" : "saisie du plan"}.</p>}</section>
@@ -101,7 +104,7 @@ function Pnl({ p }: { p: FinanceViewProps }) {
     <section className="panel finance-section"><h2>Compte de résultat réel</h2><MonthlyTable rows={p.actuals.months} months={p.months} title={`Réel ${p.year}`} testid="finance-pnl-table" /><p className="desc">Résultat = chiffre d’affaires + autres produits − charges de personnel − autres charges.</p></section>
     <section className="panel finance-section"><h2>Comparaison avec {p.year - 1}</h2><MonthlyTable rows={p.previous.months} months={p.months.map(previousMonth)} title={`Réel ${p.year - 1}, mêmes mois`} testid="finance-previous-table" /></section>
     {p.projection && p.selectedPlan ? <section className="panel finance-section"><h2>{p.selectedPlan.name}</h2><MonthlyTable rows={p.projection} months={p.months} title={labelOfPlan(p.selectedPlan)} testid="finance-projection-table" /></section> : null}
-    <section className="panel finance-section"><h2>Détail par compte</h2>{p.actuals.accounts.length ? <div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Détail comptable par mois"><table className="data-table finance-table" data-testid="finance-accounts-table"><thead><tr><th scope="col">Compte</th><th scope="col">Ligne de gestion</th>{p.months.map((month) => <th scope="col" className="num" key={month}>{formatMonth(month)}</th>)}<th scope="col" className="num">Cumul</th></tr></thead><tbody>{p.actuals.accounts.map((account) => <tr key={account.account}><th scope="row">{account.account}</th><td>{FINANCE_ROWS.find((row) => row.id === account.row)?.label}</td>{p.months.map((month) => <td key={month} className="num"><Amount cell={account.months[month] ?? absent} /></td>)}<td className="num"><Amount cell={total(p.months.map((month) => account.months[month] ?? absent))} /></td></tr>)}</tbody></table></div> : <p className="desc">Aucun compte de produits ou de charges dans la lecture retenue. Vérifie la source dans <a href={`/e/${p.slug}/donnees`}>Données</a>.</p>}</section>
+    <section className="panel finance-section"><h2>Détail par compte</h2>{p.actuals.accounts.length ? <div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Détail comptable par mois"><table className="data-table sticky sticky-first finance-table" data-testid="finance-accounts-table"><thead><tr><th scope="col">Compte</th><th scope="col">Ligne de gestion</th>{p.months.map((month) => <th scope="col" className="num" key={month}>{formatMonth(month)}</th>)}<th scope="col" className="num">Cumul</th></tr></thead><tbody>{p.actuals.accounts.map((account) => <tr key={account.account}><th scope="row">{account.account}</th><td>{FINANCE_ROWS.find((row) => row.id === account.row)?.label}</td>{p.months.map((month) => <td key={month} className="num"><Amount cell={account.months[month] ?? absent} /></td>)}<td className="num"><Amount cell={total(p.months.map((month) => account.months[month] ?? absent))} /></td></tr>)}</tbody></table></div> : <p className="desc">Aucun compte de produits ou de charges dans la lecture retenue. Vérifie la source dans <a href={`/e/${p.slug}/donnees`}>Données</a>.</p>}</section>
   </>;
 }
 
@@ -110,7 +113,7 @@ function Mapping({ p }: { p: FinanceViewProps }) {
   const accounts = [...new Set([...p.actuals.accounts.map((account) => account.account), ...p.mappings.map((mapping) => mapping.account)])].sort();
   const shown = accounts.slice(0, 256);
   const content = <><p className="desc">Correspondance initiale : 70 → chiffre d’affaires, autres 7 → autres produits, 64 → personnel, autres 6 → autres charges. La correspondance s’applique aux lectures affichées, sans modifier les écritures.</p>{accounts.length > 256 ? <p className="notice">Seuls les 256 premiers comptes peuvent être modifiés ici ; les {accounts.length - 256} autres correspondances sont conservées.</p> : null}
-    <div className="table-wrap"><table className="data-table" data-testid="finance-mappings"><thead><tr><th scope="col">Compte</th><th scope="col">Ligne de gestion</th><th scope="col">Correspondance</th></tr></thead><tbody>{shown.map((account) => {
+    <div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Correspondances des comptes"><table className="data-table sticky sticky-first" data-testid="finance-mappings"><thead><tr><th scope="col">Compte</th><th scope="col">Ligne de gestion</th><th scope="col">Correspondance</th></tr></thead><tbody>{shown.map((account) => {
       const effective = overrides.get(account) ?? p.actuals.accounts.find((item) => item.account === account)?.row ?? (account.startsWith("70") ? "revenue" : account.startsWith("64") ? "personnel" : account.startsWith("6") ? "other-expenses" : "other-income");
       return <tr key={account}><th scope="row">{account}</th><td>{p.canAdmin ? <><input type="hidden" name="account" value={account} /><select className="select" name="row" defaultValue={effective} aria-label={`Ligne de gestion du compte ${account}`}>{FINANCE_ROWS.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}</select></> : FINANCE_ROWS.find((row) => row.id === effective)?.label}</td><td>{overrides.has(account) ? "Personnalisée" : "PCG initiale"}</td></tr>;
     })}</tbody></table></div></>;
@@ -132,23 +135,25 @@ function Variance({ p }: { p: FinanceViewProps }) {
   const budget = p.budgetMonths;
   const allRows = [...FINANCE_ROWS, { id: "result" as const, label: "Résultat", kind: "income" }];
   return <>
-    <section className="panel finance-section"><h2>Réel / {p.selectedBudget.name}</h2><p className="desc">Même période pour les deux lectures. Écart = réel − budget ; une hausse des charges est défavorable, une hausse des produits favorable.</p><div className="table-wrap"><table className="data-table finance-table" data-testid="finance-variance-table"><thead><tr><th scope="col">Ligne</th><th scope="col" className="num">Réel</th><th scope="col" className="num">Budget</th><th scope="col" className="num">Écart</th></tr></thead><tbody>{allRows.map((row) => {
+    <section className="panel finance-section"><h2>Réel / {p.selectedBudget.name}</h2><p className="desc">Même période pour les deux lectures. Écart = réel − budget ; une hausse des charges est défavorable, une hausse des produits favorable.</p><div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Écarts cumulés"><table className="data-table sticky sticky-first finance-table" data-testid="finance-variance-table"><thead><tr><th scope="col">Ligne</th><th scope="col" className="num">Réel</th><th scope="col" className="num">Budget</th><th scope="col" className="num">Écart</th></tr></thead><tbody>{allRows.map((row) => {
       const actual = periodTotal(p.actuals.months, p.months, row.id), reference = periodTotal(budget, p.months, row.id);
       return <tr key={row.id} className={row.id === "result" ? "finance-result" : undefined}><th scope="row">{row.label}</th><td className="num"><Amount cell={actual} /></td><td className="num"><Amount cell={reference} /></td><td className="num"><Amount cell={difference(actual, reference)} signed /></td></tr>;
     })}</tbody></table></div></section>
     <section className="panel finance-section"><h2>Écart de résultat par mois</h2><BarChart testid="finance-variance-chart" label="Écart de résultat réel moins budget par mois" categories={p.months.map((month) => formatMonth(month).split(" ")[0])} categoryTitles={p.months.map(formatMonth)} series={[{ key: "variance", name: "Réel − budget", values: p.months.map((month) => difference(valueAt(p.actuals.months, month, "result"), valueAt(budget, month, "result")).cents), reasons: p.months.map((month) => difference(valueAt(p.actuals.months, month, "result"), valueAt(budget, month, "result")).reason) }]} unit="eur" /></section>
-    <section className="panel finance-section"><h2>Écarts détaillés par mois</h2><div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Écarts par ligne et par mois"><table className="data-table finance-table" data-testid="finance-variance-months"><thead><tr><th scope="col">Ligne</th>{p.months.map((month) => <th scope="col" className="num" key={month}>{formatMonth(month)}</th>)}</tr></thead><tbody>{allRows.map((row) => <tr key={row.id}><th scope="row">{row.label}</th>{p.months.map((month) => <td className="num" key={month}><Amount cell={difference(valueAt(p.actuals.months, month, row.id), valueAt(budget, month, row.id))} signed /></td>)}</tr>)}</tbody></table></div></section>
+    <section className="panel finance-section"><h2>Écarts détaillés par mois</h2><div className="table-wrap scroll" tabIndex={0} role="region" aria-label="Écarts par ligne et par mois"><table className="data-table sticky sticky-first finance-table" data-testid="finance-variance-months"><thead><tr><th scope="col">Ligne</th>{p.months.map((month) => <th scope="col" className="num" key={month}>{formatMonth(month)}</th>)}</tr></thead><tbody>{allRows.map((row) => <tr key={row.id}><th scope="row">{row.label}</th>{p.months.map((month) => <td className="num" key={month}><Amount cell={difference(valueAt(p.actuals.months, month, row.id), valueAt(budget, month, row.id))} signed /></td>)}</tr>)}</tbody></table></div></section>
   </>;
 }
 
 export function FinanceView(p: FinanceViewProps) {
   return <div className="finance-view" data-testid="studio-finance">
-    <header className="finance-header"><div><span className="label">Studio Finance · {p.workspaceName}</span><h1>{FINANCE_VIEWS.find((view) => view.id === p.view)?.label}</h1><p className="desc">{QUESTIONS[p.view]}</p></div><ExportMenu testid="finance-export" options={[{ label: "Excel — données et plans", href: href(p, { format: "xlsx" }, "/export") }, { label: "CSV — données et plans", href: href(p, { format: "csv" }, "/export") }]} /></header>
+    <header className="finance-header"><div><span className="label">Studio Finance</span><h1>{FINANCE_VIEWS.find((view) => view.id === p.view)?.label}</h1><p className="desc">{QUESTIONS[p.view]}</p></div><ExportMenu testid="finance-export" options={[{ label: "Excel — données et plans", href: href(p, { format: "xlsx" }, "/export") }, { label: "CSV — données et plans", href: href(p, { format: "csv" }, "/export") }]} /></header>
     <FamilyTabs current={p.view} label="Vues du Studio Finance" testid="finance-tabs" tabs={FINANCE_VIEWS.map((view) => ({ key: view.id, label: view.label, href: href(p, { vue: view.id }) }))} />
-    <SourceBadge resolution={p.source} slug={p.slug} />
-    {p.sourceNotice ? <p className="notice">{p.sourceNotice}</p> : null}
+    <div className="ms-read finance-read">
+      <SourceBadge resolution={p.source} slug={p.slug} />
+      <ReadDetails>{p.sourceNotice && <p className="ms-read-line">{p.sourceNotice}</p>}<p className="ms-read-line">Un montant n.d. reste inconnu ; une case vide du budget n’est pas un zéro. Les détails et les sources figurent aussi dans les exports.</p></ReadDetails>
+    </div>
     <Filters p={p} />
-    <p className="finance-coverage desc">Période : {p.months.length ? `${formatMonth(p.months[0])} → ${formatMonth(p.months[p.months.length - 1])}` : "n.d."}. Une période couverte par une lecture ne prouve pas la clôture comptable.</p>
+    <p className="finance-coverage desc">Période : {p.months.length ? `${formatMonth(p.months[0])} → ${formatMonth(p.months[p.months.length - 1])}` : "n.d."}</p>
     {p.view === "overview" ? <Overview p={p} /> : p.view === "pnl" ? <Pnl p={p} /> : p.view === "mapping" ? <Mapping p={p} /> : p.view === "plans" ? <Plans p={p} /> : <Variance p={p} />}
   </div>;
 }

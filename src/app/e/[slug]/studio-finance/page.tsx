@@ -1,7 +1,6 @@
 import { loadFinanceContext } from "@/lib/finance/context";
 import { savePlanAction, duplicatePlanAction, saveMappingsAction } from "./actions";
 import { FinanceView } from "./FinanceView";
-import "@/styles/finance.css";
 
 export const dynamic = "force-dynamic";
 export default async function FinancePage({ params, searchParams }: {
