@@ -7,6 +7,7 @@ import { pennylaneCoverage } from "@/lib/payroll/lot2";
 import { KPI_PARSERS, type KpiSettingKey } from "@/lib/rh-kpi-settings";
 import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import { absenteeism } from "@/lib/rh/kpi/absence";
+import { CONFIDENTIALITE_KEY, CONFIDENTIALITE_LEGACY_KEY, parseConfidentialite, type ConfidentialiteRead } from "@/lib/confidentialite";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { etpProratedMonth } from "@/lib/rh/kpi/etp-prorata";
 import { turnover } from "@/lib/rh/kpi/turnover";
@@ -21,8 +22,8 @@ export { buildContractServiceMap } from "@/lib/payroll/service-map";
 
 // --- Arguments
 
-export type AdminCommand = "absence-types" | "kpi-settings" | "pennylane-sync" | "probe";
-const COMMANDS: AdminCommand[] = ["absence-types", "kpi-settings", "pennylane-sync", "probe"];
+export type AdminCommand = "absence-types" | "kpi-settings" | "pennylane-sync" | "probe" | "confidentialite" | "espaces";
+const COMMANDS: AdminCommand[] = ["absence-types", "kpi-settings", "pennylane-sync", "probe", "confidentialite", "espaces"];
 const isCommand = (v: string): v is AdminCommand => (COMMANDS as string[]).includes(v);
 
 // Garde-fous de l'écran Données (launchSync, src/app/e/[slug]/donnees/actions.ts) : mois de fin au plus le mois courant de
@@ -49,6 +50,11 @@ export const USAGE = [
   "      écrit si le référentiel Collaborateurs est périmé ou absent : reconstruction (tables rh_*, événement rh.rebuilt), annoncée dans la sortie",
   "      et refusée sans administrateur ; --no-rebuild refuse au lieu de reconstruire. Une valeur par défaut n'est jamais journalisée :",
   "      si un ancien réglage est introuvable, le fournir par --old-exclusions / --old-absence-types",
+  "  confidentialite <slug> --seuil N [--dry-run]",
+  `      écrit le seuil de confidentialité de l'espace (${CONFIDENTIALITE_KEY}, nombre entier de personnes distinctes, au moins 1) avec un événement`,
+  `      d'audit, et affiche avant / après ; l'ancienne clé ${CONFIDENTIALITE_LEGACY_KEY}, lue par repli tant que la nouvelle est absente, n'est jamais touchée`,
+  "  espaces",
+  "      lecture seule : slugs des espaces (aucun nom) et état du seuil de confidentialité de chacun",
 ].join("\n");
 
 export type ParsedArgs =
@@ -56,7 +62,9 @@ export type ParsedArgs =
   | { ok: true; command: "absence-types"; slug: string }
   | { ok: true; command: "kpi-settings"; slug: string; excludeNone: true; absenceTypes: string[]; dryRun: boolean }
   | { ok: true; command: "pennylane-sync"; slug: string; from: string; to: string; months: string[]; apply: boolean; allowRemovals: boolean }
-  | { ok: true; command: "probe"; slug: string; months: string[]; window: string[]; oldExclusions: string[] | null; oldAbsenceTypes: string[] | null; noRebuild: boolean };
+  | { ok: true; command: "probe"; slug: string; months: string[]; window: string[]; oldExclusions: string[] | null; oldAbsenceTypes: string[] | null; noRebuild: boolean }
+  | { ok: true; command: "confidentialite"; slug: string; seuil: number; dryRun: boolean }
+  | { ok: true; command: "espaces" };
 
 type FlagSpec = { values: string[]; switches: string[] };
 const SPECS: Record<AdminCommand, FlagSpec> = {
@@ -64,6 +72,8 @@ const SPECS: Record<AdminCommand, FlagSpec> = {
   "kpi-settings": { values: ["absence-types"], switches: ["exclude-none", "dry-run"] },
   "pennylane-sync": { values: ["from", "to"], switches: ["apply", "allow-removals"] },
   probe: { values: ["months", "old-exclusions", "old-absence-types"], switches: ["no-rebuild"] },
+  confidentialite: { values: ["seuil"], switches: ["dry-run"] },
+  espaces: { values: [], switches: [] },
 };
 
 const SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
@@ -154,6 +164,8 @@ export function parseArgs(argv: string[], now: Date = new Date()): ParsedArgs {
   const tokens = tokenize(rest, SPECS[command]);
   if (typeof tokens === "string") return fail(tokens);
   const { positionals, values, switches } = tokens;
+  // espaces : la seule commande sans espace (elle les liste tous).
+  if (command === "espaces") return positionals.length === 0 ? { ok: true, command } : fail("La commande espaces ne prend pas de slug.");
   if (positionals.length === 0) return fail("Slug de l'espace manquant.");
   if (positionals.length > 1) return fail("Argument en trop après le slug de l'espace.");
   const slug = positionals[0];
@@ -169,6 +181,14 @@ export function parseArgs(argv: string[], now: Date = new Date()): ParsedArgs {
     const list = parseCodeList(raw, "--absence-types", "absence");
     if (!list.ok) return fail(list.error);
     return { ok: true, command, slug, excludeNone: true, absenceTypes: list.value, dryRun: switches.has("dry-run") };
+  }
+
+  if (command === "confidentialite") {
+    const raw = need("seuil");
+    if (raw === null) return fail("--seuil est obligatoire (nombre entier de personnes distinctes, au moins 1).");
+    const seuil = parseSeuilOption(raw);
+    if (seuil === null) return fail(SEUIL_OPTION_ERROR);
+    return { ok: true, command, slug, seuil, dryRun: switches.has("dry-run") };
   }
 
   if (command === "pennylane-sync") {
@@ -196,6 +216,44 @@ export function parseArgs(argv: string[], now: Date = new Date()): ParsedArgs {
   const first = months.value[0];
   const last = months.value[months.value.length - 1];
   return { ok: true, command: "probe", slug, months: months.value, window: monthRange(first, last), oldExclusions: excl ? excl.value : null, oldAbsenceTypes: types ? types.value : null, noRebuild: switches.has("no-rebuild") };
+}
+
+// --- Seuil de confidentialité : option, plan avant / après, liste des espaces
+
+export const SEUIL_OPTION_ERROR = "--seuil : nombre entier de personnes distinctes, au moins 1.";
+// Chiffres seulement (« 5 »), puis l'analyseur du paramètre enregistré (parseConfidentialite) : « 2,5 », « -1 », « 0 », « cinq » refusés.
+export function parseSeuilOption(raw: string): number | null {
+  const s = raw.trim();
+  return /^\d+$/.test(s) ? parseConfidentialite(Number(s)) : null;
+}
+
+const personnes = (n: number) => `${n} ${n > 1 ? "personnes" : "personne"}`;
+// État du seuil en clair : la valeur est un réglage (jamais une donnée de personne) ; la clé d'origine est nommée, et l'ancienne clé
+// est dite reprise.
+export function confidentialiteStateText(read: ConfidentialiteRead): string {
+  const key = read.source === "croisee" ? `ancienne clé ${CONFIDENTIALITE_LEGACY_KEY}, reprise tant que ${CONFIDENTIALITE_KEY} est absente` : `clé ${CONFIDENTIALITE_KEY}`;
+  if (read.setting.kind === "absent") return "non défini";
+  if (read.setting.kind === "invalid") return `illisible (${key})`;
+  return `${personnes(read.setting.value)} (${key})`;
+}
+
+export type ConfidentialitePlan = { before: string; after: string; changed: boolean };
+// À écrire sauf si la nouvelle clé porte déjà cette valeur : la même valeur lue par repli sur l'ancienne clé est écrite (la nouvelle
+// clé doit exister), une valeur illisible est réécrite.
+export function planConfidentialite(current: ConfidentialiteRead, seuil: number): ConfidentialitePlan {
+  const changed = !(current.source === "seuil" && current.setting.kind === "set" && current.setting.value === seuil);
+  return { before: confidentialiteStateText(current), after: `${personnes(seuil)} (clé ${CONFIDENTIALITE_KEY})`, changed };
+}
+
+export function renderConfidentialitePlan(plan: ConfidentialitePlan): string[] {
+  return [`Seuil de confidentialité (${CONFIDENTIALITE_KEY})`, `  avant : ${plan.before}`, `  après : ${plan.after}`, `  ${plan.changed ? "à écrire" : "inchangé, rien à écrire"}`];
+}
+
+// Liste des espaces : slugs seulement (jamais un nom), avec l'état du seuil de chacun, dans l'ordre des slugs.
+export function renderEspaces(rows: { slug: string; read: ConfidentialiteRead }[]): string[] {
+  if (!rows.length) return ["Aucun espace."];
+  const sorted = [...rows].sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+  return [`Espaces : ${rows.length} (slugs seulement, aucun nom). Seuil de confidentialité :`, ...sorted.map((r) => `  ${r.slug} : ${confidentialiteStateText(r.read)}`)];
 }
 
 // --- Réglages KPI : plan avant / après

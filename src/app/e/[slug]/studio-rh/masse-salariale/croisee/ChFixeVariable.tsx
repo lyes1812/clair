@@ -6,7 +6,8 @@ import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { ChapterId, CroiseeTable, SortDir } from "@/lib/viz/croisee";
 import { fixeVariableModel, type FixeVariableModel, type MasseBlock, type MasseChart, type PrevuItem } from "@/lib/viz/croisee-masse";
 import { capital } from "@/lib/viz/masse";
-import { ChartGuard, GraphFoot, NdLines, NdState, TrendLegend, type Affichage } from "../components";
+import { GraphFoot, NdLines, NdState, TrendLegend, type Affichage } from "../components";
+import { ChartNd, sameTitle } from "./atomes/ChartTitle";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
@@ -102,7 +103,7 @@ function Block({ b, model, chapter, slug, affichage, tableauHref, sort }: BlockP
           <div className={charts.length > 1 ? "cx-masse-charts" : "cx-masse-charts one"}>
             {charts.map((c) => (
               <div key={c.id} className="cx-masse-chart">
-                <MasseChartView c={c} titled={c.title !== b.title} />
+                <MasseChartView c={c} titled={!sameTitle(b.title, c.title)} />
                 <GraphFoot aff={affichage} tableHref={`${tableauHref}#cx-table-${c.tableId}`} testid={`cx-chart-${c.id}-tableau`} />
                 {affichage === "tout" && !b.tables.includes(c.tableId) && (
                   <p className="tile-foot cx-masse-link" data-testid={`cx-chart-${c.id}-lien`}>
@@ -128,8 +129,9 @@ function Block({ b, model, chapter, slug, affichage, tableauHref, sort }: BlockP
 }
 
 // Graphique du modèle : barres ou anneau (séries déjà calculées, n.d. hachurés ou listés avec leur raison) ; sans aucune valeur connue,
-// la raison remplace le graphique (ChartGuard). Props sérialisables : unité nommée, jamais de fonction.
-// titled : le titre du graphique est omis quand il répète celui de son bloc (il reste dans l'étiquette lue par les lecteurs d'écran).
+// la raison remplace le graphique (ChartNd). Props sérialisables : unité nommée, jamais de fonction.
+// titled : le titre du graphique est omis quand il répète celui de son bloc (sameTitle), à l'écran comme dans l'état n.d. ; il reste dans
+// l'étiquette lue par les lecteurs d'écran.
 export function MasseChartView({ c, titled = true }: { c: MasseChart; titled?: boolean }) {
   const testid = `cx-chart-${c.id}`;
   const label = `${c.title}, montants monétaires`;
@@ -137,15 +139,15 @@ export function MasseChartView({ c, titled = true }: { c: MasseChart; titled?: b
   if (c.kind === "anneau") {
     const parts: Part[] = c.series.map((s) => ({ key: s.key, name: s.name, value: s.values[0] ?? null, reason: s.reasons?.[0] ?? null, color: s.color }));
     return (
-      <ChartGuard testid={testid} title={c.title} series={c.series}>
+      <ChartNd testid={testid} heading={title} series={c.series}>
         <DonutChart testid={testid} label={label} title={title} parts={parts} unit={c.unit} centerLabel={c.centerLabel} note={c.note} />
-      </ChartGuard>
+      </ChartNd>
     );
   }
   return (
-    <ChartGuard testid={testid} title={c.title} series={c.series}>
+    <ChartNd testid={testid} heading={title} series={c.series}>
       <BarChart testid={testid} label={label} title={title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} mode={c.mode} toggle={c.mode === "stacked" && c.series.length > 1} note={c.note} />
-    </ChartGuard>
+    </ChartNd>
   );
 }
 

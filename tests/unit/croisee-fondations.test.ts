@@ -203,9 +203,9 @@ describe("glossaire de la Masse salariale croisée", () => {
     expect(maskGroups([{ size: 1, value: 1 }, { size: 0, value: 0 }, { size: 6, value: 6 }], 3, true)).toEqual(["masked", "shown", "secondary"]);
     // Sans total affiché, pas de masquage secondaire.
     expect(maskGroups([{ size: 1, value: 1 }, { size: 6, value: 6 }], 3, false)).toEqual(["masked", "shown"]);
-    // Provision par service (seuil 3) : 1 contrat masqué ; le service sans contrat (provision la plus faible) ne suffit pas, le suivant
-    // est masqué aussi.
-    expect(maskServices([{ size: 1, order: 100 }, { size: 0, order: 0 }, { size: 5, order: 500 }, { size: 8, order: 800 }], 3)).toEqual(["masked", "secondary", "secondary", "shown"]);
+    // Provision par service (seuil 3, groupes en personnes distinctes) : 1 personne masquée ; le service sans contrat (0 €, personne)
+    // ne suffit pas et reste affiché, le suivant (5 personnes) est masqué en second.
+    expect(maskServices([{ group: { persons: ["p1"], unlinked: 0 }, value: 100 }, { group: { persons: [], unlinked: 0 }, value: 0 }, { group: { persons: ["a", "b", "c", "d", "e"], unlinked: 0 }, value: 500 }, { group: { persons: ["f", "g", "h", "i", "j", "k", "l", "m"], unlinked: 0 }, value: 800 }], 3)).toEqual(["masked", "shown", "secondary", "shown"]);
     expect(conf).toContain("un service sans contrat rattaché (« Non ventilé », par exemple) ne suffit jamais à en protéger un autre");
     expect(conf).toContain("zéro compris");
   });

@@ -1,9 +1,10 @@
 import type { ChartSeries } from "@/components/charts/shared";
+import type { LandingCompare } from "@/lib/budget/landing-compare";
 import { addMonths } from "@/lib/dates";
 import { fmtDelta, fmtEtp4, fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import type { Delta, Window } from "@/lib/rh/kpi/types";
 import { costTone, type TrendTone } from "@/lib/trend";
-import { COLORS, euros, eurosSigned, monthLongLabel, monthShortLabel, ndGroups, ndLines, type MonthIn } from "@/lib/viz/masse";
+import { COLORS, euros, eurosSigned, monthLongLabel, monthShortLabel, monthShortYear, ndGroups, ndLines, type MonthIn } from "@/lib/viz/masse";
 
 // Adaptateurs purs de la Synthèse du Studio RH : période (année, mois, périodes rapides), valeur de tuile, tendance d'un coût,
 // séries et tableaux des deux graphiques. Aucun calcul métier : chaque valeur vient d'un résultat déjà calculé par le moteur
@@ -185,6 +186,33 @@ export function landingView(land: LandingIn, budget: BudgetIn, gap: GapIn | null
   if (gap.kind === "nd") return { value, budget: b, gap: { text: null, tone: "flat", reason: gap.reason } };
   const euro = eurosSigned(gap.delta);
   return { value, budget: b, gap: { text: gap.pct === null ? `${euro} (% n.d. : budget nul)` : `${euro} (${pct(gap.pct)})`, tone: costTone(gap.delta), reason: null } };
+}
+
+// Tuile Atterrissage de la Synthèse du Studio RH, même règle que la Masse salariale croisée (compareLanding) : la valeur est
+// l'atterrissage des douze mois ; budget saisi, atterrissage et écart portent sur les seuls mois de l'année dotés d'un montant de
+// budget, leur nombre écrit quand des mois sont exclus, les mois exclus nommés. Sans budget : budget et écart n.d. avec la raison.
+export type LandingTileView = {
+  value: TileValue;
+  budget: { label: string; value: TileValue };
+  compared: { label: string; text: string } | null; // atterrissage des mois comparés, quand il diffère des douze mois
+  gap: { label: string } & TrendView;
+  note: string | null; // mois sans montant de budget, exclus et nommés
+};
+export function landingTileView(land: LandingIn, budget: { name: string; compare: LandingCompare } | null, year: string): LandingTileView {
+  const c = budget?.compare ?? null;
+  const v = landingView(land, c ? { total: c.budget } : null, c?.gap ?? null, year);
+  const n = c ? c.withBudget.length : 0;
+  const partial = c !== null && n > 0 && c.excluded.length > 0;
+  const nm = `${nf.format(n)} mois`;
+  const g = c?.gap ?? null;
+  const sameMonths = g?.kind === "value" && land.kind === "value" && (partial || g.a !== land.total);
+  return {
+    value: v.value,
+    budget: { label: budget ? `Budget saisi « ${budget.name} »${partial ? `, ${nm}` : ""}` : "Budget saisi", value: v.budget },
+    compared: sameMonths && g?.kind === "value" ? { label: `Atterrissage, ${nm} comparés`, text: euros(g.a) } : null,
+    gap: { label: partial ? `Écart, ${nm} comparés` : "Écart", ...v.gap },
+    note: c && partial ? `sans montant de budget, exclus : ${c.excluded.map(monthShortYear).join(", ")}` : null,
+  };
 }
 
 // Coût par ETP-mois : fraction de centimes → « 1 234,57 € » (arrondi au centime, demi vers le haut), comme la Synthèse de Masse salariale.

@@ -6,21 +6,26 @@ import { saveCroiseeSettings } from "./actions";
 
 // Origine d'un réglage de la Masse salariale croisée : non défini, modifié (date déjà mise en forme par la page) ou illisible.
 export type CroiseeOrigin = { kind: "absent" } | { kind: "set"; at: string | null } | { kind: "invalid" };
+// Réglages saisis dans ce formulaire : le seuil de confidentialité, paramètre de toute l'application, se saisit dans la section
+// Confidentialité ; s'il est encore transmis (anciens appelants), il est ignoré ici.
+export type CroiseeFormKey = Exclude<CroiseeSettingKey, "confidentialite">;
 // Liens « ? » vers le glossaire, rendus par la page (composant serveur) : le glossaire n'est pas embarqué dans ce composant client.
 export type CroiseeHelpKey = "confidentialite" | "seuilsEffectif" | "horizonEcheances";
 export type CroiseeFormProps = {
   slug: string;
   // Valeurs en vigueur. null (ou liste vide) : le champ reste vide, jamais pré-rempli ni suggéré.
-  values: { confidentialite: number | null; seuilsEffectif: SeuilEffectif[]; margeAlerte: number | null; horizonEcheances: number | null };
-  origins: Record<CroiseeSettingKey, CroiseeOrigin>;
+  values: { confidentialite?: number | null; seuilsEffectif: SeuilEffectif[]; margeAlerte: number | null; horizonEcheances: number | null };
+  origins: Record<CroiseeFormKey, CroiseeOrigin> & { confidentialite?: CroiseeOrigin };
   limits: { seuilsMax: number; libelleMax: number }; // tailles de saisie (SEUILS_MAX, LIBELLE_MAX de src/lib/croisee-settings.ts)
   disabled: boolean;
   helps?: Partial<Record<CroiseeHelpKey, ReactNode>>;
 };
 
-const ORIGIN_IDS: Record<CroiseeSettingKey, string> = { confidentialite: "confidentialite", seuilsEffectif: "seuils", margeAlerte: "marge", horizonEcheances: "horizon" };
+export const CROISEE_CONFIDENTIALITE_NOTE = "Le seuil de confidentialité, commun à toute l'application, se règle dans la section Confidentialité.";
 
-function Origin({ name, origin }: { name: CroiseeSettingKey; origin: CroiseeOrigin }) {
+const ORIGIN_IDS: Record<CroiseeFormKey, string> = { seuilsEffectif: "seuils", margeAlerte: "marge", horizonEcheances: "horizon" };
+
+function Origin({ name, origin }: { name: CroiseeFormKey; origin: CroiseeOrigin }) {
   const text = origin.kind === "set" ? `Modifié le ${origin.at ?? "n.d."} par un administrateur.` : origin.kind === "invalid" ? "Valeur enregistrée illisible : à ré-enregistrer." : "Non défini.";
   return (
     <span className="desc pm-origin" data-missing={origin.kind === "invalid" ? "true" : undefined} data-testid={`setting-croisee-origin-${ORIGIN_IDS[name]}`}>
@@ -99,25 +104,21 @@ function SeuilsRows({ initial, disabled, max, libelleMax }: { initial: SeuilEffe
   );
 }
 
-// Paramètres de la Masse salariale croisée : seuil de confidentialité, seuils d'effectif suivis et marge d'alerte, horizon des
-// échéances de contrat. Aucune valeur par défaut : un champ vidé supprime le réglage. Lecture seule hors administrateurs.
+// Paramètres de la Masse salariale croisée : seuils d'effectif suivis et marge d'alerte, horizon des échéances de contrat. Aucune
+// valeur par défaut : un champ vidé supprime le réglage. Lecture seule hors administrateurs. Le seuil de confidentialité n'est plus
+// saisi ici : renvoi vers la section Confidentialité.
 export function CroiseeForm({ slug, values, origins, limits, disabled, helps = {} }: CroiseeFormProps) {
   const [state, action, pending] = useActionState(saveCroiseeSettings.bind(null, slug), undefined);
   return (
     <form className="form" action={action}>
       <Feedback state={state} testid="setting-croisee-status" />
       <p className="desc">Aucune valeur par défaut : un champ vidé supprime le réglage, qui redevient « non défini ».</p>
+      <p className="desc" data-testid="setting-croisee-confidentialite-note">
+        {CROISEE_CONFIDENTIALITE_NOTE}{" "}
+        <a href="#confidentialite">Ouvrir la section Confidentialité</a>
+        {helps.confidentialite}
+      </p>
       <div className="pm-cols">
-        <fieldset className="pm-card" disabled={disabled}>
-          <legend className="label">Confidentialité{helps.confidentialite}</legend>
-          <div className="pm-card-body">
-            <div className="pm-item">
-              <IntField id="croisee-confidentialite" name="confidentialite" label="Seuil de confidentialité (personnes)" min={1} value={values.confidentialite} testid="setting-croisee-confidentialite" />
-              <Origin name="confidentialite" origin={origins.confidentialite} />
-            </div>
-          </div>
-        </fieldset>
-
         <fieldset className="pm-card" disabled={disabled}>
           <legend className="label">Échéances de contrat{helps.horizonEcheances}</legend>
           <div className="pm-card-body">

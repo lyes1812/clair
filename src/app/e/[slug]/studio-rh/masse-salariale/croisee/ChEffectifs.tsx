@@ -5,8 +5,9 @@ import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { AlertSpec, CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
 import { effectifsModel, type EffectifsBlock, type EffectifsModel, type PrevuItem } from "@/lib/viz/croisee-effectifs";
 import { capital } from "@/lib/viz/masse";
-import { ChartGuard, GraphFoot, NdState, type Affichage } from "../components";
+import { GraphFoot, NdState, type Affichage } from "../components";
 import { AlertList } from "./atomes/AlertList";
+import { ChartNd, chartTitle } from "./atomes/ChartTitle";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
@@ -25,9 +26,8 @@ type ViewProps = { model: EffectifsModel; slug: string; affichage: Affichage; ta
 // Rendu synchrone du modèle (testé tel quel). Affichage « Graphiques » : cartes et blocs de graphique, chaque graphique avec un lien
 // vers son tableau exact ; « Tableaux » : cartes et tableaux, sans graphique ; « Afficher tout » : tout.
 export function EffectifsView({ model, slug, affichage, tableauHref }: ViewProps) {
-  if (model.nd) {
-    return <NdState testid="cx-effectifs-nd" heading="Effectifs & mouvements" reason={capital(model.nd.reason)} action={model.nd.action} />;
-  }
+  // Le titre du chapitre est déjà celui de la page (h2) : l'état n.d. ne le répète pas.
+  if (model.nd) return <NdState testid="cx-effectifs-nd" reason={capital(model.nd.reason)} action={model.nd.action} />;
   const tableOf = (id: string) => model.tables.find((t) => t.id === id);
   const chartOf = (id: string) => model.charts.find((c) => c.id === id);
   const showChart = affichage !== "tableau";
@@ -109,7 +109,7 @@ function Block(p: {
         const table = p.tableOf(c.tableId);
         return (
           <div key={c.id} className="cx-eff-chart">
-            {p.showChart && <ChartView c={c} />}
+            {p.showChart && <ChartView c={c} block={b.title} />}
             {p.showChart && <GraphFoot aff={p.affichage} tableHref={`${p.tableauHref}#cx-table-${c.tableId}`} testid={`cx-chart-${c.id}-tableau`} />}
             {p.showTable && table && <ModelTable table={table} slug={slug} />}
           </div>
@@ -141,15 +141,17 @@ function Block(p: {
 }
 
 // Graphique du modèle : barres (séries déjà calculées, n.d. hachurés avec leur raison) ; sans aucune valeur connue, la raison remplace
-// le graphique (ChartGuard). Les props sont sérialisables (unité nommée, jamais de fonction).
-function ChartView({ c }: { c: CroiseeChart }) {
+// le graphique (ChartNd). Les props sont sérialisables (unité nommée, jamais de fonction). Le titre du bloc n'est pas répété en texte
+// visible sous le h3 (chartTitle) ; le libellé lu par les lecteurs d'écran garde le titre complet.
+function ChartView({ c, block }: { c: CroiseeChart; block: string }) {
   const testid = `cx-chart-${c.id}`;
+  const title = chartTitle(block, c.title);
   return (
-    <ChartGuard testid={testid} title={c.title} series={c.series}>
+    <ChartNd testid={testid} heading={title} series={c.series}>
       <BarChart
         testid={testid}
         label={`${c.title}, ${c.unit === "nombre" ? "en nombre" : c.unit === "etp" ? "en ETP" : c.unit === "bps" ? "en pourcentage" : "en montants"}`}
-        title={c.title}
+        title={title}
         categories={c.categories}
         categoryTitles={c.categoryTitles}
         series={c.series}
@@ -157,7 +159,7 @@ function ChartView({ c }: { c: CroiseeChart }) {
         mode={c.mode}
         height={280}
       />
-    </ChartGuard>
+    </ChartNd>
   );
 }
 

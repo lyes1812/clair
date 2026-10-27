@@ -174,3 +174,8 @@ th[scope="row"] > .ms-detail-link::after { content: " ›"; content: " ›" / ""
   .data-table.ms-table tbody th[scope="row"], .data-table.ms-table tfoot th[scope="row"] { white-space: normal; max-width: 132px; overflow-wrap: anywhere; }
   .data-table.ms-table tbody th[scope="row"].wrap { min-width: 0; }
 }
+
+/* Seuil de confidentialité : une ligne courte au-dessus de chaque tableau masquable (seuil de l'espace ou lien vers les Paramètres). */
+.ms-confidentialite { margin: 0 0 8px; line-height: 1.5; color: var(--muted); }
+.ms-confidentialite a { color: var(--blue); }
+.ms-confidentialite .gloss-link { margin-left: 6px; }

@@ -1,6 +1,7 @@
 // Atomes de la Masse salariale croisée (composants serveur), partagés par les dix chapitres.
 export { AlertList } from "./AlertList";
 export { ChapterPrevu } from "./ChapterPrevu";
+export { ChartNd, chartTitle, sameTitle } from "./ChartTitle";
 export { ModelTable } from "./ModelTable";
 export { NdNote } from "./NdNote";
 export { Pliant } from "./Pliant";

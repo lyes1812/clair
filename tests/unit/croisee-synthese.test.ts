@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { SyntheseView } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChSynthese";
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import type { Layer, Point, Series } from "@/lib/budget/series";
+import { confidentialiteReason, SEUIL_NON_VERIFIABLE, type PersonLink } from "@/lib/confidentialite";
 import type { CroiseeSetting, SeuilEffectif } from "@/lib/croisee-settings";
 import { monthRange } from "@/lib/connectors/months";
 import { glossaryEntry } from "@/lib/glossary";
@@ -68,11 +69,14 @@ const SERVICES: ServicesInput = {
     axis: "Service",
     axisMissing: false,
     rows: [
-      { value: "A", cur: win(2_000_000), prev: win(1_800_000), evo: evo(200_000, 1_800_000), href: "/x?service=A" },
-      { value: "B", cur: win(1_400_000), prev: win(1_300_000), evo: evo(100_000, 1_300_000), href: "/x?service=B" },
+      { value: "A", cur: win(2_000_000), prev: win(1_800_000), evo: evo(200_000, 1_800_000), href: "/x?service=A", groups: { cur: { persons: ["p1", "p2"], unlinked: 0, nonZero: true }, prev: { persons: ["p1", "p2"], unlinked: 0, nonZero: true } } },
+      { value: "B", cur: win(1_400_000), prev: win(1_300_000), evo: evo(100_000, 1_300_000), href: "/x?service=B", groups: { cur: { persons: ["p3"], unlinked: 0, nonZero: true }, prev: { persons: ["p3"], unlinked: 0, nonZero: true } } },
     ],
     total: { cur: win(3_400_000), prev: win(3_100_000), evo: evo(300_000, 3_100_000) },
     selected: null,
+    // Seuil 1 (cas de base) : aucun groupe dénombré n'est masqué ; le masquage des lignes par service est testé au chapitre 05.
+    confidentialite: { kind: "set", value: 1 },
+    links: { confidentialite: "/e/demo/parametres#confidentialite" },
   },
 };
 
@@ -843,17 +847,21 @@ describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources a
       openMonths: [],
       service: { axis: jan ? "Service" : null, value: undefined, label: "Tous les services", options: [], reason: jan ? null : "journal de paie indisponible" },
       budget: jan ? { selected: null, explicit: false, options: [], reason: "aucun budget saisi pour 2026" } : { selected: { id: "b-0123456789", name: "Budget test", year: "2026", amounts: { "2026-01": 100_000, "2026-02": null } }, explicit: false, options: [], reason: null },
-      settings: { seuilsEffectif: { kind: "absent" }, margeAlerte: { kind: "absent" }, confidentialite: { kind: "absent" }, horizonEcheances: { kind: "absent" } },
+      // Seuil de confidentialité 1 (cas de base : rien n'est masqué) ; les autres réglages absents.
+      settings: { seuilsEffectif: { kind: "absent" }, margeAlerte: { kind: "absent" }, confidentialite: { kind: "set", value: 1, updatedAt: null, updatedBy: null }, horizonEcheances: { kind: "absent" } },
       affichage: "tout",
       href: (patch: Record<string, string | null> = {}, hash?: string) => croiseeHref(BASE, { ...state, ...patch }, hash),
       load: {
         payroll: async () => pay,
         compta: async () => (calls.compta++, { source: null, reason: "aucune source comptable retenue", lines: [], months: [], nd: {}, error: false }),
         scenario: async () => (calls.scenario++, scenario),
+        // Lien contrat → personne : c1, c2 et c3 ont chacun leur personne.
+        persons: async () => LINK,
       },
       ...over,
     } as unknown as CroiseeContext;
   };
+  const LINK: PersonLink = new Map([["c1", "p1"], ["c2", "p2"], ["c3", "p3"]]);
 
   it("période absente : chapitre n.d. avec la raison et le lien vers Données (lecteur)", async () => {
     const r = await loadSyntheseInput(fakeCtx({ period: null, periodNd: "Aucun mois clos à la date de référence" }));
@@ -909,6 +917,29 @@ describe("loadSyntheseInput : lecteurs du contexte, filtre de service, sources a
     expect(tile(m, "turnover").variations![0]).toMatchObject({ label: "N-1", text: null, reason: prevReason });
     expect(JSON.stringify(m)).not.toMatch(/FICTIF|Prénom/);
     for (const affichage of ["tout", "graphique", "tableau"] as const) expect(renderToStaticMarkup(h(SyntheseView, { model: m, slug: "demo", affichage })), affichage).not.toMatch(/FICTIF|Prénom/);
+  });
+
+  it("filtre de service sous le seuil de confidentialité : tout le bloc du journal (masse, composition, coût par ETP-mois, séries) est n.d. avec la seule raison du seuil et le retrait du filtre ; seuil non défini : lien vers Paramètres › Confidentialité", async () => {
+    const svc = { axis: "Service", value: "A", label: "A", options: [], reason: null };
+    const settingsOf = (confidentialite: CroiseeSetting<number>) => ({ seuilsEffectif: { kind: "absent" }, margeAlerte: { kind: "absent" }, confidentialite, horizonEcheances: { kind: "absent" } });
+    // A : une personne (c1) en janvier 2026 comme en janvier 2025 ; seuil 2 → masqué.
+    const r = await loadSyntheseInput(fakeCtx({ service: svc, settings: settingsOf(set(2)) }, JOURNAL));
+    if (r.kind !== "value") throw new Error("entrée attendue");
+    expect(r.pay).toEqual({ kind: "nd", reason: confidentialiteReason(2), action: { href: croiseeHref(BASE, { chapitre: "synthese", annee: "2026", de: "01", a: "01" }), label: "Retirer le filtre Service" }, label: "Masse salariale du service non affichée" });
+    const m = buildSynthese(r);
+    expect(tile(m, "masse").value).toEqual({ text: "n.d.", kind: "nd", reason: confidentialiteReason(2) });
+    expect(JSON.stringify(m.alerts)).toContain("Masse salariale du service non affichée");
+    expect(JSON.stringify(m)).not.toContain("1 400,00");
+    // Seuil 1 : la masse du service (1 000 + 400 = 1 400,00 €) est affichée.
+    const one = await loadSyntheseInput(fakeCtx({ service: svc, settings: settingsOf(set(1)) }, JOURNAL));
+    if (one.kind !== "value" || one.pay.kind !== "value") throw new Error("journal attendu");
+    expect(sp(tile(buildSynthese(one), "masse").value.text)).toBe("1 400,00 €");
+    // c1 non relié à une personne : non vérifiable, même au seuil 1.
+    const unlinked = await loadSyntheseInput(fakeCtx({ service: svc, settings: settingsOf(set(1)), load: { payroll: async () => ({ ...(await fakeCtx({}, JOURNAL).load.payroll()) }), persons: async () => new Map(), compta: async () => ({ source: null, reason: "aucune source comptable retenue", lines: [], months: [], nd: {}, error: false }), scenario: async () => scenario } }, JOURNAL));
+    expect(unlinked.kind === "value" && unlinked.pay.kind === "nd" && unlinked.pay.reason).toBe(SEUIL_NON_VERIFIABLE);
+    // Seuil non défini : raison du paramètre, lien vers Paramètres › Confidentialité.
+    const no = await loadSyntheseInput(fakeCtx({ service: svc, settings: settingsOf({ kind: "absent" }) }, JOURNAL));
+    expect(no.kind === "value" && no.pay).toEqual({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)", action: { href: "/e/demo/parametres#confidentialite", label: "Paramètres" }, label: "Masse salariale du service non affichée" });
   });
 
   it("filtre de service : indicateurs RH, budget et atterrissage « non filtrable par service », sans lire le scénario ni la comptabilité", async () => {

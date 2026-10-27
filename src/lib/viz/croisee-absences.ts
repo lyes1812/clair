@@ -16,8 +16,9 @@ import {
   type CongesPris,
 } from "@/lib/croisee/conges";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { confidentialiteReason, isHidden, maskReason, maskRelations, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type MaskCell as SharedMaskCell, type MaskRelation, type MaskStatus } from "@/lib/croisee/structure";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSettings } from "@/lib/croisee/settings-format";
+import { confidentialiteHref, confidentialiteReason, isHidden, maskReason, maskRelations, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type MaskCell as SharedMaskCell, type MaskRelation, type MaskStatus } from "@/lib/confidentialite";
+import { confidentialiteOf } from "@/lib/croisee/confidentialite";
+import type { CroiseeSettings } from "@/lib/croisee/settings-format";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { absenteeism, absenteeismMonth, theoreticalWindow } from "@/lib/rh/kpi/absence";
 import { ABSENCE_ALL_MOTIFS_LABEL, absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
@@ -41,9 +42,10 @@ import { deltaView, kpiRefusal, nd as ndTile, rateTile, windowOf, type TileValue
 // Tuile principale : l'absentéisme du moteur (motifs retenus dans Paramètres › Définitions des KPI). Tous les motifs de la lecture
 // restent dans le détail, et le « Taux d'absence, tous motifs » est un tableau à part, jamais présenté comme l'absentéisme.
 //
-// Seuil de confidentialité (rh.croisee.confidentialite ; absent ou illisible : blocs n.d. avec le lien vers les Paramètres) : une
-// cellule par motif qui décrit de 1 à (seuil − 1) personnes est masquée, dans le tableau par motif, les demi-journées prises par motif
-// et par mois et les absences posées à venir. Exception : le seul motif retenu présent dans la lecture n'est pas masqué (sa ligne égale
+// Seuil de confidentialité (module partagé src/lib/confidentialite, paramètre de toute l'application sans valeur par défaut ; absent ou
+// illisible : blocs n.d. avec le lien vers Paramètres › Confidentialité) : une cellule par motif qui décrit de 1 à (seuil − 1)
+// personnes distinctes est masquée, dans le tableau par motif, les demi-journées prises par motif et par mois et les absences posées à
+// venir. Exception : le seul motif retenu présent dans la lecture n'est pas masqué (sa ligne égale
 // la tuile Absentéisme, déjà publiée dans KPI RH). Masquage secondaire (fonction partagée maskRelations) dans chaque relation publiée :
 // mois d'une ligne et son total ; motifs retenus d'un mois ou de la période et la tuile ; autres motifs de la période et (tous motifs −
 // tuile) : l'ensemble masqué de chaque relation compte au moins « seuil » personnes distinctes, aucune valeur masquée ne se retrouve
@@ -435,10 +437,10 @@ function buildChapter(input: AbsencesInput): AbsencesModel {
   });
   block({ id: "mensuel", title: "Absentéisme par mois", term: TERMS.absenteisme, graph: true, charts: [TABLE_IDS.mensuel] });
 
-  // --- Seuil de confidentialité : réglage de la Masse salariale croisée, sans valeur par défaut (absent ou illisible : n.d.).
-  const s = input.settings.confidentialite;
-  const seuil = settingValue(s);
-  const seuilNd: BlockNd = { reason: croiseeSettingReason("confidentialite", s) ?? "seuil de confidentialité non défini (Paramètres)", action: { href: input.links.parametres, label: "Paramètres" } };
+  // --- Seuil de confidentialité : paramètre de l'application (module partagé), sans valeur par défaut (absent ou illisible : n.d.).
+  const conf = confidentialiteOf(input.settings.confidentialite);
+  const seuil = conf.kind === "set" ? conf.value : null;
+  const seuilNd: BlockNd = { reason: conf.kind === "nd" ? conf.reason : "", action: { href: input.links.parametres, label: "Paramètres" } };
   const mc = d.motifs.current;
   const mp = d.motifs.previous;
   const cc = d.conges.current;
@@ -619,7 +621,7 @@ export async function loadAbsencesInput(ctx: CroiseeContext): Promise<AbsencesIn
   const p = ctx.period;
   const base: Omit<AbsencesInput, "nd" | "data"> = {
     links: {
-      parametres: croiseeSettingsHref(slug),
+      parametres: confidentialiteHref(slug),
       parametresKpi: `/e/${slug}/parametres#kpi`,
       donnees: `/e/${slug}/donnees`,
       tableau: ctx.href({ affichage: "tableau" }),

@@ -1,6 +1,7 @@
 import { categoryMonth, getCategoryNatures, getContractCategories, type CategoryMonth } from "@/lib/budget/categories";
-import { CATEGORY_IDS } from "@/lib/budget/types";
+import { CATEGORY_IDS, CATEGORY_LABELS } from "@/lib/budget/types";
 import { formatDate, monthEnd } from "@/lib/dates";
+import { contractNatureLabel } from "@/lib/dsn/labels";
 import { coverageAt, gateAt } from "@/lib/rh/headcount";
 import { kpiDashboard } from "@/lib/rh/kpi/dashboard";
 import { civilWindow, closedMonths, defaultYear, lastClosedMonth, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
@@ -104,10 +105,29 @@ export async function loadKpiSuivi(slug: string, sp: Search): Promise<KpiSuivi> 
   return kpiSuiviOf(await loadKpiContext(slug, {}), sp);
 }
 
-// Effectif et ETP par catégorie (Suivi) : un calcul par mois de la fenêtre, sur le référentiel sans filtre de périmètre ; seules les
-// catégories présentes au moins un mois sont des colonnes.
-export async function loadCategoryMonths(kpi: KpiInput, w: Window, workspaceId: string): Promise<{ months: CategoryMonth[]; keys: string[] }> {
+// Effectif et ETP par catégorie (Suivi) : un calcul par mois de la fenêtre, sur l'entrée FILTRÉE des indicateurs (établissement,
+// nature) : la somme des catégories égale la tuile « ETP contractuel fin de mois » du même périmètre. Seules les catégories
+// présentes au moins un mois sont des colonnes ; `hidden` : catégories présentes dans toute l'entreprise sur la période mais sans
+// contrat dans le périmètre retenu (aucune colonne ; la mention sous le tableau les nomme). Jamais un zéro à leur place.
+export type CategoryMonths = { months: CategoryMonth[]; keys: string[]; hidden: string[] };
+export const CATEGORY_TABLE_LABELS: Record<string, string> = { ...CATEGORY_LABELS, nc: "Non classé" };
+const categoryKeys = (months: CategoryMonth[]) => [...CATEGORY_IDS, "nc"].filter((k) => months.some((c) => c.kind === "value" && c.byCategory[k]));
+export async function loadCategoryMonths(kpi: KpiInput, w: Window, workspaceId: string): Promise<CategoryMonths> {
   const [catNatures, catOverrides] = await Promise.all([getCategoryNatures(workspaceId), getContractCategories(workspaceId)]);
-  const months = w.months.map((m) => categoryMonth(kpi, m, catNatures.natures, catOverrides));
-  return { months, keys: [...CATEGORY_IDS, "nc"].filter((k) => months.some((c) => c.kind === "value" && c.byCategory[k])) };
+  const monthsOf = (input: KpiInput) => w.months.map((m) => categoryMonth(input, m, catNatures.natures, catOverrides));
+  const months = monthsOf(kpi);
+  const keys = categoryKeys(months);
+  const scoped = Boolean(kpi.scope.establishments?.length || kpi.scope.nature);
+  const hidden = scoped ? categoryKeys(monthsOf({ ...kpi, scope: {} })).filter((k) => !keys.includes(k)) : [];
+  return { months, keys, hidden };
+}
+
+// Mention du périmètre du tableau par catégorie (sous le tableau à l'écran, note de la feuille Excel) quand un filtre
+// Établissement ou Nature est retenu ; null sans filtre. Les catégories hors du périmètre sont nommées, sans colonne ni zéro.
+export function categoryScopeNote(s: Pick<Ready, "etab" | "nature" | "ctx">, hidden: string[], labels: Record<string, string> = CATEGORY_TABLE_LABELS): string | null {
+  const etab = s.etab ? (s.ctx.collab.establishments.find((e) => e.id === s.etab)?.label ?? s.etab) : null;
+  const filters = [etab ? `établissement ${etab}` : null, s.nature ? `nature ${contractNatureLabel(s.nature)}` : null].filter((x): x is string => x !== null);
+  if (!filters.length) return null;
+  const out = hidden.length ? ` ; hors de ce périmètre, sans colonne : ${hidden.map((k) => labels[k] ?? k).join(", ")}` : "";
+  return `Filtres appliqués : ${filters.join(" · ")}. Mêmes contrats que les indicateurs${out}.`;
 }

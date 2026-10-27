@@ -1,6 +1,5 @@
 import type { NextRequest } from "next/server";
 import { AXES } from "@/lib/budget/monthly";
-import { CATEGORY_LABELS } from "@/lib/budget/types";
 import { formatDate } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { xlsxResponse } from "@/lib/export/response";
@@ -11,7 +10,7 @@ import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { splitAxisLabel, unitLabel } from "@/lib/viz/kpi";
 import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
 import { effectifsShare, loadEffectifs } from "../effectifs-data";
-import { loadCategoryMonths, loadKpiSuivi, suiviColumnOn, type KpiSuivi } from "../suivi-data";
+import { CATEGORY_TABLE_LABELS, categoryScopeNote, loadCategoryMonths, loadKpiSuivi, suiviColumnOn, type KpiSuivi } from "../suivi-data";
 import { KPI_VUES } from "../tabs";
 import { categoriesSheet, effectifsGridSheet, effectifsShareSheet, suiviSheet } from "./sheets";
 
@@ -65,9 +64,10 @@ function scopeFilters(s: Ready): FilterSpec[] {
 async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABLE_VUES)[number]): Promise<Response> {
   const sheets: SheetSpec[] = [suiviSheet({ dash: s.dash, data: s.data, establishments: s.input.scope.establishments, rawLimit: s.rawLimit, vue })];
   if (vue === "suivi") {
-    const cat = await loadCategoryMonths(s.ctx.input, s.w, workspace.id);
-    // Tableau calculé sur toute l'entreprise, comme l'écran : la note de la feuille le dit quand un filtre de périmètre est retenu.
-    sheets.push(categoriesSheet(cat.months, cat.keys, { ...CATEGORY_LABELS, nc: "Non classé" }, { scoped: Boolean(s.etab || s.nature) }));
+    // Même entrée filtrée que les tuiles et le tableau « Mois par mois » (établissement, nature), comme l'écran : la note de la
+    // feuille dit que les filtres s'appliquent et nomme les catégories hors du périmètre.
+    const cat = await loadCategoryMonths(s.input, s.w, workspace.id);
+    sheets.push(categoriesSheet(cat.months, cat.keys, CATEGORY_TABLE_LABELS, { scope: categoryScopeNote(s, cat.hidden) }));
   }
   const on = (c: string) => suiviColumnOn(vue, c);
   const label = KPI_VUES.find((v) => v.key === vue)!.label;

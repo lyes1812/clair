@@ -2,11 +2,14 @@ import type { ChartSeries } from "@/components/charts/shared";
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { masseByRubric } from "@/lib/budget/cascade";
 import { landing } from "@/lib/budget/engine";
+import { compareLanding } from "@/lib/budget/landing-compare";
 import { budgetSeries, gap, liveSeries, scenarioSeries, total, type Gap, type Point, type Series } from "@/lib/budget/series";
 import { aggregate, reelVersion } from "@/lib/budget/versions";
 import { printFold, selectAlerts, type AlertesInput, type AlertMention, type ComptaCheck, type DsnCheck, type MissingSource, type SeuilInput } from "@/lib/croisee/alertes";
 import { journalReason } from "@/lib/croisee/format";
 import { memoPublicModel as memoByContext, publicReason } from "@/lib/croisee/public";
+import { confidentialiteHref } from "@/lib/confidentialite";
+import { confidentialiteOf } from "@/lib/croisee/confidentialite";
 import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting, type SeuilEffectif } from "@/lib/croisee/settings-format";
 import { monthEnd, monthsBetween } from "@/lib/dates";
 import { dsnBrutWindow } from "@/lib/payroll/dsn";
@@ -41,7 +44,7 @@ import {
 } from "@/lib/viz/croisee";
 import { publicScenario, zoomReason } from "@/lib/viz/croisee-budget";
 import { continuitySwaps, seuilAlerts, type ReasonSwap } from "@/lib/viz/croisee-effectifs";
-import { buildServices, loadServicesInput, N1_NEGATIF, N1_NUL, SERVICES_IDS, type ServicesInput } from "@/lib/viz/croisee-masse";
+import { buildServices, guardMonth, loadServicesInput, N1_NEGATIF, N1_NUL, serviceConfidentiality, SERVICES_IDS, type ServicesInput } from "@/lib/viz/croisee-masse";
 import { masseWaterfall, type MasseRubric } from "@/lib/viz/ecart";
 import { etpProratedNotes, motifsRetenusLine, type EtpIn, type HeadcountIn, type RatioIn } from "@/lib/viz/kpi";
 import { brutParts, capital, COLORS, euros, eurosSigned, hasData, monthLongLabel, monthShortLabel, monthShortYear, ndGroups, ndLines, reasonLines, type MonthIn } from "@/lib/viz/masse";
@@ -162,7 +165,8 @@ export type SynthesePay =
       unclassified: string[]; // comptes 63 / 64 sans rubrique sur la période
       checks: { compta: ComptaCheck; dsn: DsnCheck };
     }
-  | { kind: "nd"; reason: string; action: Action };
+  // label : intitulé du point à surveiller quand le journal est lu mais non affiché (service retenu sous le seuil de confidentialité).
+  | { kind: "nd"; reason: string; action: Action; label?: string };
 export type SyntheseBudget = { kind: "value"; name: string; series: Series } | { kind: "absent" | "na"; reason: string };
 export type SyntheseLive = { kind: "value"; series: Series } | { kind: "nd"; reason: string };
 export type SyntheseLanding = { kind: "value"; scenarioName: string; refMonth: string; landing: LandingIn; series: Series } | { kind: "nd" | "na"; reason: string };
@@ -511,15 +515,12 @@ export function buildSynthese(input: SyntheseInput): SyntheseModel {
     let excluded: string[] = [];
     let compared = 0;
     if (budget.kind === "value") {
-      const withBudget = ym.filter((m) => pointOf(budget.series, m).kind === "value");
-      excluded = ym.filter((m) => !withBudget.includes(m));
-      compared = withBudget.length;
-      if (withBudget.length === 0) budgetIn = { total: { kind: "nd", reason: `aucun montant de budget saisi « ${budget.name} » pour ${yearKey}` } };
-      else {
-        budgetIn = { total: total(budget.series, withBudget) };
-        if (land.kind === "value") landingGap = gap(L.series, budget.series, withBudget);
-        landingCompared = { months: compared, excluded };
-      }
+      const c = compareLanding(L.series, land.kind === "value", budget, yearKey);
+      budgetIn = { total: c.budget };
+      excluded = c.excluded;
+      compared = c.withBudget.length;
+      landingGap = c.gap;
+      if (compared > 0) landingCompared = { months: compared, excluded };
     }
     const v = landingView(land, budgetIn, landingGap, yearKey);
     landingBudgetReason = v.budget.kind === "nd" ? v.budget.reason : null;
@@ -973,7 +974,7 @@ export function buildSynthese(input: SyntheseInput): SyntheseModel {
 
   // --- Points à surveiller (fonction pure, mêmes chiffres que les cartes)
   const missing: MissingSource[] = [];
-  if (pay.kind === "nd") missing.push({ id: "journal", label: "Journal de paie non lu", reason: pay.reason, href: pay.action.href, linkLabel: pay.action.label });
+  if (pay.kind === "nd") missing.push({ id: "journal", label: pay.label ?? "Journal de paie non lu", reason: pay.reason, href: pay.action.href, linkLabel: pay.action.label });
   if (rh.kind === "nd") missing.push({ id: "rh", label: "Indicateurs RH non calculés", reason: rh.reason, href: rh.action.href, linkLabel: rh.action.label });
   const ndTiles = [...(rh.kind === "value" ? [etpTile, absTile, toTile] : []), ...(pay.kind === "value" ? [masseTile] : [])].filter((t) => t.value.kind === "nd");
   if (ndTiles.length) missing.push({ id: "indicateurs", label: "Indicateurs n.d.", reason: `${ndTiles.map((t) => t.label).join(", ")} : raison sur la carte` });
@@ -1138,11 +1139,19 @@ export async function loadSyntheseInput(ctx: CroiseeContext): Promise<SyntheseIn
     };
   }
 
-  // --- Journal de paie (filtré par service quand un service est choisi)
+  // --- Journal de paie (filtré par service quand un service est choisi). Sous le filtre Service, tous les montants du bloc (masse,
+  // composition, coût par ETP-mois, mois des séries et cascade) décrivent ce seul service : le seuil de confidentialité s'y applique,
+  // comme au chapitre 04, sur chaque mois affiché (période, N-1, douze mois glissants, années N et N-1), compté en personnes distinctes
+  // (serviceConfidentiality) ; sous le seuil ou non dénombré, tout le bloc est n.d. avec la raison et le lien « Retirer le filtre
+  // Service » ; sans seuil défini, avec le lien vers Paramètres › Confidentialité.
   const journal = pay.input;
   let payIn: SynthesePay;
+  const guard = journal && filtered ? serviceConfidentiality(confidentialiteOf(ctx.settings.confidentialite), [...new Set([...months, ...prevMonths, ...rolling, ...yearMonths(year), ...yearMonths(year - 1)])].map(guardMonth(withService(journal, svc ?? null), await ctx.load.persons()))) : null;
   if (!journal) payIn = { kind: "nd", reason: journalReason(pay) ?? "journal de paie indisponible", action: dataAction };
-  else {
+  else if (guard) {
+    const action = guard.cause === "parametre" ? { href: confidentialiteHref(slug), label: "Paramètres" } : { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
+    payIn = { kind: "nd", reason: guard.reason, action, label: "Masse salariale du service non affichée" };
+  } else {
     const j: JournalInput = filtered ? withService(journal, svc ?? null) : journal;
     const cur = windowPayroll(j, months);
     const prev = windowPayroll(j, prevMonths);

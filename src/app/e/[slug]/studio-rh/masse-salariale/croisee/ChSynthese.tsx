@@ -6,7 +6,7 @@ import { cascadeOf } from "@/lib/viz/croisee-budget";
 import { chartHasData, syntheseModel, SYNTHESE_CX_TERMS as T, SYNTHESE_TABLE_IDS as ID, type SyntheseBlock, type SyntheseBlockId, type SyntheseModel } from "@/lib/viz/croisee-synthese";
 import { euros } from "@/lib/viz/masse";
 import { NdLines, TrendLegend, type Affichage } from "../components";
-import { AlertList, ModelTable, NdNote, Pliant, Tuiles } from "./atomes";
+import { AlertList, chartTitle, ModelTable, NdNote, Pliant, Tuiles } from "./atomes";
 import type { CroiseeContext } from "./context";
 
 // Chapitre 01 · Synthèse : six cartes, points à surveiller, masse chargée par mois (réel, projection, budget saisi, N-1) et son
@@ -54,6 +54,8 @@ export function SyntheseView({ model, slug, affichage }: { model: SyntheseModel;
   const cascade = chart(ID.cascade);
   const cascadeTable = table(ID.cascade);
   const cascadeView = cascade ? cascadeOf(cascade) : null;
+  // Titre du bloc repliable de la cascade : celui du modèle ; le graphique ne le répète pas en texte visible (chartTitle).
+  const cascadeTitle = blockOf(model, "cascade")?.title ?? "D'où vient l'écart de coût ?";
   const services = table(ID.services);
   const keyTables = (blockOf(model, "chiffres")?.tables ?? []).map(table).filter((t) => t !== undefined);
   const folded = model.print.folded;
@@ -165,14 +167,14 @@ export function SyntheseView({ model, slug, affichage }: { model: SyntheseModel;
           </section>
         )}
 
-        <Pliant title="D'où vient l'écart de coût ?" id="cx-synthese-cascade" testid="cx-synthese-cascade" open={affichage === "tableau"} term={T.cascades} slug={slug}>
+        <Pliant title={cascadeTitle} id="cx-synthese-cascade" testid="cx-synthese-cascade" open={affichage === "tableau"} term={T.cascades} slug={slug}>
           <BlockNdNotes block={blockOf(model, "cascade")} testid="cx-synthese-cascade-nd" />
           {cascade && showGraph &&
             (cascadeView ? (
               <WaterfallChart
                 testid="cx-chart-synthese-cascade"
                 label={`${cascade.title}, montants monétaires`}
-                title={cascade.title}
+                title={chartTitle(cascadeTitle, cascade.title)}
                 startLabel={cascadeView.startLabel}
                 endLabel={cascadeView.endLabel}
                 start={cascadeView.start}

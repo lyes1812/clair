@@ -1,6 +1,8 @@
+import { confidentialiteSettingReason, maskRelations, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type PersonLink } from "@/lib/confidentialite";
 import { monthPayroll, serviceOf, windowPayroll, type JournalInput, type LedgerLine } from "./engine";
 import { monthBounds, monthRange } from "@/lib/connectors/months";
 import { classify, gridRubrics, type AccountGrid, type RubricId } from "./grid";
+import { hiddenReason, journalCell } from "./service-rows";
 
 // Lot 2 de la Masse salariale : fixe et variable par libellé de paie, provision de congés payés, rapprochement avec la
 // comptabilité. Calculs purs sur les lignes du journal de paie (et de la comptabilité), en centimes, débit − crédit.
@@ -12,20 +14,43 @@ const inService = (input: JournalInput, l: LedgerLine) => !input.serviceFilter |
 // --- Fixe et variable : soldes par rubrique du brut et par libellé de ligne PayFit (ex. « Primes sur objectif »).
 // Clé de regroupement : rubrique + libellé sans accents ni casse (« Prime d'été » = « Prime d'ete »).
 export type LabelTotal = { rubric: RubricId; key: string; label: string; cents: number };
-export function labelTotals(input: JournalInput, months: string[]): LabelTotal[] {
+export const labelKey = (rubric: RubricId, label: string): string => `${rubric}\u0000${norm(label)}`;
+const labelOf = (l: LedgerLine): string => (l.accountName ?? "").trim() || `compte ${l.accountId}`;
+// Lignes du brut d'un mois de la fenêtre, dans le service filtré, avec leur rubrique : mêmes lignes pour les totaux et les contrats.
+function brutLines(input: JournalInput, months: string[]): { line: LedgerLine; rubric: RubricId }[] {
   const rubrics = gridRubrics(input.grid);
-  const out = new Map<string, LabelTotal>();
+  const out: { line: LedgerLine; rubric: RubricId }[] = [];
   for (const l of input.lines) {
     if (!months.includes(l.month) || !inService(input, l)) continue;
     const c = classify(l.accountId, rubrics);
     if (!c.rubric || c.rubric.role !== "brut") continue;
-    const label = (l.accountName ?? "").trim() || `compte ${l.accountId}`;
-    const k = `${c.rubric.id}\u0000${norm(label)}`;
-    const t = out.get(k) ?? { rubric: c.rubric.id, key: k, label, cents: 0 };
+    out.push({ line: l, rubric: c.rubric.id });
+  }
+  return out;
+}
+export function labelTotals(input: JournalInput, months: string[]): LabelTotal[] {
+  const out = new Map<string, LabelTotal>();
+  for (const { line: l, rubric } of brutLines(input, months)) {
+    const label = labelOf(l);
+    const k = labelKey(rubric, label);
+    const t = out.get(k) ?? { rubric, key: k, label, cents: 0 };
     t.cents += balance(l);
     out.set(k, t);
   }
   return [...out.values()].sort((a, b) => a.rubric.localeCompare(b.rubric) || a.label.localeCompare(b.label));
+}
+
+// Contrats distincts (identifiant de la source) qui portent une ligne de chaque libellé du brut sur les mois donnés : mêmes lignes
+// que labelTotals (clé identique). Une ligne sans contrat n'apporte aucun contrat. Sert au seuil de confidentialité par libellé.
+export function labelContracts(input: JournalInput, months: string[]): Map<string, string[]> {
+  const sets = new Map<string, Set<string>>();
+  for (const { line: l, rubric } of brutLines(input, months)) {
+    const k = labelKey(rubric, labelOf(l));
+    let s = sets.get(k);
+    if (!s) sets.set(k, (s = new Set()));
+    if (l.contractId) s.add(l.contractId);
+  }
+  return new Map([...sets].map(([k, s]) => [k, [...s].sort()]));
 }
 
 // --- Provision de congés payés à fin de mois (méthode PayFit d'extourne mensuelle) : chaque mois, la provision du mois
@@ -64,6 +89,92 @@ export function provisionMonth(input: JournalInput, month: string): ProvisionMon
   const conges = part("congés payés", CONGES_PREFIX, (l) => l.accountId.startsWith(CONGES_PREFIX));
   const charges = part("charges sociales", `hors ${CONGES_PREFIX}`, (l) => !l.accountId.startsWith(CONGES_PREFIX));
   return { month, kind: "value", conges, charges, total: conges !== null && charges !== null ? conges + charges : null, missing };
+}
+
+// Contrats distincts qui portent une ligne de dotation « Mois courant » de la provision du mois, dans le service filtré (mêmes
+// lignes que provisionMonth). Sert au seuil de confidentialité de la provision par service.
+export function provisionContracts(input: JournalInput, month: string): string[] {
+  const rubrics = gridRubrics(input.grid);
+  const ids = new Set<string>();
+  for (const l of input.lines) {
+    if (l.month !== month || !l.contractId || !inService(input, l)) continue;
+    if (classify(l.accountId, rubrics).rubric?.id !== "provisions-cp" || !norm(l.accountName).includes(PROVISION_MARKER)) continue;
+    ids.add(l.contractId);
+  }
+  return [...ids].sort();
+}
+
+// --- Seuil de confidentialité : libellés de paie, familles de prime, provision par service (règle de src/lib/confidentialite).
+// Chaque montant d'une répartition décrit les personnes reliées aux contrats qui portent ses lignes ; une cellule de 1 à (seuil − 1)
+// personnes est n.d., avec masquage secondaire dans chaque ensemble dont la somme est publiée. Seuil absent ou illisible : toute la
+// répartition est n.d. avec la raison du paramètre. Les fonctions rendent, pour chaque cellule, la raison du n.d. ou null (affichée).
+
+// Fixe & variable : brut par libellé (période N et N-1 ; sommes publiées : brut de la période, brut de N-1) et primes par famille et
+// par mois (sommes publiées : primes de chaque mois, primes de la période ; les mois d'une famille somment vers sa cellule de période,
+// qui est la même que dans le tableau par libellé). Les familles sont les libellés de la rubrique « Primes » de la période N.
+export type LabelMask = {
+  labels: Record<string, { cur: string | null; prev: string | null }>; // par clé de libellé (labelKey)
+  families: Record<string, (string | null)[]>; // par clé de famille, une raison (ou null) par mois de la période
+};
+export function maskLabels(p: { input: JournalInput; months: string[]; prevMonths: string[]; keys: readonly string[]; families: readonly string[]; link: PersonLink; conf: ConfidentialiteSetting; prevNd: boolean }): LabelMask {
+  const { input, months, prevMonths, keys, families, link, prevNd } = p;
+  if (p.conf.kind !== "set") {
+    const reason = confidentialiteSettingReason(p.conf) ?? SEUIL_NON_VERIFIABLE;
+    return {
+      labels: Object.fromEntries(keys.map((k) => [k, { cur: reason, prev: reason }])),
+      families: Object.fromEntries(families.map((f) => [f, months.map(() => reason)])),
+    };
+  }
+  const seuil = p.conf.value;
+  const cells: MaskCell[] = [];
+  const relations: MaskRelation[] = [];
+  const add = (c: MaskCell) => cells.push(c) - 1;
+  const sum = (list: LabelTotal[], k: string) => list.filter((t) => t.key === k).reduce((s, t) => s + t.cents, 0);
+  const curTotals = labelTotals(input, months);
+  const curContracts = labelContracts(input, months);
+  const prevTotals = prevNd ? [] : labelTotals(input, prevMonths);
+  const prevContracts = prevNd ? new Map<string, string[]>() : labelContracts(input, prevMonths);
+  const cur = keys.map((k) => add(journalCell(curContracts.get(k) ?? [], sum(curTotals, k), link, seuil)));
+  const prev = keys.map((k) => add(journalCell(prevContracts.get(k) ?? [], prevNd ? null : sum(prevTotals, k), link, seuil)));
+  const monthTotals = months.map((m) => (monthPayroll(input, m).kind === "value" ? labelTotals(input, [m]) : null));
+  const monthContracts = months.map((m) => labelContracts(input, [m]));
+  const fam = families.map((f) => months.map((_m, j) => add(journalCell(monthContracts[j].get(f) ?? [], monthTotals[j] === null ? null : sum(monthTotals[j], f), link, seuil))));
+  // Les mois d'une famille somment vers sa cellule de période (masquable) : ces relations d'abord ; puis les colonnes à somme fixe.
+  families.forEach((f, i) => relations.push({ cells: fam[i], total: cur[keys.indexOf(f)] }));
+  relations.push({ cells: cur });
+  relations.push({ cells: prev });
+  months.forEach((_m, j) => relations.push({ cells: fam.map((row) => row[j]) }));
+  relations.push({ cells: families.map((f) => cur[keys.indexOf(f)]) });
+  const st = maskRelations(cells, relations, seuil);
+  return {
+    labels: Object.fromEntries(keys.map((k, i) => [k, { cur: hiddenReason(st[cur[i]], seuil), prev: hiddenReason(st[prev[i]], seuil) }])),
+    families: Object.fromEntries(families.map((f, i) => [f, fam[i].map((c) => hiddenReason(st[c], seuil))])),
+  };
+}
+
+// Provision de congés payés par service, à chaque fin de mois demandée (journal entier, un journal par service) : la somme des
+// services d'un mois est la provision de l'entreprise, publiée (tuile, tableau mensuel) ; masquage secondaire par mois. Une
+// provision n.d. (part sans dotation) garde sa raison ; la valeur de la cellule est le total, à défaut la part connue.
+export type ProvisionMask = Record<string, Record<string, string | null>>; // clé de service (« __nv__ » : non ventilé) → mois → raison ou null
+export const provisionServiceKey = (s: string | null): string => s ?? "__nv__";
+export function maskProvisionServices(p: { inputs: { value: string | null; input: JournalInput }[]; months: string[]; link: PersonLink; conf: ConfidentialiteSetting }): ProvisionMask {
+  const { inputs, months, link } = p;
+  if (p.conf.kind !== "set") {
+    const reason = confidentialiteSettingReason(p.conf) ?? SEUIL_NON_VERIFIABLE;
+    return Object.fromEntries(inputs.map((s) => [provisionServiceKey(s.value), Object.fromEntries(months.map((m) => [m, reason]))]));
+  }
+  const seuil = p.conf.value;
+  const cells: MaskCell[] = [];
+  const idx = inputs.map((s) =>
+    months.map((m) => {
+      const x = provisionMonth(s.input, m);
+      const value = x.kind === "nd" ? null : (x.total ?? x.conges ?? x.charges);
+      return cells.push(journalCell(provisionContracts(s.input, m), value, link, seuil)) - 1;
+    }),
+  );
+  const relations: MaskRelation[] = months.map((_m, j) => ({ cells: idx.map((row) => row[j]) }));
+  const st = maskRelations(cells, relations, seuil);
+  return Object.fromEntries(inputs.map((s, i) => [provisionServiceKey(s.value), Object.fromEntries(months.map((m, j) => [m, hiddenReason(st[idx[i][j]], seuil)]))]));
 }
 
 // --- Rapprochement avec la comptabilité (FEC ou API Pennylane) : mêmes rubriques (même grille), mêmes mois.

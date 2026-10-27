@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   absenceTypeRows,
   buildContractServiceMap,
+  confidentialiteStateText,
   coverageRefusal,
   formatList,
   lostCoverage,
@@ -13,6 +14,8 @@ import {
   parseCodeList,
   parseMonthRange,
   parisMonth,
+  parseSeuilOption,
+  planConfidentialite,
   planKpiSettings,
   previousFromHistory,
   probeKpis,
@@ -22,6 +25,8 @@ import {
   removalRefusal,
   removedCollections,
   renderAbsenceTypes,
+  renderConfidentialitePlan,
+  renderEspaces,
   renderOldSettings,
   renderPlan,
   renderProbe,
@@ -34,6 +39,7 @@ import {
   RH_REBUILD_REFUSAL,
   RH_REBUILT_DONE,
   RH_UP_TO_DATE_DONE,
+  SEUIL_OPTION_ERROR,
   SYNC_FUTURE_MESSAGE,
   SYNC_MAX_MONTHS,
   syncCounterLines,
@@ -107,6 +113,23 @@ describe("lecture des arguments", () => {
     expect(parseArgs(["probe", "espace-test", "--months", "2026-1"])).toMatchObject({ ok: false });
     expect(parseArgs(["probe", "espace-test", "--months", "2026-01", "--old-exclusions", "1"])).toMatchObject({ ok: false, error: expect.stringContaining("deux chiffres") });
   });
+  it("confidentialite : --seuil entier ≥ 1 obligatoire, --dry-run facultatif ; valeurs non entières, nulles ou négatives refusées", () => {
+    expect(parseArgs(["confidentialite", "espace-test", "--seuil", "5"])).toEqual({ ok: true, command: "confidentialite", slug: "espace-test", seuil: 5, dryRun: false });
+    expect(parseArgs(["confidentialite", "--dry-run", "espace-test", "--seuil=1"])).toEqual({ ok: true, command: "confidentialite", slug: "espace-test", seuil: 1, dryRun: true });
+    expect(parseArgs(["confidentialite", "espace-test"])).toMatchObject({ ok: false, error: expect.stringContaining("--seuil est obligatoire") });
+    for (const bad of ["0", "-1", "2,5", "2.5", "cinq", "1e3", " ", "99999999999999999999"]) expect(parseArgs(["confidentialite", "espace-test", "--seuil", bad]), bad).toEqual({ ok: false, error: SEUIL_OPTION_ERROR });
+    expect(parseArgs(["confidentialite", "espace-test", "--seuil"])).toMatchObject({ ok: false, error: expect.stringContaining("attend une valeur") });
+    expect(parseArgs(["confidentialite", "espace-test", "--seuil", "5", "--apply"])).toMatchObject({ ok: false, error: expect.stringContaining("Option inconnue") });
+    // L'option est lue comme le réglage enregistré (parseConfidentialite) : chiffres seulement, espaces autour tolérés.
+    expect(parseSeuilOption(" 5 ")).toBe(5);
+    expect(parseSeuilOption("05")).toBe(5);
+    for (const bad of ["", "0", "-3", "3,0", "3.0", "+3", "trois"]) expect(parseSeuilOption(bad), bad).toBeNull();
+  });
+  it("espaces : aucun slug (la commande les liste tous) ; un slug ou une option sont refusés", () => {
+    expect(parseArgs(["espaces"])).toEqual({ ok: true, command: "espaces" });
+    expect(parseArgs(["espaces", "espace-test"])).toMatchObject({ ok: false, error: expect.stringContaining("ne prend pas de slug") });
+    expect(parseArgs(["espaces", "--dry-run"])).toMatchObject({ ok: false, error: expect.stringContaining("Option inconnue") });
+  });
   it("refus : commande absente ou inconnue, slug absent ou en trop, option inconnue ou étrangère à la commande", () => {
     expect(parseArgs([])).toMatchObject({ ok: false, error: "Commande manquante." });
     expect(parseArgs(["supprimer", "espace-test"])).toMatchObject({ ok: false, error: expect.stringContaining("Commande inconnue") });
@@ -141,6 +164,51 @@ describe("lecture des arguments", () => {
     expect(USAGE).toContain("enregistrée explicitement");
     expect(USAGE).toContain("--old-exclusions / --old-absence-types");
     expect(USAGE).toContain("24 mois au plus");
+  });
+  it("USAGE annonce confidentialite (clé, audit, ancienne clé jamais touchée) et espaces (slugs seulement)", () => {
+    expect(USAGE).toContain("confidentialite <slug> --seuil N [--dry-run]");
+    expect(USAGE).toContain("rh.confidentialite.seuil");
+    expect(USAGE).toContain("rh.croisee.confidentialite");
+    expect(USAGE).toContain("n'est jamais touchée");
+    expect(USAGE).toContain("espaces");
+    expect(USAGE).toContain("aucun nom");
+  });
+});
+
+describe("seuil de confidentialité : plan avant / après et liste des espaces (valeurs de réglage fictives)", () => {
+  const AT = new Date("2026-10-20T08:00:00Z");
+  const set = (value: number, source: "seuil" | "croisee") => ({ setting: { kind: "set" as const, value, updatedAt: AT, updatedBy: "u1" }, source });
+  const absent = { setting: { kind: "absent" as const }, source: null };
+  it("état en clair : non défini, N personnes (clé), reprise de l'ancienne clé, illisible ; singulier à 1", () => {
+    expect(confidentialiteStateText(absent)).toBe("non défini");
+    expect(confidentialiteStateText(set(5, "seuil"))).toBe("5 personnes (clé rh.confidentialite.seuil)");
+    expect(confidentialiteStateText(set(1, "seuil"))).toBe("1 personne (clé rh.confidentialite.seuil)");
+    expect(confidentialiteStateText(set(3, "croisee"))).toBe("3 personnes (ancienne clé rh.croisee.confidentialite, reprise tant que rh.confidentialite.seuil est absente)");
+    expect(confidentialiteStateText({ setting: { kind: "invalid", raw: "5" }, source: "seuil" })).toBe("illisible (clé rh.confidentialite.seuil)");
+    expect(confidentialiteStateText({ setting: { kind: "invalid", raw: 0 }, source: "croisee" })).toBe("illisible (ancienne clé rh.croisee.confidentialite, reprise tant que rh.confidentialite.seuil est absente)");
+  });
+  it("plan : à écrire sauf si la nouvelle clé porte déjà la valeur ; la même valeur reprise de l'ancienne clé est écrite ; illisible réécrit", () => {
+    expect(planConfidentialite(absent, 5)).toEqual({ before: "non défini", after: "5 personnes (clé rh.confidentialite.seuil)", changed: true });
+    expect(planConfidentialite(set(5, "seuil"), 5)).toMatchObject({ changed: false });
+    expect(planConfidentialite(set(4, "seuil"), 5)).toMatchObject({ before: "4 personnes (clé rh.confidentialite.seuil)", changed: true });
+    expect(planConfidentialite(set(5, "croisee"), 5)).toMatchObject({ changed: true });
+    expect(planConfidentialite({ setting: { kind: "invalid", raw: "5" }, source: "seuil" }, 5)).toMatchObject({ before: "illisible (clé rh.confidentialite.seuil)", changed: true });
+    expect(renderConfidentialitePlan(planConfidentialite(set(5, "croisee"), 5))).toEqual([
+      "Seuil de confidentialité (rh.confidentialite.seuil)",
+      "  avant : 5 personnes (ancienne clé rh.croisee.confidentialite, reprise tant que rh.confidentialite.seuil est absente)",
+      "  après : 5 personnes (clé rh.confidentialite.seuil)",
+      "  à écrire",
+    ]);
+    expect(renderConfidentialitePlan(planConfidentialite(set(5, "seuil"), 5))[3]).toBe("  inchangé, rien à écrire");
+  });
+  it("espaces : slugs seulement, triés, avec l'état du seuil ; aucun espace", () => {
+    expect(renderEspaces([{ slug: "espace-b", read: set(5, "seuil") }, { slug: "espace-a", read: absent }, { slug: "espace-c", read: set(2, "croisee") }])).toEqual([
+      "Espaces : 3 (slugs seulement, aucun nom). Seuil de confidentialité :",
+      "  espace-a : non défini",
+      "  espace-b : 5 personnes (clé rh.confidentialite.seuil)",
+      "  espace-c : 2 personnes (ancienne clé rh.croisee.confidentialite, reprise tant que rh.confidentialite.seuil est absente)",
+    ]);
+    expect(renderEspaces([])).toEqual(["Aucun espace."]);
   });
 });
 

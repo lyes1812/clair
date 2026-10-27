@@ -223,7 +223,7 @@ const DEFINED: CroiseeSettings = {
   horizonEcheances: set(90),
 };
 const LABELS = { period: "juillet → septembre 2026", prev: "juillet → septembre 2025" };
-const LINKS = { parametres: "/e/demo/parametres#croisee", donnees: "/e/demo/donnees", mouvements: "/e/demo/studio-rh/collaborateurs/mouvements?de=2025-10&a=2026-09", tableau: "/e/demo/croisee?chapitre=effectifs&affichage=tableau" };
+const LINKS = { parametres: "/e/demo/parametres#croisee", confidentialite: "/e/demo/parametres#confidentialite", donnees: "/e/demo/donnees", mouvements: "/e/demo/studio-rh/collaborateurs/mouvements?de=2025-10&a=2026-09", tableau: "/e/demo/croisee?chapitre=effectifs&affichage=tableau" };
 const input = (over: Partial<EffectifsInput> = {}): EffectifsInput => ({
   links: LINKS,
   period: { months: ["2026-07", "2026-08", "2026-09"], prevMonths: ["2025-07", "2025-08", "2025-09"], labels: LABELS },
@@ -782,7 +782,7 @@ describe("buildEffectifs : structure, échéances et seuils selon les réglages"
 
   it("horizon défini, seuil de confidentialité absent : échéances n.d. (répartition par nature)", () => {
     const m = buildEffectifs(input({ settings: { ...DEFINED, confidentialite: { kind: "absent" } } }));
-    expect(block(m, "echeances").nd).toEqual([{ reason: "seuil de confidentialité non défini (Paramètres)", action: { href: LINKS.parametres, label: "Paramètres" } }]);
+    expect(block(m, "echeances").nd).toEqual([{ reason: "seuil de confidentialité non défini (Paramètres)", action: { href: LINKS.confidentialite, label: "Paramètres" } }]);
   });
 
   it("seuils définis sans marge d'alerte : écarts affichés, aucune alerte, marge n.d.", () => {

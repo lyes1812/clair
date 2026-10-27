@@ -5,18 +5,20 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { ViewSwitch } from "@/components/ViewSwitch";
+import { confidentialiteHref, getConfidentialite } from "@/lib/confidentialite";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatMonth } from "@/lib/dates";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { dsnBrutWindow } from "@/lib/payroll/dsn";
-import { monthPayroll, type CostPerEtp, type EtpMonth, type Evolution, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
+import { monthPayroll, type CostPerEtp, type EtpMonth, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
+import type { MaskedEvolution, MaskedMonth, MaskedWindow } from "@/lib/payroll/service-rows";
 import { gridRubrics } from "@/lib/payroll/grid";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { brutCotisationsSeries, capital, costSeries, euros, eurosSigned, evoDelta, evoPctDelta, hasNd, masseSeries, monthShortYear, monthsAxis, ndGroups, ndLines, numTrend, reasonLines, serviceMonthSeries, servicesParts, sourceReason, trendOf } from "@/lib/viz/masse";
-import { ChartGuard, Composition, eurosOf, GraphFoot, monthShort, MsHead, MsRead, NdKey, NdLines, NdState, PanelHead, PeriodBar, ScrollTable, Tile, TrendChart, TrendLegend, type Affichage } from "./components";
+import { ChartGuard, Composition, ConfidentialiteLine, eurosOf, GraphFoot, monthShort, MsHead, MsRead, NdKey, NdLines, NdState, PanelHead, PeriodBar, ScrollTable, Tile, TrendChart, TrendLegend, type Affichage } from "./components";
 import { DsnView } from "./DsnView";
 import { FixeVariableView, PaieComptaView } from "./Lot2Views";
 import { NV, periodLabel, serviceLabel, syntheseOf, VUES } from "./synthese-data";
@@ -28,14 +30,15 @@ type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/masse-salariale")!;
 
-const money = (w: PayrollWindow, pick: (x: Extract<PayrollWindow, { kind: "value" }>) => number) => (w.kind === "nd" ? "n.d." : euros(pick(w)));
+// Fenêtres, mois et évolutions : la forme du moteur ou sa forme après seuil de confidentialité (n.d. avec sa seule raison).
+const money = (w: MaskedWindow | PayrollWindow, pick: (x: Omit<Extract<PayrollWindow, { kind: "value" }>, "months">) => number) => (w.kind === "nd" ? "n.d." : euros(pick(w)));
 // Valeur d'une tuile : « n.d. » seul quand une période est n.d. (la raison est écrite une fois sous les tuiles) ; un N-1 nul garde sa raison courte.
-const evoText = (e: Evolution) => (e.kind === "nd" ? "n.d." : e.ratio === null ? "n.d. — N-1 nul : % non défini" : `${e.ratio.num > 0 ? "+" : ""}${fmtPercent(e.ratio)}`);
-const evoEuros = (e: Evolution) => (e.kind === "nd" ? "" : eurosSigned(e.deltaCents));
+const evoText = (e: MaskedEvolution) => (e.kind === "nd" ? "n.d." : e.ratio === null ? "n.d. — N-1 nul : % non défini" : `${e.ratio.num > 0 ? "+" : ""}${fmtPercent(e.ratio)}`);
+const evoEuros = (e: MaskedEvolution) => (e.kind === "nd" ? "" : eurosSigned(e.deltaCents));
 // Écart de montant d'une tuile : la couleur de tendance (coût en hausse : rouge, en baisse : vert) et le signe écrit.
 const delta = (cents: number, text: string) => <span className={`ms-delta ${trendOf(cents)}`.trim()}>{text}</span>;
 const costText = (c: CostPerEtp) => (c.kind === "nd" ? "n.d." : eurosOf(c.costCents));
-const cell = (r: MonthPayroll, pick: (x: Extract<MonthPayroll, { kind: "value" }>) => number) => (r.kind === "nd" ? "n.d." : euros(pick(r)));
+const cell = (r: MaskedMonth | MonthPayroll, pick: (x: Extract<MonthPayroll, { kind: "value" }>) => number) => (r.kind === "nd" ? "n.d." : euros(pick(r)));
 
 export default async function MasseSalarialePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
@@ -65,8 +68,10 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       </ul>
     </div>
   );
-  // Chargement commun avec l'export Excel (mêmes paramètres d'adresse, mêmes règles de remplacement d'une valeur invalide).
-  const synthese = syntheseOf(ctx, sp);
+  // Chargement commun avec l'export Excel (mêmes paramètres d'adresse, mêmes règles de remplacement d'une valeur invalide) ; le seuil
+  // de confidentialité de l'espace (sans valeur par défaut) s'applique aux lignes par service et au service retenu par le filtre.
+  const confidentialite = await getConfidentialite(ctx.kpi.collab.workspace.id);
+  const synthese = syntheseOf(ctx, sp, confidentialite);
   if (synthese.kind === "no-input") {
     return (
       <MoneyText><>
@@ -90,7 +95,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   }
 
   // Période : année, premier et dernier mois, service, onglet et affichage (paramètres GET ; une valeur invalide est remplacée et signalée).
-  const { fullInput, notices, vue, aff, knownServices, serviceValue, input, years, year, lastOfYear, from, to, months, prevMonths, cur, prev, evo, etpCur, etpPrev, cost, costPrev, serviceRows, totalCur, totalPrev, totalEvo, serviceNd, showDsn } = synthese;
+  const { fullInput, notices, vue, aff, knownServices, serviceValue, input, years, year, lastOfYear, from, to, months, prevMonths, cur, prev, evo, etpCur, etpPrev, cost, costPrev, services, link, guard, totalCur, totalPrev, totalEvo, serviceNd, showDsn } = synthese;
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
   const showGraph = aff !== "tableau";
   const showTable = aff !== "graphique";
@@ -99,7 +104,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const rawDetail = one(sp.mois);
   const detailMonth = isMonth(rawDetail) && (months.includes(rawDetail) || prevMonths.includes(rawDetail)) ? rawDetail : null;
   if (rawDetail && !detailMonth) ignore("mois", rawDetail, "hors de la période affichée et de son N-1");
-  const detail = detailMonth ? monthPayroll(input, detailMonth) : null;
+  // Service retenu masqué par le seuil : le détail par compte d'un mois est n.d. aussi (même raison).
+  const detail: MaskedMonth | null = detailMonth ? (guard ? { month: detailMonth, kind: "nd", open: false, nd: { reason: guard.reason } } : monthPayroll(input, detailMonth)) : null;
   const unclassified = new Map<string, { name: string | null; cents: number }>();
   for (const r of cur.months) if (r.kind === "value") for (const a of r.unclassified) unclassified.set(a.accountId, { name: a.accountName, cents: (unclassified.get(a.accountId)?.cents ?? 0) + a.balanceCents });
   const svcParam = serviceValue === undefined ? "" : `&service=${encodeURIComponent(serviceValue ?? NV)}`;
@@ -146,22 +152,30 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       ...[...etpCur, ...etpPrev].map((e) => ({ month: e.month, reason: e.etp4 === null ? `ETP fin de mois : ${e.reason ?? "n.d."}` : null })),
     ]),
   );
-  // Raisons des « n.d. » du tableau service × mois : celles qui ne sont pas déjà sous le tableau mensuel (le mois d'un seul service).
-  const svcNdList = ndLines(ndGroups(serviceRows.flatMap((r) => r.cur.months.map((m) => ({ month: m.month, reason: m.kind === "nd" ? m.nd.reason : null }))))).filter((l) => !ndList.includes(l));
+  // Raisons des « n.d. » du tableau service × mois : celles qui ne sont pas déjà sous le tableau mensuel (le mois d'un seul service,
+  // seuil de confidentialité d'un mois).
+  const svcNdList = ndLines(ndGroups(services.flatMap((r) => r.cur.months.map((m) => ({ month: m.month, reason: m.kind === "nd" ? m.nd.reason : null }))))).filter((l) => !ndList.includes(l));
+  // Raisons des « n.d. » du tableau Services (période et N-1 d'un service : seuil de confidentialité, mois hors journal).
+  const svcRowNd = reasonLines(services.flatMap((r) => [
+    { label: serviceLabel(r.value), reason: r.cur.kind === "nd" ? r.cur.nd.reason : null },
+    { label: `${serviceLabel(r.value)} (N-1)`, reason: r.prev.kind === "nd" ? r.prev.nd.reason : null },
+  ]));
+  // Sous le filtre Service, service n.d. : l'action pour y remédier (retirer le filtre ; définir le seuil quand il manque).
+  const guardHref = guard?.cause === "parametre" ? confidentialiteHref(slug) : null;
   const axis = monthsAxis(months, prevMonths, openMonths);
   const curOpen = cur.months.filter((r) => r.open).map((r) => r.month);
   const axisN = monthsAxis(months, [], curOpen);
   // Au-delà de neuf mois, un graphique empilé en demi-largeur n'a plus la place d'écrire les montants dans ses colonnes : pleine largeur.
   const wide = months.length > 9 ? "ms-chart wide" : "ms-chart";
-  const svcParts = servicesParts(serviceRows.map((r) => ({ value: r.value, cur: r.cur })));
-  // Un mois n.d. d'un seul service (ligne sans montant) : la somme empilée de ce mois ne couvre pas tous les services.
-  const svcMonthNd = serviceRows.some((r) => r.cur.months.some((m) => m.kind === "nd"));
-  const svcMonthSeries = serviceMonthSeries(serviceRows.map((r) => ({ value: r.value, months: r.cur.months })));
+  const svcParts = servicesParts(services.map((r) => ({ value: r.value, cur: r.cur })));
+  // Un mois n.d. d'un seul service (ligne sans montant, seuil de confidentialité) : la somme empilée de ce mois ne couvre pas tous les services.
+  const svcMonthNd = services.some((r) => r.cur.months.some((m) => m.kind === "nd"));
+  const svcMonthSeries = serviceMonthSeries(services.map((r) => ({ value: r.value, months: r.cur.months })));
   const brutCotisSeries = brutCotisationsSeries(cur.months);
   const sparkMasse = masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" })[0].values;
   const costEtpSeries = costSeries(cur.months, etpCur, prev.months, etpPrev, { cur: `Coût par ETP ${year}`, prev: `Coût par ETP ${year - 1} (N-1)` });
   // Clé de lecture des n.d. : écrite une fois sous les graphiques, seulement si l'un d'eux en contient un.
-  const anyNd = [masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" }), brutCotisSeries, costEtpSeries, ...(ctx.service.axis && serviceRows.length > 0 && serviceRows.length <= 8 ? [svcMonthSeries] : [])].some(hasNd);
+  const anyNd = [masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" }), brutCotisSeries, costEtpSeries, ...(ctx.service.axis && services.length > 0 && services.length <= 8 ? [svcMonthSeries] : [])].some(hasNd);
 
   return (
     <MoneyText><>
@@ -233,8 +247,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         </div>
       </div>
 
-      {vue === "fixe-variable" && <FixeVariableView slug={slug} input={input} months={months} prevMonths={prevMonths} aff={aff} tableHref={tableHref} />}
-      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} compta={await ctx.compta()} aff={aff} tableHref={tableHref} unfilterHref={href({ svc: "" })} />}
+      {vue === "fixe-variable" && <FixeVariableView slug={slug} input={input} months={months} prevMonths={prevMonths} aff={aff} tableHref={tableHref} link={link} confidentialite={confidentialite} guard={guard} unfilterHref={href({ svc: "" })} />}
+      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} serviceValue={serviceValue} compta={await ctx.compta()} aff={aff} tableHref={tableHref} unfilterHref={href({ svc: "" })} link={link} confidentialite={confidentialite} />}
       {vue === "synthese" && (
         <>
           <section className="panel">
@@ -297,6 +311,11 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               />
             </dl>
             <NdLines lines={tileNd} testid="ms-tiles-nd" />
+            {guard && (
+              <NdState testid="ms-service-guard" title={`n.d. — service ${serviceLabel(serviceValue ?? null)}`} reason={capital(guard.reason)} action={{ href: href({ svc: "" }), label: "Retirer le filtre Service" }}>
+                {guardHref && <p className="ms-nd-reason"><a href={guardHref}>Définir le seuil de confidentialité dans Paramètres</a></p>}
+              </NdState>
+            )}
             {ctx.etpQualifiers.length > 0 && (
               <p className="tile-foot ms-note" data-testid="ms-etp-qualifiers">
                 Coût par ETP-mois — ETP : {ctx.etpQualifiers.join(" ; ")}.
@@ -313,7 +332,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                   <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
                 </div>
                 <div className="ms-chart wide">
-                  {ctx.service.axis && serviceRows.length > 0 ? (
+                  {ctx.service.axis && services.length > 0 ? (
                     <div className="ms-charts-split" data-testid="ms-by-service">
                       <div className="ms-chart">
                         <DonutChart
@@ -331,7 +350,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                         />
                       </div>
                       <div className="ms-chart">
-                        {serviceRows.length <= 8 ? (
+                        {services.length <= 8 ? (
                           <ChartGuard testid="ms-chart-services-months" title={`Répartition mensuelle par service, ${year}`} series={svcMonthSeries} lines={ndList}>
                           <BarChart
                             testid="ms-chart-services-months"
@@ -422,6 +441,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 ) : (
                   <>
                     {ctx.axisMissing && <p className="notice" data-testid="ms-axis-missing">L'axe « {ctx.service.axis} » choisi dans Paramètres n'existe plus dans le journal appliqué : toutes les lignes sont « Non ventilé ».</p>}
+                    <ConfidentialiteLine slug={slug} setting={confidentialite} testid="ms-services-confidentialite" />
                     <ScrollTable label="Tableau des services">
                       <table className="data-table sticky sticky-first ms-table" data-testid="ms-services-table">
                         <caption className="ms-sr">Masse salariale chargée par service, {label(months)}, comparée à {label(prevMonths)} ; les colonnes sans N-1 portent sur la période {year}</caption>
@@ -440,7 +460,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                           </tr>
                         </thead>
                         <tbody>
-                          {serviceRows.map((r) => {
+                          {services.map((r) => {
                             const c = r.cur;
                             const isCurrent = serviceValue !== undefined && serviceValue === r.value;
                             return (
@@ -475,8 +495,10 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                         </tfoot>
                       </table>
                     </ScrollTable>
+                    <NdLines lines={svcRowNd} testid="ms-services-nd-reasons" />
                     <div className="ms-table-gap">
                       <h3 className="ms-sub">Masse chargée par service et par mois</h3>
+                      <ConfidentialiteLine slug={slug} setting={confidentialite} testid="ms-services-months-confidentialite" />
                       <ScrollTable label="Tableau de la masse chargée par service et par mois">
                         <table className="data-table sticky sticky-first ms-table" data-testid="ms-services-months">
                           <caption className="ms-sr">Masse salariale chargée par service et par mois, {label(months)}</caption>
@@ -488,7 +510,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                             </tr>
                           </thead>
                           <tbody>
-                            {serviceRows.map((r) => (
+                            {services.map((r) => (
                               <tr key={r.value ?? NV} data-service={r.value ?? NV}>
                                 <th scope="row">{serviceLabel(r.value)}</th>
                                 {r.cur.months.map((m) => (

@@ -600,11 +600,14 @@ const SERVICES: ServicesInput = {
     axis: "Service",
     axisMissing: false,
     rows: [
-      { value: "Atelier", cur: win("2026-01", 200000, 20000, 100000, 2), prev: win("2025-01", 180000, 0, 70000, 2), evo: { kind: "value", deltaCents: 50000, ratio: { num: 50000, den: 250000 } } },
-      { value: "=Bureau", cur: win("2026-01", 70000, 0, 30000, 1), prev: win("2025-01", 100000, 0, 50000, 1), evo: { kind: "value", deltaCents: -50000, ratio: { num: -50000, den: 150000 } } },
+      { value: "Atelier", cur: win("2026-01", 200000, 20000, 100000, 2), prev: win("2025-01", 180000, 0, 70000, 2), evo: { kind: "value", deltaCents: 50000, ratio: { num: 50000, den: 250000 } }, groups: { cur: { persons: ["p1", "p2"], unlinked: 0, nonZero: true }, prev: { persons: ["p1", "p2"], unlinked: 0, nonZero: true } } },
+      { value: "=Bureau", cur: win("2026-01", 70000, 0, 30000, 1), prev: win("2025-01", 100000, 0, 50000, 1), evo: { kind: "value", deltaCents: -50000, ratio: { num: -50000, den: 150000 } }, groups: { cur: { persons: ["p3"], unlinked: 0, nonZero: true }, prev: { persons: ["p3"], unlinked: 0, nonZero: true } } },
     ],
     total: { cur: win("2026-01", 270000, 20000, 130000, 3), prev: win("2025-01", 280000, 0, 120000, 3), evo: { kind: "value", deltaCents: 0, ratio: { num: 0, den: 400000 } } },
     selected: null,
+    // Seuil 1 : aucun groupe dénombré n'est masqué (le classeur montre les cellules telles quelles).
+    confidentialite: { kind: "set", value: 1 },
+    links: { confidentialite: "/e/demo/parametres#confidentialite" },
   },
 };
 // Coût / personne-mois : 3 000 € ÷ 2 = 1 500 € ; 1 000 € ÷ 1 = 1 000 € ; 4 000 € ÷ 3 = 1 333,33 €. Parts : 75 % et 25 %.

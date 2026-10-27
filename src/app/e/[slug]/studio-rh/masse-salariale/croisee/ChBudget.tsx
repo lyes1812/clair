@@ -5,7 +5,8 @@ import { MoneyText } from "@/components/Money";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
 import { budgetModel, cascadeOf, type BlocksModel, type CxBlock, type CxPrevu } from "@/lib/viz/croisee-budget";
-import { ChartGuard, GraphFoot, NdLines, TrendLegend, type Affichage } from "../components";
+import { GraphFoot, NdLines, TrendLegend, type Affichage } from "../components";
+import { ChartNd, chartTitle } from "./atomes/ChartTitle";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
@@ -92,7 +93,7 @@ function Block({ b, model, slug, affichage, tableauHref }: { b: CxBlock; model: 
         <div className={charts.length > 1 ? "cx-bud-charts" : "cx-bud-charts one"}>
           {charts.map((c) => (
             <div key={c.id} className="cx-bud-chart">
-              <ChartView c={c} />
+              <ChartView c={c} block={b.title} />
               <GraphFoot aff={affichage} tableHref={`${tableauHref}#cx-table-${c.tableId}`} testid={`cx-chart-${c.id}-tableau`} />
             </div>
           ))}
@@ -109,26 +110,28 @@ function Block({ b, model, slug, affichage, tableauHref }: { b: CxBlock; model: 
 }
 
 // Graphique du modèle : courbes (Comparaison), barres ou cascade (WaterfallChart, rouge / vert seulement pour une cascade de coût).
-// Sans valeur connue, la raison remplace le graphique ; une cascade n'est jamais tracée avec une valeur absente.
-export function ChartView({ c }: { c: CroiseeChart }) {
+// Sans valeur connue, la raison remplace le graphique ; une cascade n'est jamais tracée avec une valeur absente. `block` : titre du bloc
+// qui contient le graphique ; le même titre n'est pas répété en texte visible (chartTitle), le libellé accessible le garde en entier.
+export function ChartView({ c, block }: { c: CroiseeChart; block?: string }) {
   const testid = `cx-chart-${c.id}`;
   const label = `${c.title}, ${c.unit === "eur" ? "montants monétaires" : c.unit === "etp" ? "en équivalents temps plein" : "valeurs"}`;
+  const title = chartTitle(block, c.title);
   if (c.kind === "cascade") {
     const w = cascadeOf(c);
     if (!w) return <NdNote label="Graphique non tracé" reason="valeur absente (voir le tableau exact)" testid={`${testid}-nd`} />;
-    return <WaterfallChart testid={testid} label={label} title={c.title} startLabel={w.startLabel} endLabel={w.endLabel} start={w.start} end={w.end} steps={w.steps} unit={c.unit} trend={c.trend === "cost" ? "cost" : undefined} />;
+    return <WaterfallChart testid={testid} label={label} title={title} startLabel={w.startLabel} endLabel={w.endLabel} start={w.start} end={w.end} steps={w.steps} unit={c.unit} trend={c.trend === "cost" ? "cost" : undefined} />;
   }
   if (c.kind === "courbe") {
     return (
-      <ChartGuard testid={testid} title={c.title} series={c.series}>
-        <LineChart testid={testid} label={label} title={c.title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} />
-      </ChartGuard>
+      <ChartNd testid={testid} heading={title} series={c.series}>
+        <LineChart testid={testid} label={label} title={title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} />
+      </ChartNd>
     );
   }
   return (
-    <ChartGuard testid={testid} title={c.title} series={c.series}>
-      <BarChart testid={testid} label={label} title={c.title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} mode={c.mode} />
-    </ChartGuard>
+    <ChartNd testid={testid} heading={title} series={c.series}>
+      <BarChart testid={testid} label={label} title={title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} mode={c.mode} />
+    </ChartNd>
   );
 }
 

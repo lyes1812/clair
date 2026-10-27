@@ -8,9 +8,11 @@ import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 
 // Écrans de la Masse salariale rendus de bout en bout (lot 10) sur un journal fictif écrit à la main : tendances rouge / vert d'un coût,
-// aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif.
+// aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif ; le seuil
+// de confidentialité de l'espace vaut 1 (aucun groupe dénombré masqué ; voir ms-confidentialite.test.ts pour le masquage).
 const state = vi.hoisted(() => ({ ctx: null as unknown }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
+vi.mock("@/lib/confidentialite", async (orig) => ({ ...(await orig<typeof import("@/lib/confidentialite")>()), getConfidentialite: async () => ({ kind: "set", value: 1, updatedAt: null, updatedBy: null }) }));
 
 // Journal : janvier 2026 (service A : brut 2 200,00 €, cotisations 1 200,00 € ; service B : brut 1 000,00 €, cotisations 500,00 €),
 // février 2026 identique mais non clôturé, janvier 2025 à 90 % de janvier 2026 ; février 2025 absent du journal (n.d.).
@@ -51,7 +53,9 @@ const compta = {
   nd: {},
   error: false,
 };
+// Référentiel fictif : C1 et C2 sont les contrats de deux personnes distinctes (seuil compté en personnes).
 state.ctx = {
+  kpi: { collab: { workspace: { id: "w1" } }, input: { data: { contracts: [{ contractKey: "payfit:C1", externalId: "C1", personKey: "P1" }, { contractKey: "payfit:C2", externalId: "C2", personKey: "P2" }] } } },
   source: "payfit",
   grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
   read: { syncId: "s1", startedAt: new Date("2026-03-03T10:00:00Z"), months: input.months },
@@ -160,6 +164,11 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
     const html = await page({ service: "A" });
     expect(html).toContain("service A");
     expect(html).toContain("Le filtre Service ne s&#x27;applique pas ici : tous les services sont montrés.");
+    // Seuil 1 : le service (une personne) est affiché, sans garde de confidentialité.
+    expect(html).toContain('data-money-cents="340000"');
+    expect(html).not.toContain('data-testid="ms-service-guard"');
+    // Ligne « Confidentialité » au-dessus des tableaux par service (seuil de l'espace, jamais une valeur par défaut).
+    expect(html).toContain("Confidentialité : seuil de 1 personne");
   });
 });
 

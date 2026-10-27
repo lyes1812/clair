@@ -34,7 +34,9 @@ import { defaultsNote, PageHead, Pill, type OriginKind, type Tone } from "../don
 import { NavDisclosure } from "./NavDisclosure";
 import { CROISEE_KEYS, croiseeSettingReason, getCroiseeSettings, LIBELLE_MAX, SEUILS_MAX, settingValue, type CroiseeSettingKey } from "@/lib/croisee-settings";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
-import { CroiseeForm, type CroiseeOrigin } from "./CroiseeForm";
+import { CroiseeForm, type CroiseeFormKey, type CroiseeOrigin } from "./CroiseeForm";
+import { CONFIDENTIALITE_TERM, getConfidentialiteRead } from "@/lib/confidentialite";
+import { ConfidentialiteForm, type ConfidentialiteOrigin } from "./ConfidentialiteForm";
 
 export const dynamic = "force-dynamic";
 
@@ -78,16 +80,26 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const categories = await getCategoryNatures(workspace.id);
   const overrides = await getContractCategories(workspace.id);
   const collab = await loadCollabContext(slug);
-  // Masse salariale croisée : quatre réglages sans valeur par défaut ; défini (avec sa date), illisible, ou non défini (rien
-  // d'enregistré, ou liste de seuils vide).
+  // Confidentialité : un seul seuil pour toute l'application, sans valeur par défaut ; défini (avec sa date), illisible, ou non
+  // défini ; « legacy » quand il est encore lu par repli sur l'ancien réglage de la croisée.
+  const conf = await getConfidentialiteRead(workspace.id);
+  const confOrigin: ConfidentialiteOrigin =
+    conf.setting.kind === "set"
+      ? { kind: "set", at: conf.setting.updatedAt ? dateTimeFmt.format(conf.setting.updatedAt) : null, legacy: conf.source === "croisee" }
+      : conf.setting.kind === "invalid"
+        ? { kind: "invalid", legacy: conf.source === "croisee" }
+        : { kind: "absent" };
+  // Masse salariale croisée : trois réglages sans valeur par défaut (le seuil de confidentialité a sa section) ; défini (avec sa
+  // date), illisible, ou non défini (rien d'enregistré, ou liste de seuils vide).
   const croisee = await getCroiseeSettings(workspace.id);
+  const croiseeFormKeys = (Object.keys(CROISEE_KEYS) as CroiseeSettingKey[]).filter((k): k is CroiseeFormKey => k !== "confidentialite");
   const croiseeOrigins = Object.fromEntries(
-    (Object.keys(CROISEE_KEYS) as CroiseeSettingKey[]).map((k): [CroiseeSettingKey, CroiseeOrigin] => {
+    croiseeFormKeys.map((k): [CroiseeFormKey, CroiseeOrigin] => {
       const st = croisee[k];
       if (st.kind === "set" && croiseeSettingReason(k, st) === null) return [k, { kind: "set", at: st.updatedAt ? dateTimeFmt.format(st.updatedAt) : null }];
       return [k, st.kind === "invalid" ? { kind: "invalid" } : { kind: "absent" }];
     }),
-  ) as Record<CroiseeSettingKey, CroiseeOrigin>;
+  ) as Record<CroiseeFormKey, CroiseeOrigin>;
   const croiseeKinds = Object.values(croiseeOrigins).map((o) => o.kind);
   const ref = collab.data?.build.referenceDate ?? null;
   const persons = new Map((collab.data?.persons ?? []).map((p) => [p.personKey, p]));
@@ -110,6 +122,8 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
     { id: "effectif", label: "Définition de l'effectif", state: stateOf(natures.origin) },
     { id: "payfit-historique", label: "Historique PayFit", state: stateOf(history.origin) },
     { id: "kpi", label: "Définitions des KPI", state: kpi.invalid.length > 0 ? { text: "À corriger", tone: "failed" } : stateOf(kpiOrigins.includes("setting") ? "setting" : "default") },
+    // Seuil absent ou illisible : toute répartition est n.d. ; repris de l'ancien réglage de la croisée : à confirmer ici.
+    { id: "confidentialite", label: "Confidentialité", state: confOrigin.kind === "invalid" ? { text: "À corriger", tone: "failed" } : confOrigin.kind === "absent" ? { text: "À renseigner", tone: "failed" } : confOrigin.legacy ? { text: "À confirmer", tone: "preview" } : null },
     { id: "masse-salariale", label: "Masse salariale : grille de comptes", state: stateOf(payroll.origin) },
     { id: "croisee", label: "Masse salariale croisée", state: croiseeKinds.includes("invalid") ? { text: "À corriger", tone: "failed" } : croiseeKinds.includes("absent") ? { text: "À renseigner", tone: "preview" } : null },
     { id: "projection", label: "Projection : conventions de calcul", state: projection ? null : { text: "À renseigner", tone: "failed" } },
@@ -205,6 +219,21 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
           </section>
         </section>
 
+        <section className="pm-group" aria-labelledby="pm-g-confidentialite">
+          <div className="dn-section-head">
+            <h2 id="pm-g-confidentialite" className="group-title">Confidentialité</h2>
+            <p className="desc">Règle lue par toutes les répartitions du Studio RH et par leurs exports.</p>
+          </div>
+
+          <section className="panel pm-panel" data-testid="setting-confidentialite" id="confidentialite">
+            <div className="pm-panel-head">
+              <h3>Seuil de confidentialité<GlossaryLink slug={slug} term={CONFIDENTIALITE_TERM} /></h3>
+              {stateTag("confidentialite")}
+            </div>
+            <ConfidentialiteForm slug={slug} value={conf.setting.kind === "set" ? conf.setting.value : null} origin={confOrigin} disabled={!isAdmin} />
+          </section>
+        </section>
+
         <section className="pm-group" aria-labelledby="pm-g-masse">
           <div className="dn-section-head">
             <h2 id="pm-g-masse" className="group-title">Masse salariale</h2>
@@ -239,7 +268,6 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
             <CroiseeForm
               slug={slug}
               values={{
-                confidentialite: settingValue(croisee.confidentialite),
                 seuilsEffectif: settingValue(croisee.seuilsEffectif) ?? [],
                 margeAlerte: settingValue(croisee.margeAlerte),
                 horizonEcheances: settingValue(croisee.horizonEcheances),

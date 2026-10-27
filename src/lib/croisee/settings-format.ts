@@ -1,12 +1,17 @@
+import { CONFIDENTIALITE_KEY, confidentialiteHref, SEUIL_ILLISIBLE, SEUIL_NON_DEFINI } from "@/lib/confidentialite";
+
 // Réglages de la Masse salariale croisée : clés, types et mises en forme pures, sans lecture ni écriture en base. Les chapitres
 // (src/lib/viz/croisee-*.ts, src/lib/croisee/*) et les exports les importent d'ici, ce qui leur évite de tirer le client de base de
 // données à l'import ; src/lib/croisee-settings.ts les ré-exporte et garde les analyseurs, la lecture et l'écriture en base.
+// Le seuil de confidentialité n'est plus propre à la croisée : c'est le paramètre de toute l'application (src/lib/confidentialite,
+// clé rh.confidentialite.seuil, avec repli sur l'ancienne clé rh.croisee.confidentialite) ; il garde ici sa place parmi les
+// réglages de la croisée, avec la même forme, pour que les chapitres et les exports ne changent pas.
 
 // Règles de gestion que le rapport d'origine codait en dur, devenues des paramètres de l'espace SANS valeur par défaut. Chaque clé est
 // lue en trois états : absente (rien d'enregistré), définie (valeur lisible) ou illisible (valeur enregistrée qui ne passe pas
 // l'analyseur : jamais remplacée par une valeur de repli).
 export const CROISEE_KEYS = {
-  confidentialite: "rh.croisee.confidentialite",
+  confidentialite: CONFIDENTIALITE_KEY,
   seuilsEffectif: "rh.croisee.seuilsEffectif",
   margeAlerte: "rh.croisee.margeAlerte",
   horizonEcheances: "rh.croisee.horizonEcheances",
@@ -16,7 +21,7 @@ export const CROISEE_SETTING_KEYS = Object.keys(CROISEE_KEYS) as CroiseeSettingK
 
 export type SeuilEffectif = { libelle: string; valeur: number };
 export type CroiseeSettingValues = {
-  confidentialite: number; // nombre minimal de personnes d'un groupe affiché (entier ≥ 1)
+  confidentialite: number; // nombre minimal de personnes distinctes d'un groupe affiché (entier ≥ 1) : paramètre de toute l'application
   seuilsEffectif: SeuilEffectif[]; // seuils suivis (libellé + effectif), triés par valeur croissante ; liste vide = non définis
   margeAlerte: number; // écart maximal (≤), en salariés, au prochain seuil en deçà duquel un repère est émis (entier ≥ 0)
   horizonEcheances: number; // horizon des échéances de contrat, en jours (entier ≥ 1)
@@ -33,7 +38,7 @@ type SetValue<S> = S extends { kind: "set"; value: infer V } ? V : never;
 export const settingValue = <S extends CroiseeSetting<unknown>>(s: S): SetValue<S> | null => (s.kind === "set" && !emptyList(s) ? (s as { value: SetValue<S> }).value : null);
 
 const NAMES: Record<CroiseeSettingKey, { absent: string; invalid: string }> = {
-  confidentialite: { absent: "seuil de confidentialité non défini (Paramètres)", invalid: "seuil de confidentialité illisible : à ré-enregistrer (Paramètres)" },
+  confidentialite: { absent: SEUIL_NON_DEFINI, invalid: SEUIL_ILLISIBLE },
   seuilsEffectif: { absent: "seuils d'effectif non définis (Paramètres)", invalid: "seuils d'effectif illisibles : à ré-enregistrer (Paramètres)" },
   margeAlerte: { absent: "marge d'alerte des seuils d'effectif non définie (Paramètres)", invalid: "marge d'alerte des seuils d'effectif illisible : à ré-enregistrer (Paramètres)" },
   horizonEcheances: { absent: "horizon des échéances non défini (Paramètres)", invalid: "horizon des échéances illisible : à ré-enregistrer (Paramètres)" },
@@ -71,5 +76,5 @@ export function croiseeSettingLines(settings: CroiseeSettings): CroiseeSettingLi
   return CROISEE_SETTING_KEYS.map(line);
 }
 
-// Lien vers la section des Paramètres où ces règles se saisissent.
-export const croiseeSettingsHref = (slug: string) => `/e/${slug}/parametres#croisee`;
+// Lien vers la section des Paramètres où ces règles se saisissent ; le seuil de confidentialité a sa propre section (#confidentialite).
+export const croiseeSettingsHref = (slug: string, key?: CroiseeSettingKey): string => (key === "confidentialite" ? confidentialiteHref(slug) : `/e/${slug}/parametres#croisee`);

@@ -211,7 +211,7 @@ describe("source DSN : brut déclaré (type 001) d'une période (cas écrits à 
 });
 
 describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (cas écrits à la main)", async () => {
-  const { labelTotals, provisionMonth, reconcile, operatingRevenue, comptaGap, fecCoverage, pennylaneCoverage, withEntries } = await import("@/lib/payroll/lot2");
+  const { labelTotals, labelKey, labelContracts, provisionMonth, provisionContracts, reconcile, operatingRevenue, comptaGap, fecCoverage, pennylaneCoverage, withEntries } = await import("@/lib/payroll/lot2");
   const named = (month: string, accountId: string, name: string, debit: number | null, credit: number | null): LedgerLine => ({ ...line(month, accountId, debit, credit, "C1"), accountName: name });
   const lines = [
     named("2026-06", "641100", "Salaires, appointements", 300000, null),
@@ -240,6 +240,18 @@ describe("lot 2 : fixe et variable, provision de congés payés, rapprochement (
     expect(provisionMonth(input, "2026-06")).toEqual({ month: "2026-06", kind: "value", conges: 47589, charges: 19036, total: 66625, missing: [] });
     expect(provisionMonth(input, "2026-07")).toMatchObject({ kind: "nd", reason: expect.stringContaining("aucune ligne de provision") });
     expect(provisionMonth(input, "2026-08")).toMatchObject({ kind: "nd" });
+  });
+  it("contrats par libellé et par provision (seuil de confidentialité) : mêmes lignes que les totaux ; un contrat compte une fois ; sans ligne : rien", () => {
+    // Toutes les lignes portent le contrat C1 ; la clé d'un libellé est celle de labelTotals (rubrique + libellé sans accents ni casse).
+    expect(labelKey("primes", "Prime d'été")).toBe(labelKey("primes", "prime d'ete"));
+    expect(labelContracts(input, ["2026-06"])).toEqual(new Map([[labelKey("primes", "Primes de vacances"), ["C1"]], [labelKey("primes", "Primes sur objectif"), ["C1"]], [labelKey("salaires", "Salaires, appointements"), ["C1"]]]));
+    expect([...labelContracts(input, ["2026-06"]).keys()].sort()).toEqual(labelTotals(input, ["2026-06"]).map((t) => t.key).sort());
+    // Dotation « Mois courant » de juin : C1 ; juillet sans ligne de provision : aucun contrat ; une ligne sans contrat n'en apporte aucun.
+    expect(provisionContracts(input, "2026-06")).toEqual(["C1"]);
+    expect(provisionContracts(input, "2026-07")).toEqual([]);
+    const sansContrat = journal([{ ...named("2026-06", "641200", "Provisions pour conges payes - Mois courant", 100, null), contractId: null }, named("2026-06", "641300", "Primes sur objectif", 100, null)], ["2026-06"]);
+    expect(provisionContracts(sansContrat, "2026-06")).toEqual([]);
+    expect(labelContracts(sansContrat, ["2026-06"])).toEqual(new Map([[labelKey("primes", "Primes sur objectif"), ["C1"]]]));
   });
   it("rapprochement : la compta porte le brut sur 641100 et les cotisations sur 645100, sans provision ; écarts par rubrique et total = provisions", () => {
     const compta = [

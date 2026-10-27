@@ -1,14 +1,17 @@
 import { MoneyText } from "@/components/Money";
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
+import type { ChartSeries } from "@/components/charts/shared";
 import { GlossaryLink } from "@/components/GlossaryLink";
+import { confidentialiteHref, confidentialiteSettingReason, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
 import { formatMonth } from "@/lib/dates";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { servicesOf, shiftYear, windowPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
-import { comptaGap, labelTotals, operatingRevenue, provisionMonth, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
+import { comptaGap, labelTotals, maskLabels, maskProvisionServices, operatingRevenue, provisionMonth, provisionServiceKey, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
+import type { ServiceGuard } from "@/lib/payroll/service-rows";
 import { fmtPercent } from "@/lib/rh/kpi/format";
-import { brutParts, capital, euros, eurosSigned, fixeVariableMonths, fixeVariableSeries, hasNd, monthsAxis, noPeriod, numTrend, pluriel, primesSeries, provisionParts, provisionTotals, reasonText, reconMonthSeries, reconRubricChart, trendOf, type PrimesMonth } from "@/lib/viz/masse";
-import { ChartGuard, GraphFoot, NdKey, NdLines, NdState, PanelHead, ScrollTable, Tile, type Affichage } from "./components";
+import { brutParts, capital, euros, eurosSigned, familyColor, fixeVariableMonths, fixeVariableSeries, hasNd, monthsAxis, noPeriod, numTrend, pluriel, provisionParts, provisionTotals, reasonText, reconMonthSeries, reconRubricChart, trendOf, type PrimesMonth } from "@/lib/viz/masse";
+import { ChartGuard, ConfidentialiteLine, GraphFoot, NdKey, NdLines, NdState, PanelHead, ScrollTable, Tile, type Affichage } from "./components";
 
 const lowerMonth = (m: string) => formatMonth(m).toLowerCase();
 // Écart en % : « n.d. » avec sa raison quand la valeur de départ est nulle ou négative ; le moins est le vrai signe moins.
@@ -21,8 +24,23 @@ const ndReasons = (reasons: (string | null | undefined)[]) => {
   return list.length ? <NdLines lines={list} testid="nd-reasons" /> : null;
 };
 
+// Service retenu par le filtre et n.d. (seuil de confidentialité) : un seul état vide, avec l'action pour y remédier (retirer le filtre ;
+// définir le seuil dans les Paramètres quand il manque).
+function ServiceNd({ testid, slug, guard, unfilterHref }: { testid: string; slug?: string; guard: ServiceGuard; unfilterHref?: string }) {
+  return (
+    <NdState testid={testid} reason={capital(guard.reason)} action={unfilterHref ? { href: unfilterHref, label: "Retirer le filtre Service" } : undefined}>
+      {guard.cause === "parametre" && slug && <p className="ms-nd-reason"><a href={confidentialiteHref(slug)}>Définir le seuil de confidentialité dans Paramètres</a></p>}
+    </NdState>
+  );
+}
+const NO_LINK: PersonLink = new Map();
+const ABSENT: ConfidentialiteSetting = { kind: "absent" };
+
 // --- Onglet « Fixe & variable » : brut par rubrique et par libellé de paie PayFit, N et N-1, primes par famille et par mois.
-export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout", tableHref = "" }: { slug?: string; input: JournalInput; months: string[]; prevMonths: string[]; aff?: Affichage; tableHref?: string }) {
+// Seuil de confidentialité : chaque libellé et chaque famille de prime (par mois et sur la période) décrit les personnes reliées
+// aux contrats de ses lignes (maskLabels) ; sous le filtre Service, un service masqué (guard) rend tout l'onglet n.d.
+export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout", tableHref = "", link = NO_LINK, confidentialite = ABSENT, guard = null, unfilterHref }: { slug?: string; input: JournalInput; months: string[]; prevMonths: string[]; aff?: Affichage; tableHref?: string; link?: PersonLink; confidentialite?: ConfidentialiteSetting; guard?: ServiceGuard | null; unfilterHref?: string }) {
+  if (guard) return <MoneyText><ServiceNd testid="fv-nd" slug={slug} guard={guard} unfilterHref={unfilterHref} /></MoneyText>;
   const cur = windowPayroll(input, months);
   const prev = windowPayroll(input, prevMonths);
   const showGraph = aff !== "tableau";
@@ -101,7 +119,16 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
     const lt = labelTotals(input, [r.month]);
     return { month: r.month, kind: "value", byFamily: families.map((f) => lt.filter((t) => t.key === f.key).reduce((s, t) => s + t.cents, 0)) };
   });
-  const primesSeriesList = primesSeries(families, primesMonths);
+  // Seuil de confidentialité par libellé (N, N-1) et par famille et mois ; raison du n.d. ou null.
+  const mask = maskLabels({ input, months, prevMonths, keys: keys.map((t) => t.key), families: families.map((f) => f.key), link, conf: confidentialite, prevNd: prev.kind === "nd" });
+  const famNd = (f: { key: string }, i: number): string | null => mask.families[f.key]?.[i] ?? null;
+  const labelNd = (k: string): { cur: string | null; prev: string | null } => mask.labels[k] ?? { cur: null, prev: null };
+  const ndCell = (reason: string) => <span className="nd" title={reason}>n.d.</span>;
+  // Mêmes séries que le tableau des primes : une famille masquée un mois est n.d. ce mois-là (colonne hachurée avec sa raison).
+  const primesSeriesList: ChartSeries[] = families.map((f, j) => {
+    const pts = primesMonths.map((m, i) => (m.kind === "nd" ? { v: null, reason: m.reason } : famNd(f, i) !== null ? { v: null, reason: famNd(f, i) } : { v: m.byFamily[j], reason: null }));
+    return { key: `prime-${j}`, name: f.label, values: pts.map((x) => x.v), reasons: pts.map((x) => x.reason), color: familyColor(j) };
+  });
   const noPrimeMonths = primesMonths.filter((m) => m.kind === "value" && m.byFamily.every((v) => v === 0)).map((m) => m.month);
   const brutSplit = { fixe: cur.byRubric.salaires, variable: cur.byRubric.primes + cur.byRubric.indemnites, stages: cur.byRubric.stages };
   // Une nature sans montant positif n'a pas de secteur : elle est nommée sous l'anneau (son montant est dans les tuiles et le tableau).
@@ -215,6 +242,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
           </section>
           <section className="panel">
             <PanelHead title="Brut par libellé de paie" slug={slug} term={MASSE_TERMS.grille} />
+            {slug && <ConfidentialiteLine slug={slug} setting={confidentialite} testid="fv-labels-confidentialite" />}
             <ScrollTable label="Tableau du brut par libellé de paie">
               <table className="data-table sticky sticky-first ms-table" data-testid="fv-labels">
                 <caption className="ms-sr">Brut par libellé de paie, période et N-1</caption>
@@ -224,13 +252,16 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
                     const k = t.key;
                     const a = val(n, k);
                     const b = val(p, k);
+                    const nd = labelNd(k);
+                    // Une valeur masquée (seuil de confidentialité) masque l'écart ; la raison est listée sous le tableau.
+                    const shown = prev.kind === "value" && nd.cur === null && nd.prev === null;
                     return (
                       <tr key={k} data-label={t.label}>
                         <th scope="row" className="wrap">{t.label}</th>
-                        <td className="num" data-col="n">{euros(a)}</td>
-                        <td className="num n1" data-col="n1">{prev.kind === "value" ? euros(b) : "n.d."}</td>
-                        <td className={numTrend(prev.kind === "value" ? a - b : null)}>{prev.kind === "value" ? eurosSigned(a - b) : "n.d."}</td>
-                        <td className={numTrend(prev.kind === "value" && b > 0 ? a - b : null)}>{prev.kind === "value" ? pct(a, b) : "n.d."}</td>
+                        <td className="num" data-col="n">{nd.cur !== null ? ndCell(nd.cur) : euros(a)}</td>
+                        <td className="num n1" data-col="n1">{prev.kind !== "value" ? "n.d." : nd.prev !== null ? ndCell(nd.prev) : euros(b)}</td>
+                        <td className={numTrend(shown ? a - b : null)}>{shown ? eurosSigned(a - b) : "n.d."}</td>
+                        <td className={numTrend(shown && b > 0 ? a - b : null)}>{shown ? pct(a, b) : "n.d."}</td>
                         <td>{rubricLabel(t.rubric)}</td>
                       </tr>
                     );
@@ -241,13 +272,15 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
                 </tfoot>
               </table>
             </ScrollTable>
-            {ndReasons([prevNd && `N-1 (${prevMonths[0]} → ${prevMonths.at(-1)}) : ${prevNd}`])}
+            {ndReasons([prevNd && `N-1 (${prevMonths[0]} → ${prevMonths.at(-1)}) : ${prevNd}`, ...keys.flatMap((t) => [labelNd(t.key).cur, labelNd(t.key).prev])])}
           </section>
           <section className="panel">
             <PanelHead title="Primes par famille et par mois" slug={slug} term={MASSE_TERMS.primes} />
             {families.length === 0 ? (
               <p className="desc">Aucune prime sur la période.</p>
             ) : (
+              <>
+              {slug && <ConfidentialiteLine slug={slug} setting={confidentialite} testid="fv-primes-confidentialite" />}
               <ScrollTable label="Tableau des primes par famille et par mois">
                 <table className="data-table sticky sticky-first ms-table" data-testid="fv-primes-months">
                   <caption className="ms-sr">Primes par famille et par mois</caption>
@@ -259,7 +292,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
                         <tr key={r.month} data-month={r.month}>
                           <th scope="row">{formatMonth(r.month)}</th>
                           <td className="num">{r.kind === "value" ? euros(r.byRubric.primes) : <span className="nd" title={r.nd.reason}>n.d.</span>}</td>
-                          {families.map((f, j) => <td key={f.key} className="num">{pm.kind === "value" ? euros(pm.byFamily[j]) : <span className="nd" title={pm.reason}>n.d.</span>}</td>)}
+                          {families.map((f, j) => <td key={f.key} className="num">{pm.kind !== "value" ? ndCell(pm.reason) : famNd(f, i) !== null ? ndCell(famNd(f, i)!) : euros(pm.byFamily[j])}</td>)}
                         </tr>
                       );
                     })}
@@ -268,13 +301,14 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
                     <tr className="total" data-testid="fv-primes-months-total">
                       <th scope="row">Période</th>
                       <td className="num">{euros(cur.byRubric.primes)}</td>
-                      {families.map((f) => <td key={f.key} className="num">{euros(f.cents)}</td>)}
+                      {families.map((f) => <td key={f.key} className="num">{labelNd(f.key).cur !== null ? ndCell(labelNd(f.key).cur!) : euros(f.cents)}</td>)}
                     </tr>
                   </tfoot>
                 </table>
               </ScrollTable>
+              </>
             )}
-            {ndReasons(primesMonths.map((m) => (m.kind === "nd" ? `${formatMonth(m.month)} : ${m.reason}` : null)))}
+            {ndReasons([...primesMonths.map((m) => (m.kind === "nd" ? `${formatMonth(m.month)} : ${m.reason}` : null)), ...families.flatMap((f) => [labelNd(f.key).cur, ...months.map((_m, i) => famNd(f, i))])])}
             <p className="tile-foot ms-note" data-testid="fv-non-recurrents">
               Éléments non récurrents (ruptures conventionnelles, indemnités compensatrices de congés payés) : non distingués par le journal PayFit, ils restent dans la rubrique « Indemnités et avantages ».
             </p>
@@ -286,18 +320,24 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
 }
 
 // --- Onglet « Paie & comptabilité » : provision de congés payés et rapprochement avec la comptabilité.
+// Seuil de confidentialité : la provision par service (journal entier) et, sous le filtre Service, la provision du service retenu,
+// comptées chaque fin de mois en personnes reliées aux contrats qui portent une ligne de dotation (maskProvisionServices) ; un
+// service masqué un mois de la période ou de N-1 rend toute la provision du service n.d. sous le filtre.
 export function PaieComptaView(props: {
   slug: string;
   input: JournalInput;
   fullInput: JournalInput;
   months: string[];
   serviceFiltered: boolean;
+  serviceValue?: string | null; // service retenu par le filtre (null : non ventilé) ; undefined : aucun
   compta: { source: "pennylane" | "fec" | null; reason: string; lines: ComptaLine[]; months: string[]; nd: Record<string, string>; error: boolean };
   aff?: Affichage;
   tableHref?: string;
   unfilterHref?: string; // adresse de l'écran sans le filtre Service
+  link?: PersonLink;
+  confidentialite?: ConfidentialiteSetting;
 }) {
-  const { slug, input, fullInput, months, serviceFiltered, compta, aff = "tout", tableHref = "", unfilterHref } = props;
+  const { slug, input, fullInput, months, serviceFiltered, serviceValue, compta, aff = "tout", tableHref = "", unfilterHref, link = NO_LINK, confidentialite = ABSENT } = props;
   const showGraph = aff !== "tableau";
   const showTable = aff !== "graphique";
   const last = months.at(-1)!;
@@ -323,6 +363,19 @@ export function PaieComptaView(props: {
     return g === null ? "n.d." : eurosSigned(g);
   };
   const services = fullInput.serviceAxis ? servicesOf(fullInput, [last, shiftYear(last, -1)]) : [];
+  // Seuil de confidentialité de la provision par service : chaque fin de mois de la période et de N-1, tous les services du journal
+  // (masquage secondaire par mois). Lu par le tableau par service (dernière fin de mois N et N-1) et par la garde du filtre Service.
+  const allMonths = [...new Set([...months, ...months.map((m) => shiftYear(m, -1))])];
+  const svcInputs = fullInput.serviceAxis ? servicesOf(fullInput, allMonths).map((s) => ({ value: s, input: withService(fullInput, s) })) : [];
+  const provMask = maskProvisionServices({ inputs: svcInputs, months: allMonths, link, conf: confidentialite });
+  const provNd = (s: string | null, m: string): string | null => provMask[provisionServiceKey(s)]?.[m] ?? null;
+  const provGuard: ServiceGuard | null = (() => {
+    if (!serviceFiltered) return null;
+    const settingNd = confidentialiteSettingReason(confidentialite);
+    if (settingNd) return { cause: "parametre", reason: settingNd };
+    const hit = serviceValue === undefined ? null : (allMonths.map((m) => provNd(serviceValue, m)).find((r) => r !== null) ?? null);
+    return hit ? { cause: "seuil", reason: `${hit} — service retenu par le filtre` } : null;
+  })();
   const recon = serviceFiltered ? null : compta.source ? reconcile(fullInput, compta.lines, compta.months, months, compta.nd) : null;
   const masse = windowPayroll(fullInput, months);
   const gap = compta.source ? comptaGap(compta.months, compta.nd, months) : null;
@@ -364,7 +417,8 @@ export function PaieComptaView(props: {
     <MoneyText><>
       <section className="panel" data-testid="pc-provision">
         <PanelHead title="Que doit l'entreprise en congés payés ?" slug={slug} term={MASSE_TERMS.provision} />
-        {(() => {
+        {provGuard && <ServiceNd testid="pc-provision-nd" slug={slug} guard={provGuard} unfilterHref={unfilterHref} />}
+        {!provGuard && (() => {
           const tile = (
             <dl className="facts ms-tiles single">
               <Tile
@@ -437,10 +491,10 @@ export function PaieComptaView(props: {
             </div>
           );
         })()}
-        {showGraph && !showTable && ndReasons(months.flatMap((m, i) => [why(provCur[i], m), why(provPrev[i], shiftYear(m, -1))]))}
-        {showGraph && [provParts, provTotals].some(hasNd) && <NdKey />}
-        {showGraph && <GraphFoot aff={aff} tableHref={tableHref} />}
-        {showTable && (
+        {!provGuard && showGraph && !showTable && ndReasons(months.flatMap((m, i) => [why(provCur[i], m), why(provPrev[i], shiftYear(m, -1))]))}
+        {!provGuard && showGraph && [provParts, provTotals].some(hasNd) && <NdKey />}
+        {!provGuard && showGraph && <GraphFoot aff={aff} tableHref={tableHref} />}
+        {!provGuard && showTable && (
           <>
             <ScrollTable label="Tableau de la provision de congés payés par mois">
               <table className="data-table sticky sticky-first ms-table" data-testid="pc-provision-months">
@@ -467,14 +521,17 @@ export function PaieComptaView(props: {
             {ndReasons(months.flatMap((m, i) => [why(provCur[i], m), why(provPrev[i], shiftYear(m, -1))]))}
             {services.length > 0 && !serviceFiltered && (
               <div className="ms-table-gap">
+                <ConfidentialiteLine slug={slug} setting={confidentialite} testid="pc-provision-services-confidentialite" />
                 <ScrollTable label="Tableau de la provision de congés payés par service">
                   <table className="data-table sticky sticky-first ms-table" data-testid="pc-provision-services">
                     <caption className="ms-sr">Provision de congés payés par service, fin {lowerMonth(last)}</caption>
                     <thead><tr><th scope="col">Service, fin {lowerMonth(last)}</th><th scope="col" className="num">Total</th><th scope="col" className="num n1">Total N-1</th><th scope="col" className="num">Écart</th><th scope="col" className="num">dont congés payés</th><th scope="col" className="num">dont charges sociales</th></tr></thead>
                     <tbody>
                       {services.map((s) => {
-                        const a = provisionMonth(withService(fullInput, s), last);
-                        const b = provisionMonth(withService(fullInput, s), shiftYear(last, -1));
+                        // Fin de mois masquée (seuil de confidentialité) : total, parts et écart n.d. avec la raison du seuil.
+                        const lastPrev = shiftYear(last, -1);
+                        const a = provNd(s, last) !== null ? { month: last, kind: "nd" as const, reason: provNd(s, last)! } : provisionMonth(withService(fullInput, s), last);
+                        const b = provNd(s, lastPrev) !== null ? { month: lastPrev, kind: "nd" as const, reason: provNd(s, lastPrev)! } : provisionMonth(withService(fullInput, s), lastPrev);
                         return (
                           <tr key={s ?? "__nv__"} data-service={s ?? "__nv__"}>
                             <th scope="row">{s ?? "Non ventilé"}</th>
@@ -489,7 +546,7 @@ export function PaieComptaView(props: {
                     </tbody>
                   </table>
                 </ScrollTable>
-                {ndReasons(services.flatMap((s) => [last, shiftYear(last, -1)].map((m) => why(provisionMonth(withService(fullInput, s), m), `${s ?? "Non ventilé"} ${m}`))))}
+                {ndReasons(services.flatMap((s) => [last, shiftYear(last, -1)].map((m) => (provNd(s, m) !== null ? `${s ?? "Non ventilé"} ${m} : ${provNd(s, m)}` : why(provisionMonth(withService(fullInput, s), m), `${s ?? "Non ventilé"} ${m}`)))))}
               </div>
             )}
           </>

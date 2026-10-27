@@ -26,9 +26,9 @@ const AT = new Date("2026-10-20T08:00:00Z");
 const row = (value: unknown) => ({ value, updatedAt: AT, updatedBy: "u1" });
 
 describe("paramètres de la Masse salariale croisée : clés", () => {
-  it("quatre clés rh.croisee.*, sans valeur par défaut", () => {
+  it("trois clés rh.croisee.* et la clé du seuil de confidentialité de toute l'application, sans valeur par défaut", () => {
     expect(CROISEE_KEYS).toEqual({
-      confidentialite: "rh.croisee.confidentialite",
+      confidentialite: "rh.confidentialite.seuil",
       seuilsEffectif: "rh.croisee.seuilsEffectif",
       margeAlerte: "rh.croisee.margeAlerte",
       horizonEcheances: "rh.croisee.horizonEcheances",
@@ -43,8 +43,9 @@ describe("paramètres de la Masse salariale croisée : clés", () => {
 });
 
 describe("analyseurs (cas écrits à la main)", () => {
-  it("seuil de confidentialité : entier ≥ 1", () => {
+  it("seuil de confidentialité : entier ≥ 1, analyseur du module partagé (même fonction)", async () => {
     const f = CROISEE_PARSERS.confidentialite;
+    expect(f).toBe((await import("@/lib/confidentialite")).parseConfidentialite);
     expect(f(5)).toBe(5);
     expect(f(1)).toBe(1);
     for (const bad of [0, -3, 2.5, "5", null, undefined, Number.NaN, Infinity, [5], { v: 5 }, true]) expect(f(bad), String(bad)).toBeNull();
@@ -99,7 +100,7 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
   it("valeurs définies : reprises avec leur traçabilité", () => {
     const s = readCroiseeSettings(
       new Map([
-        ["rh.croisee.confidentialite", row(5)],
+        ["rh.confidentialite.seuil", row(5)],
         ["rh.croisee.seuilsEffectif", row([{ libelle: "Seuil A", valeur: 11 }])],
         ["rh.croisee.margeAlerte", row(2)],
         ["rh.croisee.horizonEcheances", row(90)],
@@ -112,10 +113,23 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
     for (const k of Object.keys(CROISEE_KEYS) as CroiseeSettingKey[]) expect(croiseeSettingReason(k, s[k])).toBeNull();
   });
 
+  it("seuil de confidentialité : repli sur l'ancienne clé rh.croisee.confidentialite tant que la nouvelle est absente, même forme", () => {
+    const legacy = readCroiseeSettings(new Map([["rh.croisee.confidentialite", row(3)]]));
+    expect(legacy.confidentialite).toEqual({ kind: "set", value: 3, updatedAt: AT, updatedBy: "u1" });
+    expect(croiseeSettingReason("confidentialite", legacy.confidentialite)).toBeNull();
+    // Nouvelle clé présente : elle l'emporte, même illisible ; l'ancienne n'est pas lue.
+    const both = readCroiseeSettings(new Map([["rh.confidentialite.seuil", row(5)], ["rh.croisee.confidentialite", row(3)]]));
+    expect(both.confidentialite).toEqual({ kind: "set", value: 5, updatedAt: AT, updatedBy: "u1" });
+    const own = readCroiseeSettings(new Map([["rh.confidentialite.seuil", row("5")], ["rh.croisee.confidentialite", row(3)]]));
+    expect(own.confidentialite).toEqual({ kind: "invalid", raw: "5" });
+    // Ancienne clé illisible : illisible, jamais remplacée.
+    expect(readCroiseeSettings(new Map([["rh.croisee.confidentialite", row(0)]])).confidentialite).toEqual({ kind: "invalid", raw: 0 });
+  });
+
   it("valeur illisible : « invalid » avec la valeur brute, jamais remplacée par un défaut", () => {
     const s = readCroiseeSettings(
       new Map([
-        ["rh.croisee.confidentialite", row("5")],
+        ["rh.confidentialite.seuil", row("5")],
         ["rh.croisee.seuilsEffectif", row([{ libelle: "Seuil A", valeur: -1 }])],
         ["rh.croisee.margeAlerte", row(-2)],
         ["rh.croisee.horizonEcheances", row(null)],
@@ -144,6 +158,9 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
     expect(croiseeSettingReason("horizonEcheances", absent)).toBe("horizon des échéances non défini (Paramètres)");
     expect(croiseeSettingReason("margeAlerte", absent)).toBe("marge d'alerte des seuils d'effectif non définie (Paramètres)");
     expect(croiseeSettingsHref("demo")).toBe("/e/demo/parametres#croisee");
+    // Le seuil de confidentialité a sa propre section des Paramètres ; les autres clés gardent la section de la croisée.
+    expect(croiseeSettingsHref("demo", "confidentialite")).toBe("/e/demo/parametres#confidentialite");
+    expect(croiseeSettingsHref("demo", "seuilsEffectif")).toBe("/e/demo/parametres#croisee");
   });
 
   it("liste de seuils vide : lisible mais « seuils d'effectif non définis » (raison non nulle, aucune valeur utilisable)", () => {
@@ -160,7 +177,7 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
   it("lignes du bloc « Sources et hypothèses de travail » : valeur écrite, ou n.d. avec la raison (jamais de défaut)", () => {
     const set = readCroiseeSettings(
       new Map([
-        ["rh.croisee.confidentialite", row(5)],
+        ["rh.confidentialite.seuil", row(5)],
         ["rh.croisee.seuilsEffectif", row([{ libelle: "Seuil B", valeur: 50 }, { libelle: "Seuil A", valeur: 11 }])],
         ["rh.croisee.margeAlerte", row(0)],
         ["rh.croisee.horizonEcheances", row(1)],
@@ -181,14 +198,17 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
     ]);
   });
 
-  it("getCroiseeSettings : une seule lecture des quatre clés de l'espace", async () => {
+  it("getCroiseeSettings : une seule lecture des quatre clés de l'espace et de l'ancienne clé du seuil (repli)", async () => {
     stored.rows = new Map([["rh.croisee.confidentialite", row(3)], ["rh.croisee.horizonEcheances", row("90")]]);
     stored.asked.length = 0;
     const s = await getCroiseeSettings("w1");
-    expect(stored.asked).toEqual([{ ws: "w1", keys: ["rh.croisee.confidentialite", "rh.croisee.seuilsEffectif", "rh.croisee.margeAlerte", "rh.croisee.horizonEcheances"] }]);
+    expect(stored.asked).toEqual([{ ws: "w1", keys: ["rh.confidentialite.seuil", "rh.croisee.seuilsEffectif", "rh.croisee.margeAlerte", "rh.croisee.horizonEcheances", "rh.croisee.confidentialite"] }]);
     expect(s.confidentialite).toEqual({ kind: "set", value: 3, updatedAt: AT, updatedBy: "u1" });
     expect(s.seuilsEffectif).toEqual({ kind: "absent" });
     expect(s.horizonEcheances).toEqual({ kind: "invalid", raw: "90" });
+    // Nouvelle clé enregistrée : elle l'emporte sur l'ancienne.
+    stored.rows.set("rh.confidentialite.seuil", row(5));
+    expect((await getCroiseeSettings("w1")).confidentialite).toEqual({ kind: "set", value: 5, updatedAt: AT, updatedBy: "u1" });
   });
 });
 
@@ -204,8 +224,14 @@ describe("settings-format : clés, raisons et lignes sans base de données", () 
     expect(pure.croiseeSettingsHref("demo")).toBe("/e/demo/parametres#croisee");
   });
 
-  it("settings-format n'importe rien ; les chapitres et src/lib/croisee n'importent en valeur ni croisee-settings ni le contexte de la page", () => {
-    expect(readFileSync("src/lib/croisee/settings-format.ts", "utf8")).not.toMatch(/^\s*import\s/m);
+  it("settings-format n'importe que le module partagé de confidentialité (sans base à l'import) ; les chapitres et src/lib/croisee n'importent en valeur ni croisee-settings ni le contexte de la page", () => {
+    const format = readFileSync("src/lib/croisee/settings-format.ts", "utf8");
+    for (const m of format.matchAll(/^\s*import\s[^;]*from "([^"]+)";/gm)) expect(m[1]).toBe("@/lib/confidentialite");
+    // Le module partagé ne charge aucun module de base de données à l'import : ses importations de valeur restent dans son dossier
+    // ou vers structure.ts (vérifié en détail par confidentialite.test.ts).
+    for (const f of readdirSync("src/lib/confidentialite").filter((x) => x.endsWith(".ts"))) {
+      for (const m of readFileSync(`src/lib/confidentialite/${f}`, "utf8").matchAll(/^(?:import|export) (?!type )[^;]*from "([^"]+)";/gm)) expect(m[1], `${f} : ${m[1]}`).toMatch(/^(\.\/|@\/lib\/croisee\/structure$)/);
+    }
     const files = [...readdirSync("src/lib/viz").filter((f) => /^croisee-.*\.ts$/.test(f)).map((f) => `src/lib/viz/${f}`), ...readdirSync("src/lib/croisee").filter((f) => f.endsWith(".ts")).map((f) => `src/lib/croisee/${f}`)];
     expect(files.length).toBeGreaterThan(10);
     // Une importation de valeur (pas « import type ») depuis ces deux modules tirerait le client de base de données à l'import.

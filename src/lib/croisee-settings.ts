@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { workspaceSetting } from "@/db/schema";
+import { CONFIDENTIALITE_LEGACY_KEY, parseConfidentialite, readConfidentialite, setConfidentialite } from "./confidentialite";
 import { CROISEE_KEYS, CROISEE_SETTING_KEYS as KEYS, type CroiseeSetting, type CroiseeSettingKey, type CroiseeSettings, type CroiseeSettingValues, type SeuilEffectif } from "./croisee/settings-format";
 import { getSettingsMeta, setSetting } from "./settings";
 
@@ -7,6 +8,9 @@ import { getSettingsMeta, setSetting } from "./settings";
 // l'espace SANS valeur par défaut (clés, types, raisons et lignes écrites : src/lib/croisee/settings-format.ts, sans base de données,
 // ré-exportés ici). Ce fichier garde les analyseurs, la lecture et l'écriture en base. L'écran affiche n.d. avec la raison quand une
 // valeur est absente ou illisible ; la saisie se fait dans les Paramètres (administrateur).
+// Le seuil de confidentialité est le paramètre de toute l'application (src/lib/confidentialite) : il est lu ici par le module partagé
+// (nouvelle clé, repli sur l'ancienne clé rh.croisee.confidentialite) et son écriture lui est déléguée ; settings.confidentialite
+// garde la même forme pour les chapitres et les exports.
 export {
   CROISEE_KEYS,
   CROISEE_SETTING_KEYS,
@@ -29,7 +33,7 @@ const int = (v: unknown, min: number): number | null => (typeof v === "number" &
 
 // Analyseurs purs : une valeur est acceptée telle quelle ou refusée (null), jamais convertie (« 5 » en texte est refusé).
 export const CROISEE_PARSERS: { [K in CroiseeSettingKey]: (v: unknown) => CroiseeSettingValues[K] | null } = {
-  confidentialite: (v) => int(v, 1),
+  confidentialite: parseConfidentialite,
   margeAlerte: (v) => int(v, 0),
   horizonEcheances: (v) => int(v, 1),
   // Liste explicite de { libelle, valeur } ; libellé non vide, valeur entière ≥ 1, valeurs distinctes. Une liste vide est lisible
@@ -54,6 +58,8 @@ export const CROISEE_PARSERS: { [K in CroiseeSettingKey]: (v: unknown) => Croise
 type Stored = Map<string, { value: unknown; updatedAt?: Date | null; updatedBy?: string | null }>;
 
 function readOne<K extends CroiseeSettingKey>(key: K, stored: Stored): CroiseeSetting<CroiseeSettingValues[K]> {
+  // Seuil de confidentialité : lecture du module partagé (nouvelle clé, puis repli sur l'ancienne clé tant qu'elle est absente).
+  if (key === "confidentialite") return readConfidentialite(stored).setting as CroiseeSetting<CroiseeSettingValues[K]>;
   const row = stored.get(CROISEE_KEYS[key]);
   if (!row) return { kind: "absent" };
   const value = CROISEE_PARSERS[key](row.value);
@@ -68,8 +74,9 @@ export function readCroiseeSettings(stored: Stored): CroiseeSettings {
   return out as CroiseeSettings;
 }
 
+// Une seule requête : les quatre clés de la croisée (dont la nouvelle clé du seuil) et l'ancienne clé du seuil, lue par repli.
 export async function getCroiseeSettings(workspaceId: string): Promise<CroiseeSettings> {
-  return readCroiseeSettings(await getSettingsMeta(workspaceId, KEYS.map((k) => CROISEE_KEYS[k])));
+  return readCroiseeSettings(await getSettingsMeta(workspaceId, [...KEYS.map((k) => CROISEE_KEYS[k]), CONFIDENTIALITE_LEGACY_KEY]));
 }
 
 // --- Écriture (Paramètres, administrateur) ---------------------------------------------------------------------------------------
@@ -88,6 +95,7 @@ async function deleteSetting(workspaceId: string, key: string, actorUserId: stri
 // Enregistre les réglages fournis. Toutes les valeurs passent d'abord par leur analyseur : une seule valeur illisible refuse tout
 // l'enregistrement, sans rien écrire. null (ou une liste de seuils vide) supprime le réglage, jamais remplacé par 0 ou par un défaut.
 // Seules les clés dont la valeur change sont écrites, chacune tracée par un événement setting.changed. Renvoie les clés écrites.
+// Le seuil de confidentialité est délégué à setConfidentialite (nouvelle clé seulement, mêmes règles d'écriture et d'audit).
 export async function setCroiseeSettings(workspaceId: string, next: CroiseeWrite, actorUserId: string): Promise<CroiseeSettingKey[]> {
   const plan: { key: CroiseeSettingKey; value: unknown }[] = [];
   for (const k of KEYS) {
@@ -105,6 +113,10 @@ export async function setCroiseeSettings(workspaceId: string, next: CroiseeWrite
   const current = await getCroiseeSettings(workspaceId);
   const written: CroiseeSettingKey[] = [];
   for (const { key, value } of plan) {
+    if (key === "confidentialite") {
+      if ((await setConfidentialite(workspaceId, value as number | null, actorUserId)) !== "unchanged") written.push(key);
+      continue;
+    }
     const cur = current[key];
     if (value === null) {
       if (cur.kind === "absent") continue;

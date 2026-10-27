@@ -3,7 +3,8 @@ import type { ChartSeries } from "@/components/charts/shared";
 import { amountGap, chargesOfWindow, type Amount, type ChargesPassage } from "@/lib/croisee/charges-personnel";
 import { journalReason } from "@/lib/croisee/format";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting } from "@/lib/croisee/settings-format";
+import { confidentialiteHref, confidentialiteReason, isHidden, maskGroups, maskReason as sharedMaskReason, personsOfContracts, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type ConfidentialiteSetting, type MaskInput, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { confidentialiteOf as seuilOf, groupInput, type Confidentialite } from "@/lib/croisee/confidentialite";
 import { formatMonth } from "@/lib/dates";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { MASSE_TERMS as M } from "@/lib/glossary/masse";
@@ -20,9 +21,10 @@ import { nd as ndTile, type TileValue } from "@/lib/viz/synthese";
 // déjà calculés par le moteur du journal de paie (windowPayroll, monthPayroll), par les fonctions de l'onglet Paie & comptabilité de
 // la Masse salariale (provisionMonth, reconcile, comptaGap, operatingRevenue), par le contrôle DSN (dsnBrutWindow) et par le passage
 // vers les charges de personnel (src/lib/croisee/charges-personnel.ts). loadPaieComptaInput appelle ces MÊMES fonctions sur les mêmes
-// mois et le même service que l'onglet, puis applique le seuil de confidentialité (maskServices) aux chiffres d'un service. L'écran,
-// le CSV et l'Excel partent du même modèle (paieComptaModel, calculé une fois par requête). Montants en centimes ; un n.d. reste n.d.
-// (raison écrite) jusqu'au tableau et au graphique, jamais un zéro. Aucun nom de personne ni identifiant de contrat.
+// mois et le même service que l'onglet, puis applique le seuil de confidentialité (module partagé src/lib/confidentialite : groupes
+// comptés en personnes distinctes, masquage maskGroups) aux chiffres d'un service. L'écran, le CSV et l'Excel partent du même modèle
+// (paieComptaModel, calculé une fois par requête). Montants en centimes ; un n.d. reste n.d. (raison écrite) jusqu'au tableau et au
+// graphique, jamais un zéro. Aucun nom de personne ni identifiant de contrat.
 
 // --- Entrées minimales (les types du moteur y sont assignables) -------------------------------------------------------------------
 
@@ -112,16 +114,16 @@ export const MEME_PERIODE_N1 = "Même période N-1";
 export const NON_FILTRABLE_COMPTA = "non filtrable par service : la comptabilité ne porte pas le code analytique du journal de paie";
 export const NON_FILTRABLE_DSN = "non filtrable par service : la DSN ne porte pas le code analytique du journal de paie";
 export const SANS_PRODUITS = "aucun produit d'exploitation (comptes 70 à 75) sur la période";
-export const SEUIL_NON_VERIFIABLE = "effectif du service non dénombré : seuil de confidentialité non vérifiable";
-export const SEUIL_ABSENT = "seuil de confidentialité non défini (Paramètres)";
+// Raisons du module partagé : groupe non dénombré, seuil non défini.
+export const SEUIL_NON_VERIFIABLE = GROUPE_NON_DENOMBRE;
+export const SEUIL_ABSENT = SEUIL_NON_DEFINI;
 // Limites de la lecture : comment le seuil compte un service (tableau par service, puis service retenu dans les filtres).
 export const PROVISION_SERVICES_LIMITE =
-  "Provision par service : seuil de confidentialité compté à chaque fin de mois en contrats qui portent une ligne de dotation de la provision ; une provision non nulle sans contrat rattaché est masquée ; masquage secondaire compris ; la ligne « Toute l'entreprise » reste complète.";
+  "Provision par service : seuil de confidentialité compté à chaque fin de mois en personnes distinctes dont un contrat porte une ligne de dotation de la provision ; une provision non nulle sans contrat rattaché, ou dont les contrats ne sont pas reliés à une personne, n'est pas vérifiable ; masquage secondaire compris ; la ligne « Toute l'entreprise » reste complète.";
 export const SERVICE_RETENU_LIMITE =
-  "Service retenu : seuil de confidentialité compté chaque mois en contrats qui portent une ligne de charges de personnel (passage) ou de dotation de la provision (provision) ; une valeur non nulle sans contrat rattaché est masquée ; le passage, qui contient les provisions, est masqué quand la provision l'est ; masquage secondaire avec les autres services.";
-// Raison d'une valeur masquée, la MÊME pour le masquage principal, le masquage secondaire et un service sans contrat rattaché : des
-// raisons différentes diraient lequel des services masqués compte moins de contrats que le seuil.
-export const sousSeuil = (seuil: number): string => `non affiché (seuil de confidentialité : ${seuil} ${seuil > 1 ? "contrats" : "contrat"} par service et par mois)`;
+  "Service retenu : seuil de confidentialité compté chaque mois en personnes distinctes dont un contrat porte une ligne de charges de personnel (passage) ou de dotation de la provision (provision) ; une valeur non nulle sans contrat rattaché n'est pas vérifiable ; le passage, qui contient les provisions, est masqué quand la provision l'est ; masquage secondaire avec les autres services.";
+// Raison d'une valeur masquée, la MÊME dans toute l'application pour le masquage principal et le masquage secondaire (module partagé).
+export const sousSeuil = (seuil: number): string => confidentialiteReason(seuil);
 
 // Blocs du chapitre que Clair ne calcule pas (matrice 4.7) : « Prévu », sans valeur reconstituée.
 export const PREVU_PAIE: PrevuItem[] = [
@@ -145,55 +147,27 @@ export const PREVU_PAIE: PrevuItem[] = [
   },
 ];
 
-// --- Seuil de confidentialité par service (calcul pur, testé) ---------------------------------------------------------------------
+// --- Seuil de confidentialité par service (module partagé) -------------------------------------------------------------------------
 
 // Un groupe = un service à une fin de mois, pour UNE valeur affichée : la provision de congés payés, ou le passage vers les charges de
-// personnel. size = contrats distincts qui portent au moins une ligne de cette valeur dans le journal de paie (provisionContracts,
-// passageContracts) ; null : effectif non dénombré (mois n.d.). contracts = ces contrats : les groupes masqués sont comptés en contrats
-// DISTINCTS, car un même contrat peut porter des lignes de deux services (une ligne sans code analytique, par exemple) ; sans cette
-// liste, les tailles sont additionnées. order = montant qui ordonne le masquage secondaire (le plus petit d'abord ; null : montant
-// n.d., masqué en premier). nonZero = la valeur affichée du groupe n'est pas nulle ; absent, il se lit sur order (0 : nulle ; n.d. :
-// traitée comme non nulle). Statuts : shown (affiché), masked (1 à seuil − 1 contrats, ou valeur non nulle sans contrat rattaché),
-// secondary (masqué pour protéger un autre service), unverifiable (effectif non dénombré).
-export type MaskStatus = "shown" | "masked" | "secondary" | "unverifiable";
-export type MaskGroup = { size: number | null; order: number | null; nonZero?: boolean; contracts?: readonly string[] };
+// personnel. group = personnes distinctes dont un contrat porte au moins une ligne de cette valeur dans le journal de paie
+// (provisionContracts, passageContracts, reliés par le référentiel), et contrats non reliés ; null : effectif non dénombré (mois n.d.,
+// aucune valeur affichée). value = la valeur affichée, qui ordonne le masquage secondaire (le plus petit montant d'abord) ; null :
+// valeur n.d. (le groupe n'est alors ni masqué ni protecteur : il n'affiche rien). nonZero = la valeur affichée n'est pas nulle ;
+// absent, il se lit sur value. Statuts du module partagé : shown (affiché), masked (1 à seuil − 1 personnes), secondary (masqué pour
+// protéger un autre service), unverifiable (effectif non dénombré : mois n.d., contrats non reliés sous le seuil, valeur non nulle
+// sans contrat rattaché), nd (valeur déjà n.d.).
+export type MaskStatus = "shown" | "masked" | "secondary" | "unverifiable" | "nd";
+export type MaskGroup = { group: PersonsOfContracts | null; value: number | null; nonZero?: boolean };
 
-// Règle : un service de 1 à (seuil − 1) contrats est masqué. Un service sans contrat rattaché dont la valeur n'est pas nulle (lignes
-// sans contrat, souvent « Non ventilé ») ne peut pas être vérifié : il est masqué de même, avec la même raison (dès que le seuil est
-// au moins 2). Un service sans contrat et de valeur nulle ne décrit personne : il n'est pas masqué au premier tour. Le total de toute
-// l'entreprise restant affiché, les services masqués doivent compter AU MOINS « seuil » contrats distincts : sinon le plus petit
-// service affiché est masqué aussi, et ainsi de suite. Un service sans contrat n'ajoute aucun contrat : il ne suffit jamais à
-// protéger un autre service. Ainsi, la différence entre le total de l'entreprise et les services affichés décrit toujours au moins
-// « seuil » contrats distincts.
+// Règle (maskGroups, le total de toute l'entreprise étant affiché) : un service de 1 à (seuil − 1) personnes est masqué ; un service
+// non dénombré (valeur non nulle sans contrat rattaché, ou contrats non reliés sous le seuil) n'est pas vérifiable ; un service sans
+// contrat et de valeur nulle ne décrit personne. Les services masqués doivent compter AU MOINS « seuil » personnes distinctes (une
+// personne présente dans deux services masqués compte une fois) : sinon le service affiché de plus petit montant est masqué aussi, et
+// ainsi de suite ; un service sans personne comptée ne suffit jamais à en protéger un autre.
 export function maskServices(groups: readonly MaskGroup[], seuil: number): MaskStatus[] {
-  const out = groups.map((g): MaskStatus => {
-    if (g.size === null) return "unverifiable";
-    if (g.size >= 1 && g.size < seuil) return "masked";
-    if (g.size === 0 && seuil > 1 && (g.nonZero ?? g.order !== 0)) return "masked";
-    return "shown";
-  });
-  if (out.every((s) => s === "shown")) return out;
-  const rank = (g: MaskGroup) => (g.order === null ? Number.NEGATIVE_INFINITY : g.order);
-  // Contrats distincts des services masqués (liste fournie), plus la taille de ceux qui n'en donnent pas.
-  const hidden = () => {
-    const ids = new Set<string>();
-    let others = 0;
-    groups.forEach((g, i) => {
-      if (out[i] === "shown") return;
-      if (g.contracts) for (const c of g.contracts) ids.add(c);
-      else others += g.size ?? 0;
-    });
-    return ids.size + others;
-  };
-  while (hidden() < seuil) {
-    let pick = -1;
-    out.forEach((s, i) => {
-      if (s === "shown" && (pick < 0 || rank(groups[i]) < rank(groups[pick]))) pick = i;
-    });
-    if (pick < 0) break; // tous les services sont masqués : seul le total de l'entreprise reste affiché
-    out[pick] = "secondary";
-  }
-  return out;
+  const inputs = groups.map((g): MaskInput => (g.group === null ? { size: null, value: g.value } : groupInput(g.group, seuil, g.value, g.nonZero ?? (g.value !== null && g.value !== 0))));
+  return maskGroups(inputs, seuil, true);
 }
 
 // Contrats d'un service (input.serviceFilter ; toute l'entreprise sans filtre) qui portent, dans le mois, une ligne de la valeur
@@ -231,27 +205,27 @@ export function passageContracts(input: JournalInput, month: string): string[] {
 export const passageStatus = (passage: MaskStatus, provision: MaskStatus): MaskStatus =>
   passage === "shown" && (provision === "masked" || provision === "secondary") ? provision : passage;
 
-// Groupes du seuil pour un service et un mois (journal restreint au service) : provision de fin de mois, passage du mois.
-export function provisionGroup(input: JournalInput, month: string): MaskGroup {
+// Groupes du seuil pour un service et un mois (journal restreint au service) : provision de fin de mois, passage du mois. link : lien
+// contrat → personne du référentiel (absent : aucun contrat relié, le service n'est pas dénombré dès qu'il porte une valeur non nulle).
+export function provisionGroup(input: JournalInput, month: string, link: PersonLink = new Map()): MaskGroup {
   const x = provisionMonth(input, month);
-  if (x.kind === "nd") return { size: null, order: null };
-  const contracts = provisionContracts(input, month);
-  return { size: contracts.length, contracts, order: x.total, nonZero: (x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0 };
+  if (x.kind === "nd") return { group: null, value: null };
+  return { group: personsOfContracts(provisionContracts(input, month), link), value: x.total, nonZero: (x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0 };
 }
-export function passageGroup(input: JournalInput, month: string): MaskGroup {
+export function passageGroup(input: JournalInput, month: string, link: PersonLink = new Map()): MaskGroup {
   const r = monthPayroll(input, month);
-  if (r.kind === "nd") return { size: null, order: null };
-  const contracts = passageContracts(input, month);
+  if (r.kind === "nd") return { group: null, value: null };
   const rubrics = Object.values(r.byRubric);
   const amounts = [...rubrics, ...r.unclassified.map((a) => a.balanceCents)];
-  return { size: contracts.length, contracts, order: rubrics.reduce((s, v) => s + v, 0), nonZero: amounts.some((v) => v !== 0) };
+  return { group: personsOfContracts(passageContracts(input, month), link), value: rubrics.reduce((s, v) => s + v, 0), nonZero: amounts.some((v) => v !== 0) };
 }
 
-const maskReason = (s: Exclude<MaskStatus, "shown">, seuil: number) => (s === "unverifiable" ? SEUIL_NON_VERIFIABLE : sousSeuil(seuil));
+// Raison d'un statut masqué (module partagé) ; un statut « nd » n'a pas de raison propre ici (la valeur garde la sienne).
+const maskReason = (s: MaskStatus, seuil: number): string => sharedMaskReason(s, seuil) ?? SEUIL_NON_VERIFIABLE;
 
 // Provision d'un service selon son statut : affichée telle quelle, ou n.d. avec la raison du seuil (un mois déjà n.d. garde sa raison).
 export function maskedProvision(x: ProvisionMonth, status: MaskStatus, seuil: number): ProvisionMonth {
-  if (status === "shown" || x.kind === "nd") return x;
+  if (!isHidden(status) || x.kind === "nd") return x;
   return { month: x.month, kind: "nd", reason: maskReason(status, seuil) };
 }
 
@@ -262,7 +236,7 @@ export function maskedWindow(w: WindowIn, statusAt: (month: string) => MaskStatu
   const list: readonly MonthIn[] = w.months;
   const months = list.map((r): MonthIn => {
     const s = statusAt(r.month);
-    if (s === "shown" || r.kind === "nd") return r;
+    if (!isHidden(s) || r.kind === "nd") return r;
     masked = true;
     return { month: r.month, kind: "nd", open: r.open, nd: { reason: maskReason(s, seuil) } };
   });
@@ -270,18 +244,17 @@ export function maskedWindow(w: WindowIn, statusAt: (month: string) => MaskStatu
 }
 
 // Seuil appliqué à un seul service, sans autre service pour un masquage secondaire (forme courte de maskServices + maskedProvision) ;
-// contracts : contrats qui portent une ligne de dotation de la provision du service.
-export function guardProvision(x: ProvisionMonth, contracts: number | null, seuil: number): { total: Amount; conges: Amount; charges: Amount } {
+// group : personnes distinctes dont un contrat porte une ligne de dotation de la provision du service, et contrats non reliés (null :
+// non dénombré).
+export function guardProvision(x: ProvisionMonth, group: PersonsOfContracts | null, seuil: number): { total: Amount; conges: Amount; charges: Amount } {
   const nonZero = x.kind === "nd" || (x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0;
-  const y = maskedProvision(x, maskServices([{ size: contracts, order: null, nonZero }], seuil)[0], seuil);
+  const y = maskedProvision(x, maskServices([{ group, value: x.kind === "nd" ? null : x.total, nonZero }], seuil)[0], seuil);
   return provisionAmounts(y, y);
 }
 
-// Seuil de l'espace : entier au moins égal à 1, sinon n.d. avec la raison du paramètre (jamais de valeur par défaut).
-export function confidentialiteOf(s: CroiseeSetting<number>): { kind: "set"; value: number } | { kind: "nd"; reason: string } {
-  const v = settingValue(s);
-  if (v !== null && Number.isSafeInteger(v) && v >= 1) return { kind: "set", value: v };
-  return { kind: "nd", reason: croiseeSettingReason("confidentialite", s) ?? "seuil de confidentialité illisible : à ré-enregistrer (Paramètres)" };
+// Seuil de l'espace (module partagé) : la valeur, sinon n.d. avec la raison du paramètre (jamais de valeur par défaut).
+export function confidentialiteOf(s: ConfidentialiteSetting): Confidentialite {
+  return seuilOf(s);
 }
 
 // --- Petites mises en forme (aucun calcul métier) ---------------------------------------------------------------------------------
@@ -688,7 +661,7 @@ function ratioCell(masse: Amount, produits: Amount): CroiseeCell {
 // --- Chargement : mêmes fonctions et mêmes entrées que l'onglet Paie & comptabilité de la Masse salariale -----------------------------
 
 export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInput> {
-  const links = { donnees: `/e/${ctx.slug}/donnees`, dsn: `/e/${ctx.slug}/donnees/dsn`, parametres: croiseeSettingsHref(ctx.slug) };
+  const links = { donnees: `/e/${ctx.slug}/donnees`, dsn: `/e/${ctx.slug}/donnees/dsn`, parametres: confidentialiteHref(ctx.slug) };
   const dataAction: Action = { href: links.donnees, label: ctx.canEdit ? "Choisir ou lire une source dans Données" : "Données" };
   const p = ctx.period;
   if (!p) return { nd: { reason: ctx.periodNd ?? "aucun mois disponible", action: dataAction }, data: null };
@@ -706,6 +679,8 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
   const filtered = svc !== undefined;
   const removeFilter: Action = { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
   const conf = confidentialiteOf(ctx.settings.confidentialite);
+  // Lien contrat → personne (référentiel Collaborateurs) : les groupes du seuil sont comptés en personnes distinctes.
+  const link = conf.kind === "set" ? await ctx.load.persons() : new Map<string, string>();
 
   // Services du journal entier sur la période et N-1 (plus le service retenu s'il n'y figure pas) : une entrée filtrée par service,
   // créée une fois (le moteur mémoïse ses mois par entrée). Statuts du seuil par mois, calculés une fois par mois et pour chaque valeur
@@ -726,7 +701,7 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
       // pour chaque service).
       const month: JournalInput = { ...full, lines: full.lines.filter((l) => l.month === m) };
       const inputs = groups.map((g) => withService(month, g.value));
-      s = { provision: maskServices(inputs.map((si) => provisionGroup(si, m)), seuil), passage: maskServices(inputs.map((si) => passageGroup(si, m)), seuil) };
+      s = { provision: maskServices(inputs.map((si) => provisionGroup(si, m, link)), seuil), passage: maskServices(inputs.map((si) => passageGroup(si, m, link)), seuil) };
       masks.set(m, s);
     }
     return s;

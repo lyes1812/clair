@@ -5,6 +5,7 @@ import type { ChartSeries } from "@/components/charts/shared";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Sparkline } from "@/components/Sparkline";
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { CONFIDENTIALITE_TERM, confidentialiteHref, type ConfidentialiteSetting } from "@/lib/confidentialite";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import type { MonthPayroll } from "@/lib/payroll/engine";
 import { fmtFixed } from "@/lib/rh/kpi/format";
@@ -172,6 +173,24 @@ export function Tile(p: { testid: string; label: string; value: ReactNode; nd?: 
       {p.compare && <div className="ms-tile-compare">{p.compare}</div>}
       {p.foot}
     </div></MoneyText>
+  );
+}
+
+// Ligne courte au-dessus de chaque tableau masquable : le seuil de confidentialité de l'espace (personnes distinctes), ou son
+// absence avec le lien vers les Paramètres ; le « ? » renvoie à l'entrée générale du glossaire. Jamais de valeur par défaut.
+export function ConfidentialiteLine({ slug, setting, testid = "ms-confidentialite" }: { slug: string; setting: ConfidentialiteSetting; testid?: string }) {
+  return (
+    <p className="tile-foot ms-confidentialite" data-testid={testid}>
+      Confidentialité :{" "}
+      {setting.kind === "set" ? (
+        `seuil de ${setting.value} ${setting.value > 1 ? "personnes" : "personne"}`
+      ) : (
+        <>
+          {setting.kind === "absent" ? "seuil non défini" : "seuil illisible, à ré-enregistrer"} (<a href={confidentialiteHref(slug)}>Paramètres</a>)
+        </>
+      )}
+      <GlossaryLink slug={slug} term={CONFIDENTIALITE_TERM} />
+    </p>
   );
 }
 

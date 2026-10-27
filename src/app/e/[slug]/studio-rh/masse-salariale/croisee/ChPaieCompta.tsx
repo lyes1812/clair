@@ -6,7 +6,8 @@ import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
 import { paieComptaModel, type PaieBlock, type PaieModel } from "@/lib/viz/croisee-paie";
 import { capital, hasNd } from "@/lib/viz/masse";
-import { ChartGuard, GraphFoot, NdKey, NdState, TrendLegend, type Affichage } from "../components";
+import { GraphFoot, NdKey, NdState, TrendLegend, type Affichage } from "../components";
+import { ChartNd, chartTitle } from "./atomes/ChartTitle";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
@@ -91,7 +92,7 @@ function Block({ b, model, slug, affichage, tableauHref }: { b: PaieBlock; model
             <div className={charts.length > 1 ? "cx-paie-charts" : "cx-paie-charts one"}>
               {charts.map((c) => (
                 <div key={c.id} className="cx-paie-chart">
-                  <ChartView c={c} />
+                  <ChartView c={c} block={b.title} />
                   <GraphFoot aff={affichage} tableHref={`${tableauHref}#cx-table-${c.tableId}`} testid={`cx-chart-${c.id}-tableau`} />
                 </div>
               ))}
@@ -106,17 +107,19 @@ function Block({ b, model, slug, affichage, tableauHref }: { b: PaieBlock; model
 }
 
 // Graphique du modèle : barres ou courbe (séries déjà calculées, n.d. hachurés ou interrompus avec leur raison) ; sans aucune valeur
-// connue, la raison remplace le graphique (ChartGuard). Props sérialisables : unité nommée, jamais de fonction.
-function ChartView({ c }: { c: CroiseeChart }) {
+// connue, la raison remplace le graphique (ChartNd). Props sérialisables : unité nommée, jamais de fonction. Le titre du bloc n'est pas
+// répété en texte visible sous le h3 (chartTitle) ; un bloc à plusieurs graphiques garde leurs sous-titres distincts.
+function ChartView({ c, block }: { c: CroiseeChart; block: string }) {
   const testid = `cx-chart-${c.id}`;
   const label = `${c.title}, montants monétaires`;
+  const title = chartTitle(block, c.title);
   return (
-    <ChartGuard testid={testid} title={c.title} series={c.series}>
+    <ChartNd testid={testid} heading={title} series={c.series}>
       {c.kind === "courbe" ? (
-        <LineChart testid={testid} label={label} title={c.title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} />
+        <LineChart testid={testid} label={label} title={title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} />
       ) : (
-        <BarChart testid={testid} label={label} title={c.title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} mode={c.mode} toggle={c.mode === "stacked" && c.series.length > 1} />
+        <BarChart testid={testid} label={label} title={title} categories={c.categories} categoryTitles={c.categoryTitles} series={c.series} unit={c.unit} mode={c.mode} toggle={c.mode === "stacked" && c.series.length > 1} />
       )}
-    </ChartGuard>
+    </ChartNd>
   );
 }

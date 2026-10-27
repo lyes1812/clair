@@ -2,18 +2,18 @@ import type { ChartSeries } from "@/components/charts/shared";
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { etpCascade, STEP_LABELS, type Cascade } from "@/lib/budget/cascade";
 import { landing, roundDiv, type Landing } from "@/lib/budget/engine";
+import { compareLanding } from "@/lib/budget/landing-compare";
 import { retraite, type Retraite } from "@/lib/budget/lot3";
 import { bridge, budgetSeries, gap, liveSeries, scenarioSeries, total, type Bridge, type Gap, type Layer, type Point, type Series } from "@/lib/budget/series";
 import type { BaseSnapshot, Projection } from "@/lib/budget/types";
 import { aggregate, alignedSeries, diff, nd as ndCell, reelVersion, val, type Agg, type ServiceFilter } from "@/lib/budget/versions";
 import { HORS_SALARIE, zoomOf } from "@/lib/budget/zoom";
+import { confidentialiteHref, confidentialiteReason, isHidden, maskGroups, maskReason, personsOfContracts, type MaskInput, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
 import { maskCohorts, maskNonRecurring, nonRecurringContributors, partitionCohorts, type CohortPartition, type CohortRowId, type NonRecurringContributors } from "@/lib/croisee/cohortes";
+import { confidentialiteOf as seuilOf, groupInput, masseContracts, masseGroup, unionGroups, type Confidentialite, type JournalGroup } from "@/lib/croisee/confidentialite";
 import { journalReason } from "@/lib/croisee/format";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { confidentialiteReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type Confidentialite, type MaskStatus } from "@/lib/croisee/structure";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue } from "@/lib/croisee/settings-format";
-import { monthPayroll, serviceOf, withService, type JournalInput } from "@/lib/payroll/engine";
-import { classify, gridRubrics } from "@/lib/payroll/grid";
+import { withService, type JournalInput } from "@/lib/payroll/engine";
 import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 import { costTone } from "@/lib/trend";
@@ -37,15 +37,16 @@ import { landingView, nd, type TileValue } from "@/lib/viz/synthese";
 // qui nomment le contrat, sont remplacées par leur nombre, et la raison de l'ETP n.d. d'un mois projeté par un texte sans nom
 // (publicScenario) ; les libellés libres des éléments non récurrents ne sont pas repris (le détail reste dans Hypothèses budgétaires).
 //
-// Seuil de confidentialité (rh.croisee.confidentialite ; absent ou illisible : bloc n.d. avec le lien vers les Paramètres) : il
-// s'applique aux groupes de contrats observés et aux totaux des éléments non récurrents déjà comptabilisés et prévus, comptés en
-// contributeurs (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres d'un
-// service retenu par le filtre (réalisé, contrats observés, pont et ETP) quand ce service compte de 1 à (seuil − 1) contrats
-// observés (contrats qui portent une ligne de la masse affichée : masseContracts), ou aucun contrat pour une valeur non nulle
-// (seuil non vérifiable ; de même pour les lignes du journal sans contrat d'un montant non nul, maskCohorts). Masquage secondaire par
-// les fonctions partagées (structure.ts), contrats distincts comptés une fois d'un groupe masqué à l'autre (mois, paliers) : aucune
-// valeur masquée ne se retrouve par différence. Raison : « non affiché (seuil de confidentialité : N contrats) », tous ces groupes
-// étant comptés en contrats. Les totaux de toute l'entreprise ne sont jamais masqués.
+// Seuil de confidentialité (module partagé src/lib/confidentialite : un paramètre d'espace sans valeur par défaut ; absent ou
+// illisible : bloc n.d. avec le lien vers Paramètres › Confidentialité) : il s'applique aux groupes de contrats observés et aux totaux
+// des éléments non récurrents déjà comptabilisés et prévus (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres
+// d'un service retenu par le filtre (réalisé, contrats observés, pont et ETP). Chaque groupe est compté en PERSONNES DISTINCTES : ses
+// contrats (contrats qui portent une ligne de la masse affichée, masseContracts ; contrats des paliers ; contributeurs) sont reliés à
+// leur personne par le référentiel Collaborateurs (lien du contexte) ; un contrat non relié ne protège jamais : un groupe dont les
+// personnes reliées sont sous le seuil et qui compte des contrats non reliés n'est pas dénombré (seuil non vérifiable), de même qu'un
+// groupe sans contrat pour une valeur non nulle (lignes du journal sans contrat). Masquage secondaire par le moteur partagé, personnes
+// comptées une fois d'un groupe masqué à l'autre (mois, paliers) : aucune valeur masquée ne se retrouve par différence. Une seule
+// raison : « non affiché (seuil de confidentialité : N personnes) ». Les totaux de toute l'entreprise ne sont jamais masqués.
 
 // Identifiants du glossaire vers lesquels renvoient les deux chapitres (un test vérifie que chacun existe).
 export const BUDGET_CX_TERMS = {
@@ -154,52 +155,22 @@ const LAYER_TEXT: Record<Layer, string> = { reel: "réel", "projete-parent": "pr
 
 type Why = { label: string; reason: string | null | undefined };
 
-// --- Seuil de confidentialité : raisons et effectif d'un service ---------------------------------------------------------------
+// --- Seuil de confidentialité : effectif d'un service en personnes distinctes ---------------------------------------------------
 
-// Chiffres d'un service retenu par le filtre quand il compte de 1 à (seuil − 1) contrats : la raison dit la règle, sans l'effectif.
-export const serviceSousSeuil = (seuil: number, what = "contrats observés"): string => `non affiché : service de moins de ${seuil} ${what} (seuil de confidentialité)`;
-const sizeUnder = (n: number | null, seuil: number): boolean => n !== null && n > 0 && n < seuil;
-// Groupe sans aucun contrat qui porte une valeur non nulle : son effectif ne peut pas être vérifié (null : « seuil de confidentialité
-// non vérifiable »), quel que soit le seuil défini. Une valeur inconnue (null) ne change rien : le groupe n'affiche alors rien.
-export const checkedSize = (size: number | null, value: number | null): number | null => (size === 0 && value !== null && value !== 0 ? null : size);
+// Contrats observés d'un mois (ligne de masse) : fonction partagée de la croisée, ré-exportée pour l'Analyse des écarts et les tests.
+export { masseContracts };
 
-// Contrats d'un mois qui portent la valeur affichée, la masse salariale chargée : contrats distincts qui portent au moins une ligne
-// d'une rubrique de rôle brut ou cotisations (celles que monthPayroll additionne dans la masse : salaires, primes, gratifications de
-// stage, indemnités et avantages, cotisations patronales, taxes), dans le journal restreint au service (input.serviceFilter). Ce sont
-// les contrats observés de zoomOf (rubrique « masse »). Une ligne sans contrat n'ajoute aucun contrat ; nonZero : une ligne de masse
-// du mois, avec ou sans contrat, a un solde non nul. Les rubriques hors masse (provisions, autres charges de personnel) et les
-// comptes 63/64 non classés ne comptent pas. null : mois n.d. (monthPayroll), effectif non dénombré.
-export type MasseMonthGroup = { contracts: string[]; nonZero: boolean };
-export function masseContracts(input: JournalInput, month: string): MasseMonthGroup | null {
-  if (monthPayroll(input, month).kind !== "value") return null;
-  const rubrics = gridRubrics(input.grid);
-  const f = input.serviceFilter;
-  const ids = new Set<string>();
-  let nonZero = false;
-  for (const l of input.lines) {
-    if (l.month !== month) continue;
-    if (f && serviceOf(l, input.serviceAxis) !== f.value) continue;
-    const role = classify(l.accountId, rubrics).rubric?.role;
-    if (role !== "brut" && role !== "cotisations") continue;
-    if (l.contractId) ids.add(l.contractId);
-    if ((l.debitCents ?? 0) - (l.creditCents ?? 0) !== 0) nonZero = true;
-  }
-  return { contracts: [...ids].sort(), nonZero };
+// Effectif d'un service : personnes distinctes des contrats observés (masseContracts) du journal restreint au service, reliés par le
+// référentiel (link), par mois et sur l'ensemble des mois, avec les contrats non reliés et la présence d'une masse non nulle. Les
+// personnes sont des jetons de la lecture : le masquage secondaire compte ainsi une personne une seule fois d'un mois masqué à
+// l'autre. null : mois n.d. (effectif non dénombré, seuil non vérifiable).
+export type ServiceSizes = { months: (JournalGroup | null)[]; period: JournalGroup | null };
+export function observedSizes(journal: JournalInput, months: readonly string[], link: PersonLink): ServiceSizes {
+  return { months: months.map((m) => masseGroup(journal, [m], link)), period: masseGroup(journal, months, link) };
 }
 
-// Effectif d'un service : contrats observés (masseContracts) du journal restreint au service, par mois et sur l'ensemble des mois
-// (contrats distincts). Chaque mois donne ses contrats sous forme de jetons (rang du contrat parmi les contrats observés de la
-// période, clés triées), sans identifiant : le masquage secondaire compte ainsi un contrat une seule fois d'un mois masqué à l'autre.
-// null : mois n.d. (effectif non dénombré, seuil non vérifiable).
-export type ServiceSizes = { months: (readonly number[] | null)[]; period: number | null };
-export function observedSizes(journal: JournalInput, months: readonly string[]): ServiceSizes {
-  const groups = months.map((m) => masseContracts(journal, m));
-  const rank = new Map([...new Set(groups.flatMap((g) => g?.contracts ?? []))].sort().map((k, i) => [k, i] as const));
-  return {
-    months: groups.map((g) => (g ? g.contracts.map((k) => rank.get(k)!) : null)),
-    period: groups.every((g) => g !== null) ? rank.size : null,
-  };
-}
+// Entrée de masquage d'un groupe de contrats observés (groupInput), ou d'un groupe non dénombré (mois n.d.) pour la valeur affichée.
+const sizeInput = (g: JournalGroup | null, seuil: number, value: number | null): MaskInput => (g ? groupInput(g, seuil, value === null ? null : Math.abs(value), g.nonZero) : { size: null, value: value === null ? null : Math.abs(value) });
 
 // --- Aucune identité : raisons n.d. de la projection -----------------------------------------------------------------------------
 
@@ -283,35 +254,33 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
   const paramLink = { href: hrefs.parametres, label: "Paramètres" };
 
   // --- 0. Réalisé d'un service retenu par le filtre (seuil de confidentialité) : n.d. sans seuil ; n.d. quand le service compte de 1
-  // à (seuil − 1) contrats observés sur la période ; sinon un mois de 1 à (seuil − 1) contrats, ou sans contrat pour une masse non
-  // nulle (non vérifiable), est masqué, avec le masquage secondaire de la colonne dont le total (la carte « Réalisé ») est affiché.
+  // à (seuil − 1) personnes sur la période, ou n'est pas dénombré (contrats non reliés sous le seuil, masse non nulle sans contrat) ;
+  // sinon un tel mois est masqué, avec le masquage secondaire de la colonne dont le total (la carte « Réalisé ») est affiché.
   const real = live.kind === "value" ? total(live.series, months) : ({ kind: "nd", reason: live.reason } as const);
   let realGuard: string | null = null;
   let monthMask: MaskStatus[] | null = null;
   if (input.filtered) {
     const sz = input.serviceSizes;
     if (conf.kind === "nd") realGuard = conf.reason;
-    else if (sz && sizeUnder(sz.period, conf.value)) realGuard = serviceSousSeuil(conf.value);
-    else if (live.kind === "value") {
-      // Taille d'un mois : ses contrats observés ; members : les mêmes contrats sous forme de jetons, pour qu'un contrat présent dans
-      // deux mois masqués n'y compte qu'une fois.
-      monthMask = maskGroups(
-        months.map((m, i) => {
-          const p = live.series.points.get(m);
-          const v = p && p.kind === "value" ? p.cost : null;
-          const ks = sz ? sz.months[i] : null;
-          return { size: ks ? checkedSize(ks.length, v) : null, value: v === null ? null : Math.abs(v), ...(ks ? { members: ks } : {}) };
-        }),
-        conf.value,
-        real.kind === "value",
-      );
-      // Total affiché alors qu'un mois n'est pas dénombré, ou masse non nulle sans aucun contrat sur la période : le total ne peut pas
-      // être vérifié non plus.
-      if (real.kind === "value" && (!sz || checkedSize(sz.period, real.cost) === null)) realGuard = SEUIL_NON_VERIFIABLE;
+    else {
+      const [periodSt] = maskGroups([sizeInput(sz?.period ?? null, conf.value, real.kind === "value" ? real.cost : null)], conf.value, false);
+      if (isHidden(periodSt)) realGuard = maskReason(periodSt, conf.value);
+      else if (live.kind === "value") {
+        // Taille d'un mois : ses personnes ; members : les mêmes personnes (jetons), pour qu'une personne présente dans deux mois
+        // masqués n'y compte qu'une fois.
+        monthMask = maskGroups(
+          months.map((m, i) => {
+            const p = live.series.points.get(m);
+            return sizeInput(sz?.months[i] ?? null, conf.value, p && p.kind === "value" ? p.cost : null);
+          }),
+          conf.value,
+          real.kind === "value",
+        );
+      }
     }
   }
   const seuil = conf.kind === "set" ? conf.value : 0;
-  const monthHidden = (i: number): string | null => (monthMask && isHidden(monthMask[i]) ? maskReason(monthMask[i], seuil, "contrats") : null);
+  const monthHidden = (i: number): string | null => (monthMask && isHidden(monthMask[i]) ? maskReason(monthMask[i], seuil) : null);
 
   // --- 1. Réalisé, budget saisi et écart sur la période : seuls les mois qui ont un montant de budget sont comparés.
   const realTile: TileSpec = {
@@ -488,13 +457,11 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     let withY: string[] = [];
     let exclY: string[] = [];
     if (budget.kind === "value") {
-      withY = ym.filter((m) => pointOf(budget.series, m).kind === "value");
-      exclY = ym.filter((m) => !withY.includes(m));
-      if (withY.length === 0) budgetIn = { total: { kind: "nd", reason: `aucun montant de budget saisi « ${budget.name} » pour ${yearKey}` } };
-      else {
-        budgetIn = { total: total(budget.series, withY) };
-        if (land.kind === "value") gapIn = gap(scenario.series, budget.series, withY);
-      }
+      const c = compareLanding(scenario.series, land.kind === "value", budget, yearKey);
+      budgetIn = { total: c.budget };
+      gapIn = c.gap;
+      withY = c.withBudget;
+      exclY = c.excluded;
     }
     const v = landingView(land.kind === "value" ? land : { kind: "nd", reason: frDates(land.reason) }, budgetIn, gapIn, yearKey);
     const parts = land.kind === "value" ? landingParts(land) : [];
@@ -549,8 +516,8 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       if (conf.kind === "nd") nrHidden.realised = nrHidden.projected = conf.reason;
       else {
         const st = maskNonRecurring(scenario.contributors, r, conf.value);
-        nrHidden.realised = maskReason(st.realised, conf.value, "contrats");
-        nrHidden.projected = maskReason(st.projected, conf.value, "contrats");
+        nrHidden.realised = maskReason(st.realised, conf.value);
+        nrHidden.projected = maskReason(st.projected, conf.value);
       }
     }
     const nrLine = (label: string, cents: number, hidden: string | null): TileVariation => {
@@ -658,17 +625,19 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
   if (conf.kind === "set" && cohorts.kind === "value") {
     const c = cohorts;
     const s = conf.value;
-    // Service retenu par le filtre : il compte de 1 à (seuil − 1) contrats observés sur N ou sur N-1, ou aucun contrat pour un coût
-    // non nul (lignes sans contrat : seuil non vérifiable) → tout le tableau est n.d.
-    const nCur = c.onlyCur.count + c.both.count;
-    const nPrev = c.onlyPrev.count + c.both.count;
-    if (input.filtered && (sizeUnder(nCur, s) || sizeUnder(nPrev, s))) pers.nd.push({ label: persLabel, reason: serviceSousSeuil(s, "contrats observés sur N ou sur N-1") });
-    else if (input.filtered && (checkedSize(nCur, c.total.cur) === null || checkedSize(nPrev, c.total.prev) === null)) pers.nd.push({ label: persLabel, reason: SEUIL_NON_VERIFIABLE });
+    // Service retenu par le filtre : ses contrats observés sur N (seulement N et les deux) ou sur N-1 (seulement N-1 et les deux)
+    // décrivent de 1 à (seuil − 1) personnes, ou ne sont pas dénombrés (contrats non reliés sous le seuil, coût non nul sans contrat :
+    // lignes sans contrat) → tout le tableau est n.d. ; un service sous le seuil l'emporte sur un service non dénombré.
+    const [stCur, stPrev] = input.filtered
+      ? [maskGroups([groupInput(unionGroups(c.onlyCur, c.both), s, Math.abs(c.total.cur))], s, false)[0], maskGroups([groupInput(unionGroups(c.onlyPrev, c.both), s, Math.abs(c.total.prev))], s, false)[0]]
+      : ["shown" as MaskStatus, "shown" as MaskStatus];
+    const serviceGuard = [stCur, stPrev].find((st) => st === "masked") ?? [stCur, stPrev].find(isHidden) ?? null;
+    if (serviceGuard !== null) pers.nd.push({ label: persLabel, reason: maskReason(serviceGuard, s)! });
     else {
       const mask = maskCohorts(c, s);
       // Ligne masquée : chaque cellule chiffrée devient n.d. avec la même raison (masquage principal ou secondaire, indiscernables ;
       // lignes sans contrat d'un montant non nul : seuil non vérifiable) ; une cellule sans objet par construction (« — ») le reste.
-      const cell = (id: CohortRowId, v: number | "" | null): CroiseeCell => (v === "" || v === null ? "" : mask[id] === "shown" ? v : ndIn(maskReason(mask[id], s, "contrats")!));
+      const cell = (id: CohortRowId, v: number | "" | null): CroiseeCell => (v === "" || v === null ? "" : mask[id] === "shown" ? v : ndIn(maskReason(mask[id], s)!));
       const rows: CroiseeRow[] = [
         { cells: [COHORT_LABELS.onlyPrev, cell("onlyPrev", c.onlyPrev.count), cell("onlyPrev", c.onlyPrev.prev), "", cell("onlyPrev", c.onlyPrev.delta)] },
         { cells: [COHORT_LABELS.onlyCur, cell("onlyCur", c.onlyCur.count), "", cell("onlyCur", c.onlyCur.cur), cell("onlyCur", c.onlyCur.delta)] },
@@ -687,7 +656,7 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
         ],
         rows,
         foot: { cells: ["Total", c.total.count, c.total.prev, c.total.cur, c.total.delta] },
-        notes: ["Contrat observé : contrat de paie qui porte au moins une ligne de masse dans la période ; une personne qui change de contrat entre les deux périodes compte dans deux groupes."],
+        notes: ["Contrat observé : contrat de paie qui porte au moins une ligne de masse dans la période ; une personne qui change de contrat entre les deux périodes compte dans deux groupes (une fois pour le seuil de confidentialité)."],
         terms: [T.personnes, T.masse, T.nMoinsUn, T.confidentialite],
       });
       pers.tables.push(BUDGET_TABLE_IDS.personnes);
@@ -724,11 +693,9 @@ export function zoomReason(reason: string): string {
   return ndLines(ndGroups(items as { month: string; reason: string }[])).join(" ; ");
 }
 
-// Seuil de confidentialité de l'espace (paramètre sans valeur par défaut) : valeur, ou raison de son absence.
+// Seuil de confidentialité de l'espace (module partagé, paramètre sans valeur par défaut) : valeur, ou raison de son absence.
 export function confidentialiteOf(ctx: Pick<CroiseeContext, "settings">): Confidentialite {
-  const s = ctx.settings.confidentialite;
-  const v = settingValue(s);
-  return v !== null ? { kind: "set", value: v } : { kind: "nd", reason: croiseeSettingReason("confidentialite", s) ?? "seuil de confidentialité non défini (Paramètres)" };
+  return seuilOf(ctx.settings.confidentialite);
 }
 
 export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapterInput> {
@@ -743,6 +710,8 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
   const pay = await ctx.load.payroll();
   const journal = pay.input;
   const why = journalReason(pay) ?? "journal de paie indisponible";
+  // Lien contrat → personne du référentiel : les groupes du seuil (service, cohortes, contributeurs) sont comptés en personnes.
+  const link = await ctx.load.persons();
 
   // Réalisé : journal de paie de la lecture appliquée, mois clos ; restreint au service choisi (même objet pour l'effectif du service).
   const fj = journal && filtered ? withService(journal, svc ?? null) : journal;
@@ -779,7 +748,7 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
         landing: land.kind === "nd" ? { ...land, reason: zoomReason(land.reason) } : land,
         // Totaux seulement : le détail par élément (catégories et motifs saisis, texte libre) reste dans Hypothèses budgétaires.
         retraite: ret.kind === "nd" ? { ...ret, reason: zoomReason(ret.reason) } : { ...ret, rows: [] },
-        contributors: nonRecurringContributors(pub.base, pub.proj, s.full.hypotheses, String(year)),
+        contributors: nonRecurringContributors(pub.base, pub.proj, s.full.hypotheses, String(year), link),
       };
     }
   }
@@ -791,7 +760,7 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
     const filter: ServiceFilter = filtered ? { value: svc ?? null } : null;
     const cur = zoomOf({ kind: "reel", journal, filter }, months, "masse");
     const prev = zoomOf({ kind: "reel", journal, filter }, ctx.prevMonths, "masse");
-    cohorts = prev.kind === "nd" ? { kind: "nd", reason: `N-1 : ${zoomReason(prev.reason)}` } : cur.kind === "nd" ? { kind: "nd", reason: zoomReason(cur.reason) } : partitionCohorts(prev.byKey, cur.byKey, HORS_SALARIE);
+    cohorts = prev.kind === "nd" ? { kind: "nd", reason: `N-1 : ${zoomReason(prev.reason)}` } : cur.kind === "nd" ? { kind: "nd", reason: zoomReason(cur.reason) } : partitionCohorts(prev.byKey, cur.byKey, HORS_SALARIE, link);
   }
 
   const hyp = `/e/${slug}/studio-rh/hypotheses`;
@@ -809,14 +778,14 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
       atterrissage: scenarioId && sameYear ? withScenario("vue=resultat&sous=atterrissage") : null,
       postes: withScenario("vue=postes"),
       embauches: withScenario("vue=embauches"),
-      parametres: croiseeSettingsHref(slug),
+      parametres: confidentialiteHref(slug),
     },
     live,
     budget,
     scenario,
     cohorts,
     confidentialite: confidentialiteOf(ctx),
-    serviceSizes: fj && filtered ? observedSizes(fj, months) : null,
+    serviceSizes: fj && filtered ? observedSizes(fj, months, link) : null,
   };
 }
 
@@ -839,7 +808,8 @@ export type EffetsInput =
       cascade: Cascade; // cascade d'ETP de N-1 à N (etpCascade)
       etp: { cur: Agg; prev: Agg }; // ETP moyens (moyenne des ETP de fin de mois)
       confidentialite: Confidentialite;
-      serviceSizes: { cur: number | null; prev: number | null } | null; // filtre de service : contrats observés du service sur N et N-1
+      serviceSizes: { cur: JournalGroup | null; prev: JournalGroup | null } | null; // filtre de service : personnes des contrats observés du service sur N et N-1
+      link: PersonLink; // lien contrat (clé de référentiel des paliers) → jeton de personne
       hrefs: EffetsHrefs;
     };
 export type EffetsModel = BlocksModel;
@@ -878,17 +848,21 @@ export function buildEffets(input: EffetsInput): EffetsModel {
   const why: Why[] = [];
   const paramLink = { href: hrefs.parametres, label: "Paramètres" };
 
-  // Service retenu par le filtre (seuil de confidentialité) : sans seuil, ou quand le service compte de 1 à (seuil − 1) contrats
-  // observés sur N ou sur N-1, ses chiffres (cartes, pont) sont n.d. ; un effectif non dénombré, ou aucun contrat pour une masse ou un
-  // ETP non nuls, ne permet pas de vérifier le seuil.
+  // Service retenu par le filtre (seuil de confidentialité) : sans seuil, ou quand le service compte de 1 à (seuil − 1) personnes sur
+  // N ou sur N-1, ses chiffres (cartes, pont) sont n.d. ; un effectif non dénombré (contrats non reliés sous le seuil, aucun contrat
+  // pour une masse ou un ETP non nuls) ne permet pas de vérifier le seuil. Un service sous le seuil l'emporte sur un service non
+  // dénombré.
   let guard: string | null = null;
   const sz = input.serviceSizes;
   if (sz) {
-    const shownNonZero = (xs: Agg[]) => xs.some((a) => a.kind === "value" && a.num !== 0);
-    const unverified = (size: number | null, shown: Agg[]) => size === null || (size === 0 && shownNonZero(shown));
     if (conf.kind === "nd") guard = conf.reason;
-    else if (sizeUnder(sz.cur, conf.value) || sizeUnder(sz.prev, conf.value)) guard = serviceSousSeuil(conf.value);
-    else if (unverified(sz.cur, [masse.cur, etp.cur]) || unverified(sz.prev, [masse.prev, etp.prev])) guard = SEUIL_NON_VERIFIABLE;
+    else {
+      const shownNonZero = (xs: Agg[]) => xs.some((a) => a.kind === "value" && a.num !== 0);
+      const side = (g: JournalGroup | null, shown: Agg[]): MaskStatus => maskGroups([g ? groupInput(g, conf.value, 1, g.nonZero || shownNonZero(shown)) : { size: null, value: 1 }], conf.value, false)[0];
+      const st = [side(sz.cur, [masse.cur, etp.cur]), side(sz.prev, [masse.prev, etp.prev])];
+      const worst = st.find((x) => x === "masked") ?? st.find(isHidden) ?? null;
+      if (worst !== null) guard = maskReason(worst, conf.value);
+    }
   }
   // Carte gardée : une valeur déjà n.d. garde sa raison ; une valeur affichable devient n.d. avec la raison du seuil.
   const guarded = (t: TileSpec): TileSpec => (guard === null ? t : { id: t.id, label: t.label, term: t.term, sub: t.sub, cost: t.cost, value: t.value.kind === "nd" ? t.value : nd(guard) });
@@ -981,10 +955,11 @@ export function buildEffets(input: EffetsInput): EffetsModel {
   else if (conf.kind === "nd") etpBlock.nd.push({ label: "Cascade d'ETP", reason: conf.reason, action: paramLink });
   else {
     const seuil = conf.value;
-    // Taille d'un palier : ses contrats ; members : leurs clés, pour qu'un contrat présent dans deux paliers masqués (effet report et
-    // changement d'ETP, par exemple) n'y compte qu'une fois.
+    // Taille d'un palier : les personnes de ses contrats (reliés par le lien) ; members : leurs jetons, pour qu'une personne présente
+    // dans deux paliers masqués (effet report et changement d'ETP, par exemple) n'y compte qu'une fois ; un contrat non relié ne
+    // protège pas (palier non dénombré sous le seuil).
     const status = maskGroups(
-      cascade.steps.map((s) => ({ size: s.people.length, value: Math.abs(s.etp4), members: s.people.map((p) => p.key) })),
+      cascade.steps.map((s) => groupInput(personsOfContracts(s.people.map((p) => p.key), input.link), seuil, Math.abs(s.etp4), s.people.length > 0)),
       seuil,
       true,
     );
@@ -1001,7 +976,7 @@ export function buildEffets(input: EffetsInput): EffetsModel {
     const exactOf = (e: CascadeEnd): CroiseeCell => (e.kind === "value" ? { exact: e.num / den } : ndIn(e.reason));
     // Arrivée exacte − départ exact (écart total), puis − somme des paliers arrondis (résiduel), en n × dix-millièmes sur n × 10 000.
     const gapOf = (f: (x: { a: number; b: number }) => number): CroiseeCell => (both ? { exact: f(both) / den } : ndIn(bothNd));
-    if (hidden) etpBlock.nd.push({ label: "Graphique de la cascade d'ETP", reason: confidentialiteReason(seuil, "contrats") });
+    if (hidden) etpBlock.nd.push({ label: "Graphique de la cascade d'ETP", reason: confidentialiteReason(seuil) });
     else if (!both) etpBlock.nd.push({ label: "Graphique de la cascade d'ETP", reason: bothNd });
     else {
       // Graphique en dix-millièmes entiers : départ et arrivée écrits au centième comme la carte (plotEtp4), paliers arrondis, et le
@@ -1024,7 +999,7 @@ export function buildEffets(input: EffetsInput): EffetsModel {
       ],
       rows: [
         { cells: [`ETP moyen ${startLabel}`, exactOf(A), ""], style: "subtotal" },
-        ...cascade.steps.map((s, i): CroiseeRow => ({ cells: [STEP_LABELS[s.id], "", isHidden(status[i]) ? ndIn(maskReason(status[i], seuil, "contrats")!) : s.etp4], style: "child" })),
+        ...cascade.steps.map((s, i): CroiseeRow => ({ cells: [STEP_LABELS[s.id], "", isHidden(status[i]) ? ndIn(maskReason(status[i], seuil)!) : s.etp4], style: "child" })),
         { cells: ["Résiduel d'arrondi", "", gapOf((x) => x.b - x.a - n * paliers)], style: "child" },
         { cells: ["Écart total", "", gapOf((x) => x.b - x.a)], style: "subtotal" },
       ],
@@ -1078,13 +1053,14 @@ export async function loadEffetsInput(ctx: CroiseeContext): Promise<EffetsInput>
     embauches: q("embauches"),
     globales: q("globales"),
     fixeVariable: ctx.href({ chapitre: "fixe-variable", tri: null, sens: null }),
-    parametres: croiseeSettingsHref(slug),
+    parametres: confidentialiteHref(slug),
   };
   const confidentialite = confidentialiteOf(ctx);
+  const link = await ctx.load.persons();
   if (!journal) {
     const r = journalReason(pay) ?? "journal de paie indisponible";
     const n: Agg = { kind: "nd", reason: r };
-    return { kind: "value", year, labels: ctx.labels, masse: { cur: n, prev: n }, pont: { kind: "nd", reason: r }, cascade: { kind: "nd", reason: r }, etp: { cur: n, prev: n }, confidentialite, serviceSizes: null, hrefs };
+    return { kind: "value", year, labels: ctx.labels, masse: { cur: n, prev: n }, pont: { kind: "nd", reason: r }, cascade: { kind: "nd", reason: r }, etp: { cur: n, prev: n }, confidentialite, serviceSizes: null, link, hrefs };
   }
   // Mêmes versions que l'Analyse des écarts pour « Réel PayFit N-1 » et « Réel PayFit N » : mêmes mois, même filtre de service,
   // même ETP par service (lignes du journal rattachées au contrat).
@@ -1116,7 +1092,8 @@ export async function loadEffetsInput(ctx: CroiseeContext): Promise<EffetsInput>
     cascade: etpCascade(a, b, monthsA, monthsB),
     etp: { cur: aggregate(b, monthsB, "etp"), prev: aggregate(a, monthsA, "etp") },
     confidentialite,
-    serviceSizes: fj ? { cur: observedSizes(fj, monthsB).period, prev: observedSizes(fj, monthsA).period } : null,
+    serviceSizes: fj ? { cur: masseGroup(fj, monthsB, link), prev: masseGroup(fj, monthsA, link) } : null,
+    link,
     hrefs,
   };
 }

@@ -7,8 +7,8 @@ import { MegaMenu } from "@/components/MegaMenu";
 import { SourceBadge } from "@/components/SourceBadge";
 import { BudgetError, getScenario, listBudgets, listScenarios } from "@/lib/budget/store";
 import { landing, project } from "@/lib/budget/engine";
-import { budgetSeries, gap, scenarioSeries, total } from "@/lib/budget/series";
-import { monthRange } from "@/lib/connectors/months";
+import { compareLanding, coveringScenario } from "@/lib/budget/landing-compare";
+import { budgetSeries, scenarioSeries } from "@/lib/budget/series";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, monthEnd } from "@/lib/dates";
 import { menuFamilies } from "@/lib/menu";
@@ -39,7 +39,7 @@ import {
   evolutionView,
   headcountTile,
   kpiRefusal,
-  landingView,
+  landingTileView,
   masseCells,
   MM,
   MONTH_NAMES,
@@ -79,7 +79,9 @@ type TileData = {
   size: "kpi" | "money";
   previous?: TileValue;
   budget?: { label: string; value: TileValue };
+  compared?: { label: string; text: string }; // atterrissage des seuls mois comparés au budget
   delta?: { label: string; text: string | null; reason: string | null; tone: TrendTone };
+  note?: string; // une ligne : mois exclus de la comparaison, nommés
   href: string;
 };
 
@@ -114,6 +116,7 @@ function Tile({ t, slug }: { t: TileData; slug: string }) {
         <div className="sy-tile-compare">
           {t.previous && <span className="tile-foot" data-testid={`sy-tile-${t.id}-n1`}>N-1 : {t.previous.text}</span>}
           {t.budget && <span className="tile-foot" data-testid={`sy-tile-${t.id}-budget`}>{t.budget.label} : {t.budget.value.text}<GlossaryLink slug={slug} term={T.budget} label="Budget saisi" /></span>}
+          {t.compared && <span className="tile-foot" data-testid={`sy-tile-${t.id}-compared`}>{t.compared.label} : {t.compared.text}</span>}
           {t.delta && (
             <span className="tile-foot" data-testid={`sy-tile-${t.id}-delta`}>
               {t.delta.label} : {t.delta.text === null ? "n.d." : <span className={`sy-delta ${trendClass(t.delta.tone)}`.trim()}>{t.delta.text}</span>}
@@ -132,6 +135,7 @@ function Tile({ t, slug }: { t: TileData; slug: string }) {
           </details>
         );
       })}
+      {t.note && <p className="tile-foot" data-testid={`sy-tile-${t.id}-note`}>{t.note}</p>}
       <p className="tile-foot sy-tile-links">
         {absent && <a href={`/e/${slug}/donnees`} aria-label={`Données : ${t.label}`}>Données</a>}
         <a href={t.href} aria-label={`Détail : ${t.label}`}>Détail</a>
@@ -382,37 +386,33 @@ export default async function SynthesePage({ params, searchParams }: { params: P
     );
   }
 
-  // --- Atterrissage du dernier scénario face au budget saisi (store de budget : lecture seule)
+  // --- Atterrissage de l'année face au budget saisi : la règle de la Masse salariale croisée (landing-compare.ts). Scénario : le plus
+  // récemment créé qui couvre l'année de la période (aucun : n.d. avec la raison) ; budget : le plus récemment modifié de l'année ;
+  // comparaison sur les seuls mois dotés d'un montant de budget, leur nombre écrit. Store de budget : lecture seule.
+  const yearKey = String(year);
+  const landingBase = { id: "atterrissage", label: `Atterrissage ${yearKey}`, term: T.atterrissage, size: "money" as const };
   let landingTile: TileData | null = null;
   let landingError: string | null = null;
-  const scenarios = await listScenarios(ws.id);
-  if (scenarios.length > 0) {
-    const s = scenarios[0].scenario; // le plus récent
+  const pick = coveringScenario(await listScenarios(ws.id), yearKey);
+  if (pick.kind === "nd") landingTile = { ...landingBase, value: nd(pick.reason), href: `${studio}/hypotheses` };
+  else {
+    const s = pick.row.scenario;
+    const sub = `Scénario « ${s.name} » · le plus récent qui couvre ${yearKey} · douze mois`;
+    const href = `${studio}/hypotheses?scenario=${s.id}&vue=resultat&sous=comparaison&annee=${yearKey}`;
     try {
       const full = await getScenario(ws.id, s.id);
-      if (full) {
-        const years = [...new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)))];
-        const ly = years.includes(String(year)) ? String(year) : years[0];
-        const lyMonths = monthRange(`${ly}-01`, `${ly}-12`);
+      if (!full) landingTile = { ...landingBase, sub, value: nd("scénario introuvable"), href };
+      else {
         // Raisons n.d. de la projection sans identité (le moteur nomme le contrat : « <libellé> : base n.d. (…) ») : publicScenario,
         // comme la Masse salariale croisée ; montants identiques, le détail nominatif reste dans Hypothèses budgétaires.
         const pub = publicScenario(full.base, project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions));
-        const land = landing(pub.base, pub.proj, ly);
-        const chosen = [...(await listBudgets(ws.id))].filter((b) => b.year === ly).sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null;
-        const bSeries = chosen ? budgetSeries(`budget-${chosen.id.slice(0, 8)}`, chosen.name, ly, chosen.amounts) : null;
-        const g = land.kind === "value" && bSeries ? gap(scenarioSeries(s.id, s.name, pub.base, pub.proj), bSeries, lyMonths) : null;
-        const v = landingView(land, bSeries ? { total: total(bSeries, lyMonths) } : null, g, ly);
-        landingTile = {
-          id: "atterrissage",
-          label: `Atterrissage ${ly}`,
-          term: T.atterrissage,
-          sub: `Scénario « ${s.name} »`,
-          value: v.value,
-          budget: { label: chosen ? `Budget saisi « ${chosen.name} »` : "Budget saisi", value: v.budget },
-          delta: { label: "Écart", ...v.gap },
-          size: "money",
-          href: `${studio}/hypotheses?scenario=${s.id}&vue=resultat&sous=comparaison&annee=${ly}`,
-        };
+        const land = landing(pub.base, pub.proj, yearKey);
+        const chosen = [...(await listBudgets(ws.id))].filter((b) => b.year === yearKey).sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null;
+        const budget = chosen
+          ? { name: chosen.name, compare: compareLanding(scenarioSeries(s.id, s.name, pub.base, pub.proj), land.kind === "value", { name: chosen.name, series: budgetSeries(`budget-${chosen.id.slice(0, 8)}`, chosen.name, yearKey, chosen.amounts) }, yearKey) }
+          : null;
+        const v = landingTileView(land, budget, yearKey);
+        landingTile = { ...landingBase, sub, value: v.value, budget: v.budget, compared: v.compared ?? undefined, delta: v.gap, note: v.note ?? undefined, href };
       }
     } catch (e) {
       // Base figée altérée : le scénario n'est pas lu, et l'écran le dit.

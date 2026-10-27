@@ -12,6 +12,7 @@ import { setProrata } from "@/lib/budget/settings";
 import { setCategoryNatures, setContractCategories } from "@/lib/budget/categories";
 import { CATEGORY_IDS } from "@/lib/budget/types";
 import { CROISEE_PARSERS, LIBELLE_MAX, SEUILS_MAX, setCroiseeSettings, type CroiseeWrite, type SeuilEffectif } from "@/lib/croisee-settings";
+import { getConfidentialiteRead, parseConfidentialite, setConfidentialite } from "@/lib/confidentialite";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -175,15 +176,42 @@ export async function saveContractCategories(slug: string, _prev: FormState, for
 
 // Masse salariale croisée : lecture du formulaire. Un champ présent et vide supprime le réglage (« non défini ») ; un champ absent
 // du formulaire laisse le réglage inchangé ; une valeur hors règle refuse tout l'enregistrement. Rien n'est converti en silence :
-// « 2,5 », « -1 » ou « abc » sont refusés, jamais arrondis ni remplacés par 0.
-type CroiseeIntKey = "confidentialite" | "margeAlerte" | "horizonEcheances";
+// « 2,5 », « -1 » ou « abc » sont refusés, jamais arrondis ni remplacés par 0. Le seuil de confidentialité n'est plus lu ici
+// (section Confidentialité, saveConfidentialite).
+type CroiseeIntKey = "margeAlerte" | "horizonEcheances";
 const CROISEE_INT_ERRORS: Record<CroiseeIntKey, string> = {
-  confidentialite: "Valeur invalide : seuil de confidentialité (nombre entier de personnes, au moins 1).",
   margeAlerte: "Valeur invalide : marge d'alerte (nombre entier de salariés, 0 ou plus).",
   horizonEcheances: "Valeur invalide : horizon des échéances (nombre entier de jours, au moins 1).",
 };
 const digitsOf = (v: FormDataEntryValue | null | undefined) => String(v ?? "").replace(/[\s\u00a0\u202f]/g, "");
 const wholeNumber = (s: string) => (/^\d+$/.test(s) ? Number(s) : Number.NaN);
+
+// Confidentialité (administrateur) : seuil de toute l'application, nombre entier de personnes distinctes, au moins 1. Un champ vide
+// supprime le seuil (retour à « non défini », jamais 0) ; une valeur hors règle est refusée, jamais arrondie ni convertie. Un
+// événement setting.changed par écriture ou suppression (setConfidentialite). Fichier « use server » : seules des fonctions
+// asynchrones sont exportées.
+const CONFIDENTIALITE_ERROR = "Valeur invalide : seuil de confidentialité (nombre entier de personnes, au moins 1).";
+export async function saveConfidentialite(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const { session, workspace } = await requireWorkspace(slug, "admin");
+  const raw = digitsOf(formData.get("seuil"));
+  let value: number | null = null;
+  if (raw !== "") {
+    value = parseConfidentialite(wholeNumber(raw));
+    if (value === null) return { error: CONFIDENTIALITE_ERROR };
+  }
+  let outcome: Awaited<ReturnType<typeof setConfidentialite>>;
+  try {
+    outcome = await setConfidentialite(workspace.id, value, session.user.id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Enregistrement impossible." };
+  }
+  if (outcome === "unchanged") return { ok: "Aucune modification : rien n'a été enregistré." };
+  revalidatePath(`/e/${slug}`, "layout");
+  if (outcome === "written") return { ok: "Seuil de confidentialité enregistré." };
+  // Supprimé : l'ancien réglage de la Masse salariale croisée, s'il existe encore, est de nouveau lu par repli ; l'écran le dit.
+  const after = await getConfidentialiteRead(workspace.id);
+  return { ok: after.source === "croisee" ? "Seuil de confidentialité supprimé ; l'ancien réglage de la Masse salariale croisée reste lu tant qu'il existe." : "Seuil de confidentialité supprimé : non défini." };
+}
 
 function readCroiseeForm(formData: FormData): { values: CroiseeWrite } | { error: string } {
   const values: CroiseeWrite = {};
@@ -227,7 +255,7 @@ function readCroiseeForm(formData: FormData): { values: CroiseeWrite } | { error
   return { values };
 }
 
-// Paramètres de la Masse salariale croisée (administrateur) : quatre réglages sans valeur par défaut, un événement setting.changed
+// Paramètres de la Masse salariale croisée (administrateur) : trois réglages sans valeur par défaut, un événement setting.changed
 // par réglage modifié ou supprimé.
 export async function saveCroiseeSettings(slug: string, _prev: FormState, formData: FormData): Promise<FormState> {
   const { session, workspace } = await requireWorkspace(slug, "admin");

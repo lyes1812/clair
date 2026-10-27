@@ -7,6 +7,7 @@ import { CHAPTERS } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/chapi
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import type { Affichage } from "@/app/e/[slug]/studio-rh/masse-salariale/components";
 import { syntheseOf } from "@/app/e/[slug]/studio-rh/masse-salariale/synthese-data";
+import { confidentialiteReason, SEUIL_NON_VERIFIABLE, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
 import { readCroiseeSettings, type CroiseeSettings } from "@/lib/croisee-settings";
 import { glossaryEntry } from "@/lib/glossary";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
@@ -37,7 +38,9 @@ import {
   windowReason,
   type FixeVariableData,
   type FixeVariableModel,
+  type LabelGroups,
   type LabelIn,
+  type ServiceRowIn,
   type ServicesData,
   type ServicesModel,
   type WindowIn,
@@ -99,6 +102,14 @@ const BY_MONTH: Record<string, LabelIn[]> = {
   "2026-01": [L("salaires", "Salaire de base", 400000), L("primes", "Prime sur objectifs", 60000)],
   "2026-02": [L("salaires", "Salaire de base", 400000), L("primes", "Prime sur objectifs", 10000), L("primes", "Prime exceptionnelle", 30000), L("indemnites", "Indemnité transport", 50000)],
 };
+// Personnes distinctes (jetons) d'un groupe ; sans contrat non relié sauf indication.
+const G = (persons: string[], unlinked = 0): PersonsOfContracts => ({ persons, unlinked });
+// Seuil 1 (cas de base) : chaque libellé est porté par deux personnes, rien n'est masqué ; les cas de masquage sont plus bas.
+const groupsFor = (labels: LabelIn[]): Record<string, PersonsOfContracts> => Object.fromEntries(labels.map((l) => [l.key, G(["p1", "p2"])]));
+const GROUPS: LabelGroups = { n: groupsFor(LABELS_N), n1: groupsFor(LABELS_N1), byMonth: { "2026-01": groupsFor(BY_MONTH["2026-01"]), "2026-02": groupsFor(BY_MONTH["2026-02"]) } };
+const CONF_HREF = "/e/demo/parametres#confidentialite";
+// Groupe d'un service porté par une personne (seuil 1 : affiché).
+const ONE = { persons: ["p1"], unlinked: 0, nonZero: true };
 const DATA: FixeVariableData = {
   year: 2026,
   prevYear: 2025,
@@ -110,8 +121,16 @@ const DATA: FixeVariableData = {
   labelsN: LABELS_N,
   labelsN1: LABELS_N1,
   labelsByMonth: BY_MONTH,
+  confidentialite: { kind: "set", value: 1 },
+  labelGroups: GROUPS,
+  links: { confidentialite: CONF_HREF },
 };
-const fv = (over: Partial<FixeVariableData> = {}) => buildFixeVariable({ nd: null, data: { ...DATA, ...over } });
+// Les personnes des libellés suivent les libellés fournis (deux personnes chacun) sauf groupes explicites.
+const fv = (over: Partial<FixeVariableData> = {}) => {
+  const d = { ...DATA, ...over };
+  const labelGroups: LabelGroups = over.labelGroups ?? { n: d.labelsN ? groupsFor(d.labelsN) : null, n1: d.labelsN1 ? groupsFor(d.labelsN1) : null, byMonth: Object.fromEntries(Object.entries(d.labelsByMonth).map(([m, l]) => [m, groupsFor(l)])) };
+  return buildFixeVariable({ nd: null, data: { ...d, labelGroups } });
+};
 
 // Février 2026 hors de la lecture : la période est n.d. (raison du moteur), janvier reste connu.
 const N_FEB_ND: MonthIn = { month: "2026-02", kind: "nd", open: false, nd: { reason: "mois 2026-02 hors de la lecture PayFit appliquée" } };
@@ -429,7 +448,10 @@ const PAY: PayStub = { input: JOURNAL, unavailable: null, source: "payfit", serv
 // Paramètres de l'espace : aucun enregistré, ou un seuil de confidentialité (valeur brute telle qu'enregistrée).
 const NO_SETTINGS = readCroiseeSettings(new Map());
 const seuilSettings = (value: unknown): CroiseeSettings => readCroiseeSettings(new Map([["rh.croisee.confidentialite", { value }]]));
-function fakeCtx(o: { pay?: PayStub; service?: string | null; chapitre?: string; period?: boolean; reason?: string | null; settings?: CroiseeSettings } = {}): CroiseeContext {
+// Lien contrat → jeton de personne du référentiel (contexte) : chaque contrat fictif a sa personne, sauf lien fourni.
+const linkOf = (pairs: Record<string, string>): PersonLink => new Map(Object.entries(pairs));
+const LINK = linkOf({ c1: "p1", c2: "p2", c3: "p3", c7: "p7", c8: "p8", c9: "p9" });
+function fakeCtx(o: { pay?: PayStub; service?: string | null; chapitre?: string; period?: boolean; reason?: string | null; settings?: CroiseeSettings; link?: PersonLink } = {}): CroiseeContext {
   const state = { chapitre: o.chapitre ?? "services", annee: "2026", de: "01", a: "01", service: o.service === undefined ? null : o.service === null ? "__nv__" : o.service };
   return {
     slug: "demo",
@@ -440,10 +462,11 @@ function fakeCtx(o: { pay?: PayStub; service?: string | null; chapitre?: string;
     labels: { period: "janvier 2026", prev: "janvier 2025" },
     service: { axis: "Service", value: o.service, label: o.service === undefined ? "Tous les services" : (o.service ?? "Non ventilé"), options: [], reason: o.reason ?? null },
     query: { tri: null, sens: null },
-    settings: o.settings ?? NO_SETTINGS,
+    // Seuil de confidentialité 1 par défaut (aucun groupe dénombré n'est masqué) ; les cas de masquage passent un autre réglage.
+    settings: o.settings ?? seuilSettings(1),
     affichage: "tout",
     href: (patch: Record<string, string | null> = {}, hash?: string) => croiseeHref(BASE, { ...state, ...patch }, hash),
-    load: { payroll: async () => o.pay ?? PAY },
+    load: { payroll: async () => o.pay ?? PAY, persons: async () => o.link ?? LINK },
   } as unknown as CroiseeContext;
 }
 
@@ -465,7 +488,7 @@ describe("serviceRows : mêmes lignes que le tableau Services de l'écran Masse 
     expect(serviceRows).toBe(sharedServiceRows);
     expect(serviceLabel(null)).toBe("Non ventilé");
     expect(serviceLabel("A")).toBe("A");
-    const payCtx = { input: JOURNAL, service: { axis: "Service", origin: "single-axis", updatedAt: null }, axes: ["Service"], etp: (ms: string[]) => ms.map((m) => ({ month: m, etp4: 10000, reason: null })), dsn: new Map() };
+    const payCtx = { input: JOURNAL, kpi: { input: null }, service: { axis: "Service", origin: "single-axis", updatedAt: null }, axes: ["Service"], etp: (ms: string[]) => ms.map((m) => ({ month: m, etp4: 10000, reason: null })), dsn: new Map() };
     const s = syntheseOf(payCtx as never, { annee: "2026", de: "01", a: "01" });
     if (s.kind !== "ready") throw new Error("contexte fictif incomplet");
     expect(s.months).toEqual(["2026-01"]);
@@ -544,11 +567,13 @@ describe("loadServicesInput + buildServices : tableau par service (colonnes de l
       axis: "Service",
       axisMissing: true,
       rows: [
-        { value: "A", cur: A, prev: A1, evo: { kind: "value", deltaCents: 14000, ratio: { num: 14000, den: 126000 } } },
-        { value: "C", cur: C_ND, prev: A1, evo: { kind: "nd", nd: { reason: "période n.d. (x)" } } },
+        { value: "A", cur: A, prev: A1, evo: { kind: "value", deltaCents: 14000, ratio: { num: 14000, den: 126000 } }, groups: { cur: ONE, prev: ONE } },
+        { value: "C", cur: C_ND, prev: A1, evo: { kind: "nd", nd: { reason: "période n.d. (x)" } }, groups: { cur: null, prev: ONE } },
       ],
       total: { cur: C_ND, prev: A1, evo: { kind: "nd", nd: { reason: "période n.d. (x)" } } },
       selected: null,
+      confidentialite: { kind: "set", value: 1 },
+      links: { confidentialite: CONF_HREF },
     };
     const m = buildServices({ nd: null, data });
     const t = table(m, "services");
@@ -586,17 +611,30 @@ describe("loadFixeVariableInput : mêmes fonctions que l'onglet Fixe & variable"
   });
   it("service retenu : seuil de confidentialité absent, illisible ou non atteint → chapitre n.d. avec la raison et l'action", async () => {
     const at = (settings: CroiseeSettings, service: string | null = "A") => loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", service, settings }));
-    expect(await at(NO_SETTINGS)).toEqual({ nd: { reason: "seuil de confidentialité non défini (Paramètres)", action: { href: "/e/demo/parametres#croisee", label: "Paramètres" } }, data: null });
+    expect(await at(NO_SETTINGS)).toEqual({ nd: { reason: "seuil de confidentialité non défini (Paramètres)", action: { href: CONF_HREF, label: "Paramètres" } }, data: null });
     expect((await at(seuilSettings("5"))).nd?.reason).toBe("seuil de confidentialité illisible : à ré-enregistrer (Paramètres)");
-    // Seuil 2 : A n'a qu'un contrat rémunéré en janvier 2026 → masqué ; le lien retire le filtre Service.
+    // Seuil 2 : A n'a qu'une personne rémunérée en janvier 2026 → masqué, avec la seule raison du seuil ; le lien retire le filtre.
     expect(await at(seuilSettings(2))).toEqual({
-      nd: { reason: "non affiché (seuil de confidentialité : 2 personnes) — service retenu par le filtre", action: { href: `${BASE}?chapitre=fixe-variable&annee=2026&de=01&a=01`, label: "Retirer le filtre Service" } },
+      nd: { reason: "non affiché (seuil de confidentialité : 2 personnes)", action: { href: `${BASE}?chapitre=fixe-variable&annee=2026&de=01&a=01`, label: "Retirer le filtre Service" } },
       data: null,
     });
     // Non ventilé : un contrat (c3) en janvier 2026, aucune ligne en janvier 2025 (groupe vide, non masqué) → masqué au seuil 2.
-    expect((await at(seuilSettings(2), null)).nd?.reason).toMatch(/^non affiché \(seuil de confidentialité : 2 personnes\)/);
-    // Sans filtre Service : chiffres de toute l'entreprise, jamais masqués (le paramètre n'est pas lu).
-    expect((await loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", settings: NO_SETTINGS }))).nd).toBeNull();
+    expect((await at(seuilSettings(2), null)).nd?.reason).toBe(confidentialiteReason(2));
+    // Sans filtre Service : les totaux de toute l'entreprise sont affichés ; sans seuil défini, les répartitions par libellé et par
+    // famille sont n.d. avec la raison et le lien vers Paramètres › Confidentialité.
+    const noSeuil = await loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", settings: NO_SETTINGS }));
+    expect(noSeuil.nd).toBeNull();
+    expect(noSeuil.data!.confidentialite).toEqual({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" });
+    expect(noSeuil.data!.labelGroups).toEqual({ n: null, n1: null, byMonth: {} });
+    const mNo = buildFixeVariable(noSeuil);
+    expect(sp(tile(mNo, "fixe").value.text)).toBe("1 500,00 €");
+    expect(mNo.blocks.find((b) => b.id === "libelles")!.nd).toEqual([{ label: "Brut par libellé de paie", reason: "seuil de confidentialité non défini (Paramètres)", action: { href: CONF_HREF, label: "Paramètres" } }]);
+    expect(table(mNo, FV.libelles).rows).toEqual([{ cells: ["Brut par libellé de paie", { nd: "seuil de confidentialité non défini (Paramètres)" }] }]);
+    // Seuil 2 sans filtre : personnes de chaque libellé lues par le lien (c1 : salaires A ; c2 : salaires B ; c3 : primes).
+    const two = await loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", settings: seuilSettings(2) }));
+    expect(two.data!.labelGroups.n).toEqual({ "salaires\u0000compte 641100": G(["p1", "p2"]), "primes\u0000compte 641300": G(["p3"]) });
+    expect(two.data!.labelGroups.byMonth["2026-01"]).toEqual(two.data!.labelGroups.n);
+    expect(two.data!.labelGroups.n1).toEqual({ "salaires\u0000compte 641100": G(["p1"]) });
   });
   it("sans journal ou sans période : n.d. avec la raison", async () => {
     const dsn = await loadFixeVariableInput(fakeCtx({ pay: { ...PAY, input: null, source: "dsn" } }));
@@ -687,27 +725,36 @@ describe("ServicesChapter : rendu du modèle", () => {
 
 // --- Seuil de confidentialité sous le filtre Service (cas écrits à la main) -------------------------------------------------------
 
-describe("serviceConfidentiality : chaque mois connu du service retenu est un groupe de contrats qui portent une ligne de masse", () => {
-  // nonZero : une ligne de masse (brut ou cotisations) du mois a un solde non nul ; contracts : contrats qui portent une telle ligne.
-  const v = (nonZero: boolean, ...contracts: string[]) => ({ kind: "value" as const, nonZero, contracts });
+describe("serviceConfidentiality : chaque mois connu du service retenu est un groupe de personnes dont un contrat porte une ligne de masse", () => {
+  // nonZero : une ligne de masse (brut ou cotisations) du mois a un solde non nul ; persons : personnes reliées ; unlinked : contrats
+  // sans personne.
+  const v = (nonZero: boolean, persons: string[], unlinked = 0) => ({ kind: "value" as const, group: { persons, unlinked, nonZero } });
   const ND = { kind: "nd" as const };
-  const NV = "effectif du groupe non dénombré : seuil de confidentialité non vérifiable — service retenu par le filtre";
   it("seuil absent : n.d. avec la raison du paramètre", () => {
-    expect(serviceConfidentiality({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" }, [v(true, "a")])).toEqual({ cause: "parametre", reason: "seuil de confidentialité non défini (Paramètres)" });
+    expect(serviceConfidentiality({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" }, [v(true, ["a"])])).toEqual({ cause: "parametre", reason: "seuil de confidentialité non défini (Paramètres)" });
   });
-  it("seuil 3 : trois et quatre contrats → affiché ; un mois n.d. ne compte pas ; un mois vide (aucun contrat, aucun montant non nul) n'est pas masqué", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, "a", "b", "c"), v(true, "a", "b", "c", "d"), ND, v(false)])).toBeNull();
+  it("seuil 3 : trois et quatre personnes → affiché ; un mois n.d. ne compte pas ; un mois vide (aucun contrat, aucun montant non nul) n'est pas masqué", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, ["a", "b", "c"]), v(true, ["a", "b", "c", "d"]), ND, v(false, [])])).toBeNull();
   });
-  it("seuil 3 : un mois à deux contrats → tout le chapitre n.d.", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, "a", "b", "c"), v(true, "a", "b")])).toEqual({ cause: "seuil", reason: "non affiché (seuil de confidentialité : 3 personnes) — service retenu par le filtre" });
+  it("seuil 3 : un mois à deux personnes → tout le chapitre n.d., avec la seule raison du seuil", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, ["a", "b", "c"]), v(true, ["a", "b"])])).toEqual({ cause: "seuil", reason: "non affiché (seuil de confidentialité : 3 personnes)" });
+  });
+  it("une personne à deux contrats compte une fois : deux contrats d'une même personne restent sous le seuil 2", () => {
+    // Le lien a déjà réuni les deux contrats sur la personne « a » : le mois décrit 1 personne.
+    expect(serviceConfidentiality({ kind: "set", value: 2 }, [v(true, ["a"])])).toEqual({ cause: "seuil", reason: confidentialiteReason(2) });
+    expect(serviceConfidentiality({ kind: "set", value: 2 }, [v(true, ["a", "b"])])).toBeNull();
+  });
+  it("un contrat non relié ne protège pas : 2 personnes reliées + 1 contrat non relié restent non dénombrées au seuil 3 ; 3 reliées suffisent", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, ["a", "b"], 1)])).toEqual({ cause: "seuil", reason: SEUIL_NON_VERIFIABLE });
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, ["a", "b", "c"], 1)])).toBeNull();
   });
   it("montant de masse non nul sans contrat rattaché : effectif non dénombré, seuil non vérifiable ; un mois sous le seuil l'emporte", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, "a", "b", "c"), v(true)])).toEqual({ cause: "seuil", reason: NV });
-    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true), v(true, "a")])!.reason).toMatch(/^non affiché/);
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, ["a", "b", "c"]), v(true, [])])).toEqual({ cause: "seuil", reason: SEUIL_NON_VERIFIABLE });
+    expect(serviceConfidentiality({ kind: "set", value: 3 }, [v(true, []), v(true, ["a"])])!.reason).toBe(confidentialiteReason(3));
   });
-  it("seuil 1 : un seul contrat suffit ; un montant non nul sans aucun contrat reste non vérifiable dès que le seuil est défini", () => {
-    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(true, "a")])).toBeNull();
-    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(true, "a"), v(true)])).toEqual({ cause: "seuil", reason: NV });
+  it("seuil 1 : une seule personne suffit ; un montant non nul sans aucun contrat reste non vérifiable dès que le seuil est défini", () => {
+    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(true, ["a"])])).toBeNull();
+    expect(serviceConfidentiality({ kind: "set", value: 1 }, [v(true, ["a"]), v(true, [])])).toEqual({ cause: "seuil", reason: SEUIL_NON_VERIFIABLE });
   });
 });
 
@@ -729,19 +776,200 @@ describe("loadFixeVariableInput sous filtre Service : la taille se compte sur to
     grid: DEFAULT_PREFIXES,
     serviceAxis: "Service",
   };
-  const at = (service: string, seuil: number) => loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", service, settings: seuilSettings(seuil), pay: { ...PAY, input: J2 } }));
+  const at = (service: string, seuil: number, link?: PersonLink) => loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", service, settings: seuilSettings(seuil), pay: { ...PAY, input: J2 }, link }));
   it("C (1 contrat qui ne porte que des cotisations) : masqué au seuil 2, affiché au seuil 1 (cotisations 300 €)", async () => {
-    expect((await at("C", 2)).nd?.reason).toBe("non affiché (seuil de confidentialité : 2 personnes) — service retenu par le filtre");
+    expect((await at("C", 2)).nd?.reason).toBe("non affiché (seuil de confidentialité : 2 personnes)");
     const one = await at("C", 1);
     expect(one.nd).toBeNull();
     expect(one.data!.cur).toMatchObject({ kind: "value", brut: 0, cotisations: 30000, masse: 30000 });
   });
   it("D (cotisations non nulles, aucun contrat) : non vérifiable, même au seuil 1", async () => {
-    expect((await at("D", 1)).nd?.reason).toBe("effectif du groupe non dénombré : seuil de confidentialité non vérifiable — service retenu par le filtre");
+    expect((await at("D", 1)).nd?.reason).toBe(SEUIL_NON_VERIFIABLE);
   });
   it("E : la dotation de provision (hors masse) n'ajoute pas c9 ; 1 contrat → masqué au seuil 2", async () => {
-    expect((await at("E", 2)).nd?.reason).toMatch(/^non affiché \(seuil de confidentialité : 2 personnes\)/);
+    expect((await at("E", 2)).nd?.reason).toBe(confidentialiteReason(2));
     expect((await at("E", 1)).nd).toBeNull();
+  });
+  it("C, contrat c7 non relié à une personne : non vérifiable au seuil 1 (un contrat non relié ne protège jamais)", async () => {
+    expect((await at("C", 1, linkOf({ c8: "p8" }))).nd?.reason).toBe(SEUIL_NON_VERIFIABLE);
+  });
+});
+
+// --- Seuil de confidentialité en personnes distinctes : lignes par service (05), primes par famille et brut par libellé (04) --------
+
+describe("buildServices : chaque ligne par service est un groupe de personnes distinctes ; masquage secondaire dans les colonnes N et N-1", () => {
+  // Trois services, janvier 2026 (N-1 : janvier 2025, nul pour tous). A : 1 400 € (p1) ; B : 700 € (p1 aussi : la même personne a un
+  // second contrat dans B) ; C : 2 000 € (p2, p3). Total 4 100 €.
+  const w = (masse: number, paid: number): WindowIn => ({ kind: "value", brut: masse, cotisations: 0, masse, byRubric: { salaires: masse, primes: 0, stages: 0, indemnites: 0 }, months: [], paidContractMonths: paid });
+  const zero = w(0, 0);
+  const row = (value: string, masse: number, persons: string[], unlinked = 0): ServiceRowIn => ({ value, cur: w(masse, persons.length + unlinked), prev: zero, evo: { kind: "value", deltaCents: masse, ratio: null }, groups: { cur: { persons, unlinked, nonZero: true }, prev: { persons: [], unlinked: 0, nonZero: false } } });
+  const dataOf = (rows: ServiceRowIn[], seuil: number | null): ServicesData => ({
+    year: 2026,
+    prevYear: 2025,
+    labels: { period: "janvier 2026", prev: "janvier 2025" },
+    axis: "Service",
+    axisMissing: false,
+    rows,
+    total: { cur: w(410000, 4), prev: zero, evo: { kind: "value", deltaCents: 410000, ratio: null } },
+    selected: null,
+    confidentialite: seuil === null ? { kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" } : { kind: "set", value: seuil },
+    links: { confidentialite: CONF_HREF },
+  });
+  const cellsOf = (m: ServicesModel) => table(m, "services").rows.map((r) => [r.cells[0], r.cells[1], r.cells[2], r.cells[3]]);
+
+  it("une personne à deux contrats dans deux services compte une fois : A (p1) et B (p1) masqués ne décrivent qu'une personne, C est masqué en second", () => {
+    const R2 = { nd: confidentialiteReason(2) };
+    const m = buildServices({ nd: null, data: dataOf([row("A", 140000, ["p1"]), row("B", 70000, ["p1"]), row("C", 200000, ["p2", "p3"])], 2) });
+    // Colonne N : A et B (1 personne chacun) masqués ; ensemble ils ne décrivent que p1 (1 < 2) : C (2 000 €, seul autre affiché) est
+    // masqué aussi, sinon A + B = 4 100 − 2 000 se lirait pour une seule personne. Lignes masquées pour toutes leurs valeurs.
+    expect(cellsOf(m)).toEqual([
+      ["A", R2, R2, R2],
+      ["B", R2, R2, R2],
+      ["C", R2, R2, R2],
+    ]);
+    // Le total (toute l'entreprise) n'est jamais masqué.
+    expect(table(m, "services").foot!.cells.slice(0, 2)).toEqual(["Total", 410000]);
+    expect(raw(table(m, "services"), 0, "cout-pm")).toEqual(R2);
+    expect(chart(m, "services-contribution").series[0].values).toEqual([null, null, null]);
+    expect(chart(m, "services-repartition").series.map((s) => s.values[0])).toEqual([null, null, null]);
+    expect(m.limits).toContain("Seuil de confidentialité : 2 personnes distinctes par service, sur la période et sur N-1 ; masquage secondaire ; la ligne « Total » reste complète.");
+    // B porté par une autre personne (p4) : A + B décrivent deux personnes (2 ≥ 2), C reste affiché.
+    const m2 = buildServices({ nd: null, data: dataOf([row("A", 140000, ["p1"]), row("B", 70000, ["p4"]), row("C", 200000, ["p2", "p3"])], 2) });
+    expect(cellsOf(m2)).toEqual([
+      ["C", 200000, 0, 200000],
+      ["A", R2, R2, R2],
+      ["B", R2, R2, R2],
+    ]);
+  });
+
+  it("un contrat non relié ne protège pas : B (p4 + 1 contrat non relié) est non dénombré au seuil 2 ; A (p1) masqué ; ensemble une personne : C masqué en second", () => {
+    const m = buildServices({ nd: null, data: dataOf([row("A", 140000, ["p1"]), row("B", 70000, ["p4"], 1), row("C", 200000, ["p2", "p3"])], 3) });
+    // Seuil 3 : B compte 1 personne reliée et 1 contrat non relié (< 3) : non vérifiable ; A (1 personne) masqué ; C (2 personnes)
+    // masqué ; {p1, p4, p2, p3} = 4 ≥ 3. Raison de B : effectif non dénombré ; des autres : le seuil.
+    expect(cellsOf(m)).toEqual([
+      ["A", { nd: confidentialiteReason(3) }, { nd: confidentialiteReason(3) }, { nd: confidentialiteReason(3) }],
+      ["B", { nd: SEUIL_NON_VERIFIABLE }, { nd: SEUIL_NON_VERIFIABLE }, { nd: SEUIL_NON_VERIFIABLE }],
+      ["C", { nd: confidentialiteReason(3) }, { nd: confidentialiteReason(3) }, { nd: confidentialiteReason(3) }],
+    ]);
+    // Seuil 1 : B reste non dénombré (1 personne reliée < 1 ? non : 1 ≥ 1, le contrat non relié ne compte pas) : affiché.
+    const m1 = buildServices({ nd: null, data: dataOf([row("A", 140000, ["p1"]), row("B", 70000, ["p4"], 1), row("C", 200000, ["p2", "p3"])], 1) });
+    expect(cellsOf(m1).map((c) => c[1])).toEqual([200000, 140000, 70000]);
+    // Aucune personne reliée, un contrat non relié : non dénombré même au seuil 1.
+    const m0 = buildServices({ nd: null, data: dataOf([row("A", 140000, ["p1"]), row("B", 70000, [], 1), row("C", 200000, ["p2", "p3"])], 1) });
+    expect(cellsOf(m0).find((c) => c[0] === "B")![1]).toEqual({ nd: SEUIL_NON_VERIFIABLE });
+  });
+
+  it("seuil non défini : chaque ligne n.d. avec la raison et le lien vers Paramètres › Confidentialité ; le total reste affiché", () => {
+    const why = { nd: "seuil de confidentialité non défini (Paramètres)" };
+    const m = buildServices({ nd: null, data: dataOf([row("A", 140000, ["p1"]), row("C", 200000, ["p2", "p3"])], null) });
+    expect(cellsOf(m)).toEqual([
+      ["A", why, why, why],
+      ["C", why, why, why],
+    ]);
+    expect(table(m, "services").foot!.cells[1]).toBe(410000);
+    expect(m.blocks.find((b) => b.id === "tableau")!.nd).toEqual([{ reason: "seuil de confidentialité non défini (Paramètres)", action: { href: CONF_HREF, label: "Paramètres" } }]);
+    expect(m.limits.some((l) => l.startsWith("Seuil de confidentialité"))).toBe(false);
+  });
+});
+
+describe("loadServicesInput : personnes de chaque service lues par le lien du contexte", () => {
+  // Journal fictif, janvier 2026 seulement : A = c1 (1 000 €), B = c2 (500 €), C = c4 (800 €) + c5 (700 €). Janvier 2025 : aucune
+  // ligne (fenêtres N-1 à 0 €, aucune personne).
+  const J3: JournalInput = {
+    lines: [ln("q1", "2026-01", "641100", 100000, "c1", "A"), ln("q2", "2026-01", "641100", 50000, "c2", "B"), ln("q3", "2026-01", "641100", 80000, "c4", "C"), ln("q4", "2026-01", "641100", 70000, "c5", "C")],
+    months: ["2025-01", "2026-01"],
+    openMonths: [],
+    grid: DEFAULT_PREFIXES,
+    serviceAxis: "Service",
+  };
+  const at = async (link: PersonLink) => buildServices(await loadServicesInput(fakeCtx({ settings: seuilSettings(2), pay: { ...PAY, input: J3 }, link })));
+  const by = (m: ServicesModel) => Object.fromEntries(table(m, "services").rows.map((r) => [r.cells[0], r.cells[1]]));
+  it("c1 et c2 portés par la même personne : A, B et C masqués ; c2 porté par une autre personne : C affiché (1 500 €)", async () => {
+    const same = await at(linkOf({ c1: "p1", c2: "p1", c4: "p4", c5: "p5" }));
+    expect(by(same)).toEqual({ A: { nd: confidentialiteReason(2) }, B: { nd: confidentialiteReason(2) }, C: { nd: confidentialiteReason(2) } });
+    const other = await at(linkOf({ c1: "p1", c2: "p2", c4: "p4", c5: "p5" }));
+    expect(by(other)).toEqual({ A: { nd: confidentialiteReason(2) }, B: { nd: confidentialiteReason(2) }, C: 150000 });
+  });
+  it("c2 non relié : B non dénombré, A masqué, C masqué en second (une seule personne masquée)", async () => {
+    const m = await at(linkOf({ c1: "p1", c4: "p4", c5: "p5" }));
+    expect(by(m)).toEqual({ A: { nd: confidentialiteReason(2) }, B: { nd: SEUIL_NON_VERIFIABLE }, C: { nd: confidentialiteReason(2) } });
+  });
+});
+
+describe("buildFixeVariable : primes par famille et brut par libellé suivent le seuil (personnes distinctes, masquage secondaire)", () => {
+  // Seuil 2. Personnes par libellé : « Salaire de base » p1, p2, p3 (N) et p1, p2 (N-1) ; « Prime sur objectifs » p1 (N, N-1 et chaque
+  // mois) ; « Prime exceptionnelle » p2 (N, février) ; « Indemnité transport » p3 (N, février) ; « Gratification de stage » p4 (N-1).
+  const key = (rubric: RubricId, label: string) => `${rubric}|${label.toLowerCase()}`;
+  const N: Record<string, PersonsOfContracts> = { [key("salaires", "Salaire de base")]: G(["p1", "p2", "p3"]), [key("primes", "Prime sur objectifs")]: G(["p1"]), [key("primes", "Prime exceptionnelle")]: G(["p2"]), [key("indemnites", "Indemnité transport")]: G(["p3"]) };
+  const N1: Record<string, PersonsOfContracts> = { [key("salaires", "Salaire de base")]: G(["p1", "p2"]), [key("primes", "Prime sur objectifs")]: G(["p1"]), [key("stages", "Gratification de stage")]: G(["p4"]) };
+  const JAN: Record<string, PersonsOfContracts> = { [key("salaires", "Salaire de base")]: G(["p1", "p2", "p3"]), [key("primes", "Prime sur objectifs")]: G(["p1"]) };
+  const FEB: Record<string, PersonsOfContracts> = { ...N };
+  const m = fv({ confidentialite: { kind: "set", value: 2 }, labelGroups: { n: N, n1: N1, byMonth: { "2026-01": JAN, "2026-02": FEB } } });
+  const R2 = { nd: confidentialiteReason(2) };
+
+  it("brut par libellé : « Salaire de base » (3 et 2 personnes) affiché ; chaque autre libellé (1 personne en N ou en N-1) masqué en bloc ; le brut reste affiché", () => {
+    const t = table(m, FV.libelles);
+    // Colonne N : prime exceptionnelle (p2), prime sur objectifs (p1), indemnité (p3) masquées ; la gratification (0 €, personne) suit
+    // sa ligne, masquée par N-1 (p4) ; masquées ensemble : p1, p2, p3 (3 ≥ 2). Colonne N-1 : prime sur objectifs (p1) et gratification
+    // (p4) masquées (2 ≥ 2) ; les 0 € de N-1 suivent leur ligne.
+    expect(t.rows.map((r) => [r.cells[0], r.cells[1], r.cells[2], r.cells[3], r.cells[4]])).toEqual([
+      ["Salaire de base", 800000, 750000, 50000, { exact: 50000 / 750000 }],
+      ["Prime exceptionnelle", R2, R2, R2, R2],
+      ["Prime sur objectifs", R2, R2, R2, R2],
+      ["Gratification de stage", R2, R2, R2, R2],
+      ["Indemnité transport", R2, R2, R2, R2],
+    ]);
+    expect(t.foot!.cells.slice(0, 4)).toEqual(["Brut", 950000, 820000, 130000]);
+    expect(t.terms).toContain("croisee-confidentialite");
+  });
+
+  it("primes par famille et par mois : chaque cellule masquée (1 personne), janvier à 0 € de la prime exceptionnelle masqué en second ; « Total primes » affiché ; mêmes points au graphique", () => {
+    const t = table(m, FV.primesFamilles);
+    // Janvier : prime sur objectifs (p1) masquée ; le total du mois (600 €) est publié et la prime exceptionnelle (0 €, personne) ne
+    // protège pas : masquée aussi. Février : les deux familles (p2, p1) masquées, 2 ≥ 2. Période : p2 et p1, 2 ≥ 2.
+    expect(t.rows.map((r) => r.cells.slice(1))).toEqual([
+      [60000, R2, R2],
+      [40000, R2, R2],
+    ]);
+    expect(t.foot!.cells).toEqual(["Période", 100000, R2, R2]);
+    const c = chart(m, FV.primesFamilles);
+    expect(c.series.map((s) => s.values)).toEqual([
+      [null, null],
+      [null, null],
+    ]);
+    expect(c.series.map((s) => s.reasons)).toEqual([
+      [confidentialiteReason(2), confidentialiteReason(2)],
+      [confidentialiteReason(2), confidentialiteReason(2)],
+    ]);
+    // Les cartes et les composantes (totaux de l'entreprise) ne sont pas masquées.
+    expect(sp(tile(m, "primes").value.text)).toBe("1 000,00 €");
+    expect(m.blocks.find((b) => b.id === "primes")!.nd).toEqual([]);
+  });
+
+  it("seuil 3, deux personnes sur la prime exceptionnelle en février : masquée tout de même en second (le total du mois protège p1)", () => {
+    const two = fv({ confidentialite: { kind: "set", value: 3 }, labelGroups: { n: { ...N, [key("primes", "Prime exceptionnelle")]: G(["p2", "p5"]) }, n1: N1, byMonth: { "2026-01": JAN, "2026-02": { ...FEB, [key("primes", "Prime exceptionnelle")]: G(["p2", "p5"]) } } } });
+    const t = table(two, FV.primesFamilles);
+    const R3 = { nd: confidentialiteReason(3) };
+    expect(t.rows.map((r) => r.cells.slice(1))).toEqual([
+      [60000, R3, R3],
+      [40000, R3, R3],
+    ]);
+    expect(t.foot!.cells).toEqual(["Période", 100000, R3, R3]);
+  });
+
+  it("seuil 1 : rien n'est masqué (cas de base) ; seuil non défini : les deux tableaux n.d. avec la raison et le lien, totaux affichés", () => {
+    const base = fv();
+    expect(table(base, FV.libelles).rows.every((r) => typeof r.cells[1] === "number")).toBe(true);
+    const why = "seuil de confidentialité non défini (Paramètres)";
+    const no = fv({ confidentialite: { kind: "nd", reason: why }, labelGroups: { n: null, n1: null, byMonth: {} } });
+    expect(table(no, FV.libelles).rows).toEqual([{ cells: ["Brut par libellé de paie", { nd: why }] }]);
+    expect(table(no, FV.primesFamilles).rows).toEqual([{ cells: ["Primes par famille et par mois", { nd: why }] }]);
+    expect(no.charts.some((c) => c.id === FV.primesFamilles)).toBe(false);
+    expect(no.blocks.find((b) => b.id === "primes")!.nd).toEqual([{ label: "Primes par famille et par mois", reason: why, action: { href: CONF_HREF, label: "Paramètres" } }]);
+    expect(no.blocks.find((b) => b.id === "primes")!.tables).toEqual([FV.primesMois]);
+    expect(no.blocks.find((b) => b.id === "libelles")!.tables).toEqual([]);
+    expect(sp(tile(no, "fixe").value.text)).toBe("8 000,00 €");
+    expect(table(no, FV.primesMois).foot!.cells).toEqual(["Période", 100000, 50000, 50000]);
   });
 });
 
@@ -787,11 +1015,13 @@ describe("N-1 négatif, brut nul, coût total nul : n.d. avec leur raison, jamai
       axisMissing: false,
       rows: [
         // A : 100 € face à −200 € → écart +300 €, N-1 négatif. B : −100 € face à 0 € → écart −100 €, N-1 nul.
-        { value: "A", cur: w(10000), prev: w(-20000), evo: { kind: "value", deltaCents: 30000, ratio: { num: 30000, den: -20000 } } },
-        { value: "B", cur: w(-10000), prev: w(0), evo: { kind: "value", deltaCents: -10000, ratio: null } },
+        { value: "A", cur: w(10000), prev: w(-20000), evo: { kind: "value", deltaCents: 30000, ratio: { num: 30000, den: -20000 } }, groups: { cur: ONE, prev: ONE } },
+        { value: "B", cur: w(-10000), prev: w(0), evo: { kind: "value", deltaCents: -10000, ratio: null }, groups: { cur: ONE, prev: { ...ONE, nonZero: false } } },
       ],
       total: { cur: w(0), prev: w(-20000), evo: { kind: "value", deltaCents: 20000, ratio: { num: 20000, den: -20000 } } },
       selected: null,
+      confidentialite: { kind: "set", value: 1 },
+      links: { confidentialite: CONF_HREF },
     };
     const t = table(buildServices({ nd: null, data }), "services");
     expect(t.rows.map((r) => r.cells[0])).toEqual(["A", "B"]);
@@ -878,6 +1108,8 @@ describe("services sans aucune ligne : la phrase est écrite une fois, sans grap
     rows: [],
     total: { cur: CUR, prev: PREV, evo: { kind: "value", deltaCents: 182000, ratio: { num: 182000, den: 1148000 } } },
     selected: null,
+    confidentialite: { kind: "set", value: 1 },
+    links: { confidentialite: CONF_HREF },
   };
   const m = buildServices({ nd: null, data });
   it.each(["tout", "graphique", "tableau"] as Affichage[])("affichage %s", (affichage) => {

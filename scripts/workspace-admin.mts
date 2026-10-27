@@ -1,20 +1,23 @@
 // Administration ponctuelle d'un espace, à lancer en conteneur ponctuel (aucun serveur web, aucune session) :
 //   scalingo --app clair-test run "npx tsx scripts/workspace-admin.mts <commande> <slug-espace> [options]"
-// Commandes : absence-types, kpi-settings, pennylane-sync, probe (voir USAGE dans src/lib/admin/workspace-ops.ts).
+// Commandes : absence-types, kpi-settings, pennylane-sync, probe, confidentialite, espaces (voir USAGE dans src/lib/admin/workspace-ops.ts).
 // N'affiche jamais une clé, un identifiant de société, un nom, un montant ni un effectif. L'acteur des écritures est
 // l'administrateur le plus ancien de l'espace (ordre de création, puis identifiant : choix déterministe). Écritures possibles :
-// kpi-settings (réglages), pennylane-sync (lecture, et application avec --apply) et probe (reconstruction du référentiel
-// Collaborateurs s'il est périmé, annoncée ; --no-rebuild la refuse). Code de sortie : 0 réussi, 1 échec ou refus, 2 arguments invalides.
+// kpi-settings et confidentialite (réglages), pennylane-sync (lecture, et application avec --apply) et probe (reconstruction du
+// référentiel Collaborateurs s'il est périmé, annoncée ; --no-rebuild la refuse). Code de sortie : 0 réussi, 1 échec ou refus,
+// 2 arguments invalides.
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, pool } from "@/db/client";
 import { member, organization, rhBuild, sourceRecord, sourceSync, workspaceEvent } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import {
   absenceTypeRows,
+  confidentialiteStateText,
   coverageRefusal,
   lostCoverage,
   NO_ADMIN_MESSAGE,
   parseArgs,
+  planConfidentialite,
   planKpiSettings,
   probeKpis,
   probeServiceEtp,
@@ -23,6 +26,8 @@ import {
   removalRefusal,
   removedCollections,
   renderAbsenceTypes,
+  renderConfidentialitePlan,
+  renderEspaces,
   renderOldSettings,
   renderPlan,
   renderProbe,
@@ -37,6 +42,7 @@ import {
   type SettingOrigin,
 } from "@/lib/admin/workspace-ops";
 import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
+import { CONFIDENTIALITE_KEY, getConfidentialiteRead, setConfidentialite } from "@/lib/confidentialite";
 import { ProviderError } from "@/lib/connectors/http";
 import { isMonth } from "@/lib/connectors/months";
 import { activeSync, applySync, getConnection, getSync, listSyncs, startSync, STALE_AFTER_MS, SYNC_STATUS_LABELS, SyncError, type SyncStatus, type SyncSummary } from "@/lib/connectors/sync";
@@ -393,6 +399,45 @@ async function probe(w: Workspace, a: Args<"probe">): Promise<number> {
   return 0;
 }
 
+// --- confidentialite
+
+// Seuil de confidentialité de l'espace (décision de Lyes, valeur saisie à la commande, jamais codée) : plan avant / après, écriture
+// de la nouvelle clé seulement avec son événement d'audit, puis relecture. L'ancienne clé de la croisée n'est jamais touchée.
+async function confidentialite(w: Workspace, a: Args<"confidentialite">): Promise<number> {
+  const actor = a.dryRun ? null : needAdmin(w);
+  const before = await getConfidentialiteRead(w.id);
+  const plan = planConfidentialite(before, a.seuil);
+  for (const line of renderConfidentialitePlan(plan)) log(line);
+  if (a.dryRun) {
+    log("Simulation (--dry-run) : aucune écriture.");
+    return 0;
+  }
+  if (!plan.changed) {
+    log("Rien à écrire : le seuil est déjà enregistré à cette valeur.");
+    return 0;
+  }
+  const outcome = await setConfidentialite(w.id, a.seuil, actor!);
+  const after = await getConfidentialiteRead(w.id);
+  log(`Écrit : ${CONFIDENTIALITE_KEY} (événement d'audit setting.changed). Aucun autre réglage touché.`);
+  log(`Relecture : ${confidentialiteStateText(after)}.`);
+  if (outcome !== "written" || after.source !== "seuil" || after.setting.kind !== "set" || after.setting.value !== a.seuil) {
+    console.error("[admin] Relecture : la valeur enregistrée ne correspond pas à la demande.");
+    return 1;
+  }
+  return 0;
+}
+
+// --- espaces
+
+// Lecture seule : slugs des espaces (aucun nom) et état du seuil de confidentialité de chacun.
+async function espaces(): Promise<number> {
+  const rows = await db.select({ id: organization.id, slug: organization.slug }).from(organization).orderBy(organization.slug);
+  const out: { slug: string; read: Awaited<ReturnType<typeof getConfidentialiteRead>> }[] = [];
+  for (const r of rows) out.push({ slug: r.slug, read: await getConfidentialiteRead(r.id) });
+  for (const line of renderEspaces(out)) log(line);
+  return 0;
+}
+
 // --- Exécution
 
 // Seuls les messages de nos propres erreurs sont affichés : une erreur de base de données peut citer ses paramètres.
@@ -400,11 +445,15 @@ const safeMessage = (e: unknown) => (e instanceof AdminError || e instanceof Syn
 
 let code = 1;
 try {
-  const w = await resolveWorkspace(parsed.slug);
-  if (parsed.command === "absence-types") code = await absenceTypes(w);
-  else if (parsed.command === "kpi-settings") code = await kpiSettings(w, parsed);
-  else if (parsed.command === "pennylane-sync") code = await pennylaneSync(w, parsed);
-  else code = await probe(w, parsed);
+  if (parsed.command === "espaces") code = await espaces();
+  else {
+    const w = await resolveWorkspace(parsed.slug);
+    if (parsed.command === "absence-types") code = await absenceTypes(w);
+    else if (parsed.command === "kpi-settings") code = await kpiSettings(w, parsed);
+    else if (parsed.command === "pennylane-sync") code = await pennylaneSync(w, parsed);
+    else if (parsed.command === "confidentialite") code = await confidentialite(w, parsed);
+    else code = await probe(w, parsed);
+  }
 } catch (e) {
   console.error(`[admin] Échec : ${safeMessage(e)}`);
   code = 1;

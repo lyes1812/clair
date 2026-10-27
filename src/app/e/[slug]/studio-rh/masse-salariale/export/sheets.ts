@@ -2,17 +2,19 @@ import { formatMonth } from "@/lib/dates";
 import { exactRatio, type ColumnSpec, type ExportCell, type SheetSpec } from "@/lib/export/xlsx";
 import { dsnBrutWindow, type DsnMonth } from "@/lib/payroll/dsn";
 import type { CostPerEtp, EtpMonth, Evolution, MonthPayroll, PayrollWindow } from "@/lib/payroll/engine";
-import { serviceLabel, type ServiceRow } from "../synthese-data";
+import type { MaskedEvolution, MaskedMonth, MaskedWindow } from "@/lib/payroll/service-rows";
+import { serviceLabel } from "../synthese-data";
 
 // Feuilles Excel de Masse salariale › Synthèse, construites depuis les mêmes objets que l'écran (moteur de paie, ETP fin de mois,
 // contrôle DSN) : montants en centimes écrits en euros, rapports (coût par ETP, parts, écarts en %) en valeur exacte ; un n.d.
-// est « n.d. » avec sa raison, jamais un zéro.
+// est « n.d. » avec sa raison, jamais un zéro. Les lignes par service sont celles de l'écran après seuil de confidentialité
+// (MaskedServiceRow) : mêmes cellules n.d., même raison ; les fenêtres du moteur (PayrollWindow) restent acceptées.
 
 type Value<T> = Extract<T, { kind: "value" }>;
 const eurCol = (header: string, key: string): ColumnSpec => ({ header, key, kind: "eur" });
 const OBS: ColumnSpec = { header: "Observations", key: "observations", kind: "text" };
 
-const money = (w: MonthPayroll | PayrollWindow, pick: (x: Value<MonthPayroll> | Value<PayrollWindow>) => number, prefix = ""): ExportCell => (w.kind === "nd" ? { nd: `${prefix}${w.nd.reason}` } : pick(w));
+const money = (w: MonthPayroll | PayrollWindow | MaskedMonth | MaskedWindow, pick: (x: Value<MonthPayroll> | Omit<Value<PayrollWindow>, "months">) => number, prefix = ""): ExportCell => (w.kind === "nd" ? { nd: `${prefix}${w.nd.reason}` } : pick(w));
 const etpCell = (e: EtpMonth): ExportCell => (e.etp4 === null ? { nd: e.reason ?? "ETP fin de mois n.d." } : e.etp4);
 // Coût par ETP d'un mois : masse chargée ÷ ETP fin de mois (en euros, valeur exacte).
 function costEtpCell(r: MonthPayroll, e: EtpMonth): ExportCell {
@@ -22,8 +24,8 @@ function costEtpCell(r: MonthPayroll, e: EtpMonth): ExportCell {
   return { exact: exactRatio(r.masse * 100, e.etp4) };
 }
 const costCell = (c: CostPerEtp): ExportCell => (c.kind === "nd" ? { nd: c.nd.reason } : { exact: exactRatio(c.costCents.num, c.costCents.den * 100) });
-const gapCell = (e: Evolution): ExportCell => (e.kind === "nd" ? { nd: e.nd.reason } : e.deltaCents);
-const pctCell = (e: Evolution): ExportCell => (e.kind === "nd" ? { nd: e.nd.reason } : e.ratio ? { exact: exactRatio(e.ratio.num, e.ratio.den) } : { nd: "N-1 nul : % non défini" });
+const gapCell = (e: Evolution | MaskedEvolution): ExportCell => (e.kind === "nd" ? { nd: e.nd.reason } : e.deltaCents);
+const pctCell = (e: Evolution | MaskedEvolution): ExportCell => (e.kind === "nd" ? { nd: e.nd.reason } : e.ratio ? { exact: exactRatio(e.ratio.num, e.ratio.den) } : { nd: "N-1 nul : % non défini" });
 // Somme des ETP fin de mois de la période (ETP-mois), n.d. dès qu'un mois l'est.
 function etpMonthsCell(etp: EtpMonth[]): ExportCell {
   const missing = etp.filter((e) => e.etp4 === null);
@@ -121,18 +123,20 @@ export function monthlySheet(x: MonthlySheetIn): SheetSpec {
   return { name: "Mois par mois", columns, rows: [...rows, foot], note: "Montants en euros ; ETP et coût par ETP : valeur exacte conservée dans la cellule." };
 }
 
-export type ServicesSheetIn = { rows: ServiceRow[]; totalCur: PayrollWindow; totalPrev: PayrollWindow; totalEvo: Evolution; year: number };
+// Ligne par service telle que l'écran l'affiche (après seuil de confidentialité) ; une ligne du moteur (ServiceRow) y est assignable.
+export type ServiceSheetRow = { value: string | null; cur: MaskedWindow; prev: MaskedWindow; evo: MaskedEvolution };
+export type ServicesSheetIn = { rows: ServiceSheetRow[]; totalCur: PayrollWindow; totalPrev: PayrollWindow; totalEvo: Evolution; year: number };
 
 // Tableau « Services » : coût de la période et de son N-1 par service (tout le journal), écart, part, composition.
 export function servicesSheet(x: ServicesSheetIn): SheetSpec {
-  const part = (c: PayrollWindow): ExportCell => {
+  const part = (c: MaskedWindow): ExportCell => {
     if (c.kind === "nd") return { nd: c.nd.reason };
     if (x.totalCur.kind === "nd") return { nd: `total de la période n.d. : ${x.totalCur.nd.reason}` };
     if (x.totalCur.masse <= 0) return { nd: "masse totale de la période nulle ou négative : part non définie" };
     return { exact: exactRatio(c.masse, x.totalCur.masse) };
   };
-  const perPerson = (c: PayrollWindow): ExportCell => (c.kind === "nd" ? { nd: c.nd.reason } : c.paidContractMonths > 0 ? { exact: exactRatio(c.masse, c.paidContractMonths * 100) } : { nd: "aucune personne rémunérée sur la période" });
-  const line = (label: string, c: PayrollWindow, p: PayrollWindow, evo: Evolution, share: ExportCell): ExportCell[] => [
+  const perPerson = (c: MaskedWindow): ExportCell => (c.kind === "nd" ? { nd: c.nd.reason } : c.paidContractMonths > 0 ? { exact: exactRatio(c.masse, c.paidContractMonths * 100) } : { nd: "aucune personne rémunérée sur la période" });
+  const line = (label: string, c: MaskedWindow, p: MaskedWindow, evo: Evolution | MaskedEvolution, share: ExportCell): ExportCell[] => [
     label,
     money(c, (v) => v.masse),
     money(p, (v) => v.masse),
@@ -161,17 +165,17 @@ export function servicesSheet(x: ServicesSheetIn): SheetSpec {
       OBS,
     ],
     rows: [...x.rows.map((r) => line(serviceLabel(r.value), r.cur, r.prev, r.evo, part(r.cur))), line("Total", x.totalCur, x.totalPrev, x.totalEvo, "")],
-    note: "Tous les services : le filtre Service de l'écran ne s'applique pas à ce tableau. Écart et parts : valeur exacte conservée dans la cellule.",
+    note: "Tous les services : le filtre Service de l'écran ne s'applique pas à ce tableau. Écart et parts : valeur exacte conservée dans la cellule. Seuil de confidentialité : mêmes cellules n.d. qu'à l'écran, avec leur raison.",
   };
 }
 
 // Tableau « Masse chargée par service et par mois » : une ligne par service, une colonne par mois, puis la période ; total.
-export function servicesMonthsSheet(x: { rows: ServiceRow[]; totalCur: PayrollWindow; months: string[] }): SheetSpec {
-  const line = (label: string, w: PayrollWindow): ExportCell[] => [label, ...w.months.map((m) => money(m, (v) => v.masse)), money(w, (v) => v.masse), ""];
+export function servicesMonthsSheet(x: { rows: Pick<ServiceSheetRow, "value" | "cur">[]; totalCur: PayrollWindow; months: string[] }): SheetSpec {
+  const line = (label: string, w: MaskedWindow | PayrollWindow): ExportCell[] => [label, ...w.months.map((m) => money(m, (v) => v.masse)), money(w, (v) => v.masse), ""];
   return {
     name: "Services par mois",
     columns: [{ header: "Service", key: "service", kind: "text", width: 24 }, ...x.months.map((m) => eurCol(formatMonth(m), m)), eurCol("Période", "periode"), OBS],
     rows: [...x.rows.map((r) => line(serviceLabel(r.value), r.cur)), line("Total", x.totalCur)],
-    note: "Tous les services : le filtre Service de l'écran ne s'applique pas à ce tableau.",
+    note: "Tous les services : le filtre Service de l'écran ne s'applique pas à ce tableau. Seuil de confidentialité : mêmes cellules n.d. qu'à l'écran, avec leur raison.",
   };
 }

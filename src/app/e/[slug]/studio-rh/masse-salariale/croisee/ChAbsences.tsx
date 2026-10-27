@@ -4,8 +4,9 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import type { CroiseeChart, CroiseeTable } from "@/lib/viz/croisee";
 import { absencesModel, type AbsencesBlock, type AbsencesModel, type PrevuItem } from "@/lib/viz/croisee-absences";
-import { capital, hasData } from "@/lib/viz/masse";
+import { capital } from "@/lib/viz/masse";
 import { GraphFoot, NdState, type Affichage } from "../components";
+import { ChartNd, chartTitle } from "./atomes/ChartTitle";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
 import { Tuiles } from "./atomes/Tuile";
@@ -104,7 +105,7 @@ function Block(p: {
         const table = p.tableOf(c.tableId);
         return (
           <div key={c.id} className="cx-abs-chart">
-            {p.showChart && <ChartView c={c} />}
+            {p.showChart && <ChartView c={c} block={b.title} />}
             {p.showChart && <GraphFoot aff={p.affichage} tableHref={`${p.tableauHref}#cx-table-${c.tableId}`} testid={`cx-chart-${c.id}-tableau`} />}
             {p.showTable && table && <ModelTable table={table} slug={slug} />}
           </div>
@@ -119,28 +120,27 @@ function Block(p: {
 const UNIT_TEXT: Partial<Record<CroiseeChart["unit"], string>> = { bps: "en pourcentage", nombre: "en demi-journées" };
 
 // Graphique du modèle : barres groupées ou empilées (séries déjà calculées, n.d. hachurés ou absents de la pile, avec leur raison dans
-// l'infobulle). Sans aucune valeur connue, la raison remplace le graphique (le titre du bloc n'est pas répété). Les props sont
-// sérialisables (unité nommée, jamais de fonction).
-function ChartView({ c }: { c: CroiseeChart }) {
+// l'infobulle). Sans aucune valeur connue, la raison remplace le graphique (ChartNd). Le titre du bloc n'est pas répété en texte visible
+// sous le h3 (chartTitle) ; le libellé lu par les lecteurs d'écran garde le titre complet. Les props sont sérialisables (unité nommée,
+// jamais de fonction).
+function ChartView({ c, block }: { c: CroiseeChart; block: string }) {
   const testid = `cx-chart-${c.id}`;
-  if (!hasData(c.series)) {
-    const reasons = [...new Set(c.series.flatMap((s) => (s.reasons ?? []).filter((r): r is string => Boolean(r))))];
-    const shown = reasons.slice(0, 3);
-    return <NdState testid={`${testid}-vide`} reason="Aucune valeur connue sur la période : graphique non tracé." reasons={shown} more={reasons.length - shown.length} />;
-  }
+  const title = chartTitle(block, c.title);
   return (
-    <BarChart
-      testid={testid}
-      label={`${c.title}${UNIT_TEXT[c.unit] ? `, ${UNIT_TEXT[c.unit]}` : ""}`}
-      title={c.title}
-      categories={c.categories}
-      categoryTitles={c.categoryTitles}
-      series={c.series}
-      unit={c.unit}
-      mode={c.mode}
-      toggle={c.mode === "stacked"}
-      height={280}
-    />
+    <ChartNd testid={testid} heading={title} series={c.series}>
+      <BarChart
+        testid={testid}
+        label={`${c.title}${UNIT_TEXT[c.unit] ? `, ${UNIT_TEXT[c.unit]}` : ""}`}
+        title={title}
+        categories={c.categories}
+        categoryTitles={c.categoryTitles}
+        series={c.series}
+        unit={c.unit}
+        mode={c.mode}
+        toggle={c.mode === "stacked"}
+        height={280}
+      />
+    </ChartNd>
   );
 }
 

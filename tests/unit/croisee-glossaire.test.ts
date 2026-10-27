@@ -3,54 +3,56 @@ import { glossaryEntry } from "@/lib/glossary";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { maskNonRecurring, maskCohorts, partitionCohorts } from "@/lib/croisee/cohortes";
 import { KEY_FIGURES_TITLE, keyFiguresTable, ND_SHEET, REFERENCE_TITLE, WATCH_SHEET } from "@/lib/croisee/export";
-import { confidentialiteReason, maskGroups, personOf, personsByGroup, SEUIL_NON_VERIFIABLE } from "@/lib/croisee/structure";
+import { confidentialiteReason, maskGroups, personOf, SEUIL_NON_VERIFIABLE, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { personsByGroup } from "@/lib/croisee/structure";
 import { congesMask } from "@/lib/viz/croisee-absences";
-import { publicProjectionReasons, serviceSousSeuil } from "@/lib/viz/croisee-budget";
+import { publicProjectionReasons } from "@/lib/viz/croisee-budget";
 import { exitMotifRows } from "@/lib/viz/croisee-effectifs";
 import { N1_NEGATIF, N1_NUL } from "@/lib/viz/croisee-masse";
 import { maskServices, SEUIL_NON_VERIFIABLE as PAIE_NON_VERIFIABLE, sousSeuil } from "@/lib/viz/croisee-paie";
+
+const G = (persons: string[], unlinked = 0): PersonsOfContracts => ({ persons, unlinked });
+const link = (o: Record<string, string>): PersonLink => new Map(Object.entries(o));
 
 // Règle 6 : les définitions de la Masse salariale croisée disent ce que le code fait. Chaque phrase vérifiée ici l'est sur la fonction
 // qui la met en œuvre, avec un cas écrit à la main (valeurs fictives, aucune donnée réelle).
 const def = (id: string) => glossaryEntry(id)!.definition;
 
 describe("glossaire de la Masse salariale croisée ↔ code", () => {
-  it("seuil de confidentialité : raisons citées, toutes en « non affiché » ; groupe non dénombré « non vérifiable »", () => {
+  it("seuil de confidentialité : une seule raison dans toute l'application, en personnes ; groupe non dénombré « non vérifiable »", () => {
     const conf = def(T.confidentialite);
     expect(conf).toContain(`« ${confidentialiteReason(2).replace("2 personnes", "N personnes")} »`);
-    expect(conf).toContain(`« ${sousSeuil(2).replace("2 contrats", "N contrats")} »`);
-    for (const r of [confidentialiteReason(3), sousSeuil(3), serviceSousSeuil(3)]) expect(r.startsWith("non affiché")).toBe(true);
-    for (const r of [SEUIL_NON_VERIFIABLE, PAIE_NON_VERIFIABLE]) expect(r).toContain("seuil de confidentialité non vérifiable");
+    // Paie & comptabilité ne porte plus de raison propre : la même que partout (module partagé).
+    expect(sousSeuil(3)).toBe(confidentialiteReason(3));
+    expect(PAIE_NON_VERIFIABLE).toBe(SEUIL_NON_VERIFIABLE);
+    for (const r of [confidentialiteReason(3), sousSeuil(3)]) expect(r.startsWith("non affiché")).toBe(true);
+    expect(SEUIL_NON_VERIFIABLE).toContain("seuil de confidentialité non vérifiable");
     expect(conf).toContain("« seuil de confidentialité non vérifiable »");
     // Groupe vide (0) : affiché ; effectif non dénombré (null) : non vérifiable ; 1 personne avec un seuil de 3 : masqué.
     expect(maskGroups([{ size: 0, value: 0 }, { size: null, value: 4 }, { size: 1, value: 1 }, { size: 5, value: 5 }], 3, false)).toEqual(["shown", "unverifiable", "masked", "shown"]);
   });
 
-  it("seuil de 1 : aucun groupe dénombré n'est masqué, pas même un service sans contrat rattaché", () => {
+  it("seuil de 1 : aucun groupe dénombré n'est masqué ; un service sans contrat rattaché de valeur non nulle n'est pas dénombré (non vérifiable)", () => {
     expect(def(T.confidentialite)).toContain("avec 1, aucun groupe dénombré n'est masqué");
     expect(maskGroups([{ size: 1, value: 1 }, { size: 9, value: 9 }], 1, true)).toEqual(["shown", "shown"]);
-    expect(maskServices([{ size: 0, order: 500, nonZero: true }, { size: 1, order: 100 }], 1)).toEqual(["shown", "shown"]);
+    expect(maskServices([{ group: G(["p1"]), value: 100 }, { group: G(["p2"]), value: 900 }], 1)).toEqual(["shown", "shown"]);
+    expect(maskServices([{ group: G([]), value: 500, nonZero: true }, { group: G(["p1"]), value: 100 }], 1)).toEqual(["unverifiable", "secondary"]);
   });
 
-  it("Paie & comptabilité : un service sans contrat rattaché de valeur non nulle est masqué (seuil ≥ 2) ; un contrat présent dans deux services masqués compte une fois", () => {
+  it("Paie & comptabilité : un service sans contrat rattaché de valeur non nulle n'est pas vérifiable ; une personne à deux contrats dans deux services compte une fois ; un contrat non relié ne protège pas", () => {
     const conf = def(T.confidentialite);
-    expect(conf).toContain("un contrat présent dans deux services masqués ne compte qu'une fois");
     expect(conf).toContain("un service sans contrat rattaché (« Non ventilé », par exemple) ne suffit jamais à en protéger un autre");
-    // Seuil 2 : « Non ventilé » (0 contrat, 500 €) masqué ; il n'ajoute aucun contrat, le service suivant (5 contrats) est masqué aussi.
-    expect(maskServices([{ size: 0, order: 50_000, nonZero: true }, { size: 5, order: 100_000 }], 2)).toEqual(["masked", "secondary"]);
+    // Seuil 2 : « Non ventilé » (0 personne, 500 €) non vérifiable ; il n'apporte personne, le service suivant (5 personnes) est masqué
+    // aussi.
+    const P = (n: number) => Array.from({ length: n }, (_, i) => `p${i + 1}`);
+    expect(maskServices([{ group: G([]), value: 50_000, nonZero: true }, { group: G(P(5)), value: 100_000 }], 2)).toEqual(["unverifiable", "secondary"]);
     // Sans contrat et de valeur nulle : rien à protéger.
-    expect(maskServices([{ size: 0, order: 0, nonZero: false }, { size: 5, order: 100_000 }], 2)).toEqual(["shown", "shown"]);
-    // Seuil 2 : deux services d'un contrat chacun, le MÊME contrat « c1 » : un seul contrat distinct masqué, le troisième service
-    // (3 contrats) est masqué à son tour.
-    const st = maskServices(
-      [
-        { size: 1, order: 10_000, contracts: ["c1"] },
-        { size: 1, order: 20_000, contracts: ["c1"] },
-        { size: 3, order: 30_000, contracts: ["c2", "c3", "c4"] },
-      ],
-      2,
-    );
-    expect(st).toEqual(["masked", "masked", "secondary"]);
+    expect(maskServices([{ group: G([]), value: 0, nonZero: false }, { group: G(P(5)), value: 100_000 }], 2)).toEqual(["shown", "shown"]);
+    // Seuil 2 : deux services d'un contrat chacun, portés par la MÊME personne « q1 » : une seule personne masquée, le troisième service
+    // (3 personnes) est masqué à son tour.
+    expect(maskServices([{ group: G(["q1"]), value: 10_000 }, { group: G(["q1"]), value: 20_000 }, { group: G(["p2", "p3", "p4"]), value: 30_000 }], 2)).toEqual(["masked", "masked", "secondary"]);
+    // Le second service porté par un contrat non relié : non dénombré, il n'apporte personne non plus.
+    expect(maskServices([{ group: G(["q1"]), value: 10_000 }, { group: G([], 1), value: 20_000 }, { group: G(["p2", "p3", "p4"]), value: 30_000 }], 2)).toEqual(["masked", "unverifiable", "secondary"]);
   });
 
   it("Effectifs & mouvements : groupes comptés en personnes distinctes ; un contrat sans personne compte pour une personne", () => {
@@ -96,23 +98,25 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     expect([hidden.months[0][0], hidden.cur[0]]).toEqual(["masked", "masked"]);
   });
 
-  it("éléments non récurrents : quand l'un des deux totaux est masqué, l'autre l'est aussi (zéro compris)", () => {
+  it("éléments non récurrents : quand l'un des deux totaux est masqué, l'autre l'est aussi (zéro compris) ; une hypothèse sans contrat n'est pas une personne", () => {
     expect(def(T.confidentialite)).toContain("quand l'un est masqué, l'autre l'est aussi, et la cascade du retraité n'est pas tracée");
     expect(def(T.atterrissage)).toContain("quand l'un est masqué, l'autre l'est aussi et la cascade du retraité n'est pas tracée");
-    // Seuil 2 : 1 hypothèse déjà comptabilisée (50 €) ; 4 contrats prévus (200 €).
-    expect(maskNonRecurring({ realised: 1, projected: 4 }, { realised: 5_000, projected: 20_000 }, 2)).toEqual({ realised: "masked", projected: "secondary" });
-    // Aucun contributeur déjà comptabilisé (0 €) ; 1 contrat prévu (30 €) : le total nul est masqué au masquage secondaire.
-    expect(maskNonRecurring({ realised: 0, projected: 1 }, { realised: 0, projected: 3_000 }, 2)).toEqual({ realised: "secondary", projected: "masked" });
+    // Seuil 2 : 1 personne déjà comptabilisée (50 €) ; 4 personnes prévues (200 €).
+    expect(maskNonRecurring({ realised: G(["q1"]), projected: G(["p1", "p2", "p3", "p4"]) }, { realised: 5_000, projected: 20_000 }, 2)).toEqual({ realised: "masked", projected: "secondary" });
+    // Aucun contributeur déjà comptabilisé (0 €) ; 1 personne prévue (30 €) : le total nul est masqué au masquage secondaire.
+    expect(maskNonRecurring({ realised: G([]), projected: G(["p1"]) }, { realised: 0, projected: 3_000 }, 2)).toEqual({ realised: "secondary", projected: "masked" });
+    // Une hypothèse « réalisé » saisie sans contrat n'est reliée à personne : non dénombrée (non vérifiable), l'autre total en second.
+    expect(maskNonRecurring({ realised: G([], 1), projected: G(["p1", "p2", "p3", "p4"]) }, { realised: 5_000, projected: 20_000 }, 2)).toEqual({ realised: "unverifiable", projected: "secondary" });
     // Contribution sans contrat ni hypothèse : non vérifiable.
-    expect(maskNonRecurring({ realised: 2, projected: null }, { realised: 5_000, projected: 3_000 }, 2).projected).toBe("unverifiable");
+    expect(maskNonRecurring({ realised: G(["q1", "q2"]), projected: null }, { realised: 5_000, projected: 3_000 }, 2).projected).toBe("unverifiable");
   });
 
   it("contrats observés : les lignes sans contrat d'un montant non nul sont « non vérifiables », avec masquage secondaire", () => {
     expect(def(T.confidentialite)).toContain("La ligne « Lignes du journal sans contrat » des contrats observés ne décrit aucun contrat dénombré : d'un montant non nul, elle est n.d. « seuil de confidentialité non vérifiable », quel que soit le seuil, avec masquage secondaire dans chaque colonne.");
     // N-1 : a = 100 (N-1 seulement), b = 200 et d = 50 (les deux), x = 10 (sans contrat) ; N : b = 250, d = 60, c = 80 (N seulement),
-    // x = 30. Seuil 2 : « N-1 seulement » et « N seulement » (1 contrat chacun) masqués ; la ligne sans contrat (10 et 30) n'est pas
-    // vérifiable. Colonne N-1 : « N-1 seulement » (1 contrat) et la ligne sans contrat (aucun contrat compté) → « les deux » (2 contrats)
-    // masqué en second.
+    // x = 30 ; chaque contrat relié à sa personne. Seuil 2 : « N-1 seulement » et « N seulement » (1 personne chacun) masqués ; la ligne
+    // sans contrat (10 et 30) n'est pas vérifiable. Colonne N-1 : « N-1 seulement » (1 personne) et la ligne sans contrat (personne) →
+    // « les deux » (2 personnes) masqué en second.
     const p = partitionCohorts(
       new Map([
         ["a", 100],
@@ -127,6 +131,7 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
         ["x", 30],
       ]),
       "x",
+      link({ a: "p-a", b: "p-b", c: "p-c", d: "p-d" }),
     );
     expect(p.kind).toBe("value");
     if (p.kind !== "value") return;

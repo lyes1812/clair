@@ -70,3 +70,14 @@ export async function exactText(l: Locator): Promise<string> {
   });
   return t.replace(/\s+/g, " ").trim();
 }
+
+// Seuil de confidentialité de l'espace (Paramètres › Confidentialité) : personnes distinctes en deçà desquelles une répartition est
+// masquée. Les parcours sur données fictives le posent à 1 (sept personnes, services de deux ou trois) ; le masquage est vérifié
+// à part avec un seuil de 3. Sans seuil, les répartitions sont n.d. « seuil de confidentialité non défini ».
+export async function setConfidentialite(page: Page, slug: string, n: number) {
+  await page.goto(`/e/${slug}/parametres#confidentialite`);
+  await page.waitForLoadState("networkidle");
+  await page.getByTestId("setting-confidentialite-seuil").fill(String(n));
+  await page.getByTestId("setting-confidentialite-save").click();
+  await expect(page.getByTestId("setting-confidentialite-status")).toContainText("Seuil de confidentialité enregistré", NAV);
+}

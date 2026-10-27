@@ -6,7 +6,9 @@ import { CATEGORY_LABELS } from "@/lib/budget/types";
 import { nd as ndCell, val } from "@/lib/budget/versions";
 import { contractEcheances, type EcheanceContract } from "@/lib/croisee/echeances";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { effectifStructure, isHidden, maskGroups, maskReason, membersByGroup, personOf, type Confidentialite, type StructureContract } from "@/lib/croisee/structure";
+import { confidentialiteHref, isHidden, maskGroups, maskReason, membersByGroup, personOf } from "@/lib/confidentialite";
+import { confidentialiteOf } from "@/lib/croisee/confidentialite";
+import { effectifStructure, type Confidentialite, type StructureContract } from "@/lib/croisee/structure";
 import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting, type CroiseeSettingKey, type CroiseeSettings, type CroiseeSettingValues, type SeuilEffectif } from "@/lib/croisee/settings-format";
 import { formatDate, monthEnd, monthsBetween } from "@/lib/dates";
 import { contractNatureLabel, endReasonLabel } from "@/lib/dsn/labels";
@@ -87,7 +89,7 @@ export type EffectifsData = {
 };
 
 export type EffectifsInput = {
-  links: { parametres: string; donnees: string; mouvements: string; tableau: string };
+  links: { parametres: string; confidentialite: string; donnees: string; mouvements: string; tableau: string }; // parametres : réglages de la croisée ; confidentialite : seuil
   // labels : libellés de période du contexte (ctx.labels), repris tels quels dans les titres, les en-têtes et les exports.
   period: { months: string[]; prevMonths: string[]; labels: { period: string; prev: string } } | null;
   service: { value: string | null | undefined; label: string }; // value undefined : tous les services
@@ -445,10 +447,11 @@ function buildChapter(input: EffectifsInput, d: EffectifsData, p: NonNullable<Ef
     tables.push(ndTable(tableId, title, nd.reason));
     return block({ id, title, nd: [nd], ...extra });
   };
-  // Seuil de confidentialité : sans réglage lisible, chaque répartition est n.d. avec la raison et le lien vers les Paramètres.
-  const conf = setting(input.settings, "confidentialite", input.links.parametres);
-  const seuil = "value" in conf ? conf.value : null;
-  const confNd: BlockNd | null = "nd" in conf ? conf.nd : null;
+  // Seuil de confidentialité (module partagé) : sans réglage lisible, chaque répartition est n.d. avec la raison et le lien vers
+  // Paramètres › Confidentialité.
+  const confRead = confidentialiteOf(input.settings.confidentialite);
+  const seuil = confRead.kind === "set" ? confRead.value : null;
+  const confNd: BlockNd | null = confRead.kind === "nd" ? { reason: confRead.reason, action: { href: input.links.confidentialite, label: "Paramètres" } } : null;
 
   // --- Où sont les effectifs ? (calculé d'abord : la carte « ETP fin de mois » d'un service filtré lit la même grille masquée)
   const serviceGrid = d.grids.find((g) => g.axis === "service") ?? null;
@@ -730,7 +733,7 @@ function buildChapter(input: EffectifsInput, d: EffectifsData, p: NonNullable<Ef
   else if (d.population.kind === "nd") ndBlock("structure", sTitle, "structure-effectif", { reason: d.population.reason }, { term: T.structureEffectif, prevu: sPrevu });
   else {
     const st = effectifStructure({ contracts: d.population.contracts, confidentialite });
-    if (st.kind === "nd") ndBlock("structure", sTitle, "structure-effectif", { reason: st.reason, action: confNd ? paramAction : undefined }, { term: T.structureEffectif, prevu: sPrevu });
+    if (st.kind === "nd") ndBlock("structure", sTitle, "structure-effectif", { reason: st.reason, action: confNd ? confNd.action : undefined }, { term: T.structureEffectif, prevu: sPrevu });
     else {
       tables.push({
         id: "structure-effectif",
@@ -878,6 +881,7 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
   const base: Omit<EffectifsInput, "nd" | "data"> = {
     links: {
       parametres: croiseeSettingsHref(slug),
+      confidentialite: confidentialiteHref(slug),
       donnees: `/e/${slug}/donnees`,
       mouvements: p ? `/e/${slug}/studio-rh/collaborateurs/mouvements?de=${rollingWindow(p.months[p.months.length - 1]).from}&a=${p.months[p.months.length - 1]}` : `/e/${slug}/studio-rh/collaborateurs/mouvements`,
       tableau: ctx.href({ affichage: "tableau" }),

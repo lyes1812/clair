@@ -2,7 +2,6 @@ import "@/styles/kpi.css";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate } from "@/lib/dates";
-import { CATEGORY_LABELS, type CategoryId } from "@/lib/budget/types";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
@@ -58,7 +57,7 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { Prevu, type PrevuLink } from "@/components/Prevu";
 import { EffectifsMensuels } from "./EffectifsMensuels";
 import { PeriodModeFields } from "./PeriodModeFields";
-import { coverageShown, loadCategoryMonths, loadKpiSuivi, suiviColumnOn } from "./suivi-data";
+import { CATEGORY_TABLE_LABELS, categoryScopeNote, coverageShown, loadCategoryMonths, loadKpiSuivi, suiviColumnOn } from "./suivi-data";
 import { KPI_VUES } from "./tabs";
 
 export const dynamic = "force-dynamic";
@@ -288,7 +287,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const absCur = t.absenteeism.current;
   const prCur = t.etpProrated.current;
 
-  const { months: catMonths, keys: catKeys } = await loadCategoryMonths(ctx.input!, w, ctx.collab.workspace.id);
+  // Tableau par catégorie (Suivi) : même entrée filtrée que les tuiles (établissement, nature) ; la mention sous le tableau nomme
+  // le périmètre et les catégories hors de ce périmètre (sans colonne, jamais un zéro).
+  const cat = vue === "suivi" ? await loadCategoryMonths(input, w, ctx.collab.workspace.id) : null;
+  const catScope = cat ? categoryScopeNote(suivi, cat.hidden) : null;
   const tileOn = (id: string) => vue === "suivi" || (vue === "turnover" ? id === "turnover" || id === "headcount-avg" : id === "absenteeism");
   const colOn = (c: string) => suiviColumnOn(vue, c);
   // Page « Prévu » : aucun chiffre, donc ni limites de la lecture ni paramètres en vigueur à rappeler.
@@ -528,28 +530,28 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <NdReasons items={ndItems} slug={slug} />
       </section>
 
-      {vue === "suivi" && (
+      {cat && (
       <section className="panel" data-testid="kpi-categories">
         <div className="kpi-title-stack">
           <PanelTitle slug={slug} term={KPI_TERMS.categories} label="Effectif et ETP par catégorie">Effectif et ETP par catégorie</PanelTitle>
-          <p className="desc">Fin de mois · personnes puis ETP</p>
+          <p className="desc">Fin de mois · personnes puis ETP{catScope ? " · périmètre des filtres" : ""}</p>
         </div>
-        <KpiCategoryChart months={catMonths} keys={catKeys} labels={{ ...CATEGORY_LABELS, nc: "Non classé" }} />
+        <KpiCategoryChart months={cat.months} keys={cat.keys} labels={CATEGORY_TABLE_LABELS} />
         <p className="kpi-scroll-hint">Tableau défilant : faire glisser vers la droite.</p>
         <div className="table-wrap scroll kpi-fit" tabIndex={0} role="region" aria-label="Effectif et ETP par catégorie, tableau défilant">
           <table className="data-table kpi-table sticky sticky-first" data-testid="kpi-categories-table">
             <thead>
-              <tr><th>Mois</th>{catKeys.map((k) => <th key={k} className="num">{k === "nc" ? "Non classé" : CATEGORY_LABELS[k as CategoryId]}</th>)}<th className="num">Total</th></tr>
+              <tr><th>Mois</th>{cat.keys.map((k) => <th key={k} className="num">{CATEGORY_TABLE_LABELS[k] ?? k}</th>)}<th className="num">Total</th></tr>
             </thead>
             <tbody>
-              {catMonths.map((c) => (
+              {cat.months.map((c) => (
                 <tr key={c.month} data-month={c.month}>
                   <td>{c.month}</td>
                   {c.kind === "nd" ? (
-                    <td colSpan={catKeys.length + 1} className="nd wrap">n.d. — {c.reason}</td>
+                    <td colSpan={cat.keys.length + 1} className="nd wrap">n.d. — {c.reason}</td>
                   ) : (
                     <>
-                      {catKeys.map((k) => {
+                      {cat.keys.map((k) => {
                         const x = c.byCategory[k];
                         return <td key={k} className="num" data-col={k}>{x ? `${c.lowerBound ? "≥ " : ""}${x.headcount} · ${x.etp4 === null ? "ETP n.d." : `${fmtEtp4(x.etp4)} ETP`}` : "—"}</td>;
                       })}
@@ -561,6 +563,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             </tbody>
           </table>
         </div>
+        {catScope && <p className="desc" data-testid="kpi-categories-scope">{catScope}</p>}
         <p className="desc"><a href={`/e/${slug}/parametres#projection`}>Paramètres › Catégories de contrat</a></p>
       </section>
       )}

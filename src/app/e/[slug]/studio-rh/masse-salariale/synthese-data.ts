@@ -1,12 +1,16 @@
+import { getConfidentialite, linkFromReferential, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
 import { formatMonth } from "@/lib/dates";
 import { costPerEtp, evolution, monthPayroll, servicesOf, shiftYear, windowPayroll, withService, type CostPerEtp, type EtpMonth, type Evolution, type JournalInput, type PayrollWindow } from "@/lib/payroll/engine";
 import { loadPayrollContext, type PayrollContext } from "@/lib/payroll/context";
-import { serviceRows as serviceRowsOf, type ServiceRow } from "@/lib/payroll/service-rows";
+import { maskServiceRows, serviceGuard, serviceRows as serviceRowsOf, type MaskedServiceRow, type ServiceGuard, type ServiceRow } from "@/lib/payroll/service-rows";
 import type { Affichage } from "./components";
 
 // Chargement commun de Masse salariale › Synthèse (page et export Excel) : période (année, premier et dernier mois), service, onglet
 // et affichage lus dans l'adresse ; une valeur invalide est remplacée et signalée. Montants de la période et de son N-1, ETP fin de
 // mois, coût par ETP, tableau par service (toujours sur tout le journal). Aucun autre calcul que ceux du moteur de paie.
+// Seuil de confidentialité (paramètre d'espace, src/lib/confidentialite) : les lignes par service sont masquées en personnes distinctes
+// (services), et, sous le filtre Service, un service masqué rend tous les chiffres de l'écran n.d. (guard) : période, N-1, mois, ETP,
+// coût par ETP sont alors remplacés par des n.d. qui portent la raison, pour l'écran comme pour l'export.
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const MM = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
@@ -20,7 +24,7 @@ export const NV = "__nv__";
 export const VUES = { synthese: "Synthèse", "fixe-variable": "Fixe & variable", "paie-compta": "Paie & comptabilité" } as const;
 export type MsVue = keyof typeof VUES;
 // Lignes par service et leur libellé : règle partagée avec la Masse salariale croisée (src/lib/payroll/service-rows.ts).
-export { serviceLabel, type ServiceRow } from "@/lib/payroll/service-rows";
+export { serviceLabel, type MaskedServiceRow, type ServiceGuard, type ServiceRow } from "@/lib/payroll/service-rows";
 // « janvier → mars 2026 », ou le mois seul.
 export const periodLabel = (ms: string[]) => (ms.length === 1 ? formatMonth(ms[0]) : `${MONTH_NAMES[Number(ms[0].slice(5)) - 1]} → ${MONTH_NAMES[Number(ms.at(-1)!.slice(5)) - 1]} ${ms[0].slice(0, 4)}`);
 
@@ -49,7 +53,11 @@ export type SyntheseReady = {
   etpPrev: EtpMonth[];
   cost: CostPerEtp;
   costPrev: CostPerEtp;
-  serviceRows: ServiceRow[];
+  serviceRows: ServiceRow[]; // lignes du moteur, avant seuil : ne pas afficher ; l'écran et l'export lisent `services`
+  services: MaskedServiceRow[]; // lignes par service après seuil de confidentialité (mêmes n.d. à l'écran et dans l'export)
+  confidentialite: ConfidentialiteSetting;
+  link: PersonLink; // contrat du journal → personne du référentiel Collaborateurs
+  guard: ServiceGuard | null; // service retenu par le filtre masqué ou seuil non défini : les chiffres du service sont n.d.
   totalCur: PayrollWindow;
   totalPrev: PayrollWindow;
   totalEvo: Evolution;
@@ -58,8 +66,10 @@ export type SyntheseReady = {
 };
 export type Synthese = { kind: "no-input"; ctx: PayrollContext } | { kind: "no-month"; ctx: PayrollContext; fullInput: JournalInput } | SyntheseReady;
 
-// Fonction pure (le contexte de paie est déjà chargé) : mêmes règles que l'écran pour chaque paramètre d'adresse.
-export function syntheseOf(ctx: PayrollContext, sp: Search): Synthese {
+// Fonction pure (le contexte de paie est déjà chargé) : mêmes règles que l'écran pour chaque paramètre d'adresse. Le seuil de
+// confidentialité est lu par l'appelant (getConfidentialite) ; omis, il est traité comme non défini (jamais un masquage par défaut
+// plus faible : tout est n.d. avec la raison du paramètre).
+export function syntheseOf(ctx: PayrollContext, sp: Search, confidentialite: ConfidentialiteSetting = { kind: "absent" }): Synthese {
   const fullInput = ctx.input;
   if (!fullInput) return { kind: "no-input", ctx };
   const valueMonths = fullInput.months.filter((m) => monthPayroll(fullInput, m).kind === "value");
@@ -101,25 +111,43 @@ export function syntheseOf(ctx: PayrollContext, sp: Search): Synthese {
   const months = MM.filter((m) => m >= from && m <= to).map((m) => `${year}-${m}`);
   const prevMonths = months.map((m) => shiftYear(m, -1));
 
-  const cur = windowPayroll(input, months);
-  const prev = windowPayroll(input, prevMonths);
-  const evo = evolution(cur, prev, (w) => w.masse);
+  let cur = windowPayroll(input, months);
+  let prev = windowPayroll(input, prevMonths);
+  let evo = evolution(cur, prev, (w) => w.masse);
   const svcFilter = serviceValue === undefined ? undefined : { value: serviceValue };
-  const etpCur = ctx.etp(months, svcFilter);
-  const etpPrev = ctx.etp(prevMonths, svcFilter);
-  const cost = costPerEtp(cur, etpCur);
-  const costPrev = costPerEtp(prev, etpPrev);
+  let etpCur = ctx.etp(months, svcFilter);
+  let etpPrev = ctx.etp(prevMonths, svcFilter);
+  let cost = costPerEtp(cur, etpCur);
+  let costPrev = costPerEtp(prev, etpPrev);
   // Table par service (toujours sur tout le journal) : la somme des services, non ventilé compris, égale le total.
   const serviceRows: ServiceRow[] = ctx.service.axis ? serviceRowsOf(fullInput, months, prevMonths) : [];
+  // Seuil de confidentialité : lignes par service en personnes distinctes (contrats du journal reliés par le référentiel).
+  const link: PersonLink = ctx.kpi.input ? linkFromReferential(ctx.kpi.input.data) : new Map();
+  const services = maskServiceRows(serviceRows, link, confidentialite);
+  // Service retenu par le filtre : masqué sans filtre, ou seuil non défini → tous les chiffres du service sont n.d. (écran et export).
+  const guard = serviceValue === undefined ? null : serviceGuard(services, serviceValue, confidentialite);
+  if (guard) {
+    const reason = guard.reason;
+    const nd = { code: "month-nd" as const, reason }; // code générique du moteur : seule la raison est lue par les écrans et l'export
+    const ndMonths = (w: PayrollWindow) => w.months.map((m) => ({ month: m.month, kind: "nd" as const, open: m.open, nd }));
+    cur = { kind: "nd", nd, months: ndMonths(cur) };
+    prev = { kind: "nd", nd, months: ndMonths(prev) };
+    evo = { kind: "nd", nd };
+    etpCur = months.map((month) => ({ month, etp4: null, reason }));
+    etpPrev = prevMonths.map((month) => ({ month, etp4: null, reason }));
+    cost = { kind: "nd", nd };
+    costPrev = { kind: "nd", nd };
+  }
   const totalCur = windowPayroll(fullInput, months);
   const totalPrev = windowPayroll(fullInput, prevMonths);
   const totalEvo = evolution(totalCur, totalPrev, (w) => w.masse);
   const serviceNd = ctx.service.origin === "setting" ? "ventilation par service désactivée par un administrateur" : ctx.axes.length === 0 ? "aucun code analytique dans le journal PayFit" : `plusieurs axes analytiques (${ctx.axes.join(", ")}) : choisir celui du service`;
   // Contrôle DSN : affiché sur le total entreprise seulement (la DSN ne porte pas le code analytique du journal).
   const showDsn = serviceValue === undefined && [...months, ...prevMonths].some((m) => ctx.dsn.has(m));
-  return { kind: "ready", ctx, fullInput, last, notices, vue, aff, knownServices, serviceValue, input, years, year, lastOfYear, from, to, months, prevMonths, cur, prev, evo, etpCur, etpPrev, cost, costPrev, serviceRows, totalCur, totalPrev, totalEvo, serviceNd, showDsn };
+  return { kind: "ready", ctx, fullInput, last, notices, vue, aff, knownServices, serviceValue, input, years, year, lastOfYear, from, to, months, prevMonths, cur, prev, evo, etpCur, etpPrev, cost, costPrev, serviceRows, services, confidentialite, link, guard, totalCur, totalPrev, totalEvo, serviceNd, showDsn };
 }
 
 export async function loadSynthese(slug: string, sp: Search): Promise<Synthese> {
-  return syntheseOf(await loadPayrollContext(slug), sp);
+  const ctx = await loadPayrollContext(slug);
+  return syntheseOf(ctx, sp, await getConfidentialite(ctx.kpi.collab.workspace.id));
 }

@@ -1,17 +1,16 @@
 import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { NV } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
 import type { ChartSeries } from "@/components/charts/shared";
+import { confidentialiteHref, isHidden, maskGroups, maskReason, maskRelations, type MaskCell, type MaskInput, type MaskRelation, type MaskStatus, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { confidentialiteOf, groupInput, labelGroups as labelGroupsOf, masseGroup, NO_GROUP, type Confidentialite, type JournalGroup } from "@/lib/croisee/confidentialite";
 import { journalReason } from "@/lib/croisee/format";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { maskReason, type Confidentialite, type MaskStatus } from "@/lib/croisee/structure";
-import { croiseeSettingReason, settingValue } from "@/lib/croisee/settings-format";
-import { evolution, windowPayroll, withService } from "@/lib/payroll/engine";
+import { evolution, windowPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
 import { labelTotals, type LabelTotal } from "@/lib/payroll/lot2";
 import { serviceLabel, serviceRows, type ServiceRow } from "@/lib/payroll/service-rows";
 import { cellView, costVariation, plainVariation, sortRows, sortState, sparkValues, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeColumn, type CroiseeRow, type CroiseeTable, type SortDir, type TileSpec, type TileVariation } from "@/lib/viz/croisee";
-import { brutParts, capital, COLORS, euros, eurosSigned, fixeVariableMonths, fixeVariableSeries, monthLongLabel, monthsAxis, monthShortYear, ndGroups, ndLines, pluriel, primesSeries, reasonLines, servicesParts, type MonthIn, type PrimesMonth } from "@/lib/viz/masse";
-import { masseContracts } from "@/lib/viz/croisee-budget";
+import { brutParts, capital, COLORS, euros, eurosSigned, familyColor, fixeVariableMonths, fixeVariableSeries, monthLongLabel, monthsAxis, monthShortYear, ndGroups, ndLines, pluriel, reasonLines, servicesParts, type MonthIn, type PrimesMonth } from "@/lib/viz/masse";
 import { MONTH_NAMES, nd as ndTile, type TileValue } from "@/lib/viz/synthese";
 
 // Masse salariale croisée, chapitres 04 · Fixe & variable et 05 · Services (journal de paie PayFit). buildFixeVariable et
@@ -22,6 +21,13 @@ import { MONTH_NAMES, nd as ndTile, type TileValue } from "@/lib/viz/synthese";
 // identiques. Montants en centimes ; un n.d. reste n.d. (raison écrite) jusqu'au tableau et au graphique, jamais un zéro. Les
 // périodes s'écrivent avec les libellés du contexte (« janvier → mars 2026 », N-1 : « janvier → mars 2025 »), jamais l'année seule.
 // Aucun texte libre saisi dans Clair n'est affiché : les libellés viennent du journal de paie (comptes) et des codes de service.
+//
+// Seuil de confidentialité (module partagé src/lib/confidentialite, compté en personnes distinctes par le lien contrat → personne du
+// référentiel ; un contrat non relié ne protège jamais) : sous le filtre Service, tout le chapitre 04 est n.d. dès qu'un mois du
+// service est sous le seuil ou non dénombré ; sans filtre, les répartitions par famille de prime et par libellé de paie (04) et les
+// lignes par service (05, reprises par la Synthèse) suivent la règle, avec le masquage secondaire du moteur partagé dans chaque
+// colonne dont le total est publié. Les totaux de toute l'entreprise ne sont jamais masqués. Seuil absent ou illisible : ces
+// répartitions sont n.d. avec la raison et le lien vers Paramètres › Confidentialité.
 
 // --- Entrées minimales (les types du moteur y sont assignables) ------------------------------------------------------------------
 
@@ -204,31 +210,43 @@ export const periodHeads = (labels: { period: string; prev: string }) => ({ n: c
 
 // --- Seuil de confidentialité sous le filtre Service ----------------------------------------------------------------------------
 
-// Mois du journal du service retenu, pour le seuil : contrats qui portent une ligne de la valeur affichée, c'est-à-dire de la masse
-// (brut ou cotisations : masseContracts), et présence d'une telle ligne de solde non nul ; ou mois n.d.
-export type GuardMonth = { kind: "value"; contracts: readonly string[]; nonZero: boolean } | { kind: "nd" };
+// Mois du journal du service retenu, pour le seuil : personnes distinctes des contrats qui portent une ligne de la valeur affichée,
+// c'est-à-dire de la masse (brut ou cotisations : masseGroup), contrats non reliés et présence d'une telle ligne de solde non nul ;
+// ou mois n.d.
+export type GuardMonth = { kind: "value"; group: JournalGroup } | { kind: "nd" };
 export type ServiceGuard = { cause: "parametre" | "seuil"; reason: string };
 
-// Sous le filtre Service, tous les chiffres du chapitre 04 décrivent ce seul service : le seuil de confidentialité s'y applique.
-// Chaque mois connu de la période et de N-1 est un groupe (ses contrats qui portent une ligne de masse : brut, cotisations) ; un mois
-// de 1 à (seuil − 1) contrats, ou un mois qui porte un montant de masse non nul sans aucun contrat rattaché (effectif non dénombré,
-// quel que soit le seuil défini), rend tout le chapitre n.d. : aucun montant de ce service ne se lit alors, ni directement ni par
+// Sous le filtre Service, tous les chiffres du chapitre (04, et la masse de la Synthèse) décrivent ce seul service : le seuil de
+// confidentialité s'y applique. Chaque mois connu est un groupe (personnes de ses contrats qui portent une ligne de masse) ; un mois de
+// 1 à (seuil − 1) personnes, ou un mois non dénombré (contrats non reliés sous le seuil ; montant de masse non nul sans aucun contrat
+// rattaché, quel que soit le seuil), rend tout le chapitre n.d. : aucun montant de ce service ne se lit alors, ni directement ni par
 // différence. Un mois vide (aucun contrat, aucun montant non nul) ne désigne personne. Seuil absent ou illisible : n.d. avec la raison
-// du paramètre. null : affiché.
+// du paramètre. Raison : celle du moteur partagé, la même que pour toute cellule masquée (un mois sous le seuil l'emporte sur un mois
+// non dénombré). null : affiché.
 export function serviceConfidentiality(conf: Confidentialite, months: readonly GuardMonth[]): ServiceGuard | null {
   if (conf.kind === "nd") return { cause: "parametre", reason: conf.reason };
-  const status = months.flatMap((m): MaskStatus[] => {
-    if (m.kind !== "value") return [];
-    const size = m.contracts.length;
-    return [size === 0 ? (m.nonZero ? "unverifiable" : "shown") : size < conf.value ? "masked" : "shown"];
-  });
-  const worst = status.includes("masked") ? "masked" : status.includes("unverifiable") ? "unverifiable" : null;
-  if (!worst) return null;
-  return { cause: "seuil", reason: `${maskReason(worst, conf.value)} — service retenu par le filtre` };
+  const status = maskGroups(
+    months.flatMap((m) => (m.kind === "value" ? [groupInput(m.group, conf.value, 1, m.group.nonZero)] : [])),
+    conf.value,
+    false,
+  );
+  const worst = status.find((x) => x === "masked") ?? status.find(isHidden) ?? null;
+  return worst === null ? null : { cause: "seuil", reason: maskReason(worst, conf.value)! };
 }
+
+// Entrée de masquage d'un groupe de contrats (groupInput), ou d'un groupe non dénombré (fenêtre n.d.), pour une fenêtre affichée.
+const windowInput = (g: JournalGroup | null, seuil: number, w: WindowIn): MaskInput => {
+  const value = w.kind === "value" ? Math.abs(w.masse) : null;
+  return g ? groupInput(g, seuil, value, g.nonZero) : { size: null, value };
+};
+// Fenêtre masquée : n.d. avec la seule raison du seuil (sans mois : windowReason la rend telle quelle).
+const ndWindow = (reason: string): WindowIn => ({ kind: "nd", nd: { reason }, months: [] });
 
 // --- Chapitre 04 · Fixe & variable ----------------------------------------------------------------------------------------------------
 
+// Personnes de chaque libellé de paie (clé de labelTotals), sur la période (n), sur N-1 (n1) et dans chaque mois connu (byMonth) ;
+// null : fenêtre n.d. Un libellé absent n'a aucun contrat (NO_GROUP).
+export type LabelGroups = { n: Readonly<Record<string, PersonsOfContracts>> | null; n1: Readonly<Record<string, PersonsOfContracts>> | null; byMonth: Readonly<Record<string, Readonly<Record<string, PersonsOfContracts>>>> };
 export type FixeVariableData = {
   year: number;
   prevYear: number;
@@ -240,6 +258,9 @@ export type FixeVariableData = {
   labelsN: LabelIn[] | null; // labelTotals sur la période (null : période n.d.)
   labelsN1: LabelIn[] | null; // labelTotals sur N-1 (null : N-1 n.d.)
   labelsByMonth: Record<string, LabelIn[]>; // labelTotals de chaque mois connu de la période
+  confidentialite: Confidentialite; // seuil de l'espace (primes par famille, brut par libellé), ou la raison de son absence
+  labelGroups: LabelGroups; // personnes de chaque libellé (seuil de confidentialité)
+  links: { confidentialite: string }; // Paramètres › Confidentialité
 };
 export type FixeVariableInput = { nd: BlockNd | null; data: FixeVariableData | null };
 
@@ -268,6 +289,16 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
   const fv = fixeVariableMonths(cur.months.map((m): MonthIn => (m.kind === "nd" ? { ...m, nd: { reason: monthReason(m) } } : m)));
   const families = familiesOf(d);
   const ndList: { label: string; reason: string | null }[] = [];
+
+  // --- Seuil de confidentialité : les répartitions par famille de prime et par libellé de paie sont comptées en personnes distinctes
+  // (labelGroups) ; sans seuil défini, elles sont n.d. avec la raison et le lien vers Paramètres › Confidentialité.
+  const conf = d.confidentialite;
+  const seuil = conf.kind === "set" ? conf.value : null;
+  const confNd: BlockNd | null = conf.kind === "nd" ? { reason: conf.reason, action: { href: d.links.confidentialite, label: "Paramètres" } } : null;
+  const lg = d.labelGroups;
+  const groupOf = (table: Readonly<Record<string, PersonsOfContracts>> | null | undefined, key: string): PersonsOfContracts => table?.[key] ?? NO_GROUP;
+  // Cellule après masquage : masquée ⇒ n.d. avec la raison du seuil ; sinon la cellule elle-même (qui garde sa propre raison n.d.).
+  const masked = (st: MaskStatus | undefined, c: CroiseeCell): CroiseeCell => (st !== undefined && seuil !== null && isHidden(st) ? { nd: maskReason(st, seuil)! } : c);
 
   // --- Cartes (période écrite sur chacune) : montant, N-1, écart et écart en % (ton de coût, neutre quand le % est n.d.) ; parts du
   // brut et écart en points (neutres).
@@ -437,52 +468,98 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     if (!lt) return { month: r.month, kind: "nd", reason: `${monthShortYear(r.month)} : libellés du mois non lus` };
     return { month: r.month, kind: "value", byFamily: families.map((f) => lt.filter((t) => t.key === f.key).reduce((s, t) => s + t.cents, 0)) };
   });
-  const familiesTable: CroiseeTable | null = families.length
-    ? {
-        id: ID.primesFamilles,
-        title: "Primes par famille et par mois",
-        columns: [text("mois", "Mois"), eur("total", "Total primes"), ...families.map((f, j) => eur(`f${j + 1}`, f.label))],
-        rows: cur.months.map((m, i) => {
-          const pm = primesMonths[i];
-          return { cells: [monthRow(m), ofMonth(m, (x) => x.byRubric.primes), ...families.map((_, j): CroiseeCell => (pm.kind === "value" ? pm.byFamily[j] : { nd: pm.reason }))] };
-        }),
-        foot: { cells: ["Période", of(cur, PICK.primes), ...families.map((f): CroiseeCell => (cur.kind === "value" ? f.cents : { nd: windowReason(cur) }))] },
-        terms: [X.primes],
-      }
-    : null;
+  // Grille des familles (mois × famille, puis la période), seuil de confidentialité : chaque cellule décrit les personnes qui ont une
+  // ligne de ce libellé dans le mois (ou la période). Relations du moteur partagé : chaque famille et son total de période (total
+  // masquable), chaque mois (son « Total primes » est publié), la période (total publié).
+  const nFam = families.length;
+  const famTitle = "Primes par famille et par mois";
+  const famAt = (i: number, j: number) => i * nFam + j;
+  const famFoot = (j: number) => cur.months.length * nFam + j;
+  const famStatus: MaskStatus[] | null = (() => {
+    if (seuil === null || nFam === 0) return null;
+    const cells: MaskCell[] = cur.months.flatMap((m, i) => families.map((f, j) => groupInput(groupOf(lg.byMonth[m.month], f.key), seuil, primesMonths[i].kind === "value" ? Math.abs((primesMonths[i] as Extract<PrimesMonth, { kind: "value" }>).byFamily[j]) : null)));
+    cells.push(...families.map((f) => groupInput(groupOf(lg.n, f.key), seuil, cur.kind === "value" ? Math.abs(f.cents) : null)));
+    const relations: MaskRelation[] = [
+      ...families.map((_, j) => ({ cells: cur.months.map((_, i) => famAt(i, j)), total: famFoot(j) })),
+      ...cur.months.map((_, i) => ({ cells: families.map((_, j) => famAt(i, j)) })),
+      { cells: families.map((_, j) => famFoot(j)) },
+    ];
+    return maskRelations(cells, relations, seuil);
+  })();
+  const famCell = (i: number, j: number): CroiseeCell => {
+    const pm = primesMonths[i];
+    return masked(famStatus?.[famAt(i, j)], pm.kind === "value" ? pm.byFamily[j] : { nd: pm.reason });
+  };
+  const famPeriod = (j: number): CroiseeCell => masked(famStatus?.[famFoot(j)], cur.kind === "value" ? families[j].cents : { nd: windowReason(cur) });
+  const familiesNd: BlockNd[] = nFam > 0 && confNd ? [{ label: famTitle, ...confNd }] : [];
+  const familiesTable: CroiseeTable | null =
+    nFam === 0
+      ? null
+      : confNd
+        ? ndTable(ID.primesFamilles, famTitle, confNd.reason)
+        : {
+            id: ID.primesFamilles,
+            title: famTitle,
+            columns: [text("mois", "Mois"), eur("total", "Total primes"), ...families.map((f, j) => eur(`f${j + 1}`, f.label))],
+            rows: cur.months.map((m, i) => ({ cells: [monthRow(m), ofMonth(m, (x) => x.byRubric.primes), ...families.map((_, j) => famCell(i, j))] })),
+            foot: { cells: ["Période", of(cur, PICK.primes), ...families.map((_, j) => famPeriod(j))] },
+            terms: [X.primes, X.confidentialite],
+          };
+  // Séries par famille : les mêmes cellules masquées que le tableau (un point masqué n'est pas tracé, sa raison est écrite).
+  const famSeries: ChartSeries[] = families.map((f, j) => {
+    const pts = cur.months.map((_, i) => {
+      const c = famCell(i, j);
+      return isNum(c) ? { v: c, r: null } : { v: null, r: ndOf(c)?.nd ?? null };
+    });
+    return { key: `prime-${j}`, name: f.label, values: pts.map((q) => q.v), reasons: pts.map((q) => q.r), color: familyColor(j) };
+  });
   const familiesChart: MasseChart | null =
-    families.length > 0 && families.length <= 8
-      ? { id: ID.primesFamilles, title: "Primes par famille et par mois", kind: "barres", unit: "eur", categories: axisN.categories, categoryTitles: axisN.titles, series: primesSeries(families, primesMonths), mode: "stacked", tableId: ID.primesFamilles }
-      : null;
+    nFam > 0 && nFam <= 8 && !confNd ? { id: ID.primesFamilles, title: famTitle, kind: "barres", unit: "eur", categories: axisN.categories, categoryTitles: axisN.titles, series: famSeries, mode: "stacked", tableId: ID.primesFamilles } : null;
   const primesNotes = [
     ...(families.length === 0 ? [cur.kind === "value" ? "Aucune famille de prime sur la période." : "Aucune famille de prime dans les mois connus de la période."] : []),
-    ...(families.length > 8 ? ["Plus de huit familles de prime : graphique par famille non tracé ; montants dans le tableau « Primes par famille et par mois »."] : []),
+    ...(families.length > 8 && !confNd ? ["Plus de huit familles de prime : graphique par famille non tracé ; montants dans le tableau « Primes par famille et par mois »."] : []),
   ];
 
   // --- Brut par libellé de paie, N face à N-1 (même clé de regroupement que le calcul : rubrique + libellé sans accents ni casse).
+  // Chaque libellé est un groupe de personnes sur N et un autre sur N-1 ; le brut de la période et de N-1 (pied du tableau) est
+  // publié : masquage secondaire dans chacune des deux colonnes, chaque colonne protégée pour elle-même. Une ligne dont l'une des
+  // deux cellules est masquée l'est entièrement (l'écart se déduit de l'une et de l'autre) : masquer en plus ne découvre rien, alors
+  // qu'un bloc forcerait un masquage secondaire autour de cellules qui ne décrivent personne (0 € de N-1 d'un libellé nouveau).
   let libelles: CroiseeTable;
   const libellesNd: BlockNd[] = [];
   if (!d.labelsN) {
     const why = cur.kind === "nd" ? windowReason(cur) : "libellés de la période non lus";
     libelles = ndTable(ID.libelles, "Brut par libellé de paie", why);
     libellesNd.push({ label: "Brut par libellé de paie", reason: why });
+  } else if (confNd) {
+    libelles = ndTable(ID.libelles, "Brut par libellé de paie", confNd.reason);
+    libellesNd.push({ label: "Brut par libellé de paie", ...confNd });
   } else {
     const n = d.labelsN;
     const p = d.labelsN1;
     const prevNd: Val | null = p ? null : { nd: prev.kind === "nd" ? windowReason(prev) : "libellés N-1 non lus" };
     const keys = [...new Map([...(p ?? []), ...n].map((t) => [t.key, t])).values()].sort((a, b) => BRUT_ORDER.indexOf(a.rubric) - BRUT_ORDER.indexOf(b.rubric) || a.label.localeCompare(b.label));
     const val = (list: LabelIn[], k: string) => list.filter((t) => t.key === k).reduce((s, t) => s + t.cents, 0);
+    const values = keys.map((t) => ({ a: val(n, t.key) as Val, b: (prevNd ?? val(p!, t.key)) as Val }));
+    const labStatus: MaskStatus[] = (() => {
+      if (seuil === null) return [];
+      const cells: MaskCell[] = values.flatMap(({ a, b }, i) => [groupInput(groupOf(lg.n, keys[i].key), seuil, isNum(a) ? Math.abs(a) : null), groupInput(groupOf(lg.n1, keys[i].key), seuil, isNum(b) ? Math.abs(b) : null)]);
+      return maskRelations(cells, [{ cells: keys.map((_, i) => 2 * i) }, { cells: keys.map((_, i) => 2 * i + 1) }], seuil);
+    })();
+    // Raison de la ligne : celle de sa cellule masquée (N d'abord), appliquée aux deux cellules.
+    const rowWhy = (i: number): string | null => (seuil === null ? null : (maskReason(labStatus[2 * i], seuil) ?? maskReason(labStatus[2 * i + 1], seuil)));
     libelles = {
       id: ID.libelles,
       title: "Brut par libellé de paie",
       columns: [text("libelle", "Libellé (PayFit)"), eur("n", nHead), eur("n1", pHead), gapCol(), pctCol(), text("rubrique", "Rubrique", { term: X.grille })],
-      rows: keys.map((t) => {
-        const a: Val = val(n, t.key);
-        const b: Val = prevNd ?? val(p!, t.key);
+      rows: keys.map((t, i) => {
+        const why = rowWhy(i);
+        const a: Val = why === null ? values[i].a : { nd: why };
+        const b: Val = why === null ? values[i].b : { nd: why };
         return { cells: [t.label, a, b, gap(a, b), pct(a, b), rubricLabel(t.rubric)] };
       }),
       foot: { cells: ["Brut", of(cur, PICK.brut), of(prev, PICK.brut), gap(of(cur, PICK.brut), of(prev, PICK.brut)), pct(of(cur, PICK.brut), of(prev, PICK.brut)), ""] },
-      terms: [X.grille, X.brut, X.evolution],
+      terms: [X.grille, X.brut, X.evolution, X.confidentialite],
     };
   }
 
@@ -498,11 +575,11 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
       title: "Primes",
       term: X.primes,
       graph: true,
-      nd: [],
+      nd: familiesNd,
       charts: [primesMoisChart.id, ...(familiesChart ? [familiesChart.id] : [])],
-      tables: [primesMoisTable.id, ...(familiesTable ? [familiesTable.id] : [])],
+      tables: [primesMoisTable.id, ...(familiesTable && !confNd ? [familiesTable.id] : [])],
       notes: primesNotes,
-      ...(familiesTable && !familiesChart ? { graphLinks: [familiesTable.id] } : {}),
+      ...(familiesTable && !familiesChart && !confNd ? { graphLinks: [familiesTable.id] } : {}),
     },
     { id: "libelles", title: "Brut par libellé de paie", term: X.grille, graph: false, nd: libellesNd, charts: [], tables: libellesNd.length ? [] : [libelles.id], notes: [] },
   ];
@@ -538,25 +615,24 @@ export async function loadFixeVariableInput(ctx: CroiseeContext): Promise<FixeVa
   const prevMonths = ctx.prevMonths;
   const cur = windowPayroll(input, months);
   const prev = windowPayroll(input, prevMonths);
-  // Service retenu : seuil de confidentialité sur les contrats qui portent une ligne de masse, chaque mois (période et N-1).
+  // Seuil de confidentialité (module partagé) et lien contrat → personne du référentiel : groupes comptés en personnes distinctes.
+  const conf = confidentialiteOf(ctx.settings.confidentialite);
+  const link = conf.kind === "set" ? await ctx.load.persons() : new Map<string, string>();
+  // Service retenu : seuil sur les personnes des contrats qui portent une ligne de masse, chaque mois (période et N-1).
   if (svc !== undefined) {
-    const conf = ctx.settings.confidentialite;
-    const seuil = settingValue(conf);
-    const c: Confidentialite = seuil !== null ? { kind: "set", value: seuil } : { kind: "nd", reason: croiseeSettingReason("confidentialite", conf) ?? "seuil de confidentialité non défini (Paramètres)" };
-    const guard = serviceConfidentiality(
-      c,
-      [...months, ...prevMonths].map((m): GuardMonth => {
-        const g = masseContracts(input, m);
-        return g ? { kind: "value", ...g } : { kind: "nd" };
-      }),
-    );
+    const guard = serviceConfidentiality(conf, [...months, ...prevMonths].map(guardMonth(input, link)));
     if (guard) {
-      const action = guard.cause === "parametre" ? { href: `/e/${ctx.slug}/parametres#croisee`, label: "Paramètres" } : { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
+      const action = guard.cause === "parametre" ? { href: confidentialiteHref(ctx.slug), label: "Paramètres" } : { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
       return { nd: { reason: guard.reason, action }, data: null };
     }
   }
   const labelsByMonth: Record<string, LabelIn[]> = {};
-  for (const r of cur.months) if (r.kind === "value") labelsByMonth[r.month] = labelTotals(input, [r.month]);
+  const byMonth: Record<string, Record<string, PersonsOfContracts>> = {};
+  for (const r of cur.months) {
+    if (r.kind !== "value") continue;
+    labelsByMonth[r.month] = labelTotals(input, [r.month]);
+    if (conf.kind === "set") byMonth[r.month] = labelGroupsOf(input, [r.month], link);
+  }
   return {
     nd: null,
     data: {
@@ -570,9 +646,24 @@ export async function loadFixeVariableInput(ctx: CroiseeContext): Promise<FixeVa
       labelsN: cur.kind === "value" ? labelTotals(input, months) : null,
       labelsN1: prev.kind === "value" ? labelTotals(input, prevMonths) : null,
       labelsByMonth,
+      confidentialite: conf,
+      labelGroups: {
+        n: conf.kind === "set" && cur.kind === "value" ? labelGroupsOf(input, months, link) : null,
+        n1: conf.kind === "set" && prev.kind === "value" ? labelGroupsOf(input, prevMonths, link) : null,
+        byMonth,
+      },
+      links: { confidentialite: confidentialiteHref(ctx.slug) },
     },
   };
 }
+
+// Mois d'un journal (restreint au service) vu par le seuil : groupe des personnes de ses contrats observés, ou mois n.d.
+export const guardMonth =
+  (input: JournalInput, link: PersonLink) =>
+  (m: string): GuardMonth => {
+    const g = masseGroup(input, [m], link);
+    return g ? { kind: "value", group: g } : { kind: "nd" };
+  };
 
 // Modèle du chapitre 04, calculé une fois par requête : le composant du chapitre et l'export appellent cette même fonction.
 export const fixeVariableModel = memoByContext((ctx: CroiseeContext) => loadFixeVariableInput(ctx).then(buildFixeVariable));
@@ -583,7 +674,9 @@ export const fixeVariableModel = memoByContext((ctx: CroiseeContext) => loadFixe
 // reprise telle quelle par la Synthèse.
 export { serviceLabel, serviceRows, type ServiceRow };
 
-export type ServiceRowIn = { value: string | null; cur: WindowIn; prev: WindowIn; evo: EvolutionIn; href?: string };
+// groups : personnes distinctes des contrats observés du service sur la période et sur N-1 (seuil de confidentialité ; null : fenêtre
+// n.d., effectif non dénombré).
+export type ServiceRowIn = { value: string | null; cur: WindowIn; prev: WindowIn; evo: EvolutionIn; href?: string; groups: { cur: JournalGroup | null; prev: JournalGroup | null } };
 export type ServicesData = {
   year: number;
   prevYear: number;
@@ -593,6 +686,8 @@ export type ServicesData = {
   rows: ServiceRowIn[];
   total: { cur: WindowIn; prev: WindowIn; evo: EvolutionIn };
   selected: { label: string; clearHref: string } | null; // service retenu dans les filtres
+  confidentialite: Confidentialite; // seuil de l'espace, ou la raison de son absence
+  links: { confidentialite: string }; // Paramètres › Confidentialité
 };
 export type ServicesInput = { nd: BlockNd | null; data: ServicesData | null };
 
@@ -619,12 +714,32 @@ function evoPct(e: EvolutionIn, cur: WindowIn, prev: WindowIn): CroiseeCell {
 const perPerson = (w: WindowIn): CroiseeCell => (w.kind === "nd" ? { nd: windowReason(w) } : w.paidContractMonths > 0 ? { exact: w.masse / (w.paidContractMonths * 100) } : { nd: SANS_CONTRAT });
 
 export function buildServices(input: ServicesInput): ServicesModel {
-  const terms = [X.service, X.masse, X.evolution, X.contributionServices, X.primes, X.cotisations];
+  const terms = [X.service, X.masse, X.evolution, X.contributionServices, X.primes, X.cotisations, X.confidentialite];
   const empty = { chapter: "services" as const, alerts: [], terms, tiles: [] };
   const d = input.data;
   if (input.nd || !d) return { ...empty, tables: [], charts: [], blocks: [], limits: [], trend: false, count: null, selected: null, nd: input.nd ?? { reason: "journal de paie indisponible" } };
   const ID = SERVICES_IDS;
   const { total, labels } = d;
+
+  // --- Seuil de confidentialité : chaque ligne (un service) est un groupe de personnes distinctes sur la période et un autre sur N-1 ;
+  // les totaux (toute l'entreprise) sont affichés : masquage secondaire dans la colonne N et dans la colonne N-1 (moteur partagé),
+  // chaque colonne protégée pour elle-même. Une ligne dont l'une des deux cellules est masquée l'est pour toutes ses valeurs (elles se
+  // déduisent l'une de l'autre) ; masquer en plus ne découvre rien. Sans seuil défini : chaque ligne est n.d. avec la raison et le lien
+  // vers Paramètres › Confidentialité ; les totaux restent affichés.
+  const conf = d.confidentialite;
+  const rowReason: (string | null)[] = (() => {
+    if (conf.kind === "nd") return d.rows.map(() => conf.reason);
+    const s = conf.value;
+    const cells: MaskCell[] = d.rows.flatMap((r) => [windowInput(r.groups.cur, s, r.cur), windowInput(r.groups.prev, s, r.prev)]);
+    const st = maskRelations(cells, [{ cells: d.rows.map((_, i) => 2 * i) }, { cells: d.rows.map((_, i) => 2 * i + 1) }], s);
+    return d.rows.map((_, i) => maskReason(st[2 * i], s) ?? maskReason(st[2 * i + 1], s));
+  })();
+  const rowsIn: ServiceRowIn[] = d.rows.map((r, i) => {
+    const why = rowReason[i];
+    return why === null ? r : { ...r, cur: ndWindow(why), prev: ndWindow(why), evo: { kind: "nd", nd: { reason: why } } };
+  });
+  const confNd: BlockNd[] = conf.kind === "nd" && d.rows.length > 0 ? [{ reason: conf.reason, action: { href: d.links.confidentialite, label: "Paramètres" } }] : [];
+
   const cells = (label: string, cur: WindowIn, prev: WindowIn, evo: EvolutionIn, whole: WindowIn | null): CroiseeCell[] => [
     label,
     of(cur, PICK.masse),
@@ -652,7 +767,7 @@ export function buildServices(input: ServicesInput): ServicesModel {
   ];
   // Lignes dans l'ordre du tri par défaut (coût de la période décroissant, n.d. en dernier), le même que celui de l'écran : le
   // tableau, les deux graphiques et les exports suivent cet ordre.
-  const draft = d.rows.map((r) => ({ r, row: { cells: cells(serviceLabel(r.value), r.cur, r.prev, r.evo, total.cur), ...(r.href ? { href: r.href } : {}) } as CroiseeRow }));
+  const draft = rowsIn.map((r) => ({ r, row: { cells: cells(serviceLabel(r.value), r.cur, r.prev, r.evo, total.cur), ...(r.href ? { href: r.href } : {}) } as CroiseeRow }));
   const sorted = sortRows({ id: ID.table, title: "", columns, rows: draft.map((x) => x.row) }, SERVICES_DEFAULT_SORT.key, SERVICES_DEFAULT_SORT.dir);
   const source = new Map(draft.map((x) => [x.row, x.r]));
   const rows = sorted.map((row) => source.get(row)!);
@@ -662,7 +777,7 @@ export function buildServices(input: ServicesInput): ServicesModel {
     columns,
     rows: sorted,
     foot: { cells: cells("Total", total.cur, total.prev, total.evo, null) },
-    terms,
+    terms: [...terms, X.confidentialite],
   };
   const open = openLine(total.cur, total.prev);
 
@@ -705,7 +820,7 @@ export function buildServices(input: ServicesInput): ServicesModel {
   };
 
   const trend = hasTrend([table]);
-  const tableBlock: MasseBlock = { id: "tableau", title: "Coût par service", term: X.service, graph: false, badge: pluriel(rows.length, "service"), trend, nd: [], charts: [], tables: [table.id], notes: [] };
+  const tableBlock: MasseBlock = { id: "tableau", title: "Coût par service", term: X.service, graph: false, badge: pluriel(rows.length, "service"), trend, nd: confNd, charts: [], tables: [table.id], notes: [] };
   // Sans aucune ligne : la phrase est écrite une fois, dans le bloc du tableau (affiché aussi en « Graphiques »), sans graphique vide.
   const blocks: MasseBlock[] =
     rows.length === 0
@@ -719,6 +834,7 @@ export function buildServices(input: ServicesInput): ServicesModel {
     ...(d.axisMissing ? [`L'axe « ${d.axis} » choisi dans Paramètres n'existe plus dans le journal appliqué : toutes les lignes sont « Non ventilé ».`] : []),
     ...(open ? [open] : []),
     "Coût / personne-mois : contrats rémunérés chaque mois ; ce n'est pas un coût par ETP.",
+    ...(conf.kind === "set" ? [`Seuil de confidentialité : ${pluriel(conf.value, "personne")} distinctes par service, sur la période et sur N-1 ; masquage secondaire ; la ligne « Total » reste complète.`] : []),
   ];
   return { ...empty, nd: null, tables: [table], charts: rows.length === 0 ? [] : [contribution, repartition], blocks, limits, trend, count: rows.length, selected: d.selected };
 }
@@ -739,6 +855,10 @@ export async function loadServicesInput(ctx: CroiseeContext): Promise<ServicesIn
   const cur = windowPayroll(journal, months);
   const prev = windowPayroll(journal, prevMonths);
   const svc = ctx.service.value;
+  // Seuil de confidentialité (module partagé) et personnes de chaque service (journal restreint au service, contrats observés reliés
+  // par le référentiel).
+  const conf = confidentialiteOf(ctx.settings.confidentialite);
+  const link = conf.kind === "set" ? await ctx.load.persons() : new Map<string, string>();
   return {
     nd: null,
     data: {
@@ -748,9 +868,14 @@ export async function loadServicesInput(ctx: CroiseeContext): Promise<ServicesIn
       axis: pay.service.axis,
       axisMissing: pay.axisMissing,
       // Un clic sur un service filtre tout le rapport (paramètre service=, « __nv__ » pour non ventilé).
-      rows: rows.map((r) => ({ ...r, href: ctx.href({ service: r.value ?? NV }) })),
+      rows: rows.map((r) => {
+        const j = withService(journal, r.value);
+        return { ...r, href: ctx.href({ service: r.value ?? NV }), groups: { cur: masseGroup(j, months, link), prev: masseGroup(j, prevMonths, link) } };
+      }),
       total: { cur, prev, evo: evolution(cur, prev, (w) => w.masse) },
       selected: svc === undefined ? null : { label: ctx.service.label, clearHref: ctx.href({ service: null }) },
+      confidentialite: conf,
+      links: { confidentialite: confidentialiteHref(ctx.slug) },
     },
   };
 }

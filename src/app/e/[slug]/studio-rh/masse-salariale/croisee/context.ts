@@ -1,7 +1,9 @@
 import { project } from "@/lib/budget/engine";
 import { BudgetError, getScenario, listBudgets, listScenarios, type BudgetRow, type ScenarioFull } from "@/lib/budget/store";
 import type { Projection } from "@/lib/budget/types";
+import type { PersonLink } from "@/lib/confidentialite";
 import { monthRange } from "@/lib/connectors/months";
+import { croiseeLink } from "@/lib/croisee/confidentialite";
 import { dateFmt, journalReason } from "@/lib/croisee/format";
 import { getCroiseeSettings, type CroiseeSettings } from "@/lib/croisee-settings";
 import { monthPayroll, servicesOf } from "@/lib/payroll/engine";
@@ -31,6 +33,9 @@ export type ScenarioLoad = { kind: "value"; full: ScenarioFull; proj: Projection
 export type CroiseeLoaders = {
   payroll: () => Promise<PayrollContext>; // journal de paie, grille, ETP, axe de service, DSN de contrôle (loadPayrollContext)
   kpi: () => Promise<KpiContext>; // référentiel RH et paramètres des KPI (le même que celui du journal : lu une fois)
+  // Lien contrat → jeton de personne du référentiel Collaborateurs (croiseeLink), pour compter les groupes du journal de paie en
+  // personnes distinctes (seuil de confidentialité) ; vide sans référentiel construit : aucun contrat n'est alors relié.
+  persons: () => Promise<PersonLink>;
   compta: () => Promise<ComptaSource>; // comptabilité retenue (FEC ou API Pennylane)
   budgets: () => Promise<BudgetRow[]>;
   scenarios: () => Promise<ScenarioListRow[]>;
@@ -84,9 +89,14 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
   let selectedScenario: ScenarioListRow | null = null;
   let scenarioReason: string | null = null;
   const payroll = once(() => loadPayrollContext(slug));
+  const kpiLoad = once(async () => (await payroll()).kpi);
   const load: CroiseeLoaders = {
     payroll,
-    kpi: once(async () => (await payroll()).kpi),
+    kpi: kpiLoad,
+    persons: once(async () => {
+      const k = await kpiLoad();
+      return k.input ? croiseeLink(k.input.data) : new Map();
+    }),
     compta: once(async () => (await payroll()).compta()),
     budgets: once(() => listBudgets(ws)),
     scenarios: once(() => listScenarios(ws)),
@@ -106,6 +116,8 @@ export async function loadCroiseeContext(slug: string, workspace: WorkspaceAcces
     }),
   };
 
+  // Réglages de la croisée ; settings.confidentialite est la lecture du module partagé src/lib/confidentialite (clé
+  // rh.confidentialite.seuil, repli sur l'ancienne clé), celle que tous les chapitres et les exports suivent.
   const settings = await getCroiseeSettings(ws);
   const ctxBase = {
     slug,

@@ -150,11 +150,10 @@ export function suiviSheet({ dash, data, establishments, rawLimit, vue }: SuiviS
   };
 }
 
-// Tableau « Effectif et ETP par catégorie » (Suivi) : contrats et ETP de fin de mois de chaque catégorie, puis le total. Il est
-// calculé sur toute l'entreprise (comme l'écran) : `scoped` (un établissement ou une nature retenu dans les filtres) l'écrit dans
-// la note de la feuille.
-export const CATEGORIES_UNSCOPED_NOTE = "Tous établissements et toutes natures comptées : les filtres Établissement et Nature ne s'appliquent pas à ce tableau.";
-export function categoriesSheet(months: CategoryMonth[], keys: string[], labels: Record<string, string>, opts: { scoped?: boolean } = {}): SheetSpec {
+// Tableau « Effectif et ETP par catégorie » (Suivi) : contrats et ETP de fin de mois de chaque catégorie, puis le total. Les filtres
+// Établissement et Nature s'appliquent comme à l'écran (mêmes mois, mêmes colonnes) : `scope` est la mention du périmètre de
+// l'écran (categoryScopeNote), reprise dans la note de la feuille.
+export function categoriesSheet(months: CategoryMonth[], keys: string[], labels: Record<string, string>, opts: { scope?: string | null } = {}): SheetSpec {
   const label = (k: string) => labels[k] ?? k;
   // L'écran n'écrit que « ETP n.d. » : la raison propre à chaque contrat (quotité absente ou illisible, contrat non déclaré…)
   // est dans le détail de l'ETP fin de mois du tableau « Mois par mois ».
@@ -178,7 +177,7 @@ export function categoriesSheet(months: CategoryMonth[], keys: string[], labels:
     const total: ExportCell[] = [all.reduce((n, x) => n + x.headcount, 0), all.some((x) => x.etp4 === null) ? TOTAL_ND : all.reduce((n, x) => n + (x.etp4 ?? 0), 0)];
     return [c.month, ...cells, ...total, c.lowerBound ? `Effectifs : ${LOWER}` : ""];
   });
-  const note = `Fin de mois ; catégorie sans contrat ce mois-là : cellule vide.${opts.scoped ? ` ${CATEGORIES_UNSCOPED_NOTE}` : ""}`;
+  const note = `Fin de mois ; catégorie sans contrat ce mois-là : cellule vide.${opts.scope ? ` ${opts.scope}` : ""}`;
   return { name: "Par catégorie", columns, rows, note };
 }
 

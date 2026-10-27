@@ -7,6 +7,8 @@ import SynthesePage from "@/app/e/[slug]/studio-rh/page";
 import { MegaMenu } from "@/components/MegaMenu";
 import { glossaryEntry } from "@/lib/glossary";
 import { project } from "@/lib/budget/engine";
+import { compareLanding, coveringScenario, scenarioCovers } from "@/lib/budget/landing-compare";
+import { budgetSeries, type Series } from "@/lib/budget/series";
 import type { BaseSnapshot, Conventions, Hypothesis } from "@/lib/budget/types";
 import { monthRange } from "@/lib/connectors/months";
 import type { JournalInput, LedgerLine, MonthPayroll } from "@/lib/payroll/engine";
@@ -24,6 +26,7 @@ import {
   evolutionView,
   headcountTile,
   kpiRefusal,
+  landingTileView,
   landingView,
   masseCells,
   ndReasonLines,
@@ -57,9 +60,11 @@ vi.mock("@/lib/budget/store", async (orig) => {
   return {
     ...real,
     listScenarios: async () => state.scenarios,
-    getScenario: async () => {
+    // Le scénario complet n'est rendu que pour l'identifiant demandé : un mauvais choix de scénario se verrait (« scénario introuvable »).
+    getScenario: async (_ws: string, id: string) => {
       if (state.fail) throw new real.BudgetError(state.fail);
-      return state.full;
+      const full = state.full as { scenario: { id: string } } | null;
+      return full && full.scenario.id === id ? full : null;
     },
     listBudgets: async () => state.budgets,
   };
@@ -199,6 +204,73 @@ describe("atterrissage du dernier scénario face au budget saisi", () => {
     expect(partial.budget).toMatchObject({ text: "n.d.", reason: "montant du budget non saisi (2026-12)" });
     expect(partial.gap.reason).toBe("montant du budget non saisi (2026-12)");
     expect(landingView(land, budget, { kind: "nd", reason: "écart n.d." }, "2026").gap).toEqual({ text: null, tone: "flat", reason: "écart n.d." });
+  });
+});
+
+describe("règle unique de l'atterrissage (landing-compare) : scénario qui couvre l'année, mois dotés d'un budget", () => {
+  const span = (id: string, firstMonth: string, lastMonth: string, createdAt: string) => ({ scenario: { id, firstMonth, lastMonth, createdAt: new Date(createdAt) } });
+  // Le plus récent (2027) ne couvre pas 2026 : il n'est pas retenu ; le scénario d'octobre → décembre 2026 l'est.
+  const s2027 = span("b", "2027-01", "2027-12", "2026-10-20T08:00:00Z");
+  const s2026 = span("a", "2026-10", "2026-12", "2026-10-06T08:00:00Z");
+  it("le scénario retenu est le plus récemment créé parmi ceux qui couvrent l'année ; aucun : n.d. avec la raison", () => {
+    expect(scenarioCovers(s2026.scenario, "2026")).toBe(true);
+    expect(scenarioCovers(s2027.scenario, "2026")).toBe(false);
+    expect(scenarioCovers(span("c", "2026-10", "2027-03", "2026-10-01T08:00:00Z").scenario, "2027")).toBe(true);
+    expect(coveringScenario([s2027, s2026], "2026")).toEqual({ kind: "value", row: s2026 });
+    expect(coveringScenario([s2027, s2026], "2027")).toEqual({ kind: "value", row: s2027 });
+    expect(coveringScenario([s2027, s2026], "2025")).toEqual({ kind: "nd", reason: "aucun scénario ne couvre 2025" });
+    expect(coveringScenario([], "2026")).toEqual({ kind: "nd", reason: "aucun scénario ne couvre 2026" });
+    // Deux scénarios couvrent l'année : le plus récemment créé, quel que soit l'ordre reçu.
+    const older = span("d", "2026-07", "2026-12", "2026-09-01T08:00:00Z");
+    expect(coveringScenario([older, s2026], "2026")).toEqual({ kind: "value", row: s2026 });
+  });
+
+  // Scénario 2026 : janvier → mars 1 000,00 €, avril → décembre 1 200,00 € ; douze mois = 3 000 + 10 800 = 13 800,00 €.
+  const scenarioPts = Object.fromEntries(monthRange("2026-01", "2026-12").map((m) => [m, m <= "2026-03" ? 100000 : 120000]));
+  const scenario: Series = { key: "s", label: "Scénario « S »", points: new Map(Object.entries(scenarioPts).map(([month, cost]) => [month, { month, kind: "value", cost, etp4: null, etpNd: null, layer: "projete" }])) };
+  // Budget : janvier → novembre 1 100,00 €, décembre sans montant ; onze mois = 12 100,00 €.
+  const amounts = Object.fromEntries(monthRange("2026-01", "2026-12").map((m) => [m, m === "2026-12" ? null : 110000]));
+  const budget = { name: "B", series: budgetSeries("b", "Budget saisi « B »", "2026", amounts) };
+  const land = { kind: "value" as const, total: 1380000 };
+  it("onze mois comparés : atterrissage de ces mois 12 600,00 € − budget 12 100,00 € = +500,00 € (+4,13 %) ; décembre exclu et nommé", () => {
+    const c = compareLanding(scenario, true, budget, "2026");
+    expect(c.withBudget).toEqual(monthRange("2026-01", "2026-11"));
+    expect(c.excluded).toEqual(["2026-12"]);
+    // Atterrissage des onze mois : 3 × 1 000 + 8 × 1 200 = 12 600,00 € ; budget : 11 × 1 100 = 12 100,00 €.
+    expect(c.budget).toEqual({ kind: "value", cost: 1210000 });
+    expect(c.gap).toEqual({ kind: "value", a: 1260000, b: 1210000, delta: 50000, pct: { num: 50000, den: 1210000 } });
+    // Valeur − Référence = Écart sur les mêmes mois.
+    expect(c.gap && c.gap.kind === "value" ? c.gap.a - c.gap.b : null).toBe(50000);
+  });
+  it("atterrissage n.d. : le budget des mois dotés reste, l'écart n'existe pas ; aucun mois doté : budget n.d. avec la raison", () => {
+    const c = compareLanding(scenario, false, budget, "2026");
+    expect(c.budget).toEqual({ kind: "value", cost: 1210000 });
+    expect(c.gap).toBeNull();
+    const empty = compareLanding(scenario, true, { name: "Vide", series: budgetSeries("v", "Vide", "2026", {}) }, "2026");
+    expect(empty).toEqual({ withBudget: [], excluded: monthRange("2026-01", "2026-12"), budget: { kind: "nd", reason: "aucun montant de budget saisi « Vide » pour 2026" }, gap: null });
+    // Un montant de 0 € est un montant : le mois est comparé.
+    const zero = compareLanding(scenario, true, { name: "Z", series: budgetSeries("z", "Z", "2026", { ...amounts, "2026-12": 0 }) }, "2026");
+    expect(zero.withBudget).toHaveLength(12);
+  });
+  it("tuile : budget et écart « 11 mois », atterrissage des mois comparés, mois exclus nommés ; douze mois dotés : sans ces mentions", () => {
+    const t = landingTileView(land, { name: "B", compare: compareLanding(scenario, true, budget, "2026") }, "2026");
+    expect(flat(t.value.text)).toBe("13 800,00 €");
+    expect([t.budget.label, flat(t.budget.value.text)]).toEqual(["Budget saisi « B », 11 mois", "12 100,00 €"]);
+    expect([t.compared!.label, flat(t.compared!.text)]).toEqual(["Atterrissage, 11 mois comparés", "12 600,00 €"]);
+    expect([t.gap.label, flat(t.gap.text!), t.gap.tone]).toEqual(["Écart, 11 mois comparés", "+500,00 € (+4,13 %)", "bad"]);
+    expect(t.note).toBe("sans montant de budget, exclus : déc. 2026");
+    // Douze mois à 1 100,00 € : 13 800 − 13 200 = +600,00 € (+4,55 %) ; l'atterrissage des mois comparés égale les douze mois : pas de ligne.
+    const full = { name: "B", series: budgetSeries("b", "Budget saisi « B »", "2026", { ...amounts, "2026-12": 110000 }) };
+    const t12 = landingTileView(land, { name: "B", compare: compareLanding(scenario, true, full, "2026") }, "2026");
+    expect([t12.budget.label, flat(t12.budget.value.text)]).toEqual(["Budget saisi « B »", "13 200,00 €"]);
+    expect(t12.compared).toBeNull();
+    expect([t12.gap.label, flat(t12.gap.text!)]).toEqual(["Écart", "+600,00 € (+4,55 %)"]);
+    expect(t12.note).toBeNull();
+    // Sans budget : budget et écart n.d. avec la raison, sans ligne « mois comparés ».
+    const none = landingTileView(land, null, "2026");
+    expect(none.budget).toEqual({ label: "Budget saisi", value: { text: "n.d.", kind: "nd", reason: "aucun budget saisi pour 2026" } });
+    expect(none.gap).toEqual({ label: "Écart", text: null, tone: "flat", reason: "aucun budget saisi pour 2026" });
+    expect([none.compared, none.note]).toEqual([null, null]);
   });
 });
 
@@ -510,13 +582,44 @@ describe("page : atterrissage du dernier scénario face au budget saisi", () => 
     arm([budget("Budget saisi 2026", 800000, "2026-10-07T08:00:00Z")]);
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
     const t = tile(html, "atterrissage");
-    expect(t.text).toContain("Atterrissage 2026 ? Scénario « Budget 2026 » 94 950 €");
+    // La tuile dit le scénario retenu et pourquoi (le plus récent qui couvre l'année), puis les douze mois.
+    expect(t.text).toContain("Atterrissage 2026 ? Scénario « Budget 2026 » · le plus récent qui couvre 2026 · douze mois 94 950 €");
     expect(t.text).toContain("Budget saisi « Budget saisi 2026 » : 96 000 € ? Écart : −1 050 € (−1,09 %)");
+    // Douze mois dotés d'un budget : ni nombre de mois comparés, ni ligne « Atterrissage, n mois comparés », ni mois exclus.
+    expect(t.text).not.toMatch(/mois comparés|exclus/);
     // « ? » du glossaire sur l'atterrissage et sur le budget saisi.
     expect(t.raw).toContain('aria-label="Définition : Budget saisi"');
     expect(t.raw.match(/class="gloss-link"/g)).toHaveLength(2);
     expect(t.raw).toContain('class="sy-delta trend-good"');
     expect(t.raw).toContain("sous=comparaison");
+    expect(t.raw).toContain("annee=2026");
+  });
+  it("deux scénarios : le plus récent (2027) ne couvre pas 2026 et n'est pas retenu ; budget sans décembre : 11 mois comparés, 84 300 − 88 000 = −3 700,00 € (−4,20 %)", async () => {
+    // Scénario créé après « Budget 2026 » mais sur 2027 seulement : non retenu pour 2026 (le faux complet ne répond qu'à l'identifiant retenu).
+    const s2027 = { ...scenario, id: "22222222-2222-4222-8222-222222222222", name: "Budget 2027", firstMonth: "2027-01", lastMonth: "2027-12", createdAt: new Date("2026-10-20T08:00:00Z") };
+    // Budget janvier → novembre 8 000,00 €, décembre sans montant : 11 × 8 000 = 88 000,00 € ; atterrissage des mêmes mois :
+    // 9 × 7 000 + 2 × 10 650 = 84 300,00 € ; écart −3 700,00 € ; −3 700 ÷ 88 000 = −4,20 %. Les douze mois restent 94 950,00 €.
+    const b = budget("Budget saisi 2026", 800000, "2026-10-07T08:00:00Z");
+    arm([{ ...b, amounts: { ...b.amounts, "2026-12": null } }]);
+    state.scenarios = [{ scenario: s2027, refMonth: "2026-09" }, { scenario, refMonth: "2026-09" }];
+    const { html } = await render({ annee: "2026", de: "01", a: "03" });
+    const t = tile(html, "atterrissage");
+    expect(t.text).toContain("Scénario « Budget 2026 » · le plus récent qui couvre 2026 · douze mois 94 950 €");
+    expect(t.text).not.toContain("Budget 2027");
+    expect(t.text).toContain("Budget saisi « Budget saisi 2026 », 11 mois : 88 000 € ? Atterrissage, 11 mois comparés : 84 300 € Écart, 11 mois comparés : −3 700 € (−4,20 %)");
+    expect(text(/<span[^>]*data-testid="sy-tile-atterrissage-compared"[\s\S]*?<\/span>/.exec(t.raw)![0])).toBe("Atterrissage, 11 mois comparés : 84 300 €");
+    expect(text(/<p[^>]*data-testid="sy-tile-atterrissage-note"[\s\S]*?<\/p>/.exec(t.raw)![0])).toBe("sans montant de budget, exclus : déc. 2026");
+    expect(t.raw).toContain('class="sy-delta trend-good"');
+  });
+  it("aucun scénario ne couvre l'année de la période : tuile n.d. avec la raison, sans scénario nommé", async () => {
+    const s2027 = { ...scenario, id: "22222222-2222-4222-8222-222222222222", name: "Budget 2027", firstMonth: "2027-01", lastMonth: "2027-12", createdAt: new Date("2026-10-20T08:00:00Z") };
+    arm([budget("Budget saisi 2026", 800000, "2026-10-07T08:00:00Z")]);
+    state.scenarios = [{ scenario: s2027, refMonth: "2026-09" }];
+    const { html } = await render({ annee: "2026", de: "01", a: "03" });
+    const t = tile(html, "atterrissage");
+    expect(text(/<p[^>]*data-testid="sy-tile-atterrissage-value"[\s\S]*?<\/p>/.exec(t.raw)![0])).toBe("n.d.");
+    expect(text(/<p[^>]*data-testid="sy-tile-atterrissage-nd-valeur"[\s\S]*?<\/p>/.exec(t.raw)![0])).toBe("aucun scénario ne couvre 2026");
+    expect(t.text).not.toMatch(/Scénario «|Budget 2027|Budget saisi «/);
   });
   it("plusieurs budgets de l'année : le plus récemment modifié, nommé dans la tuile", async () => {
     arm([budget("Ancien", 700000, "2026-01-07T08:00:00Z"), budget("Révision d'octobre", 900000, "2026-10-07T08:00:00Z")]);
@@ -541,13 +644,14 @@ describe("page : atterrissage du dernier scénario face au budget saisi", () => 
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
     const t = tile(html, "atterrissage");
     const ONE = "1 contrat sans base de projection (détail dans Hypothèses budgétaires)";
-    expect(t.text).toContain("Atterrissage 2026 ? Scénario « Budget 2026 » n.d.");
+    expect(t.text).toContain("Atterrissage 2026 ? Scénario « Budget 2026 » · le plus récent qui couvre 2026 · douze mois n.d.");
     expect(t.text).toContain(`2026-10 : ${ONE} ; 2026-11 : ${ONE} ; 2026-12 : ${ONE}`);
     expect(html).not.toMatch(/FICTIF|Prénom/);
   });
-  it("aucun scénario : pas de tuile ; base figée altérée : le scénario n'est pas lu et l'écran le dit", async () => {
+  it("aucun scénario : tuile n.d. « aucun scénario ne couvre 2026 » ; base figée altérée : le scénario n'est pas lu et l'écran le dit", async () => {
     reset();
-    expect((await render({ annee: "2026", de: "01", a: "03" })).html).not.toContain("sy-tile-atterrissage");
+    const none = tile((await render({ annee: "2026", de: "01", a: "03" })).html, "atterrissage");
+    expect(none.text).toContain("Atterrissage 2026 ? n.d. aucun scénario ne couvre 2026");
     arm([]);
     state.fail = "Base figée altérée : son empreinte ne correspond plus à celle enregistrée à la création.";
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
