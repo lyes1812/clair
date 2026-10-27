@@ -21,7 +21,7 @@ function props(patch: Partial<FinanceViewProps> = {}): FinanceViewProps {
     previous: { months: [month("2025-01"), month("2025-02")], accounts: [] },
     selectedPlan: plan, projection: null, selectedBudget: plan, budgetMonths: null, plans: [plan], mappings: [], revision: 7,
     source: { domain: "accounting", mode: "files", chosen: "fec", reason: "Fichier fictif appliqué.", apiApplied: false, filesApplied: true, appliedAt: null, modeSetAt: null, modeSetBy: null },
-    sourceNotice: "Lecture fictive de deux mois.", rhOptions: [{ id: "00000000-0000-4000-8000-000000000002", name: "Scénario fictif", firstMonth: "2026-01", lastMonth: "2026-12" }], canEdit: true, canAdmin: true,
+    sourceNotice: "Lecture fictive de deux mois ; une lecture ne prouve pas la clôture comptable.", rhOptions: [{ id: "00000000-0000-4000-8000-000000000002", name: "Scénario fictif", firstMonth: "2026-01", lastMonth: "2026-12" }], canEdit: true, canAdmin: true,
     savePlan: action, duplicatePlan: action, saveMappings: action, ...patch,
   };
 }
