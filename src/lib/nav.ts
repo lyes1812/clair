@@ -16,4 +16,9 @@ export const STUDIO_RH_ITEMS: NavItem[] = [
   { label: "Reporting social", path: "studio-rh/reporting-social", module: 6, summary: "Index égalité FH et BDESE : entrées prévues, pas encore réalisées." },
 ];
 
-export const ALL_ITEMS: NavItem[] = [DATA_ITEM, ...STUDIO_RH_ITEMS];
+// Studio Finance demandé par Lyes ; le catalogue et l'ordre du Studio RH restent inchangés.
+export const FINANCE_ITEM: NavItem = {
+  label: "Studio Finance", path: "studio-finance", module: 7,
+  summary: "Compte de résultat issu de Pennylane ou du FEC, modèle, budget, prévision et écarts.",
+};
+export const ALL_ITEMS: NavItem[] = [DATA_ITEM, ...STUDIO_RH_ITEMS, FINANCE_ITEM];
