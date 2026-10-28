@@ -32,13 +32,18 @@ test("Fichiers réels : classeurs Excel, CSV et PDF de synthèse téléchargés 
   await setConfidentialite(page, slug, 1);
 
   const files: { name: string; bytes: number; type: string; from: string }[] = [];
-  const download = async (href: string, name: string, expectedType: string) => {
+  // Le type du fichier est lu dans la réponse (un lien sans format explicite peut servir le CSV historique) : seuls Excel et CSV
+  // sont acceptés, et l'extension suit le type reçu.
+  const download = async (href: string, stem: string) => {
     const res = await page.request.get(href);
     expect(res.status(), href).toBe(200);
-    expect(res.headers()["content-type"], href).toContain(expectedType);
+    const type = res.headers()["content-type"] ?? "";
+    const ext = type.includes(XLSX) ? "xlsx" : type.startsWith("text/csv") ? "csv" : null;
+    expect(ext, `${href} : type inattendu ${type}`).not.toBeNull();
     const body = await res.body();
+    const name = `${stem}.${ext}`;
     writeFileSync(`${OUT}/${name}`, body);
-    files.push({ name, bytes: body.length, type: res.headers()["content-type"], from: href });
+    files.push({ name, bytes: body.length, type, from: href });
   };
   // Tous les liens d'export d'une page (menu « Exporter » : Excel en premier, CSV conservé), téléchargés un par un.
   const downloadAll = async (url: string, prefix: string) => {
@@ -47,10 +52,7 @@ test("Fichiers réels : classeurs Excel, CSV et PDF de synthèse téléchargés 
     const hrefs = await page.locator("a[href*='/export?']").evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).getAttribute("href") ?? ""));
     expect(hrefs.length, `${url} : aucun lien d'export`).toBeGreaterThan(0);
     let i = 0;
-    for (const href of [...new Set(hrefs)]) {
-      const csv = /format=csv|tableau=/.test(href) && !/format=xlsx/.test(href);
-      await download(href, `${prefix}-${String(++i).padStart(2, "0")}.${csv ? "csv" : "xlsx"}`, csv ? "text/csv" : XLSX);
-    }
+    for (const href of [...new Set(hrefs)]) await download(href, `${prefix}-${String(++i).padStart(2, "0")}`);
   };
 
   const base = `/e/${slug}/studio-rh`;
