@@ -34,7 +34,7 @@ import type { KpiContext } from "@/lib/rh/kpi-context";
 import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
-import { CONFIDENTIALITE_TERM, confidentialiteHref, isHidden, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type PersonsOfContracts } from "@/lib/confidentialite";
+import { CONFIDENTIALITE_TERM, confidentialiteHref, isHidden, maskReason, type ConfidentialiteSetting, type PersonsOfContracts } from "@/lib/confidentialite";
 import type { MotifWindow } from "@/lib/croisee/conges";
 import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, maskMotifRows, monthAxis, motifMask, motifRows, movementSeries, ndSummary, readingQualifiers, seuilOf, seuilText, typeCountMask, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
@@ -845,16 +845,18 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
 // Absentéisme par motif (période) : TOUS les motifs présents dans la lecture, retenus ou non, puis, à part, le taux tous motifs.
 // Un motif n.d. garde sa raison (jamais 0) ; le taux tous motifs est nommé comme tel et n'est jamais présenté comme la tuile.
 // Seuil de confidentialité (paramètre de l'espace, module partagé) : statuts de motifWindowMask, la fonction de la croisée 03, sur les
-// cellules de la fenêtre lues par la page dans le moteur (cells = motifWindow : chaque motif, ses mois et son total ; absentéisme de
-// chaque mois, tuile et taux tous motifs publiés ou non) ; une même ligne a donc le même statut ici et dans la croisée. Une ligne qui
-// concerne de 1 à (seuil − 1) personnes distinctes est n.d. (exception : le seul motif retenu présent dans la lecture, qui égale la
-// tuile) ; masquage secondaire ; le taux tous motifs, indicateur de l'entreprise, n'est masqué que lorsqu'il donnerait une ligne masquée
-// par différence. Paramètre absent, illisible ou non transmis : lignes n.d. avec la raison et le lien vers Paramètres ; le taux tous
-// motifs reste affiché.
-export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite }: { motifs: AbsenceMotifs; cells: MotifWindow; slug: string; confidentialite?: ConfidentialiteSetting }) {
+// cellules de la fenêtre lues par la page dans le moteur (cells = motifWindow : chaque motif, ses mois et son total ; absentéisme et
+// taux tous motifs de chaque mois publiés ou non) : chaque mois d'un motif a le statut de la colonne de son mois, la ligne de la
+// fenêtre (période ou N-1) est n.d. dès qu'un de ses mois est masqué ; une même ligne a donc le même statut ici et dans la croisée,
+// quelle que soit la période. Une ligne qui concerne de 1 à (seuil − 1) personnes distinctes est n.d. (exception : le seul motif retenu
+// présent dans la lecture, qui égale la tuile) ; masquage secondaire ; le taux tous motifs, indicateur de l'entreprise, n'est masqué que
+// lorsqu'il donnerait une ligne masquée par différence. « Absences de la lecture » : le statut de la tuile Absentéisme (typeCountMask,
+// typeSizes : absenceTypePersons ; non transmis, un nombre non nul n'est pas vérifiable). Paramètre absent, illisible ou non transmis :
+// lignes n.d. avec la raison et le lien vers Paramètres ; le taux tous motifs reste affiché.
+export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite, typeSizes }: { motifs: AbsenceMotifs; cells: MotifWindow; slug: string; confidentialite?: ConfidentialiteSetting; typeSizes?: Readonly<Record<string, PersonsOfContracts>> }) {
   const read = seuilOf(confidentialite);
   const mask = read.seuil === null || motifs.lines.length === 0 ? null : motifMask(cells, read.seuil);
-  const rows = maskMotifRows(motifRows(motifs.lines), mask, read.seuil, read.reason);
+  const rows = maskMotifRows(motifRows(motifs.lines), mask, read.seuil, read.reason, typeSizes ?? {});
   const allReason = mask && read.seuil !== null && isHidden(mask.all) ? maskReason(mask.all, read.seuil) : null;
   const all = motifs.all;
   const link = <> (<a href={confidentialiteHref(slug)}>Paramètres</a>)</>;
@@ -876,26 +878,22 @@ export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite }: { 
               {rows.map((r) => (
                 <tr key={r.type} data-motif={r.type} data-retained={r.retained ? "oui" : "non"} data-masque={r.masked ? "oui" : undefined}>
                   <td><AbsenceType code={r.type} withCode /></td>
-                  {r.masked ? (
-                    <>
-                      <td colSpan={2} className="nd wrap">n.d. — {r.masked}{read.seuil === null && link}</td>
-                      <td>{r.retained ? "oui" : "non"}</td>
-                      <td colSpan={2} className="nd wrap">n.d. — {r.masked}</td>
-                    </>
+                  {/* Nombres d'absences : chacun son statut (maskMotifRows) ; une seule cellule quand les deux sont n.d. pour la même raison. */}
+                  {r.countMasked !== null && r.countMasked === r.inWindowMasked ? (
+                    <td colSpan={2} className="nd wrap">n.d. — {r.countMasked}{read.seuil === null && link}</td>
                   ) : (
                     <>
-                      {/* Ligne n.d. du moteur : ses personnes ne sont pas dénombrées, les nombres d'absences ne sont pas vérifiables. */}
-                      <td className="num">{r.kind === "nd" ? <abbr className="nd" title={SEUIL_NON_VERIFIABLE}>n.d.</abbr> : fmtInt(r.count)}</td>
-                      <td className="num">{r.kind === "nd" ? <abbr className="nd" title={SEUIL_NON_VERIFIABLE}>n.d.</abbr> : fmtInt(r.inWindow)}</td>
-                      <td>{r.retained ? "oui" : "non"}</td>
-                      {r.kind === "nd" ? (
-                        <td colSpan={2} className="nd wrap">n.d. — {r.reason}</td>
-                      ) : (
-                        <>
-                          <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.halfText}</td>
-                          <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.rateText}</td>
-                        </>
-                      )}
+                      <td className="num">{r.countMasked !== null ? <abbr className="nd" title={r.countMasked}>n.d.</abbr> : fmtInt(r.count)}</td>
+                      <td className="num">{r.inWindowMasked !== null ? <abbr className="nd" title={r.inWindowMasked}>n.d.</abbr> : fmtInt(r.inWindow)}</td>
+                    </>
+                  )}
+                  <td>{r.retained ? "oui" : "non"}</td>
+                  {r.kind === "nd" ? (
+                    <td colSpan={2} className="nd wrap">n.d. — {r.reason}</td>
+                  ) : (
+                    <>
+                      <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.halfText}</td>
+                      <td className={r.kind === "lower_bound" ? "num lower" : "num"}>{r.rateText}</td>
                     </>
                   )}
                 </tr>
@@ -929,8 +927,9 @@ export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite }: { 
 }
 
 // confidentialite : seuil de l'espace (getConfidentialite), transmis par la page au détail par motif ; cells : cellules de la fenêtre
-// (motifWindow, lues dans le moteur par la page : motifs × mois et total, absentéisme des mois, tuile et taux tous motifs publiés).
-export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, cells, slug, confidentialite }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; cells?: MotifWindow; slug?: string; confidentialite?: ConfidentialiteSetting }) {
+// (motifWindow, lues dans le moteur par la page : motifs × mois et total, absentéisme et taux tous motifs de chaque mois publiés) ;
+// typeSizes : personnes distinctes de chaque motif dans toute la lecture (absenceTypePersons, comme la tuile Absentéisme).
+export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, cells, slug, confidentialite, typeSizes }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; cells?: MotifWindow; slug?: string; confidentialite?: ConfidentialiteSetting; typeSizes?: Readonly<Record<string, PersonsOfContracts>> }) {
   // Une ligne par mois : jours théoriques (toujours calculés s'ils le peuvent) et absences (n.d. avec la raison de la période
   // quand l'absentéisme s'arrête avant le calcul mensuel : arrêts DSN non extraits, types non choisis, absences non lues).
   const abs = new Map(v.months.map((m) => [m.month, m]));
@@ -977,7 +976,7 @@ export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, ce
           {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
         </Total>
       )}
-      {motifs && cells && slug && <AbsenceMotifsDetail motifs={motifs} cells={cells} slug={slug} confidentialite={confidentialite} />}
+      {motifs && cells && slug && <AbsenceMotifsDetail motifs={motifs} cells={cells} slug={slug} confidentialite={confidentialite} typeSizes={typeSizes} />}
     </>
   );
 }

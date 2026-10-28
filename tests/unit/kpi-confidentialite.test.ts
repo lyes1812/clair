@@ -132,40 +132,45 @@ describe("moteur : personnes distinctes par motif (avril 2026)", async () => {
 });
 
 // --- Masquage du tableau par motif (cas écrits à la main) -----------------------------------------------------------------------
-// Lot 12 (relecture) : motifMask lit la colonne de la fenêtre de motifWindowMask, la fonction partagée avec la croisée 03 ; ses cellules
-// sont celles de la fenêtre (motifs × mois, et total). Ces cas portent sur la colonne de la fenêtre seule : fenêtre d'un mois dont
-// l'absentéisme n'est pas publié (aucune relation de colonne de mois), chaque ligne portant la même cellule pour son mois et son total.
-// Jeton de personne : le numéro de « pN ».
+// Lot 12 (troisième relecture) : motifMask lit le total de la fenêtre de motifWindowMask, la fonction partagée avec la croisée 03 ;
+// chaque mois a le statut de la seule colonne de son mois, le total de la fenêtre se déduit de ses mois. Ces cas portent sur une fenêtre
+// d'un mois, chaque ligne portant la même cellule pour son mois et son total : la tuile est alors l'absentéisme du mois (tile), le taux
+// tous motifs de la fenêtre celui du mois (all). Le total déduit d'un mois masqué est « secondary » (avant : « masked », le total étant
+// masqué pour lui-même) ; l'écran écrit la même raison du seuil. Jeton de personne : le numéro de « pN » ; motif : « motif_i » (ordre
+// canonique = ordre des lignes).
 const tok = (p: string) => Number(p.replace(/\D/g, ""));
-const line = (chosen: boolean, half: number | null, who: { persons: string[]; unlinked: number } | null, kind: "exact" | "lower_bound" | "nd" = half === null ? "nd" : "exact"): MotifWindowLine => {
+const line = (chosen: boolean, half: number | null, who: { persons: string[]; unlinked: number } | null, kind: "exact" | "lower_bound" | "nd" = half === null ? "nd" : "exact"): Omit<MotifWindowLine, "type"> => {
   const c: CongeCell = kind === "nd" ? { kind: "nd", reason: "n.d. (test)" } : { kind, half: half!, persons: who?.persons.length ?? 0, unlinked: who?.unlinked ?? 0, who: (who?.persons ?? []).map(tok) };
   return { chosen, months: [c], total: c };
 };
-const win1 = (lines: MotifWindowLine[], published: { tile: boolean; all: boolean }): MotifWindow => ({ lines, published: { months: [false], ...published } });
+const win1 = (lines: Omit<MotifWindowLine, "type">[], published: { tile: boolean; all: boolean }): MotifWindow => ({
+  lines: lines.map((l, i) => ({ ...l, type: `motif_${i}` })),
+  published: { months: [published.tile], allMonths: [published.all], all: published.all },
+});
 const PUB = { tile: true, all: true };
 
 describe("tableau par motif : masquage principal, exception du motif retenu unique, masquage secondaire, taux tous motifs", () => {
   it("seuil 3 : un autre motif de 2 personnes est masqué ; le taux tous motifs étant publié, l'autre motif affiché le plus petit (4 personnes) l'est aussi ; le motif retenu unique n'est jamais masqué", () => {
     const m = motifMask(win1([line(true, 10, P("p1", "p2", "p3")), line(false, 18, P("p1", "p2")), line(false, 30, P("p4", "p5", "p6", "p7"))], PUB), 3);
     expect(m.exempt).toBe(0);
-    expect(m.lines).toEqual(["shown", "masked", "secondary"]);
+    expect(m.lines).toEqual(["shown", "secondary", "secondary"]);
     expect(m.all).toBe("shown");
   });
   it("seuil 3 : un seul autre motif, sous le seuil : rien ne peut le protéger, le taux tous motifs est masqué (secondaire)", () => {
     const m = motifMask(win1([line(true, 10, P("p1", "p2", "p3")), line(false, 4, P("p1"))], PUB), 3);
-    expect(m.lines).toEqual(["shown", "masked"]);
+    expect(m.lines).toEqual(["shown", "secondary"]);
     expect(m.all).toBe("secondary");
   });
   it("seuil 3 : deux motifs retenus (la tuile est leur somme publiée) : celui d'une personne est masqué, l'autre le protège (secondaire) ; le taux tous motifs reste", () => {
     const m = motifMask(win1([line(true, 10, P("p1", "p2", "p3")), line(true, 2, P("p4"))], PUB), 3);
     expect(m.exempt).toBeNull();
-    expect(m.lines).toEqual(["secondary", "masked"]);
+    expect(m.lines).toEqual(["secondary", "secondary"]);
     expect(m.all).toBe("shown");
   });
   it("le motif retenu unique (égal à la tuile) n'est pas masqué même sous le seuil ; tuile et taux non publiés : masquage principal seul", () => {
     expect(motifMask(win1([line(true, 2, P("p1")), line(false, 4, P("p2", "p3", "p4"))], PUB), 3).lines).toEqual(["shown", "shown"]);
     const m = motifMask(win1([line(false, 2, P("p1")), line(false, 4, P("p2", "p3", "p4"))], { tile: false, all: false }), 3);
-    expect(m.lines).toEqual(["masked", "shown"]);
+    expect(m.lines).toEqual(["secondary", "shown"]);
     expect(m.all).toBe("nd");
   });
   it("contrat non relié : il ne protège jamais (non vérifiable sous le seuil, affiché dès que les personnes reliées suffisent) ; borne basse sans personne comptée : non vérifiable ; ligne vide : affichée ; ligne n.d. : n.d.", () => {
@@ -207,11 +212,13 @@ const cellsOf = (m: AbsenceMotifs): MotifWindow => {
   return {
     lines: m.lines.map((l) => {
       const c: CongeCell = l.kind === "nd" ? { kind: "nd", reason: l.nd.reason } : { kind: l.kind, half: l.half, persons: l.persons?.length ?? 0, unlinked: l.unlinked ?? 0, who: (l.persons ?? []).map((p) => ids.indexOf(p)) };
-      return { chosen: l.chosen, months: [c], total: c };
+      return { type: l.type, chosen: l.chosen, months: [c], total: c };
     }),
-    published: { months: [true], tile: true, all: m.all.kind !== "nd" },
+    published: { months: [true], allMonths: [m.all.kind !== "nd"], all: m.all.kind !== "nd" },
   };
 };
+// Personnes de chaque motif dans toute la lecture (absenceTypePersons) : celles de sa ligne (fenêtre d'un mois, toute la lecture).
+const sizesOf = (m: AbsenceMotifs) => Object.fromEntries(m.lines.map((l) => [l.type, { persons: l.persons ?? [], unlinked: l.unlinked ?? 0 }]));
 describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
   const win = { from: "2026-04", to: "2026-04", label: "avril 2026", months: ["2026-04"] };
   // Maladie (retenue, 2 personnes) ; congés (non retenu, 1 personne : masqué) ; le taux tous motifs, seul à pouvoir révéler les congés
@@ -227,7 +234,7 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
     emptyReason: null,
   };
   it("seuil 2 : la ligne des congés est n.d. (quatre nombres, motif et « retenu » conservés), la maladie reste ; le taux tous motifs est n.d. avec la même raison ; ligne Confidentialité", () => {
-    const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: set(2) }));
+    const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo", confidentialite: set(2) }));
     const leave = rowOf("test_paid_leave").exec(html)![0];
     expect(leave).toContain('data-masque="oui"');
     expect(text(leave)).toBe(`test_paid_leave n.d. — ${R2} non n.d. — ${R2}`);
@@ -242,14 +249,14 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
     expect(note).not.toContain("parametres#confidentialite");
   });
   it("seuil 1 : rien n'est masqué (deux lignes, taux tous motifs 18,33 %)", () => {
-    const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: set(1) }));
+    const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo", confidentialite: set(1) }));
     expect(html).not.toContain("data-masque");
     expect(text(html)).toContain("18 (9 j) 15,00 %");
     expect(text(html)).toContain("22 demi-journées = 11 j ÷ 60 j = 18,33 %");
   });
   it("seuil absent ou non transmis : chaque ligne n.d. « non défini » avec le lien vers Paramètres › Confidentialité ; le taux tous motifs (entreprise entière) reste affiché", () => {
     for (const conf of [ABSENT, undefined]) {
-      const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: conf }));
+      const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo", confidentialite: conf }));
       expect(html.match(/data-masque="oui"/g)).toHaveLength(2);
       expect(html.match(/href="\/e\/demo\/parametres#confidentialite"/g)!.length).toBeGreaterThanOrEqual(3);
       expect(text(html)).toContain(`n.d. — ${SEUIL_NON_DEFINI} ( Paramètres )`);
@@ -257,17 +264,17 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
       expect(text(html)).toContain("Confidentialité : seuil non défini ( Paramètres )");
       expect(text(html)).not.toMatch(/(^|[^\d])8,33 %|15,00 %/);
     }
-    const bad = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: INVALID }));
+    const bad = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo", confidentialite: INVALID }));
     expect(text(bad)).toContain(`n.d. — ${SEUIL_ILLISIBLE}`);
   });
   it("le détail de la période transmet le seuil et l'état de la tuile au tableau par motif", () => {
     const v = { kind: "exact", ratio: { num: 10, den: 120 }, months: [], qualifiers: [] } as never;
     const theoretical = { kind: "exact", half: 120, months: [], contributions: [] } as never;
-    const html = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: set(2) }));
+    const html = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo", confidentialite: set(2) }));
     expect(html.match(/data-masque="oui"/g)).toHaveLength(1);
     expect(text(html)).toContain("Confidentialité : seuil de 2 personnes");
     // Sans seuil transmis par la page : non défini (jamais une valeur de repli).
-    const none = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, cells: cellsOf(motifs), slug: "demo" }));
+    const none = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo" }));
     expect(text(none)).toContain(SEUIL_NON_DEFINI);
   });
   it("motifs de la lecture (tuile) : un nombre sous le seuil est n.d. avec la raison, les autres restent ; ligne Confidentialité dans la tuile (HTML valide : aucun paragraphe dans un span)", () => {

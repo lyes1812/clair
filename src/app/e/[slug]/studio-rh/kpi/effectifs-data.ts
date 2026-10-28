@@ -2,11 +2,13 @@ import { monthRange } from "@/lib/connectors/months";
 import { getCategoryNatures, getContractCategories, categoryOfContract, type CategoryNatures, type ContractCategories } from "@/lib/budget/categories";
 import { project } from "@/lib/budget/engine";
 import { flowsOf } from "@/lib/budget/flows";
-import { AXES, MEASURES, monthlyGrid, type Axis, type Grid, type Measure, type RealSource, type ScenarioSource } from "@/lib/budget/monthly";
+import { AXES, MEASURES, monthlyGrid, projectedMasseByService, type Axis, type Grid, type Measure, type RealSource, type ScenarioSource } from "@/lib/budget/monthly";
 import { getScenario, KIND_LABELS, listScenarios, type ScenarioFull } from "@/lib/budget/store";
 import { CATEGORY_LABELS, type CategoryId, type Hypothesis, type PresentPerson } from "@/lib/budget/types";
 import { nd, val } from "@/lib/budget/versions";
 import { getConfidentialite, linkFromReferential, personsOfContracts, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
+import { countedMovements } from "@/lib/confidentialite/flows";
+import { headcountItems, movementItems, splitLabel, type SplitAxis, type SplitItem } from "@/lib/confidentialite/splits";
 import { isHireKey } from "@/lib/croisee/confidentialite";
 import { monthEnd } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
@@ -30,7 +32,8 @@ import { gridMask, maskedCount, maskedGrid, monthShortLabel, repartition, repart
 // (groupe × mois) d'une répartition est comptée en PERSONNES DISTINCTES — les contrats qui portent la valeur affichée, reliés à leur
 // personne par le référentiel Collaborateurs — et reçoit un statut CANONIQUE, le même sur tous les écrans qui publient la même cellule
 // (gridMask : le statut d'un mois ne dépend que de sa colonne, dont le total est publié ; stocks par la passe partagée avec le Suivi et
-// la croisée 02 ; masse × service des mois réels par la colonne de la Masse salariale ; le cumul d'un flux se déduit de ses mois). Le
+// la croisée 02 ; masse × service des mois réels par la colonne de la Masse salariale ; nature et établissement des mois réels par les
+// groupes de splits.ts, ceux de la croisée 02 et de la garde des filtres de KPI RH ; le cumul d'un flux se déduit de ses mois). Le
 // total du mois n'est jamais masqué. `grid` est la grille APRÈS masquage (écran, graphiques et export lisent les mêmes cellules) ;
 // `raw` la grille du calcul et `mask` les statuts, qui servent à la répartition par groupe (repartitionMasked : anneau, tableau et
 // feuille « Répartition » lisent les mêmes statuts).
@@ -74,20 +77,37 @@ const add = (m: Members, group: string, id: string | null) => {
   if (id !== null) (isHireKey(id) ? s.hires : s.contracts).add(id);
 };
 
-// Groupe d'un contrat du référentiel sur un axe, pour les mois réalisés : mêmes libellés que la grille (budget/monthly.ts) ; une
-// divergence rendrait le groupe non dénombré (valeur sans personne : non vérifiable), jamais une valeur affichée à tort.
+// Groupe d'un contrat du référentiel sur un axe, pour les mois réalisés : mêmes libellés que la grille (budget/monthly.ts, qui range
+// par la caractéristique ACTUELLE du contrat ; nature et établissement : libellés de splits.ts) ; une divergence rendrait le groupe non
+// dénombré (valeur sans personne : non vérifiable), jamais une valeur affichée à tort.
 function realGroupOf(c: ContractDraft, axis: Exclude<Axis, "service">, natures: CategoryNatures, overrides: ContractCategories): string {
   if (axis === "categorie") {
     const id = categoryOfContract(c.externalId, c.nature, natures, overrides);
     return id ? CATEGORY_LABELS[id] : NO_CATEGORY;
   }
-  if (axis === "contrat") return c.nature ? contractNatureLabel(c.nature) : "Nature n.d.";
-  if (axis === "etablissement") return c.establishmentId ?? "Établissement n.d.";
+  if (axis === "contrat") return splitLabel("nature", c.nature);
+  if (axis === "etablissement") return splitLabel("etablissement", c.establishmentId);
   return c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "Statut n.d.";
 }
 
+// Nature et établissement (mois réalisés) : groupes canoniques de splits.ts, les mêmes que la croisée 02 et la garde des filtres de
+// KPI RH (mouvement rangé par sa propre nature ou son établissement déclarant ; contrat de fin de mois par la valeur déclarée ce
+// mois-là), en clés de contrat du référentiel. La grille (budget/monthly.ts) range par la caractéristique actuelle du contrat : quand,
+// pour un contrat du mois, les deux diffèrent (DSN : nature transformée, mutation entre établissements), la cellule de la grille n'est
+// pas celle des autres écrans ; la colonne du mois n'est alors pas dénombrée (null : non vérifiable), jamais affichée sur un autre
+// découpage que celui des autres écrans.
+const SPLIT_AXES: Partial<Record<Axis, SplitAxis>> = { contrat: "nature", etablissement: "etablissement" };
+function splitMembers(items: readonly SplitItem[], gridLabel: (contractKey: string) => string | null): Members | null {
+  const out: Members = new Map();
+  for (const it of items) {
+    if (gridLabel(it.contract) !== it.group) return null;
+    add(out, it.group, it.contract);
+  }
+  return out;
+}
+
 // Contrats qui portent la valeur de chaque groupe d'un mois réalisé (mêmes moteurs que la grille) ; null : mois non dénombré (la
-// grille est alors n.d. ou en borne basse pour ce mois).
+// grille est alors n.d. ou en borne basse pour ce mois, ou range autrement que les autres écrans).
 function realMembers(src: { kpi: KpiInput | null; journal: JournalInput | null; natures: CategoryNatures; overrides: ContractCategories; serviceMap: Map<string, string | null> | null }, m: string, measure: Measure, axis: Axis): Members | null {
   const { kpi, journal } = src;
   const out: Members = new Map();
@@ -118,16 +138,32 @@ function realMembers(src: { kpi: KpiInput | null; journal: JournalInput | null; 
     return out;
   }
   if (axis === "service") return null;
+  const split = SPLIT_AXES[axis];
+  const byKey = new Map(kpi.data.contracts.map((c) => [c.contractKey, c]));
   if (measure === "entrees" || measure === "sorties") {
     const mv = monthMovements(kpi, m);
     if ((measure === "entrees" ? mv.entries : mv.exits).kind !== "exact") return null;
-    for (const x of mv.events) if (x.why === "counted" && x.row.event.kind === (measure === "entrees" ? "entry" : "exit")) add(out, realGroupOf(x.row.contract, axis, src.natures, src.overrides), x.row.contract.externalId);
+    const kind = measure === "entrees" ? "entry" : "exit";
+    if (split) {
+      // Grille : chaque mouvement compté sous la caractéristique actuelle de son contrat (un contrat n'entre et ne sort qu'une fois).
+      const grid = new Map(countedMovements(mv, kind).map((x) => [x.row.contract.contractKey, realGroupOf(x.row.contract, axis, src.natures, src.overrides)]));
+      return splitMembers(movementItems(mv, kind, split), (k) => grid.get(k) ?? null);
+    }
+    for (const x of mv.events) if (x.why === "counted" && x.row.event.kind === kind) add(out, realGroupOf(x.row.contract, axis, src.natures, src.overrides), x.row.contract.externalId);
     return out;
   }
   const h = headcountAt(kpi.data, monthEnd(m), countedOpts(kpi));
   if (h.kind !== "exact") return null;
   if (measure === "etp" && etpMonthEnd(kpi, m).kind !== "exact") return null;
-  const byKey = new Map(kpi.data.contracts.map((c) => [c.contractKey, c]));
+  if (split) {
+    const items = headcountItems(kpi.data, monthEnd(m), countedOpts(kpi), split);
+    // Chaque contrat de l'effectif une seule fois, sous le libellé de la grille (un contrat déclaré par deux établissements diverge).
+    if (!items || items.length !== h.contractKeys.length) return null;
+    return splitMembers(items, (k) => {
+      const c = byKey.get(k);
+      return c ? realGroupOf(c, axis, src.natures, src.overrides) : null;
+    });
+  }
   for (const key of h.contractKeys) {
     const c = byKey.get(key);
     if (c) add(out, realGroupOf(c, axis, src.natures, src.overrides), c.externalId);
@@ -137,7 +173,9 @@ function realMembers(src: { kpi: KpiInput | null; journal: JournalInput | null; 
 
 // Contrats et embauches qui portent la valeur de chaque groupe d'un mois projeté : mêmes règles de groupe que la grille
 // (budget/monthly.ts, mois projetés) ; une embauche prévisionnelle (clé « embauche:<id> ») est comptée à part : elle ne décrit personne,
-// ne protège jamais, et une cellule qu'elle porte seule n'est masquée qu'avec toute sa colonne (voir gridMask).
+// ne protège jamais, et une cellule qu'elle porte seule n'est masquée qu'avec toute sa colonne (voir gridMask). Masse × service :
+// groupes de projectedMasseByService (service porté par chaque contribution), les mêmes que la grille et que l'Écart budgétaire
+// (maskProjectedServices) ; jamais le service de la base figée, qu'un changement d'affectation rend différent.
 function scenarioMembers(src: ScenarioSource, m: string, measure: Measure, axis: Axis): Members | null {
   const { base, hyps, proj } = src;
   if (proj.kind === "error" || axis === "etablissement") return null;
@@ -156,7 +194,15 @@ function scenarioMembers(src: ScenarioSource, m: string, measure: Measure, axis:
   };
   const out: Members = new Map();
   if (measure === "masse") {
-    for (const c of pm.contributions) add(out, c.contractKey ? keyGroup(c.contractKey) : axis === "service" ? (c.service ?? NON_VENTILE) : OUT, c.contractKey);
+    if (axis === "service") {
+      for (const [service, g] of projectedMasseByService(pm)) {
+        const group = service ?? NON_VENTILE;
+        add(out, group, null);
+        for (const k of g.keys) add(out, group, k);
+      }
+      return out;
+    }
+    for (const c of pm.contributions) add(out, c.contractKey ? keyGroup(c.contractKey) : OUT, c.contractKey);
     return out;
   }
   if (measure === "etp" || measure === "inscrit") {

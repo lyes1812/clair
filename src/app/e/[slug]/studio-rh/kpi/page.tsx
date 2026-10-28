@@ -608,7 +608,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} natureAt={natureAt} />}
           {(detail.id === "entries" || detail.id === "exits") && <MovementsDetail v={detail.value} kind={detail.id === "entries" ? "entry" : "exit"} maps={maps} slug={slug} />}
           {(detail.id === "theoretical" || detail.id === "absenteeism") && <AbsenceMonthDetail id={detail.id} v={detail.value} theoretical={detail.theoretical} maps={maps} slug={slug} />}
-          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} motifs={absenceByMotif(input, detail.window)} cells={motifWindow(input, detail.window)} slug={slug} confidentialite={confidentialite} />}
+          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} motifs={absenceByMotif(input, detail.window)} cells={motifWindow(input, detail.window)} slug={slug} confidentialite={confidentialite} typeSizes={absenceTypePersons(input)} />}
           {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={inDetail} />}
           {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={inDetail} natureAt={natureAt} />}
         </section>

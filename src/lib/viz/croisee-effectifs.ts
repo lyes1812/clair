@@ -7,7 +7,8 @@ import { nd as ndCell, val } from "@/lib/budget/versions";
 import { contractEcheances, type EcheanceContract } from "@/lib/croisee/echeances";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
 import { confidentialiteHref, isHidden, maskGroups, maskReason, type PersonsOfContracts } from "@/lib/confidentialite";
-import { countedMovements, flowCounts, flowPartitionStatus, type FlowCount } from "@/lib/confidentialite/flows";
+import { countedMovements, flowColumn, flowCounts, type FlowCount } from "@/lib/confidentialite/flows";
+import { movementValue, splitLabel } from "@/lib/confidentialite/splits";
 import { columnStatus, stockColumn, stockGroups, type StockGroup } from "@/lib/confidentialite/columns";
 import { confidentialiteOf, groupInput, NO_GROUP } from "@/lib/croisee/confidentialite";
 import { effectifStructure, groupsOfContracts, personOf, type Confidentialite, type StructureContract } from "@/lib/croisee/structure";
@@ -55,7 +56,8 @@ export type BlockNd = { label?: string; reason: string; action?: Action };
 
 type Compare<T> = { current: T; previous: T; delta: Delta };
 export type MovementIn = { kind: "exact" | "lower_bound"; value: number } | { kind: "nd"; nd: { reason: string } };
-// Mouvement compté dans le turnover, sans date exacte, sans service ni identifiant : mois, sens, nature, motif de sortie déclaré ;
+// Mouvement compté dans le turnover, sans date exacte, sans service ni identifiant : mois, sens, nature du mouvement (déclarée à
+// l'entrée ou avec la fin : movementValue de splits.ts), motif de sortie déclaré ;
 // contract : jeton du contrat propre à la lecture ; person : jeton de sa personne (null : contrat non relié) ; aucune clé de la source.
 export type JournalEventIn = { month: string; kind: "entry" | "exit"; nature: string | null; endReason: string | null; contract: string; person: string | null };
 export type JournalMonthIn = { month: string; entries: CountIn; exits: CountIn };
@@ -351,16 +353,24 @@ export type NatureCount = FlowCount;
 // Cellules « dont <nature> » d'un total du mois : une cellule par nature comptée, le nombre de contrats, masquée quand elle concerne
 // de 1 à (seuil − 1) personnes distinctes, non vérifiable quand ses contrats non reliés laissent les personnes reliées sous le seuil
 // (masquage secondaire dans le mois, dont le total est affiché). Total n.d. : la même raison ; total en borne basse : la répartition
-// n'est pas publiée. Statuts : flowPartitionStatus (src/lib/confidentialite/flows.ts), la fonction que KPI RH appelle pour les entrées
-// et les sorties du périmètre retenu par le filtre Nature : une même cellule a le même statut sur les deux écrans.
+// n'est pas publiée. Statuts : la colonne canonique du mois (flowColumn, src/lib/confidentialite/flows.ts) sur toutes les natures qui
+// portent un mouvement (counts, y compris hors de la liste des colonnes), libellé contractNatureLabel (splits.ts), dans l'ordre
+// canonique des libellés et non dans l'ordre de la liste ; une nature sans mouvement reste hors de la relation et s'affiche à 0. Mêmes
+// groupes, même valeur d'ordre (le nombre de mouvements) et même fonction que KPI RH › Effectifs mensuels (axe « Contrat (nature) ») et
+// que la garde des entrées et des sorties du filtre Nature (flow-guard.ts) : une même cellule a le même statut sur les trois écrans.
 export function natureCells(counts: Readonly<Record<string, NatureCount>>, natures: readonly string[], total: CountIn | MovementIn | number, seuil: number): CroiseeCell[] {
   if (typeof total !== "number" && total.kind === "nd") return natures.map(() => ({ nd: total.nd.reason }));
   if (typeof total !== "number" && total.kind === "lower_bound") return natures.map(() => ({ nd: REPARTITION_BORNE }));
-  const st = flowPartitionStatus(counts, natures, seuil, true);
-  return natures.map((n, i) => (isHidden(st[i]) ? { nd: maskReason(st[i], seuil)! } : (counts[n]?.contracts ?? 0)));
+  const col = flowColumn(Object.fromEntries(Object.entries(counts).map(([n, c]) => [splitLabel("nature", n), c])), seuil, true);
+  return natures.map((n) => {
+    const v = counts[n]?.contracts ?? 0;
+    const st = columnStatus(col, splitLabel("nature", n), v);
+    return isHidden(st) ? { nd: maskReason(st, seuil)! } : v;
+  });
 }
 
-// Mouvements comptés d'un mois par nature (agrégation du journal : aucune date exacte, aucun service) : contrats et leur groupe.
+// Mouvements comptés d'un mois par nature (agrégation du journal : aucune date exacte, aucun service) : contrats et leur groupe. Un
+// mouvement compté porte toujours une nature comptée (sa nature est celle du mouvement : movementValue de splits.ts).
 export function countByNature(events: readonly JournalEventIn[], month: string, kind: "entry" | "exit"): Record<string, NatureCount> {
   const list = events.filter((e): e is JournalEventIn & { nature: string } => e.month === month && e.kind === kind && e.nature !== null);
   return flowCounts(list.map((e) => ({ group: e.nature, contract: e.contract, person: e.person })));
@@ -994,7 +1004,7 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
   for (const m of roll.months) {
     const mv = monthMovements(input, m);
     jMonths.push({ month: m, entries: mv.entries, exits: mv.exits });
-    for (const x of countedMovements(mv)) events.push({ month: m, kind: x.row.event.kind, nature: x.row.event.nature, endReason: x.row.event.endReason, contract: ctoken(x.row.contract), person: token(x.row.contract) });
+    for (const x of countedMovements(mv)) events.push({ month: m, kind: x.row.event.kind, nature: movementValue(x.row.event, "nature"), endReason: x.row.event.endReason, contract: ctoken(x.row.contract), person: token(x.row.contract) });
   }
   const jTotal = windowMovements(input, roll);
 

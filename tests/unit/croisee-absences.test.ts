@@ -112,6 +112,7 @@ const CONGES_N1: CongesPris = {
   ],
 };
 
+const PUBLISHED_3 = { months: [true, true, true], allMonths: [true, true, true], all: true };
 const data = (over: Partial<AbsencesData> = {}): AbsencesData => ({
   source: "payfit",
   absenceTypes: ["test_sickness"],
@@ -133,6 +134,8 @@ const data = (over: Partial<AbsencesData> = {}): AbsencesData => ({
     previous: { label: ABSENCE_ALL_MOTIFS_LABEL, lines: [line("test_paid_leave", false, 50), line("test_rare", false, 0), line("test_sickness", true, 19), line("test_unread", false, 0)], all: ex(62, 1820), emptyReason: null },
   },
   conges: { current: CONGES, previous: CONGES_N1 },
+  // Absentéisme et taux tous motifs publiés pour chaque mois de la période et de N-1, et pour les deux fenêtres (motifPublished).
+  published: { current: PUBLISHED_3, previous: PUBLISHED_3 },
   aVenir: {
     kind: "value",
     after: "2026-09",
@@ -292,6 +295,18 @@ describe("buildAbsences : absentéisme par mois (graphique et tableau exact)", (
   });
 });
 
+// Cas A sous la règle canonique (lot 12, troisième relecture) : le statut d'un mois se calcule sur la seule colonne de son mois ; une
+// période, N-1 et le taux tous motifs se déduisent de leurs mois (n.d. dès qu'un mois est masqué). Colonnes, seuil 3, test_sickness
+// exempt (seul motif retenu) ; autres motifs → taux tous motifs du mois − absentéisme du mois (tous deux publiés chaque mois) :
+//   juillet 2026 : test_paid_leave 20 (3 personnes), test_rare 0, test_unread 0 → rien à masquer ;
+//   août 2026 : test_rare 4 (1 personne) masqué, test_unread n.d. (n'apporte personne) → 1 < 3 : test_paid_leave 30 (4 personnes)
+//     masqué en second (1 + 4 ≥ 3) ;
+//   septembre 2026 : test_paid_leave 10 (1 personne) masqué ; test_rare et test_unread à 0 ne protègent personne : impossible, le taux
+//     tous motifs de septembre est masqué ;
+//   juillet 2025 : test_paid_leave 10 (2 personnes) masqué, seul autre motif non vide : taux tous motifs de juillet 2025 masqué ;
+//   août 2025 : test_paid_leave 30 (3 personnes) affiché ; septembre 2025 : 10 (1 personne) masqué, taux tous motifs masqué.
+// Périodes : test_paid_leave n.d. en N et en N-1 (un mois masqué chacune) ; test_rare n.d. en N (août), 0 en N-1 ; tous motifs n.d. en
+// N (septembre) et en N-1 (juillet, septembre).
 describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un seul motif retenu ; seuil 3)", () => {
   const m = buildAbsences(input());
 
@@ -299,10 +314,10 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
     const t = tableOf(m, TABLE_IDS.motifs);
     expect(t.columns.map((c) => c.header)).toEqual(["Motif", "Retenu dans l'absentéisme", `Demi-journées ${LABEL}`, `Taux ${LABEL}`, `Demi-journées ${PREV_LABEL}`, `Taux ${PREV_LABEL}`, "Écart (points)"]);
     expect(texts(t)).toEqual([
-      // Période : masquée en second. Autres motifs de la période (somme = tous motifs − tuile = 70 − 15) : test_rare (1 personne)
-      // masqué, test_unread n.d. (personnes non dénombrées : n'apporte aucune personne) → 1 < 3, test_paid_leave (5 personnes) est
-      // masqué aussi. N-1 : 50/1 820 = 2,75 % (4 personnes, rien à protéger) ; écart n.d.
-      ["test_paid_leave", "non", "n.d.", "n.d.", "50", "2,75 %", "n.d."],
+      // Période : août (masqué en second) et septembre (1 personne) masqués ⇒ n.d. N-1 : juillet 2025 (2 personnes) et septembre 2025
+      // (1 personne) masqués ⇒ n.d. Avant : N-1 affiché (50/1 820), ses deux mois masqués se protégeant dans la relation de la ligne,
+      // propre à la fenêtre ; un total qui contient un mois masqué est désormais n.d. pour toute fenêtre. Écart n.d.
+      ["test_paid_leave", "non", "n.d.", "n.d.", "n.d.", "n.d.", "n.d."],
       // 1 personne en N : n.d. ; aucune personne en N-1 (rien à protéger) : 0 affiché ; écart n.d.
       ["test_rare", "non", "n.d.", "n.d.", "0", "0,00 %", "n.d."],
       // Seul motif retenu : 15 et 19 demi-journées (2 personnes en N-1) affichées, comme la tuile (0,82 % et 1,04 %).
@@ -318,11 +333,14 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
     expect(texts(t)[2][5]).toBe(tile(m, "absenteisme-n1").value.text);
   });
 
-  it("« Taux d'absence, tous motifs » : tableau à part, jamais l'absentéisme ; affiché quand les autres motifs se protègent entre eux", () => {
+  it("« Taux d'absence, tous motifs » : tableau à part, jamais l'absentéisme ; n.d. quand un de ses mois donnerait un motif masqué", () => {
     const t = tableOf(m, TABLE_IDS.tousMotifs);
     expect(t.title).toBe("Taux d'absence, tous motifs");
-    // 70/1 820 = 3,846… % ; 62/1 820 = 3,406… % ; écart 8/1 820 × 100 = 0,439… point.
-    expect(texts(t)).toEqual([["Taux d'absence, tous motifs", "70", "3,85 %", "62", "3,41 %", "+0,44 pts"]]);
+    // Avant : 70 (3,85 %) et 62 (3,41 %) affichés. Septembre 2026 (et juillet, septembre 2025) : le seul autre motif non vide est
+    // masqué ; le taux tous motifs de ce mois, publié par une période d'un mois, le redonnerait (tous motifs − absentéisme − 0) : il est
+    // masqué, et avec lui la période et N-1 qui le contiennent (sinon il se lirait par différence entre deux périodes).
+    expect(texts(t)).toEqual([["Taux d'absence, tous motifs", "n.d.", "n.d.", "n.d.", "n.d.", "n.d."]]);
+    expect(t.rows[0].cells.slice(1, 5)).toEqual([{ nd: CONF }, { nd: CONF }, { nd: CONF }, { nd: CONF }]);
     expect(m.blocks.find((b) => b.id === "tous-motifs")!.tables).toEqual([TABLE_IDS.tousMotifs]);
     expect(t.title.toLowerCase()).not.toContain("absentéisme");
   });
@@ -332,10 +350,10 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
     expect(t.title).toBe("Demi-journées prises par motif et par mois");
     expect(t.columns.map((c) => c.header)).toEqual(["Motif", "Juil. 2026", "Août 2026", "Sept. 2026", `Demi-journées ${LABEL}`, `Demi-journées ${PREV_LABEL}`, "Écart (demi-journées)"]);
     expect(texts(t)).toEqual([
-      // Septembre : 1 personne ⇒ masqué ; le total de la ligne (60) est encore affiché ⇒ la plus petite cellule affichée de la ligne
-      // (juillet, 20, 3 personnes) est masquée aussi : 1 + 3 ≥ 3, 60 − 30 ne donne plus septembre. La période (60) est ensuite
-      // masquée par la relation des autres motifs (voir le tableau par motif) ; écart n.d.
-      ["test_paid_leave", "n.d.", "30", "n.d.", "n.d.", "50", "n.d."],
+      // Août : masqué en second dans sa colonne (protège test_rare) ; septembre : 1 personne ⇒ masqué ; juillet (3 personnes) affiché.
+      // Avant : juillet masqué et août affiché (relation de la ligne, propre à la période) ; la ligne n'est plus une relation : la
+      // période et N-1, qui contiennent un mois masqué, sont n.d. ; écart n.d.
+      ["test_paid_leave", "20", "n.d.", "n.d.", "n.d.", "n.d.", "n.d."],
       // Août et la période : 1 personne ⇒ masqués (deux cellules masquées dans la ligne : rien de plus).
       ["test_rare", "0", "n.d.", "0", "n.d.", "0", "n.d."],
       // Seul motif retenu : rien n'est masqué (juillet 6 et septembre 9 = tableau mensuel). Écart 15 − 19 = −4.
@@ -343,9 +361,9 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
       ["test_unread", "0", "n.d.", "0", "n.d.", "0", "n.d."],
     ]);
     // Cellules numériques (exportées comme nombres), jamais du texte « 3,5 j ».
-    expect(t.rows[0].cells.slice(2)).toEqual([30, { nd: CONF }, { nd: CONF }, 50, { nd: ECART_ND.valeur }]);
+    expect(t.rows[0].cells.slice(2)).toEqual([{ nd: CONF }, { nd: CONF }, { nd: CONF }, { nd: CONF }, { nd: ECART_ND.valeur }]);
     expect(t.rows[2].cells.slice(1)).toEqual([6, 0, 9, 15, 19, -4]);
-    expect(t.rows[0].cells[1]).toEqual({ nd: CONF });
+    expect(t.rows[0].cells[1]).toBe(20);
     expect(t.rows[1].cells[6]).toEqual({ nd: ECART_ND.valeur });
     expect(t.rows[3].cells[2]).toEqual({ nd: UNREAD });
     // Aucun classement « congé payé / RTT / repos » : les motifs de la source, tels quels.
@@ -358,12 +376,12 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
     const c = m.charts.find((x) => x.id === TABLE_IDS.conges)!;
     expect(c).toMatchObject({ kind: "barres", unit: "nombre", mode: "stacked", tableId: TABLE_IDS.conges, categories: ["juil.", "août", "sept."], title: "Demi-journées prises par motif et par mois" });
     expect(c.series.map((s) => [s.key, s.name, s.values, s.color])).toEqual([
-      ["motif-1", "test_paid_leave", [null, 30, null], "var(--chart-1)"],
+      ["motif-1", "test_paid_leave", [20, null, null], "var(--chart-1)"],
       ["motif-2", "test_rare", [0, null, 0], "var(--chart-2)"],
       ["motif-3", "test_sickness", [6, 0, 9], "var(--chart-3)"],
       ["motif-4", "test_unread", [0, null, 0], "var(--chart-4)"],
     ]);
-    expect(c.series[0].reasons).toEqual([CONF, null, CONF]);
+    expect(c.series[0].reasons).toEqual([null, CONF, CONF]);
     expect(c.series[3].reasons).toEqual([null, UNREAD, null]);
     // Le graphique est suivi de son tableau exact, dans le même bloc.
     expect(m.blocks.find((b) => b.id === "conges")).toMatchObject({ graph: true, charts: [TABLE_IDS.conges], tables: [] });
@@ -550,51 +568,56 @@ describe("masquage : fonctions pures (cas écrits à la main, seuil 3)", () => {
   it("aVenirMask : un mois masqué dans une ligne dont le total est affiché ⇒ le plus petit autre mois l'est aussi", () => {
     expect(aVenirMask([{ months: [v(2, 1), v(6, 4)], total: v(8, 4) }], 3)).toEqual({ months: [["masked", "secondary"]], total: ["shown"] });
   });
-  // Lot 12 (relecture) : la grille porte deux fenêtres (période et N-1), chacune avec ses mois et son total, masquées chacune par la
-  // fonction partagée motifWindowMask (celle du détail de KPI RH) ; le motif exempt est déduit des lignes (seul motif retenu).
-  const NOTHING = { months: [false], tile: false, all: false };
-  it("congesMask : sans total publié pour un mois, la colonne de ce mois n'est pas une relation", () => {
+  // Lot 12 (troisième relecture) : la grille porte deux fenêtres (période et N-1), masquées chacune par la fonction partagée
+  // motifWindowMask (celle du détail de KPI RH) : chaque mois a le statut de la seule colonne de son mois, le total d'une fenêtre se
+  // déduit de ses mois (windowStatus : « secondary » dès qu'un mois est masqué, même raison du seuil à l'écran). Le motif exempt est
+  // déduit des lignes (seul motif retenu). Fenêtres d'un mois : la tuile de la fenêtre est l'absentéisme du mois.
+  const NOTHING = { months: [false], allMonths: [false], all: false };
+  it("congesMask : sans absentéisme publié pour un mois, la colonne de ce mois n'est pas une relation", () => {
     const g = {
       current: {
         lines: [
-          { chosen: true, months: [v(4, 1)], total: v(4, 1) },
-          { chosen: true, months: [v(9, 3)], total: v(9, 3) },
+          { type: "test_a", chosen: true, months: [v(4, 1)], total: v(4, 1) },
+          { type: "test_b", chosen: true, months: [v(9, 3)], total: v(9, 3) },
         ],
         published: NOTHING,
       },
       previous: {
         lines: [
-          { chosen: true, months: [v(0, 0)], total: v(0, 0) },
-          { chosen: true, months: [v(0, 0)], total: v(0, 0) },
+          { type: "test_a", chosen: true, months: [v(0, 0)], total: v(0, 0) },
+          { type: "test_b", chosen: true, months: [v(0, 0)], total: v(0, 0) },
         ],
         published: NOTHING,
       },
     };
-    expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
-    // Avec la tuile publiée : la période de l'autre motif retenu est masquée en second (et, par sa ligne, son mois).
-    expect(congesMask({ ...g, current: { ...g.current, published: { ...NOTHING, tile: true } } }, 3)).toEqual({ months: [["masked"], ["secondary"]], cur: ["masked", "secondary"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
+    // Mois : masquage principal seul (1 personne masquée, 3 affichées). Période : déduite du mois masqué (avant : « masked », la
+    // période étant une cellule masquée pour elle-même).
+    expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["secondary", "shown"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
+    // Avec l'absentéisme du mois publié : l'autre motif retenu du mois est masqué en second (1 + 3 ≥ 3), et sa période avec lui.
+    expect(congesMask({ ...g, current: { ...g.current, published: { ...NOTHING, months: [true] } } }, 3)).toEqual({ months: [["masked"], ["secondary"]], cur: ["secondary", "secondary"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
   });
-  it("congesMask : un seul motif non retenu sous le seuil ⇒ le taux tous motifs est masqué (période), N-1 reste", () => {
+  it("congesMask : un seul motif non retenu sous le seuil ⇒ le taux tous motifs du mois est masqué, et la période avec lui ; N-1 reste", () => {
     // Motif retenu exempté (seul retenu : égal à la tuile) ; motif non retenu de 2 personnes (seuil 3) : la relation des autres motifs
-    // (tous motifs − tuile) n'a aucune autre cellule → son total, le taux tous motifs de la période, est masqué. N-1 : 0 personne.
-    const all = { months: [true], tile: true, all: true };
+    // du mois (tous motifs − absentéisme) n'a aucune autre cellule → son total, le taux tous motifs du mois, est masqué ; la période
+    // le contient (n.d.). Période du motif : déduite de son mois masqué (avant : « masked »). N-1 : 0 personne.
+    const all = { months: [true], allMonths: [true], all: true };
     const g = {
       current: {
         lines: [
-          { chosen: false, months: [v(14, 2)], total: v(14, 2) },
-          { chosen: true, months: [v(15, 3)], total: v(15, 3) },
+          { type: "test_a", chosen: false, months: [v(14, 2)], total: v(14, 2) },
+          { type: "test_b", chosen: true, months: [v(15, 3)], total: v(15, 3) },
         ],
         published: all,
       },
       previous: {
         lines: [
-          { chosen: false, months: [v(0, 0)], total: v(0, 0) },
-          { chosen: true, months: [v(19, 2)], total: v(19, 2) },
+          { type: "test_a", chosen: false, months: [v(0, 0)], total: v(0, 0) },
+          { type: "test_b", chosen: true, months: [v(19, 2)], total: v(19, 2) },
         ],
         published: all,
       },
     };
-    expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"], allCur: "secondary", allPrev: "shown" });
+    expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["secondary", "shown"], prev: ["shown", "shown"], allCur: "secondary", allPrev: "shown" });
   });
 });
 
@@ -619,27 +642,29 @@ describe("seuil de confidentialité : borne basse sans personne comptée (demi-j
     expect(aVenirMask([{ months: [lb0], total: lb0 }], 3)).toEqual({ months: [["unverifiable"]], total: ["unverifiable"] });
   });
 
-  it("congesMask : motif non retenu en borne basse sans personne ; l'autre motif non retenu est masqué en second dans la période, puis un de ses mois", () => {
+  it("congesMask : motif non retenu en borne basse sans personne ; l'autre motif non retenu est masqué en second dans le même mois, et sa période", () => {
     // Seuil 3. Ligne 0 (non retenue) : juillet ≥ 0 (aucune personne), août 0 ; période ≥ 0 ; N-1 0. Ligne 1 (non retenue) : juillet 20
-    // (4 personnes), août 7 (4) ; période 27 (4) ; N-1 30 (4). Ligne 2 : seul motif retenu, exempté. Taux tous motifs publié.
-    // Période, autres motifs (total : tous motifs − tuile) : ligne 0 non vérifiable, seule masquée → ligne 1 (4 personnes) masquée en
-    // second. Ligne 1 : total masqué, ses deux mois affichés le redonneraient → le plus petit, août (7), masqué. N-1 (ses propres mois) :
-    // ligne 1 à 4 personnes chaque mois, rien n'est masqué.
-    const all = { months: [true, true], tile: true, all: true };
+    // (4 personnes), août 7 (4) ; période 27 (4) ; N-1 30 (4). Ligne 2 : seul motif retenu, exempté. Absentéisme et taux tous motifs
+    // publiés chaque mois. Juillet, autres motifs (tous motifs du mois − absentéisme du mois) : ligne 0 non vérifiable, seule masquée →
+    // ligne 1 (4 personnes) masquée en second en juillet. Août : rien sous le seuil. Périodes déduites des mois : ligne 0 non vérifiable,
+    // ligne 1 n.d. (juillet masqué). Avant : la ligne 1 était masquée en second dans la colonne de la période, puis son plus petit mois
+    // (août, 7) par la relation de sa ligne ; c'est désormais juillet, le mois de la cellule à protéger, pour toute période qui le
+    // contient. N-1 (ses propres mois) : ligne 1 à 4 personnes chaque mois, rien n'est masqué.
+    const all = { months: [true, true], allMonths: [true, true], all: true };
     const g = {
       current: {
         lines: [
-          { chosen: false, months: [lb0, v(0, 0)], total: lb0 },
-          { chosen: false, months: [v(20, 4), v(7, 4)], total: v(27, 4) },
-          { chosen: true, months: [v(0, 0), v(4, 1)], total: v(4, 1) },
+          { type: "test_a", chosen: false, months: [lb0, v(0, 0)], total: lb0 },
+          { type: "test_b", chosen: false, months: [v(20, 4), v(7, 4)], total: v(27, 4) },
+          { type: "test_c", chosen: true, months: [v(0, 0), v(4, 1)], total: v(4, 1) },
         ],
         published: all,
       },
       previous: {
         lines: [
-          { chosen: false, months: [v(0, 0), v(0, 0)], total: v(0, 0) },
-          { chosen: false, months: [v(15, 4), v(15, 4)], total: v(30, 4) },
-          { chosen: true, months: [v(0, 0), v(2, 1)], total: v(2, 1) },
+          { type: "test_a", chosen: false, months: [v(0, 0), v(0, 0)], total: v(0, 0) },
+          { type: "test_b", chosen: false, months: [v(15, 4), v(15, 4)], total: v(30, 4) },
+          { type: "test_c", chosen: true, months: [v(0, 0), v(2, 1)], total: v(2, 1) },
         ],
         published: all,
       },
@@ -647,7 +672,7 @@ describe("seuil de confidentialité : borne basse sans personne comptée (demi-j
     expect(congesMask(g, 3)).toEqual({
       months: [
         ["unverifiable", "shown"],
-        ["shown", "secondary"],
+        ["secondary", "shown"],
         ["shown", "shown"],
       ],
       cur: ["unverifiable", "secondary", "shown"],

@@ -10,7 +10,7 @@ import { monthMovements } from "@/lib/rh/kpi/turnover";
 import type { KpiInput } from "@/lib/rh/kpi/types";
 import { categoryOfContract, type CategoryNatures, type ContractCategories } from "./categories";
 import { flowsOf } from "./flows";
-import { CATEGORY_LABELS, type BaseSnapshot, type CategoryId, type Hypothesis, type PresentPerson, type Projection } from "./types";
+import { CATEGORY_LABELS, type BaseSnapshot, type CategoryId, type Hypothesis, type PresentPerson, type ProjectedMonth, type Projection } from "./types";
 import type { Cell } from "./versions";
 
 // Effectifs mensuels : une mesure (ETP, inscrit fin de mois, entrées, sorties, masse salariale) mois par mois et par axe
@@ -135,6 +135,24 @@ function realMonth(src: RealSource, m: string, measure: Measure, axis: Axis): Mo
 }
 
 // --- Scénario (mois projetés).
+// Masse d'un mois projeté par service : UNE convention pour KPI RH › Effectifs mensuels (valeur et personnes de chaque cellule masse ×
+// service) et pour l'Écart budgétaire et l'Analyse des écarts (montants sous le filtre Service, colonnes du mois de
+// maskProjectedServices). Chaque contribution est rangée sous le service qu'elle porte : le moteur de projection fait foi (après un
+// changement d'affectation, les coûts du salarié suivent son nouveau service), jamais le service de la base figée. Clé null : non
+// ventilé. cost : somme des coûts du service (centimes) ; keys : contrats et embauches qui y portent une contribution (une
+// contribution sans contrat, enveloppe ou élément ponctuel global, ajoute son coût sans personne).
+export type ProjectedServiceMasse = { cost: number; keys: Set<string> };
+export function projectedMasseByService(pm: Extract<ProjectedMonth, { kind: "value" }>): Map<string | null, ProjectedServiceMasse> {
+  const out = new Map<string | null, ProjectedServiceMasse>();
+  for (const c of pm.contributions) {
+    let g = out.get(c.service);
+    if (!g) out.set(c.service, (g = { cost: 0, keys: new Set() }));
+    g.cost += c.cost;
+    if (c.contractKey !== null) g.keys.add(c.contractKey);
+  }
+  return out;
+}
+
 function scenarioMonth(src: ScenarioSource, m: string, measure: Measure, axis: Axis): MonthResult {
   const { base, hyps, proj } = src;
   if (proj.kind === "error") return nd("projection refusée (hypothèses en erreur)");
@@ -155,7 +173,9 @@ function scenarioMonth(src: ScenarioSource, m: string, measure: Measure, axis: A
     return c ? (c.nature ? contractNatureLabel(c.nature) : "Nature n.d.") : hireBy.has(key) ? "Embauche prévisionnelle" : "Nature n.d.";
   };
   if (measure === "masse") {
-    for (const c of pm.contributions) bump(out, c.contractKey ? keyGroup(c.contractKey) : axis === "service" ? (c.service ?? "Non ventilé") : OUT, c.cost);
+    // Par service : le service porté par chaque contribution (projectedMasseByService), comme l'Écart budgétaire.
+    if (axis === "service") for (const [service, g] of projectedMasseByService(pm)) bump(out, service ?? "Non ventilé", g.cost);
+    else for (const c of pm.contributions) bump(out, c.contractKey ? keyGroup(c.contractKey) : OUT, c.cost);
     return { kind: "value", values: out, layer: "projete" };
   }
   if (measure === "etp" || measure === "inscrit") {

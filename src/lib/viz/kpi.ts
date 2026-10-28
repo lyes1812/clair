@@ -1,5 +1,5 @@
 import type { ChartSeries } from "@/components/charts/shared";
-import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type MaskCell, type MaskStatus, type PersonsOfContracts } from "@/lib/confidentialite";
+import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskStatus, type PersonsOfContracts } from "@/lib/confidentialite";
 import { columnStatus, maskColumn, stockColumn, stockCount, windowStatus, type StockGroup } from "@/lib/confidentialite/columns";
 import { groupInput, projectedGroupCell } from "@/lib/confidentialite/groups";
 import { motifWindowMask, type MotifWindow } from "@/lib/croisee/conges";
@@ -275,30 +275,39 @@ export const seuilText = (setting: ConfidentialiteSetting | undefined): string =
 export const seuilFilterText = (setting: ConfidentialiteSetting | undefined): string =>
   setting?.kind === "set" ? `${seuilText(setting)} distinctes` : setting?.kind === "invalid" ? "seuil illisible : à ré-enregistrer (Paramètres)" : "seuil non défini (Paramètres)";
 
-// --- Tableau par motif du détail de l'absentéisme : la colonne de la fenêtre de motifWindowMask (src/lib/croisee/conges.ts), la même
-// fonction que la croisée 03 (période et N-1). Mêmes cellules (pour chaque motif de la lecture, les mois de la fenêtre et son total),
-// mêmes relations (mois d'un motif → son total ; motifs retenus d'un mois → absentéisme du mois ; motifs retenus → tuile ; autres
-// motifs → taux tous motifs − tuile), même départage des égalités : le statut d'une ligne ne dépend pas de l'écran. Exception : le seul
-// motif retenu présent dans la lecture (sa ligne égale la tuile Absentéisme, déjà publiée). cells : motifWindow(entrée, fenêtre), lu
-// par la page dans le moteur ; lines[i] : statut du total de la ligne i (même ordre que les motifs d'absenceByMotif).
+// --- Tableau par motif du détail de l'absentéisme : le total de la fenêtre de motifWindowMask (src/lib/croisee/conges.ts), la même
+// fonction que la croisée 03 (période et N-1). Chaque mois d'un motif a le statut de la seule colonne de son mois (motifs retenus du
+// mois → absentéisme du mois ; autres motifs du mois → taux tous motifs du mois ; ordre canonique des motifs) ; la ligne d'une fenêtre
+// (période ou N-1) et le taux tous motifs se déduisent de leurs mois (windowStatus : n.d. dès qu'un mois est masqué). Le statut d'une
+// ligne ne dépend donc ni de l'écran ni de la fenêtre choisie. Exception : le seul motif retenu présent dans la lecture (sa ligne égale
+// la tuile Absentéisme, déjà publiée). cells : motifWindow(entrée, fenêtre), lu par la page dans le moteur ; lines[i] : statut du total
+// de la ligne i (même ordre que les motifs d'absenceByMotif).
 export type MotifMask = { lines: MaskStatus[]; all: MaskStatus; exempt: number | null };
 export function motifMask(cells: MotifWindow, seuil: number): MotifMask {
   const m = motifWindowMask(cells, seuil);
   return { lines: m.total, all: m.all, exempt: m.exempt };
 }
 
-// Lignes du tableau par motif après masquage : une ligne masquée garde son motif et « retenu » ; ses quatre nombres (absences de la
-// lecture et de la période, demi-journées, taux) sont n.d. avec la raison du seuil, jamais 0.
-export type MaskedMotifRow = MotifRow & { masked: string | null };
-export function maskMotifRows(rows: MotifRow[], mask: MotifMask | null, seuil: number | null, settingReason: string | null): MaskedMotifRow[] {
+// Lignes du tableau par motif après masquage : une ligne masquée garde son motif et « retenu » ; ses demi-journées, son taux et ses
+// absences de la période sont n.d. avec la raison du seuil, jamais 0. « Absences de la lecture » (countMasked) est la cellule que publie
+// aussi la tuile Absentéisme (« Motifs de la lecture ») : son statut est celui de typeCountMask, le même sur les deux blocs, quelle que
+// soit la fenêtre. « Absences de la période » (inWindowMasked) : n.d. avec la ligne ; n.d. aussi quand le nombre de toute la lecture est
+// masqué (ses absences en sont une partie : elles décrivent au plus autant de personnes) ; ligne n.d. du moteur : ses personnes ne
+// sont pas dénombrées (non vérifiable). sizes : personnes distinctes de chaque motif dans toute la lecture (absenceTypePersons) ;
+// absentes, un nombre non nul n'est pas vérifiable (typeCountMask).
+export type MaskedMotifRow = MotifRow & { masked: string | null; countMasked: string | null; inWindowMasked: string | null };
+export function maskMotifRows(rows: MotifRow[], mask: MotifMask | null, seuil: number | null, settingReason: string | null, sizes: Readonly<Record<string, PersonsOfContracts>> = {}): MaskedMotifRow[] {
   return rows.map((r, i): MaskedMotifRow => {
     const reason = settingReason ?? (mask && seuil !== null && isHidden(mask.lines[i]) ? maskReason(mask.lines[i], seuil) : null);
-    return reason ? { ...r, kind: "nd", halfText: "n.d.", rateText: "n.d.", reason, masked: reason } : { ...r, masked: null };
+    const countMasked = settingReason ?? (seuil === null ? null : typeCountMask(sizes, r.type, r.count, seuil));
+    const inWindowMasked = reason ?? (r.kind === "nd" ? SEUIL_NON_VERIFIABLE : null) ?? (countMasked !== null && r.inWindow > 0 ? countMasked : null);
+    return reason ? { ...r, kind: "nd", halfText: "n.d.", rateText: "n.d.", reason, masked: reason, countMasked, inWindowMasked } : { ...r, masked: null, countMasked, inWindowMasked };
   });
 }
 
-// Nombre d'absences par motif de toute la lecture (bloc « Motifs de la lecture » de la tuile) : masquage principal seulement (aucun
-// total publié), en personnes distinctes des contrats des absences. null : nombre affiché ; sinon la raison du n.d.
+// Nombre d'absences par motif de toute la lecture (bloc « Motifs de la lecture » de la tuile, colonne « Absences de la lecture » du
+// détail par motif) : masquage principal seulement (aucun total publié), en personnes distinctes des contrats des absences ; il ne
+// dépend d'aucune fenêtre. null : nombre affiché ; sinon la raison du n.d.
 export function typeCountMask(sizes: Readonly<Record<string, PersonsOfContracts>>, type: string, count: number, seuil: number): string | null {
   const g = sizes[type] ?? { persons: [], unlinked: 0 };
   const [st] = maskGroups([groupInput(g, seuil, count)], seuil, false);

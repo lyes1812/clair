@@ -7,6 +7,7 @@ import {
   congeSize,
   congesPris,
   motifInput,
+  motifPublished,
   motifWindowMask,
   motifWindowOf,
   publicMonth,
@@ -17,6 +18,7 @@ import {
   type CongeCell,
   type CongesAVenir,
   type CongesPris,
+  type MotifPublished,
   type MotifWindow,
 } from "@/lib/croisee/conges";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
@@ -50,14 +52,16 @@ import { deltaView, kpiRefusal, nd as ndTile, rateTile, windowOf, type TileValue
 // illisible : blocs n.d. avec le lien vers Paramètres › Confidentialité) : une cellule par motif qui décrit de 1 à (seuil − 1)
 // personnes distinctes est masquée, dans le tableau par motif, les demi-journées prises par motif et par mois et les absences posées à
 // venir. Exception : le seul motif retenu présent dans la lecture n'est pas masqué (sa ligne égale
-// la tuile Absentéisme, déjà publiée dans KPI RH). Masquage secondaire (fonction partagée maskRelations) dans chaque relation publiée :
-// mois d'une ligne et son total ; motifs retenus d'un mois ou de la période et la tuile ; autres motifs de la période et (tous motifs −
-// tuile) : l'ensemble masqué de chaque relation compte au moins « seuil » personnes distinctes, aucune valeur masquée ne se retrouve
-// par différence. Quand les autres motifs ne peuvent pas se protéger entre eux (un seul motif non retenu sous le seuil, par exemple),
-// la ligne « tous motifs » de la période (ou de N-1) est masquée, avec la même raison. Les cartes et le tableau mensuel (entreprise
-// entière, mêmes valeurs que KPI RH) ne sont pas masqués. Le statut d'une cellule par motif (mois et total d'une fenêtre) est celui de
-// motifWindowMask (src/lib/croisee/conges.ts), la fonction que KPI RH appelle pour le détail de l'absentéisme : la période et N-1 sont
-// chacune une fenêtre avec ses propres mois, et une même cellule a le même statut sur les deux écrans.
+// la tuile Absentéisme, déjà publiée dans KPI RH). Masquage secondaire (fonction partagée maskRelations) dans chaque relation publiée
+// d'un mois : motifs retenus du mois et l'absentéisme du mois ; autres motifs du mois et (tous motifs du mois − absentéisme du mois) :
+// l'ensemble masqué de chaque relation compte au moins « seuil » personnes distinctes, aucune valeur masquée ne se retrouve par
+// différence. Quand les autres motifs d'un mois ne peuvent pas se protéger entre eux (un seul motif non retenu sous le seuil, par
+// exemple), le taux tous motifs de ce mois est masqué, et avec lui la ligne « tous motifs » de toute période (ou N-1) qui le contient.
+// Les cartes et le tableau mensuel (entreprise entière, mêmes valeurs que KPI RH) ne sont pas masqués. Le statut d'une cellule par
+// motif est celui de motifWindowMask (src/lib/croisee/conges.ts), la fonction que KPI RH appelle pour le détail de l'absentéisme
+// (période et N-1) : le statut d'un mois se calcule sur la seule colonne de son mois (motifs retenus → absentéisme du mois ; autres
+// motifs → taux tous motifs du mois), le total d'une période, de N-1 et le taux tous motifs se déduisent de leurs mois (n.d. dès qu'un
+// mois est masqué). Une même cellule a donc le même statut sur les deux écrans, quelle que soit la période choisie.
 //
 // Aucun identifiant : les raisons du moteur qui nomment une absence ou un contrat sont remplacées à la lecture (conges.ts), et un
 // dernier filtre (publicText) passe sur tout le modèle.
@@ -86,6 +90,9 @@ export type AbsencesData = {
   rolling: { from: string; to: string; prevFrom: string; prevTo: string; current: RateK; previous: RateK; months: RateK[] };
   motifs: { current: MotifsK; previous: MotifsK }; // absenceByMotif, période et N-1
   conges: { current: CongesPris; previous: CongesPris };
+  // Ce que l'application publie de la période et de N-1, mois par mois (motifPublished, la fonction de KPI RH) : absentéisme de chaque
+  // mois, taux tous motifs de chaque mois et de la fenêtre. Relations des colonnes de mois du masquage par motif.
+  published: { current: MotifPublished; previous: MotifPublished };
   aVenir: CongesAVenir;
 };
 
@@ -243,10 +250,10 @@ const maskCellOf = congeMaskCell;
 
 // Grille « pris par motif » de la période et de N-1 : pour chaque fenêtre, chaque motif, ses mois et son total (colonnes du tableau par
 // motif et des demi-journées prises). Le statut de chaque cellule est celui de motifWindowMask (src/lib/croisee/conges.ts), la fonction
-// que KPI RH appelle sur la fenêtre de son détail : mêmes cellules (mois et total de la fenêtre), mêmes relations (mois d'un motif →
-// son total ; motifs retenus d'un mois → absentéisme du mois ; motifs retenus de la fenêtre → tuile ; autres motifs → taux tous motifs
-// − tuile), même départage des égalités. La colonne N-1 est donc celle de la fenêtre N-1 avec ses propres mois, qu'elle soit lue ici ou
-// dans le détail N-1 de KPI RH.
+// que KPI RH appelle sur la fenêtre de son détail : un mois a le statut de la seule colonne de son mois (motifs retenus → absentéisme
+// du mois ; autres motifs → taux tous motifs du mois − absentéisme du mois ; ordre canonique des motifs), le même pour toute période
+// qui le contient ; le total d'une fenêtre et le taux tous motifs se déduisent de leurs mois (windowStatus). La colonne N-1 est donc
+// déduite des mois N-1, qu'elle soit lue ici ou dans le détail N-1 de KPI RH.
 export type CongesGrid = { current: MotifWindow; previous: MotifWindow };
 // allCur, allPrev : statut du taux tous motifs de la période et de N-1 (« secondary » : masqué pour protéger un autre motif).
 export type CongesGridMask = { months: MaskStatus[][]; cur: MaskStatus[]; prev: MaskStatus[]; allCur: MaskStatus; allPrev: MaskStatus };
@@ -424,23 +431,20 @@ function buildChapter(input: AbsencesInput): AbsencesModel {
   // demi-journées prises : une valeur masquée l'est partout.
   const grid = (() => {
     if (seuil === null || cc.lines.length === 0) return null;
-    // Ce que l'application publie de chaque fenêtre (mêmes résultats du moteur que KPI RH, motifWindow) : absentéisme de chaque mois
-    // (tableau mensuel, colonnes N et N-1), tuile Absentéisme de la fenêtre, taux tous motifs de la fenêtre.
-    const rowOf = new Map(d.rows.map((x) => [x.month, x.absenteeism]));
-    const prevRowOf = new Map(d.rows.map((x) => [x.previous.month, x.previous.absenteeism]));
+    // Ce que l'application publie de chaque fenêtre : d.published (motifPublished, mêmes résultats du moteur que KPI RH).
     const prevLines = new Map(d.conges.previous.lines.map((l) => [l.type, l]));
     const prevOf = new Map(d.conges.previous.lines.map((l) => [l.type, l.total]));
     const mask = congesMask(
       {
-        current: motifWindowOf(cc, { months: months.map((m) => (rowOf.get(m)?.kind ?? "nd") !== "nd"), tile: cur.kind !== "nd", all: mc.all.kind !== "nd" }),
+        current: motifWindowOf(cc, d.published.current),
         // N-1 : les lignes de la période (mêmes motifs de la lecture), avec leurs mois et leur total N-1 ; un motif sans ligne N-1 n'est
         // pas dénombré.
         previous: {
           lines: cc.lines.map((l) => {
             const p = prevLines.get(l.type);
-            return { chosen: l.chosen, months: prevMonths.map((_, j) => p?.months[j]), total: p?.total };
+            return { type: l.type, chosen: l.chosen, months: prevMonths.map((_, j) => p?.months[j]), total: p?.total };
           }),
-          published: { months: prevMonths.map((m) => (prevRowOf.get(m)?.kind ?? "nd") !== "nd"), tile: prev.kind !== "nd", all: mp.all.kind !== "nd" },
+          published: d.published.previous,
         },
       },
       seuil,
@@ -586,7 +590,7 @@ function prevuItems(input: AbsencesInput): PrevuItem[] {
 function limitsOf(d: AbsencesData | null): string[] {
   return [
     "Absentéisme et jours théoriques : entreprise entière, non soumis au seuil de confidentialité (mêmes valeurs que KPI RH).",
-    "Seuil de confidentialité : motifs et absences posées, avec masquage secondaire ; un motif retenu seul n'est pas masqué (il égale la tuile Absentéisme) ; le taux tous motifs est masqué quand il donnerait par différence un motif masqué.",
+    "Seuil de confidentialité : motifs et absences posées, avec masquage secondaire mois par mois ; une période est n.d. dès qu'un de ses mois est masqué ; un motif retenu seul n'est pas masqué (il égale la tuile Absentéisme) ; le taux tous motifs est masqué quand il donnerait par différence un motif masqué.",
     "Motifs tels que la source les nomme : aucun motif n'est classé en congé payé, RTT ou repos.",
     "Une demi-journée couverte par deux motifs compte dans chacun : la somme des motifs (et une barre empilée) peut dépasser le taux tous motifs.",
     ...(d?.source === "payfit" ? ["Absences posées et demandes en attente : statut lu à la date de la lecture PayFit, jours des mois lus seulement."] : []),
@@ -662,6 +666,7 @@ export async function loadAbsencesInput(ctx: CroiseeContext): Promise<AbsencesIn
     },
     motifs: { current: motifs(dash.motifs ?? absenceByMotif(input, w)), previous: motifs(absenceByMotif(input, pw)) },
     conges: { current: congesPris(input, w), previous: congesPris(input, pw) },
+    published: { current: motifPublished(input, w), previous: motifPublished(input, pw) },
     aVenir: after ? congesAVenir(input, after) : { kind: "nd", reason: "aucun mois clos dans la source retenue" },
   };
   return { ...base, nd: null, data };

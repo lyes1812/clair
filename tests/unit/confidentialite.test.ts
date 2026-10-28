@@ -265,12 +265,18 @@ describe("module partagé : ré-exports et pureté à l'import", () => {
   it("aucune importation de valeur hors du dossier et de structure.ts : les chapitres et les exports peuvent l'importer sans base", () => {
     const dir = "src/lib/confidentialite";
     const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
-    // columns.ts : colonne canonique d'une répartition (ordre des groupes, stocks de fin de mois, fenêtres) ; flows.ts : partitions des
-    // entrées et sorties d'un mois. Tous deux purs (moteur de structure.ts et groupes de groups.ts seulement).
-    expect(files.sort()).toEqual(["columns.ts", "flows.ts", "groups.ts", "index.ts", "persons.ts", "setting.ts"]);
+    // columns.ts : colonne canonique d'une répartition (ordre des groupes, stocks de fin de mois, fenêtres) ; flows.ts : colonne des
+    // entrées et sorties d'un mois. Tous deux purs (moteur de structure.ts et groupes de groups.ts seulement). splits.ts (lot 12) : groupes
+    // des répartitions par nature et par établissement, partagés par les Effectifs mensuels, la croisée 02 et les filtres de KPI RH.
+    expect(files.sort()).toEqual(["columns.ts", "flows.ts", "groups.ts", "index.ts", "persons.ts", "setting.ts", "splits.ts"]);
     // groups.ts forme les groupes du journal de paie : il lit les moteurs purs de la paie (monthPayroll, grille de comptes) et la clé
-    // d'embauche du moteur de projection, tous sans base ; aucun autre module n'est admis.
-    const pure: Record<string, RegExp> = { "groups.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/payroll\/(engine|grid)$|@\/lib\/budget\/engine$)/ };
+    // d'embauche du moteur de projection, tous sans base. splits.ts forme ceux de l'effectif et des mouvements : il lit le moteur pur des
+    // effectifs (headcountAt, celui que les filtres de KPI RH appliquent) et les libellés des natures (contractNatureLabel), sans base.
+    // Aucun autre module n'est admis.
+    const pure: Record<string, RegExp> = {
+      "groups.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/payroll\/(engine|grid)$|@\/lib\/budget\/engine$)/,
+      "splits.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/rh\/headcount$|@\/lib\/dsn\/labels$)/,
+    };
     for (const f of files) {
       const src = readFileSync(`${dir}/${f}`, "utf8");
       for (const m of src.matchAll(/^(?:import|export) (?!type )[^;]*from "([^"]+)";/gm)) expect(m[1], `${f} : ${m[1]}`).toMatch(pure[f] ?? /^(\.\/|@\/lib\/croisee\/structure$)/);

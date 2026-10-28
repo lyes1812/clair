@@ -75,9 +75,10 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
   // Seuil de confidentialité de l'espace (règle de toute l'application, sans valeur par défaut) et lien contrat → personne du
   // référentiel Collaborateurs. Sous un filtre de service, les chiffres du service (cascade, contributions de masse, pont) décrivent
   // le service retenu sur chaque version : la garde est la garde unique de l'application (ecartServiceGuard : lignes par service du
-  // journal masquées par le moteur, masquage secondaire compris, comme la Synthèse de la Masse salariale et l'Écart budgétaire ;
-  // composition projetée d'un scénario, embauches prévues exemptes) ; gardé, tout le bloc est n.d. Sans filtre, seuls les paliers de
-  // la cascade sont masqués ; les totaux et le pont de toute l'entreprise ne le sont jamais.
+  // journal masquées par le moteur, masquage secondaire compris, comme la Synthèse de la Masse salariale et l'Écart budgétaire ; mois
+  // projetés d'un scénario par les colonnes du mois, maskProjectedServices : une embauche prévue y est affichée sans jamais protéger
+  // personne et masquée avec toute la colonne quand celle-ci ne peut pas être protégée) ; gardé, tout le bloc est n.d. Sans filtre,
+  // seuls les paliers de la cascade sont masqués ; les totaux et le pont de toute l'entreprise ne le sont jamais.
   const setting = await getConfidentialite(workspace.id);
   const conf = confidentialiteOf(setting);
   const kpiData = loaded.ctx.kpi.input?.data ?? null;

@@ -4,6 +4,7 @@ import { getScenario, KIND_LABELS, listBudgets, listScenarios, type ScenarioFull
 import { budgetVersion, ndVersion, nd, reelVersion, scenarioVersion, val, type ServiceFilter, type Version } from "@/lib/budget/versions";
 import type { ZoomSource } from "@/lib/budget/zoom";
 import { flowsOf, type MonthFlow } from "@/lib/budget/flows";
+import { projectedMasseByService } from "@/lib/budget/monthly";
 import type { ProjectedMonth } from "@/lib/budget/types";
 import { confidentialiteReason, confidentialiteSettingReason, isHidden, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
 import { columnStatus, maskColumn, stockColumn } from "@/lib/confidentialite/columns";
@@ -156,7 +157,8 @@ export async function loadVersions(slug: string, workspaceId: string, sp: Search
 // l'ordre canonique des services (maskColumn, stockColumn de src/lib/confidentialite/columns.ts : les mêmes statuts que tout autre
 // écran qui publie la même colonne). Cellules de chaque service du mois (projectedCell : contrats réels reliés à leur personne par le
 // référentiel ; une embauche prévue ne décrit personne et ne protège jamais ; valeur absolue, qui ne sert qu'à l'ordre du masquage) :
-// - masse (et ses rubriques) : contrats et embauches qui portent une contribution du service (service de la contribution) ;
+// - masse (et ses rubriques) : contrats et embauches qui portent une contribution du service, groupes de projectedMasseByService
+//   (service porté par la contribution, le même découpage que KPI RH › Effectifs mensuels, masse × service) ;
 // - effectif et ETP : salariés et embauches comptés présents en fin de mois dans le service (stockColumn, valeur = l'effectif) ;
 // - entrées : entrants du mois dans le service, valeur = leur nombre (colonne absente quand les mouvements du mois sont n.d.).
 // Rend, pour chaque service présent ce mois-là (null : non ventilé), son statut dans chaque colonne, dans cet ordre. Le statut d'un
@@ -169,10 +171,10 @@ export function maskProjectedServices(pm: Extract<ProjectedMonth, { kind: "value
     if (!g) groups.set(service, (g = { masse: 0, contributors: new Set(), present: [], entrants: [] }));
     return g;
   };
-  for (const c of pm.contributions) {
-    const g = at(c.service);
-    g.masse += c.cost;
-    if (c.contractKey !== null) g.contributors.add(c.contractKey);
+  for (const [service, m] of projectedMasseByService(pm)) {
+    const g = at(service);
+    g.masse = m.cost;
+    g.contributors = m.keys;
   }
   const people = pm.people ?? {};
   for (const [key, p] of Object.entries(people)) at(p.service).present.push(key);

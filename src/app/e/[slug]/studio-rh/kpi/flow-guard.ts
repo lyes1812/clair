@@ -1,30 +1,30 @@
 import { confidentialiteReason, isHidden, maskReason, type MaskStatus } from "@/lib/confidentialite";
-import { countedMovements, flowCounts, flowPartitionStatus, type FlowCount } from "@/lib/confidentialite/flows";
+import { columnStatus } from "@/lib/confidentialite/columns";
+import { flowColumn, flowCounts } from "@/lib/confidentialite/flows";
+import { movementItems, splitLabel, type SplitAxis } from "@/lib/confidentialite/splits";
 import type { Count } from "@/lib/rh/headcount";
 import { delta } from "@/lib/rh/kpi/compare";
 import { monthMovements } from "@/lib/rh/kpi/turnover";
 import { kpiNd, type KpiDashboard, type KpiInput, type KpiScope, type MovementTotal, type Turnover } from "@/lib/rh/kpi/types";
-import type { EventDraft } from "@/lib/rh/referential/types";
 
 // Garde des flux du périmètre (KPI RH, filtres Établissement et Nature). Sous un filtre, les entrées et les sorties du périmètre, mois
 // par mois, sont une cellule d'une répartition dont le total est publié : la nature retenue est l'une des cellules « dont <nature> » des
-// entrées (ou des sorties) du mois, publiées par la croisée 02 (journal des mouvements, natureCells) ; l'établissement retenu est l'une
-// des cellules de la répartition par établissement des mouvements de l'entreprise (total publié sans filtre). Le flux du périmètre est
-// n.d. un mois donné, avec la raison du seuil (écran et export), dès que sa cellule est masquée, principal ou secondaire : même
-// partition, mêmes mouvements comptés (monthMovements de l'entrée sans le filtre examiné), même fonction de statut que la croisée 02
-// (flowPartitionStatus, src/lib/confidentialite/flows.ts). Les deux filtres ensemble : nature dans l'établissement retenu, établissement
-// dans la nature retenue (même découpage que la garde des effectifs, scopeGuard). Total du mois n.d. ou en borne basse : la répartition
-// n'est pas publiée, masquage principal seul.
+// entrées (ou des sorties) du mois, publiées par la croisée 02 (journal des mouvements, natureCells) et par KPI RH › Effectifs mensuels
+// (axe « Contrat (nature) ») ; l'établissement retenu est l'une des cellules de la répartition par établissement des mouvements de
+// l'entreprise (Effectifs mensuels, axe « Établissement »). Le flux du périmètre est n.d. un mois donné, avec la raison du seuil (écran
+// et export), dès que sa cellule est masquée, principal ou secondaire : mêmes groupes (splits.ts : mouvements comptés de l'entrée sans le
+// filtre examiné, rangés par la nature ou l'établissement du mouvement, vus par leur personne), même colonne canonique que les deux
+// autres écrans (flowColumn : ordre des libellés, groupe sans mouvement hors de la relation, valeur d'ordre = nombre de mouvements).
+// Les deux filtres ensemble : nature dans l'établissement retenu, établissement dans la nature retenue (même découpage que la garde des
+// effectifs, scopeGuard). Total du mois n.d. ou en borne basse : la répartition n'est pas publiée, masquage principal seul.
 // Les sommes publiées qui contiennent un mois masqué ne sont pas affichées non plus (raison du seuil) : le total de la période (ligne
 // « Période »), et le turnover de la période et de N-1 dès qu'il lit un flux masqué (sorties ; entrées aussi pour la formule « moyenne
-// des entrées et des sorties »). Les autres mois restent affichés : ils sont publiés tels quels dans la croisée 02, ils ne peuvent pas
-// servir de protection secondaire.
+// des entrées et des sorties »). Les autres mois restent affichés : leurs cellules ont le même statut sur les trois écrans.
 export type FlowKind = "entries" | "exits";
 // months : mois de la période et de N-1 → raison du n.d. de chaque flux masqué (absent : affiché).
 export type FlowGuard = { seuil: number; months: Map<string, Partial<Record<FlowKind, string>>> };
 
-const REST = "\u0000reste"; // mouvements d'aucune valeur de la liste (sans établissement, par exemple) : jamais un code de la source
-type Partition = { values: readonly string[]; selected: string; input: KpiInput; key: (e: EventDraft) => string | null };
+type Partition = { axis: SplitAxis; values: readonly string[]; selected: string; input: KpiInput };
 
 export function flowGuard(p: { base: KpiInput; scope: KpiScope; months: readonly string[]; establishments: readonly string[]; natures: readonly string[]; seuil: number }): FlowGuard | null {
   const { scope, seuil } = p;
@@ -32,25 +32,20 @@ export function flowGuard(p: { base: KpiInput; scope: KpiScope; months: readonly
   if (etab === undefined && !scope.nature) return null;
   // Entrée de chaque partition : le périmètre élargi (sans le filtre examiné), une seule fois (mémo du moteur par entrée).
   const parts: Partition[] = [];
-  if (scope.nature) parts.push({ values: p.natures, selected: scope.nature, input: { ...p.base, scope: { establishments: scope.establishments } }, key: (e) => e.nature });
-  if (etab !== undefined) parts.push({ values: p.establishments, selected: etab, input: { ...p.base, scope: { nature: scope.nature } }, key: (e) => e.establishmentId });
+  if (scope.nature) parts.push({ axis: "nature", values: p.natures, selected: scope.nature, input: { ...p.base, scope: { establishments: scope.establishments } } });
+  if (etab !== undefined) parts.push({ axis: "etablissement", values: p.establishments, selected: etab, input: { ...p.base, scope: { nature: scope.nature } } });
   const scoped: KpiInput = { ...p.base, scope };
   const status = (part: Partition, m: string, kind: "entry" | "exit"): MaskStatus => {
-    const at = part.values.indexOf(part.selected);
     // Valeur inconnue des listes de l'espace : le périmètre seul, masquage principal (jamais une valeur affichée sans contrôle).
-    if (at < 0) {
-      const own = flowCounts(countedMovements(monthMovements(scoped, m), kind).map((x) => ({ group: "p", contract: x.row.contract.contractKey, person: x.row.contract.personKey })));
-      return flowPartitionStatus(own, ["p"], seuil, false)[0];
+    if (!part.values.includes(part.selected)) {
+      const own = flowCounts(movementItems(monthMovements(scoped, m), kind, part.axis).map((x) => ({ ...x, group: "périmètre" })));
+      return flowColumn(own, seuil, false).get("périmètre") ?? "shown";
     }
     const mv = monthMovements(part.input, m);
     const total: Count = kind === "entry" ? mv.entries : mv.exits;
-    const items = countedMovements(mv, kind).map((x) => {
-      const v = part.key(x.row.event);
-      return { group: v !== null && part.values.includes(v) ? v : REST, contract: x.row.contract.contractKey, person: x.row.contract.personKey };
-    });
-    const counts = flowCounts(items);
-    const rest: FlowCount | null = counts[REST] ?? null;
-    return flowPartitionStatus(counts, part.values, seuil, total.kind === "exact", rest)[at];
+    const counts = flowCounts(movementItems(mv, kind, part.axis));
+    const label = splitLabel(part.axis, part.selected);
+    return columnStatus(flowColumn(counts, seuil, total.kind === "exact"), label, counts[label]?.contracts ?? 0);
   };
   const months = new Map<string, Partial<Record<FlowKind, string>>>();
   for (const m of p.months) {

@@ -61,7 +61,7 @@ const MORE: Record<string, string> = {
   zoom:
     "Dans le tableau d'écart, un écart souligné en pointillés et suivi d'un chevron (›) ouvre ce détail. Il n'existe que pour la masse salariale chargée, le total brut, la rémunération de base, les primes, les indemnités et les charges patronales.",
   cascade:
-    "Chaque palier décrit les personnes distinctes de ses contrats : un palier de 1 à (seuil de confidentialité − 1) personnes est n.d., avec masquage secondaire puisque l'écart total est publié ; un palier porté seulement par des contrats non reliés au référentiel (embauche prévue) est non vérifiable. Un palier n.d. empêche de tracer la cascade ; départ, arrivée, écart total et résiduel restent affichés. Sans seuil défini, tous les paliers sont n.d., avec un lien vers les Paramètres (voir « Seuil de confidentialité »).",
+    "Chaque palier décrit les personnes distinctes de ses contrats : un palier de 1 à (seuil de confidentialité − 1) personnes est n.d., avec masquage secondaire puisque l'écart total est publié ; un contrat sans personne rattachée est non relié et ne protège jamais (un palier qui en compte sans atteindre le seuil en personnes reliées est non vérifiable) ; un palier porté seulement par des embauches prévues est affiché, ne protège personne et n'est masqué qu'avec toute la cascade. Un palier n.d. empêche de tracer la cascade ; départ, arrivée, écart total et résiduel restent affichés. Sans seuil défini, tous les paliers sont n.d., avec un lien vers les Paramètres (voir « Seuil de confidentialité »).",
 };
 
 // Formules d'une ligne, ajoutées aux définitions existantes.
@@ -175,7 +175,7 @@ const MOVED: GlossaryEntry[] = [
     definition: [
       "Le pont décompose l'écart de masse salariale chargée entre deux versions en deux effets : l'effet volume, qui mesure ce que coûte l'écart d'ETP-mois au coût par ETP-mois de la version 1, et l'effet coût moyen, qui est le reste. L'effet volume est arrondi au centime : la somme des deux effets égale exactement l'écart. L'écart d'ETP-mois est la différence des cumuls d'ETP de fin de mois de la période.",
       "L'effet de structure (mélange de statuts et de rémunérations) n'est pas calculé : il est compris dans l'effet coût moyen.",
-      "Sans filtre de service, le pont porte sur toute l'entreprise et n'est jamais masqué. Sous un filtre, les chiffres du service (pont, cascade d'ETP, contributions de masse) sont n.d. dès que le service compte de 1 à (seuil de confidentialité − 1) personnes sur l'une des deux versions, ou n'est pas dénombré ; sans seuil défini, ils sont n.d. avec un lien vers les Paramètres (voir « Seuil de confidentialité »).",
+      "Sans filtre de service, le pont porte sur toute l'entreprise et n'est jamais masqué. Sous un filtre, les chiffres du service (pont, cascade d'ETP, contributions de masse) sont n.d. dès qu'un de ses mois est masqué, en principal ou en secondaire. Un mois réel est jugé dans la colonne des masses des services du mois ; un mois projeté d'un scénario, dans trois colonnes de services dont le total du scénario est publié sans filtre : la masse, l'effectif et l'ETP de fin de mois (masqués ensemble), les entrées. Le service est aussi n.d. s'il n'est pas dénombré ; sans seuil défini, ils sont n.d. avec un lien vers les Paramètres (voir « Seuil de confidentialité »).",
     ].join("\n\n"),
     formula: "effet volume = (ETP-mois v2 − ETP-mois v1) × coût par ETP-mois v1 ; effet coût moyen = écart − effet volume",
   },

@@ -245,12 +245,15 @@ describe("détail de l'absentéisme : tableau par motif et taux tous motifs, à 
     return {
       lines: m.lines.map((l) => {
         const c: CongeCell = l.kind === "nd" ? { kind: "nd", reason: l.nd.reason } : { kind: l.kind, half: l.half, persons: l.persons?.length ?? 0, unlinked: l.unlinked ?? 0, who: (l.persons ?? []).map((p) => ids.indexOf(p)) };
-        return { chosen: l.chosen, months: [c], total: c };
+        return { type: l.type, chosen: l.chosen, months: [c], total: c };
       }),
-      published: { months: [true], tile: true, all: m.all.kind !== "nd" },
+      published: { months: [true], allMonths: [m.all.kind !== "nd"], all: m.all.kind !== "nd" },
     };
   };
-  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") => render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m, cells: m && cellsOf(m), slug: slug ?? undefined, confidentialite: SEUIL_1 }));
+  // Personnes de chaque motif dans toute la lecture (absenceTypePersons, nombres « Absences de la lecture ») : celles de sa ligne ; le
+  // motif n.d. (contrat inconnu du référentiel) n'a qu'un contrat non relié.
+  const sizesOf = (m: AbsenceMotifs) => Object.fromEntries(m.lines.map((l) => [l.type, { persons: l.persons ?? [], unlinked: l.kind === "nd" ? 1 : (l.unlinked ?? 0) }]));
+  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") => render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m, cells: m && cellsOf(m), typeSizes: m && sizesOf(m), slug: slug ?? undefined, confidentialite: SEUIL_1 }));
 
   it("tous les motifs présents : libellé et code, nombres d'absences, retenu oui / non, demi-journées, taux", () => {
     const html = detail(motifs);

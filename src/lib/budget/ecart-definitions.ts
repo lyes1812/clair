@@ -16,7 +16,7 @@ export const ECART_DEFINITIONS: { id: string; title: string; text: string }[] = 
     id: "effectifs",
     title: "Effectifs et ETP de l'écart",
     text:
-      "ETP : moyenne des ETP de fin de mois sur les mois de la période (la somme de douze ETP mensuels n'est pas un effectif annuel). Inscrit fin de période : effectif compté le dernier jour du dernier mois. Entrées et sorties : sommes sur la période des salariés comptés présents en fin de mois et non présents le mois précédent, ou l'inverse. Pour les mois réalisés, ces valeurs viennent du référentiel Collaborateurs courant (quotités PayFit à la date de lecture, non historisées) ; elles ne sont pas filtrables par service, sauf l'ETP.",
+      "ETP : moyenne des ETP de fin de mois sur les mois de la période (la somme de douze ETP mensuels n'est pas un effectif annuel). Inscrit fin de période : effectif compté le dernier jour du dernier mois. Entrées et sorties : sommes sur la période des salariés comptés présents en fin de mois et non présents le mois précédent, ou l'inverse. Pour les mois réalisés, ces valeurs viennent du référentiel Collaborateurs courant (quotités PayFit à la date de lecture, non historisées) ; elles ne sont pas filtrables par service, sauf l'ETP. Les mois repris d'un scénario parent ne conservent que les totaux de toute l'entreprise : sous un filtre de service, leur masse, leur ETP et leur effectif sont n.d. (non filtrables par service). Pour les mois projetés par le scénario, la masse d'un service est celle des coûts que la projection lui attribue (après un changement d'affectation, le nouveau service), et l'effectif et l'ETP ceux des salariés comptés présents dans le service en fin de mois.",
   },
   {
     id: "ecart",

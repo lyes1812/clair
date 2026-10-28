@@ -147,8 +147,12 @@ export function scenarioVersion(
       else {
         const why = "projeté par le scénario parent : ventilation par rubrique non conservée";
         const r = filtered ? nd("projeté par le scénario parent : non filtrable par service") : nd(why);
+        // Le scénario parent n'a conservé que les totaux de toute l'entreprise (coût, ETP, effectif), sans service : sous le filtre
+        // Service, masse, ETP et effectif sont n.d. (non filtrables), jamais les chiffres de toute l'entreprise sous le nom du service.
         months.set(m, {
-          month: m, layer: "projete-parent", source: src, etp4: pr.etp4 === null ? nd(pr.etpNd ?? "ETP n.d.") : val(pr.etp4), headcount: val(pr.headcount), entrees: nd(why), sorties: nd(why), people: { kind: "nd", reason: "projeté par le scénario parent : composition non conservée" },
+          month: m, layer: "projete-parent", source: src,
+          etp4: filtered ? r : pr.etp4 === null ? nd(pr.etpNd ?? "ETP n.d.") : val(pr.etp4), headcount: filtered ? r : val(pr.headcount),
+          entrees: nd(why), sorties: nd(why), people: { kind: "nd", reason: "projeté par le scénario parent : composition non conservée" },
           masse: filtered ? r : val(pr.cost), brut: pr.brut === null || pr.brut === undefined || filtered ? r : val(pr.brut), remun: r, primes: r, indemnites: r, autres: NA,
           charges: pr.charges === null || pr.charges === undefined || filtered ? r : val(pr.charges), nonventile: NA, free: {},
         });

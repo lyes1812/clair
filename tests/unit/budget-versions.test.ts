@@ -269,3 +269,39 @@ describe("garde du filtre Service : mois projetés d'un scénario, masquage seco
     expect(s.guard("S3", 5)).toBeNull();
   });
 });
+
+// --- Mois projetés par le scénario PARENT (base dérivée) sous le filtre Service (revue du lot 12) : le parent n'a conservé que les
+// totaux de toute l'entreprise (coût, inscrits, ETP), sans service. Avant, sous le filtre, l'Écart budgétaire et l'Analyse des écarts
+// affichaient l'ETP et l'effectif de toute l'entreprise sous le nom du service retenu. Base dérivée fictive : réel figé janvier → juin
+// 2026, parent juillet → septembre (chaque mois 10 650,00 €, 3 inscrits, 2,50 ETP), projection propre octobre → décembre (A : TECH,
+// B : SALES, comme ci-dessus).
+describe("mois projetés par le scénario parent sous le filtre Service : n.d., non filtrables", () => {
+  const parent = (month: string) => ({ month, kind: "value" as const, cost: 1065000, brut: 760000, charges: 305000, headcount: 3, etp4: 25000, etpNd: null, source: "Scénario parent fictif" });
+  const derived: BaseSnapshot = { ...base, actuals: base.actuals.slice(0, 6), prior: [parent("2026-07"), parent("2026-08"), parent("2026-09")] };
+  const version = (filter: ServiceFilter) => scenarioVersion("s", "Révisé", "2026", derived, project(derived, "2026-10", "2026-12", [], conv), null, null, filter);
+  const WHY = "projeté par le scénario parent : non filtrable par service";
+
+  it("sans filtre : totaux du parent (10 650,00 €, 3 inscrits, 2,50 ETP) ; filtre TECH ou non ventilé : masse, ETP et inscrits n.d. avec la raison, jamais ceux de toute l'entreprise", () => {
+    expect(version(null).months.get("2026-07")).toMatchObject({ layer: "projete-parent", masse: val(1065000), etp4: val(25000), headcount: val(3) });
+    for (const filter of [{ value: "TECH" }, { value: null }]) {
+      const jul = version(filter).months.get("2026-07")!;
+      expect(jul.layer).toBe("projete-parent");
+      expect([jul.masse, jul.etp4, jul.headcount]).toEqual([nd(WHY), nd(WHY), nd(WHY)]);
+    }
+    // Mois projetés par le scénario lui-même : filtrables (TECH = A seul : 4 200 €, 1 inscrit, 1,00 ETP).
+    expect(version({ value: "TECH" }).months.get("2026-10")).toMatchObject({ layer: "projete", masse: val(420000), headcount: val(1), etp4: val(10000) });
+  });
+
+  it("agrégats de l'Écart budgétaire (écran et export, mêmes cellules) : ETP moyen et inscrit fin de période de juillet → septembre n.d. sous le filtre ; sans filtre 2,50 ETP et 3", () => {
+    const q3 = monthsOfYear("2026", "07", "09");
+    const reason = ["2026-07", "2026-08", "2026-09"].map((m) => `${m} : ${WHY}`).join(" ; ");
+    const tech = version({ value: "TECH" });
+    expect(aggregate(tech, q3, "etp")).toEqual({ kind: "nd", reason });
+    expect(aggregate(tech, q3, "headcount")).toEqual({ kind: "nd", reason });
+    // Sans filtre : ETP moyen = 3 × 2,50 ÷ 3 = 2,50 (num 75 000, den 3 × 10 000) ; inscrits fin septembre = 3.
+    expect(aggregate(version(null), q3, "etp")).toEqual({ kind: "value", num: 75000, den: 30000 });
+    expect(aggregate(version(null), q3, "headcount")).toEqual({ kind: "value", num: 3, den: 1 });
+    // Écart d'ETP entre la version filtrée et une autre : n.d. avec la même raison (jamais un écart calculé sur toute l'entreprise).
+    expect(diff(aggregate(tech, q3, "etp"), { kind: "value", num: 30000, den: 30000 })).toEqual({ kind: "nd", reason });
+  });
+});

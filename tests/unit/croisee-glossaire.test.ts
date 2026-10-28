@@ -62,6 +62,12 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     const conf = def(T.confidentialite);
     expect(conf).toContain("une personne qui a deux contrats dans un même groupe y compte une fois");
     expect(def(T.repartitionEffectifs)).toContain("une personne qui a deux contrats simultanés dans le groupe y compte une fois");
+    // Le texte dit la règle du code (non relié), plus l'ancienne (« compte pour une personne »), au chapitre 02, à la répartition et à
+    // la structure.
+    for (const text of [conf, def(T.repartitionEffectifs), def(T.structureEffectif)]) {
+      expect(text).toContain("un contrat sans personne rattachée est non relié : il ne protège jamais");
+      expect(text).not.toContain("compte pour une personne");
+    }
     // Personne « p1 » avec deux contrats dans le groupe A : 1 personne ; deux contrats sans personne dans B : 0 personne, 2 contrats non
     // reliés (règle du module partagé : maskSize rend le groupe non dénombré sous le seuil).
     const c = (group: string, contract: string, personKey: string | null) => ({ group, contract, person: personOf({ contractKey: contract, personKey }) });
@@ -87,16 +93,17 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     expect(conf).toContain("la ligne du motif retenu quand c'est le seul motif retenu présent dans la lecture (elle égale alors la tuile Absentéisme)");
     expect(def(T.congesPris)).toContain("Un motif dont toutes les valeurs sont masquées garde sa ligne et son nom.");
     // Un motif, 1 personne, 4 demi-journées en janvier ; seuil 3. Retenu (seul retenu de la lecture) : exempt ; non retenu : masqué.
-    // L'exemption est déduite des lignes par la fonction partagée (motifWindowMask), la même pour KPI RH et la croisée.
+    // L'exemption est déduite des lignes par la fonction partagée (motifWindowMask), la même pour KPI RH et la croisée. Le mois est
+    // masqué dans sa colonne ; la période, déduite de ce mois, est n.d. avec la même raison (statut « secondary » ; avant : « masked »).
     const cell = { kind: "exact" as const, half: 4, persons: 1, unlinked: 0, who: [0] };
     const grid = (chosen: boolean) => ({
-      current: { lines: [{ chosen, months: [cell], total: cell }], published: { months: [true], tile: true, all: true } },
-      previous: { lines: [{ chosen, months: [], total: undefined }], published: { months: [], tile: false, all: false } },
+      current: { lines: [{ type: "test_motif", chosen, months: [cell], total: cell }], published: { months: [true], allMonths: [true], all: true } },
+      previous: { lines: [{ type: "test_motif", chosen, months: [], total: undefined }], published: { months: [], allMonths: [], all: false } },
     });
     const free = congesMask(grid(true), 3);
     expect([free.months[0][0], free.cur[0]]).toEqual(["shown", "shown"]);
     const hidden = congesMask(grid(false), 3);
-    expect([hidden.months[0][0], hidden.cur[0]]).toEqual(["masked", "masked"]);
+    expect([hidden.months[0][0], hidden.cur[0]]).toEqual(["masked", "secondary"]);
   });
 
   it("éléments non récurrents : quand l'un des deux totaux est masqué, l'autre l'est aussi (zéro compris) ; une hypothèse sans contrat n'est pas une personne", () => {

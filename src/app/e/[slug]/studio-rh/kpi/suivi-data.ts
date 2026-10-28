@@ -1,8 +1,9 @@
 import { categoryMonth, categoryOfContract, getCategoryNatures, getContractCategories, type CategoryMonth, type CategoryNatures, type ContractCategories } from "@/lib/budget/categories";
 import { CATEGORY_IDS, CATEGORY_LABELS } from "@/lib/budget/types";
-import { confidentialiteSettingReason, getConfidentialite, isHidden, linkFromReferential, maskGroups, maskReason, personsOfContracts, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type MaskInput, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { confidentialiteSettingReason, getConfidentialite, isHidden, linkFromReferential, maskGroups, maskReason, personsOfContracts, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type MaskStatus, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
 import { groupInput, NO_GROUP } from "@/lib/croisee/confidentialite";
 import { columnStatus, stockColumn, stockGroups, type StockGroup } from "@/lib/confidentialite/columns";
+import { headcountItems, splitLabel, type SplitAxis } from "@/lib/confidentialite/splits";
 import { formatDate, monthEnd } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { coverageAt, gateAt, headcountAt } from "@/lib/rh/headcount";
@@ -128,13 +129,15 @@ export async function loadKpiSuivi(slug: string, sp: Search): Promise<KpiSuivi> 
 // Sous un filtre Établissement ou Nature, tous les chiffres de l'écran (tuiles, tableau mensuel, tableau par catégorie, détails) décrivent
 // un seul groupe de personnes : le périmètre retenu. Comme le service retenu de la Masse salariale (serviceGuard), il est n.d. dans son
 // ensemble dès que, un mois de la période ou de N-1, il compte de 1 à (seuil − 1) personnes distinctes ou n'est pas dénombré, et dès que
-// le seuil n'est pas défini (lien vers les Paramètres). Masquage secondaire : chaque mois, le périmètre est une cellule d'une
-// répartition dont le total est publié (l'effectif de fin de mois de l'entreprise, ou de l'établissement retenu) ; les autres valeurs du
-// même filtre (les autres natures comptées, les autres établissements, le reste sans établissement) forment les autres cellules, et le
-// moteur partagé masque le périmètre quand il protégerait seul une valeur masquée (sinon le filtre révélerait par différence ce que le
-// masquage cache). Rien n'est recalculé : les groupes sont ceux de l'effectif de fin de mois (headcountAt, mêmes contrats que les
-// indicateurs), en personnes reliées par le référentiel. null : aucun filtre, ou périmètre affiché. Les flux du périmètre (entrées et
-// sorties de chaque mois) ont leur propre garde, mois par mois, avec la partition de la croisée 02 : flow-guard.ts.
+// le seuil n'est pas défini (lien vers les Paramètres). Masquage secondaire : chaque mois, le périmètre est une cellule de la répartition
+// de l'effectif de fin de mois par nature (ou par établissement), dont le total est publié (l'effectif de l'entreprise, ou de
+// l'établissement retenu) ; son statut est celui de la colonne canonique des stocks (stockColumn, la passe que partagent KPI RH ›
+// Effectifs mensuels, le Suivi et la croisée 02), formée des mêmes groupes que les Effectifs mensuels (splits.ts, headcountItems : les
+// contrats de l'effectif rangés par la nature ou l'établissement déclaré ce mois-là, en personnes reliées par le référentiel), dans
+// l'ordre canonique de leurs libellés et non dans l'ordre des listes de l'espace ; valeur d'ordre : l'effectif. Le filtre ne révèle donc
+// jamais par différence ce que la grille masque, et inversement. Effectif de l'ensemble n.d. (aucun total publié) ou valeur inconnue des
+// listes de l'espace : le périmètre seul, masquage principal. null : aucun filtre, ou périmètre affiché. Les flux du périmètre (entrées
+// et sorties de chaque mois) ont leur propre garde, mois par mois, avec les mêmes conventions : flow-guard.ts.
 export type ScopeGuard = { cause: "parametre" | "seuil"; reason: string };
 type ScopeGroup = { contracts: string[]; persons: PersonsOfContracts };
 export function scopeGuard(p: { input: KpiInput; months: string[]; establishments: string[]; natures: string[]; confidentialite: ConfidentialiteSetting }): ScopeGuard | null {
@@ -150,32 +153,19 @@ export function scopeGuard(p: { input: KpiInput; months: string[]; establishment
     const h = headcountAt(input.data, monthEnd(m), countedOpts({ ...input, scope: s }));
     return h.kind === "nd" ? null : { contracts: h.contractKeys, persons: personsOfContracts(h.contractKeys, link) };
   };
-  const cell = (g: ScopeGroup | null): MaskInput => (g ? groupInput(g.persons, seuil, g.contracts.length) : { size: null, value: null });
-  // Reste d'une partition : contrats du périmètre élargi qui ne sont dans aucune valeur du filtre (sans établissement, par exemple).
-  const rest = (whole: ScopeGroup | null, parts: (ScopeGroup | null)[]): ScopeGroup | null => {
-    if (!whole) return null;
-    const seen = new Set(parts.flatMap((g) => g?.contracts ?? []));
-    const contracts = whole.contracts.filter((k) => !seen.has(k));
-    return contracts.length ? { contracts, persons: personsOfContracts(contracts, link) } : null;
-  };
-  const partitions: { values: string[]; selected: string; of: (v: string) => KpiScope; whole: KpiScope }[] = [];
-  if (scope.nature) partitions.push({ values: p.natures, selected: scope.nature, of: (v) => ({ establishments: scope.establishments, nature: v }), whole: { establishments: scope.establishments } });
-  if (etab !== undefined) partitions.push({ values: p.establishments, selected: etab, of: (v) => ({ establishments: [v], nature: scope.nature }), whole: { nature: scope.nature } });
+  const partitions: { axis: SplitAxis; values: string[]; selected: string; whole: KpiScope }[] = [];
+  if (scope.nature) partitions.push({ axis: "nature", values: p.natures, selected: scope.nature, whole: { establishments: scope.establishments } });
+  if (etab !== undefined) partitions.push({ axis: "etablissement", values: p.establishments, selected: etab, whole: { nature: scope.nature } });
   for (const m of p.months) {
     const selected = group(scope, m);
     if (!selected) continue; // mois n.d. pour le périmètre : aucun chiffre affiché
     for (const part of partitions) {
-      const at = part.values.indexOf(part.selected);
-      // Valeur inconnue des listes de l'espace : le périmètre seul, masquage principal (jamais une valeur affichée sans contrôle).
-      if (at < 0) {
-        const [st] = maskGroups([cell(selected)], seuil, false);
-        if (isHidden(st)) return { cause: "seuil", reason: maskReason(st, seuil)! };
-        continue;
-      }
-      const groups = part.values.map((v) => group(part.of(v), m));
-      const extra = rest(group(part.whole, m), groups);
-      const st = maskGroups([...groups, ...(extra ? [extra] : [])].map(cell), seuil, true);
-      if (isHidden(st[at])) return { cause: "seuil", reason: maskReason(st[at], seuil)! };
+      const items = part.values.includes(part.selected) ? headcountItems(input.data, monthEnd(m), countedOpts({ ...input, scope: part.whole }), part.axis) : null;
+      const st: MaskStatus =
+        items === null
+          ? maskGroups([groupInput(selected.persons, seuil, selected.contracts.length)], seuil, false)[0]
+          : columnStatus(stockColumn(stockGroups(items), seuil), splitLabel(part.axis, part.selected), selected.contracts.length);
+      if (isHidden(st)) return { cause: "seuil", reason: maskReason(st, seuil)! };
     }
   }
   return null;

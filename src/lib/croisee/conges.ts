@@ -1,4 +1,5 @@
 import { maskSize, personsOfContracts, type PersonsOfContracts } from "@/lib/confidentialite/persons";
+import { canonicalCompare, windowStatus } from "@/lib/confidentialite/columns";
 import { maskRelations, type MaskCell, type MaskRelation, type MaskStatus } from "@/lib/croisee/structure";
 import { addMonths, monthEnd, monthStart, monthsBetween } from "@/lib/dates";
 import { monthRanges } from "@/lib/rh/headcount";
@@ -173,24 +174,31 @@ export function congesPris(input: KpiInput, w: Window): CongesPris {
   return { window: w, lines, emptyReason: null };
 }
 
-// --- Seuil de confidentialité : demi-journées par motif d'une fenêtre (UNE seule fonction pour toute l'application) ----------------
-// La même cellule (demi-journées d'un motif sur une fenêtre) est publiée par KPI RH (détail de l'absentéisme, « Par motif ») et par la
-// croisée 03 (tableau par motif et demi-journées prises : colonne de la période et colonne N-1). Son statut ne dépend pas de l'écran :
-// il est calculé ici, une fois par fenêtre, sur les mêmes cellules (pour chaque motif présent dans la lecture : chaque mois de la
-// fenêtre et le total de la fenêtre), avec les mêmes relations et le même départage des égalités (moteur partagé maskRelations, jamais
-// recodé). Relations dont la somme est publiée :
-//   1. les mois d'un motif → son total de la fenêtre (cellule masquable) ;
-//   2. les motifs retenus d'un mois → l'absentéisme du mois (publié par KPI RH et par la croisée), quand il n'est pas n.d. ;
-//   3. les motifs retenus de la fenêtre → la tuile Absentéisme ; les autres motifs → (taux tous motifs − tuile), le taux tous motifs
-//      étant une cellule onlyAsTotal (masquée seulement quand rien d'autre ne protège un motif masqué) ; sans tuile publiée, tous les
-//      motifs → taux tous motifs ; sans taux tous motifs, les motifs retenus → tuile.
-// Exception : le seul motif retenu présent dans la lecture (sa ligne égale la tuile Absentéisme, déjà publiée) est exempt.
+// --- Seuil de confidentialité : demi-journées par motif (UNE seule fonction pour toute l'application) ---------------------------------
+// La même cellule (demi-journées d'un motif sur un mois ou sur une fenêtre) est publiée par KPI RH (détail de l'absentéisme, « Par
+// motif », période et N-1) et par la croisée 03 (tableau par motif, demi-journées prises, période et N-1, et leurs exports). Son statut
+// ne dépend ni de l'écran ni de la fenêtre choisie (règle canonique de src/lib/confidentialite/columns.ts) : une cellule masquée pour
+// une période et affichée pour une autre se reconstituerait par différence.
+//   1. Mois d'un motif : statut calculé sur la SEULE colonne de son mois (motifMonthMask), formée dans l'ordre canonique des motifs
+//      (canonicalCompare), avec les seules relations du mois dont la somme est publiée : motifs retenus du mois → absentéisme du mois
+//      (tableau mensuel), quand il n'est pas n.d. ; autres motifs du mois → taux tous motifs du mois − absentéisme du mois, le taux tous
+//      motifs du mois étant une cellule onlyAsTotal (publiée par toute fenêtre d'un mois, masquée seulement quand rien d'autre ne protège
+//      un motif masqué) ; sans absentéisme publié, tous les motifs → taux tous motifs du mois ; sans taux tous motifs, rien de plus.
+//   2. Fenêtre (période, N-1, colonne « Par motif » du détail de KPI RH) : total d'un motif et taux tous motifs déduits de leurs mois
+//      (windowStatus), sans relation propre : n.d. dès qu'un de leurs mois est masqué, quelle que soit la fenêtre.
+// Exception : le seul motif retenu présent dans la lecture (sa ligne égale la tuile Absentéisme, déjà publiée) est exempt, mois et total.
 // Taille d'une cellule : congeSize (personnes reliées ; non dénombrée quand des contrats non reliés laissent les personnes reliées sous
-// le seuil, ou pour une borne basse sans demi-journée comptée) ; cellule absente (motif sans ligne) : non dénombrée.
-export type MotifWindowLine = { chosen: boolean; months: readonly (CongeCell | undefined)[]; total: CongeCell | undefined };
-// published.months : l'absentéisme de chaque mois de la fenêtre est publié (non n.d.) ; tile : la tuile Absentéisme de la fenêtre ;
-// all : le taux tous motifs de la fenêtre.
-export type MotifWindow = { lines: readonly MotifWindowLine[]; published: { months: readonly boolean[]; tile: boolean; all: boolean } };
+// le seuil, ou pour une borne basse sans demi-journée comptée) ; cellule absente (motif sans ligne) : non dénombrée. Un motif vide du
+// mois (0, aucune personne) ne protège personne ; il reste dans la colonne, car les deux écrans listent tous les motifs de la lecture :
+// quand les motifs retenus d'un mois ne peuvent pas se protéger entre eux, toute la répartition du mois est n.d., zéros compris (sinon
+// absentéisme du mois − 0 redonnerait le motif masqué).
+// type : le motif tel que la source le nomme (ordre canonique de la colonne d'un mois).
+export type MotifWindowLine = { type: string; chosen: boolean; months: readonly (CongeCell | undefined)[]; total: CongeCell | undefined };
+// Ce que l'application publie d'une fenêtre, mois par mois : months, l'absentéisme de chaque mois (tableau mensuel de KPI RH et de la
+// croisée) ; allMonths, le taux tous motifs de chaque mois (publié par toute fenêtre d'un seul mois) ; all, le taux tous motifs de la
+// fenêtre. Les drapeaux d'un mois ne dépendent que du mois (motifPublished) : le même mois a la même colonne dans toutes les fenêtres.
+export type MotifPublished = { months: readonly boolean[]; allMonths: readonly boolean[]; all: boolean };
+export type MotifWindow = { lines: readonly MotifWindowLine[]; published: MotifPublished };
 // months[r][j], total[r] : statut du mois j et du total de la ligne r ; all : statut du taux tous motifs ; exempt : ligne exempte.
 export type MotifWindowMask = { months: MaskStatus[][]; total: MaskStatus[]; all: MaskStatus; exempt: number | null };
 
@@ -205,41 +213,65 @@ export function congeMaskCell(c: CongeCell | undefined, seuil: number, exempt = 
   return { size, value: c.half, exempt, members: size === null ? [] : c.who };
 }
 
+// Ligne exempte : le seul motif retenu présent dans la lecture (les lignes sont les motifs de toute la lecture, pas de la fenêtre).
+const exemptOf = (lines: readonly { chosen: boolean }[]): number | null => {
+  const retained = lines.flatMap((l, r) => (l.chosen ? [r] : []));
+  return retained.length === 1 ? retained[0] : null;
+};
+
+// Colonne d'un mois : la cellule de chaque motif de la lecture ce mois-là, et ce que l'application publie de ce mois (absentéisme,
+// taux tous motifs). Statuts dans l'ordre des lignes reçues ; all : statut du taux tous motifs du mois.
+export type MotifMonth = { lines: readonly { type: string; chosen: boolean; cell: CongeCell | undefined }[]; published: { absenteeism: boolean; all: boolean } };
+export type MotifMonthMask = { lines: MaskStatus[]; all: MaskStatus; exempt: number | null };
+export function motifMonthMask(col: MotifMonth, seuil: number): MotifMonthMask {
+  const exempt = exemptOf(col.lines);
+  // Ordre canonique des motifs (libellé, ordre des points de code) : le départage des égalités ne dépend pas de l'ordre de l'écran.
+  const order = col.lines.map((_, r) => r).sort((a, b) => canonicalCompare(col.lines[a].type, col.lines[b].type));
+  const cells: MaskCell[] = order.map((r) => congeMaskCell(col.lines[r].cell, seuil, r === exempt));
+  const allAt = cells.length;
+  cells.push({ size: null, value: col.published.all ? 0 : null, onlyAsTotal: true });
+  const pos = order.map((_, p) => p);
+  const retained = pos.filter((p) => col.lines[order[p]].chosen);
+  const others = pos.filter((p) => !col.lines[order[p]].chosen);
+  const { absenteeism: abs, all } = col.published;
+  const rel: MaskRelation[] = abs && all ? [{ cells: retained }, { cells: others, total: allAt }] : all ? [{ cells: pos, total: allAt }] : abs ? [{ cells: retained }] : [];
+  const st = maskRelations(cells, rel, seuil);
+  const lines: MaskStatus[] = new Array(col.lines.length);
+  order.forEach((r, p) => (lines[r] = st[p]));
+  return { lines, all: st[allAt], exempt };
+}
+
 export function motifWindowMask(g: MotifWindow, seuil: number): MotifWindowMask {
   const k = g.published.months.length;
-  const at = (r: number, j: number) => r * (k + 1) + j;
-  const all = g.lines.map((_, r) => r);
-  const retained = all.filter((r) => g.lines[r].chosen);
-  const others = all.filter((r) => !g.lines[r].chosen);
-  const exempt = retained.length === 1 ? retained[0] : null;
-  const cells: MaskCell[] = g.lines.flatMap((l, r) => [...Array.from({ length: k }, (_, j) => congeMaskCell(l.months[j], seuil, r === exempt)), congeMaskCell(l.total, seuil, r === exempt)]);
-  const allAt = cells.length;
-  cells.push({ size: null, value: g.published.all ? 0 : null, onlyAsTotal: true });
-  // Relations dans l'ordre de lecture du moteur : d'abord les lignes (total masquable), puis les colonnes des mois, puis la fenêtre.
-  const rel: MaskRelation[] = all.map((r) => ({ cells: Array.from({ length: k }, (_, j) => at(r, j)), total: at(r, k) }));
-  g.published.months.forEach((ok, j) => {
-    if (ok) rel.push({ cells: retained.map((r) => at(r, j)) });
-  });
-  const { tile, all: allShown } = g.published;
-  if (tile && allShown) rel.push({ cells: retained.map((r) => at(r, k)) }, { cells: others.map((r) => at(r, k)), total: allAt });
-  else if (allShown) rel.push({ cells: all.map((r) => at(r, k)), total: allAt });
-  else if (tile) rel.push({ cells: retained.map((r) => at(r, k)) });
-  const st = maskRelations(cells, rel, seuil);
-  return { months: all.map((r) => Array.from({ length: k }, (_, j) => st[at(r, j)])), total: all.map((r) => st[at(r, k)]), all: st[allAt], exempt };
+  const cols = Array.from({ length: k }, (_, j) =>
+    motifMonthMask({ lines: g.lines.map((l) => ({ type: l.type, chosen: l.chosen, cell: l.months[j] })), published: { absenteeism: g.published.months[j], all: g.published.allMonths[j] } }, seuil),
+  );
+  const months = g.lines.map((_, r) => cols.map((c) => c.lines[r]));
+  // Total d'un motif : déduit de ses mois ; n.d. du moteur : sa raison ; motif sans ligne (cellule absente) : non dénombré.
+  const total = g.lines.map((l, r) => (l.total === undefined ? "unverifiable" : windowStatus(months[r], l.total.kind === "nd")));
+  return { months, total, all: windowStatus(cols.map((c) => c.all), !g.published.all), exempt: exemptOf(g.lines) };
 }
 
 // Cellules d'une fenêtre à partir des demi-journées prises par motif (congesPris) et de ce que l'application publie de la même fenêtre.
-export const motifWindowOf = (c: CongesPris, published: MotifWindow["published"]): MotifWindow => ({ lines: c.lines.map((l) => ({ chosen: l.chosen, months: l.months, total: l.total })), published });
+export const motifWindowOf = (c: CongesPris, published: MotifPublished): MotifWindow => ({ lines: c.lines.map((l) => ({ type: l.type, chosen: l.chosen, months: l.months, total: l.total })), published });
 
-// Cellules d'une fenêtre lues dans le moteur : demi-journées prises par motif et par mois (congesPris), absentéisme de chaque mois et de
-// la fenêtre, taux tous motifs (absenceByMotif). KPI RH l'appelle sur la fenêtre de son détail ; la croisée lit les mêmes résultats du
+// Ce que l'application publie d'une fenêtre, lu dans le moteur : absentéisme de chaque mois (absenteeismMonth, celui du tableau
+// mensuel), taux tous motifs de chaque mois (tous les motifs de la lecture retenus, allMotifsInput : la valeur d'une fenêtre d'un mois),
+// taux tous motifs de la fenêtre (absenceByMotif). KPI RH et la croisée l'appellent sur les mêmes fenêtres (période et N-1).
+export function motifPublished(input: KpiInput, w: Window): MotifPublished {
+  const allIn = allMotifsInput(input);
+  return {
+    months: w.months.map((m) => absenteeismMonth(input, m).kind !== "nd"),
+    allMonths: w.months.map((m) => absenteeismMonth(allIn, m).kind !== "nd"),
+    all: absenceByMotif(input, w).all.kind !== "nd",
+  };
+}
+
+// Cellules d'une fenêtre lues dans le moteur : demi-journées prises par motif et par mois (congesPris) et ce que l'application publie de
+// la fenêtre (motifPublished). KPI RH l'appelle sur la fenêtre de son détail (période ou N-1) ; la croisée lit les mêmes résultats du
 // moteur (loadAbsencesInput) pour sa période et pour N-1.
 export function motifWindow(input: KpiInput, w: Window): MotifWindow {
-  return motifWindowOf(congesPris(input, w), {
-    months: w.months.map((m) => absenteeismMonth(input, m).kind !== "nd"),
-    tile: absenteeism(input, w).kind !== "nd",
-    all: absenceByMotif(input, w).all.kind !== "nd",
-  });
+  return motifWindowOf(congesPris(input, w), motifPublished(input, w));
 }
 
 // --- Absences posées à venir et demandes en attente ----------------------------------------------------------------------------------

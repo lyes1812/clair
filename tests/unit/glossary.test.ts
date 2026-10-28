@@ -19,7 +19,10 @@ import {
   type GlossaryEntry,
 } from "@/lib/glossary";
 import { GLOSSARY_ECRAN } from "@/lib/glossary/ecran";
-import { CONFIDENTIALITE_TERM, confidentialiteReason, SEUIL_ILLISIBLE, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE } from "@/lib/confidentialite";
+import { CONFIDENTIALITE_TERM, confidentialiteReason, maskGroups, SEUIL_ILLISIBLE, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE } from "@/lib/confidentialite";
+import { canonicalCompare, maskColumn, stockColumn, windowStatus } from "@/lib/confidentialite/columns";
+import { projectedGroupCell } from "@/lib/confidentialite/groups";
+import { provisionValue } from "@/lib/payroll/lot2";
 import { seuilText } from "@/lib/viz/kpi";
 
 // Accès : la page demande l'espace comme les autres pages (un non-membre est refusé, 404 côté application).
@@ -273,6 +276,78 @@ describe("Glossaire : Seuil de confidentialité (règle de l'application)", () =
     expect(glossaryEntry("effectifs-ventilation")!.definition).toContain("le total du mois reste affiché");
     expect(glossaryEntry("absence-par-motif")!.definition).toContain("seule la ligne du motif retenu reste affichée quand c'est le seul motif retenu présent dans la lecture");
     expect(glossaryEntry("absence-all-motifs")!.definition).toContain("n'est masqué par le seuil de confidentialité que lorsqu'il donnerait par différence un motif masqué");
+  });
+
+  // Lot 12 : le glossaire décrit la règle canonique en place (src/lib/confidentialite/columns.ts) et les corrections du lot. Chaque phrase
+  // est vérifiée sur la fonction qui la met en œuvre, avec un cas écrit à la main (valeurs fictives).
+  it("règle canonique : colonne du mois, ordre des libellés, groupe vide hors de la colonne, fenêtre déduite de ses mois", () => {
+    const d = general.definition;
+    expect(d).toContain("se jugent sur la seule colonne de leur mois, les groupes pris dans l'ordre de leur libellé (« Non ventilé », « Non classé », « Hors salarié » et les groupes « … n.d. » en dernier)");
+    // Ordre écrit à la main : libellés ordinaires par points de code, puis les groupes « reste » (« N » = 0x4E avant « É » = 0xC9).
+    expect(["Non ventilé", "Service B", "Établissement n.d.", "Service A"].sort(canonicalCompare)).toEqual(["Service A", "Service B", "Non ventilé", "Établissement n.d."]);
+    expect(d).toContain("Un groupe qui ne décrit rien ce mois-là (aucun contrat, aucune embauche, aucun montant) reste hors de la colonne et s'affiche à 0");
+    // Seuil 3 : A (1 personne) et C (1 personne) masqués, B vide (0, personne). Ensemble : 2 personnes < 3, impossible à protéger.
+    // Colonne du mois (maskColumn) : B reste hors de la relation et s'affiche à 0. Moteur seul sur toute la liste (maskGroups) : B
+    // serait masqué avec le reste.
+    const a = { size: 1, value: 1, members: ["a"] };
+    const b = { size: 0, value: 0 };
+    const c = { size: 1, value: 1, members: ["c"] };
+    const col = maskColumn([{ key: "A", label: "A", cell: a }, { key: "B", label: "B", cell: b }, { key: "C", label: "C", cell: c }], 3, true);
+    expect([col.get("A"), col.get("B"), col.get("C")]).toEqual(["masked", "shown", "masked"]);
+    expect(maskGroups([a, b, c], 3, true)).toEqual(["masked", "secondary", "masked"]);
+    expect(d).toContain("il n'est affiché que si aucun de ses mois n'est masqué ni non dénombré");
+    expect(windowStatus(["shown", "secondary", "shown"])).toBe("secondary");
+    expect(windowStatus(["shown", "unverifiable"])).toBe("unverifiable");
+    expect(windowStatus(["shown", "shown"])).toBe("shown");
+    // Stock de fin de mois, seuil 2 : X (2 personnes, 2 contrats), Y (4, 4), Z (1, 1). Z est masqué ; la plus petite cellule par
+    // l'effectif, X, l'est en second ; Y reste affiché.
+    expect(d).toContain("l'effectif ordonne le masquage et les deux sont masqués ensemble");
+    const stock = stockColumn({ X: { persons: ["a", "b"], unlinked: 0, contracts: 2 }, Y: { persons: ["c", "d", "e", "f"], unlinked: 0, contracts: 4 }, Z: { persons: ["g"], unlinked: 0, contracts: 1 } }, 2);
+    expect([stock.get("X"), stock.get("Y"), stock.get("Z")]).toEqual(["secondary", "shown", "masked"]);
+  });
+
+  it("embauche prévue : affichée, jamais protectrice, masquée seulement avec toute sa répartition ; un contrat sans personne est non relié", () => {
+    const d = general.definition;
+    expect(d).toContain("une cellule portée seulement par des embauches prévues est affichée, ne protège jamais une autre cellule et n'est masquée qu'avec toute sa répartition quand celle-ci ne peut pas être protégée");
+    expect(d).not.toContain("embauche prévue d'un scénario) ne protège jamais");
+    // Seuil 3. H : 2 embauches prévues, 7 €. Avec A (1 personne, 1 €) et C (5 personnes, 50 €) : A masqué, C masqué en second
+    // (H n'apporte personne), H affiché. Avec A seul : 1 personne, impossible à protéger : H est masqué avec la colonne.
+    const h = projectedGroupCell({ persons: [], unlinked: 0, hires: 2 }, 3, 7);
+    expect(h).toEqual({ size: 0, value: 7, members: [] });
+    const a = { size: 1, value: 1, members: ["a"] };
+    const c = { size: 5, value: 50, members: ["c1", "c2", "c3", "c4", "c5"] };
+    const three = maskColumn([{ key: "A", label: "A", cell: a }, { key: "C", label: "C", cell: c }, { key: "H", label: "H", cell: h }], 3, true);
+    expect([three.get("A"), three.get("C"), three.get("H")]).toEqual(["masked", "secondary", "shown"]);
+    const two = maskColumn([{ key: "A", label: "A", cell: a }, { key: "H", label: "H", cell: h }], 3, true);
+    expect([two.get("A"), two.get("H")]).toEqual(["masked", "secondary"]);
+    for (const id of ["cascade", "effectifs-ventilation"]) expect(glossaryEntry(id)!.definition, id).toMatch(/seulement par des embauches prév\w+ est affiché.*qu'avec toute/);
+    expect(glossaryEntry("cascade")!.definition).not.toContain("(embauche prévue) est non vérifiable");
+    // Un contrat sans personne rattachée n'est jamais compté comme une personne (règle de persons.ts) : aucune entrée ne dit l'inverse.
+    for (const e of GLOSSARY) expect(e.definition, e.id).not.toContain("compte pour une personne");
+  });
+
+  it("filtres : service masqué en secondaire, périmètre Établissement ou Nature de KPI RH, tableau par catégorie", () => {
+    const d = general.definition;
+    expect(d).toContain("est masqué sans filtre, en principal ou en secondaire, ou n'est pas dénombré");
+    expect(d).toContain("Filtres Établissement et Nature de KPI RH : tout l'écran est n.d.");
+    expect(d).toContain("les entrées et les sorties du périmètre sont n.d., mois par mois, quand la cellule de la répartition des mouvements du mois par nature (ou par établissement) l'est");
+    expect(d).toContain("la ligne Période et le turnover qui contiennent un tel mois le sont aussi");
+    const cat = glossaryEntry("kpi-categories")!;
+    expect(cat.see).toContain("confidentialite");
+    expect(cat.definition).toContain("Sous un filtre Établissement ou Nature, tout l'écran est n.d. quand le périmètre retenu est masqué.");
+    for (const id of ["croisee-personnes-observees", "pont-volume-cout"]) expect(glossaryEntry(id)!.definition, id).toContain("en principal ou en secondaire");
+  });
+
+  it("provision par service : le total, à défaut la part connue ; éléments non récurrents du réel soumis au seuil", () => {
+    expect(glossaryEntry("provision")!.definition).toContain("le total de la provision du service ou, quand une part manque, la part connue (congés payés, à défaut charges sociales)");
+    // Cas écrits à la main : 100,00 € + 40,00 € = 140,00 € ; congés seuls 100,00 € ; charges seules 40,00 € ; mois n.d. : aucune valeur.
+    const m = "2026-01";
+    expect(provisionValue({ month: m, kind: "value", conges: 10_000, charges: 4_000, total: 14_000, missing: [] })).toBe(14_000);
+    expect(provisionValue({ month: m, kind: "value", conges: 10_000, charges: null, total: null, missing: ["charges"] })).toBe(10_000);
+    expect(provisionValue({ month: m, kind: "value", conges: null, charges: 4_000, total: null, missing: ["congés"] })).toBe(4_000);
+    expect(provisionValue({ month: m, kind: "nd", reason: "mois non lu" })).toBeNull();
+    expect(glossaryEntry("primes")!.definition).toContain("La répartition par nature (nombre d'éléments et coût) suit le seuil de confidentialité");
+    expect(general.definition).toContain("les mois d'une ligne et son total, pour une famille de prime, une nature d'éléments non récurrents du réel");
   });
 });
 

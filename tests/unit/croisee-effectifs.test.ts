@@ -518,15 +518,18 @@ describe("Journal agrégé et motifs de sortie : aucune date exacte, aucun servi
       // 3 entrées : CDI 2, CDD 1 → CDD masqué, CDI (plus petite affichée) aussi.
       ["Novembre 2025", "3", C2, C2, ...Z],
       ["Décembre 2025", ...Z, ...Z],
-      // 1 sortie CDD : masquée, et la cellule CDI (0) avec elle.
-      ["Janvier 2026", ...Z, "1", C2, C2],
+      // 1 sortie CDD : masquée ; rien ne peut la protéger, toute la relation est masquée. La cellule CDI (0, aucune sortie) ne décrit
+      // personne : règle canonique (lot 12, colonnes), elle reste hors de la relation et s'affiche à 0 sur les trois écrans (croisée 02,
+      // Effectifs mensuels, filtre Nature de KPI RH) ; avant, la croisée la masquait seule (la grille des Effectifs mensuels l'affichait).
+      ["Janvier 2026", ...Z, "1", "0", C2],
       ["Février 2026", ...Z, ...Z],
       // 4 entrées : CDI 2 (2 personnes), CDD 2 (deux contrats simultanés d'une seule personne) → CDD masqué, CDI aussi (secondaire).
       ["Mars 2026", "4", C2, C2, ...Z],
       ["Avril 2026", ...Z, ...Z],
       ["Mai 2026", ...Z, ...Z],
       ["Juin 2026", ...Z, ...Z],
-      ["Juillet 2026", "1", C2, C2, ...Z],
+      // 1 entrée CDD (seule, masquée) ; la cellule CDI (0) reste à 0 (même règle qu'en janvier).
+      ["Juillet 2026", "1", "0", C2, ...Z],
       ["Août 2026", M, M, M, M, M, M],
       // Total des sorties en borne basse : la répartition n'est pas publiée.
       ["Septembre 2026", "2", "2", "0", "≥ 1", `n.d. : ${REPARTITION_BORNE}`, `n.d. : ${REPARTITION_BORNE}`],
@@ -668,10 +671,12 @@ describe("buildEffectifs : structure, échéances et seuils selon les réglages"
     expect(t.title).toBe("Échéances de contrat d'ici 90 jours");
     expect(t.columns.map((c) => c.header)).toEqual(["Mois", "Fins de contrat", "dont CDI (01)", "dont CDD (02)", "Entrées à venir", "dont CDI (01)", "dont CDD (02)"]);
     expect(shown(t)).toEqual([
-      // Octobre : 1 fin CDD et 1 entrée CDD, chacune masquée avec la cellule CDI (0) de son mois.
-      ["Octobre 2026", "1", C2, C2, "1", C2, C2],
-      ["Novembre 2026", "0", "0", "0", "1", C2, C2],
-      ["Décembre 2026", "1", C2, C2, "0", "0", "0"],
+      // Octobre : 1 fin CDD et 1 entrée CDD, chacune masquée ; la cellule CDI (0) de son mois ne décrit personne : hors de la relation,
+      // affichée à 0 (règle canonique des colonnes, la même que le journal des mouvements ; avant, masquée avec la cellule CDD).
+      ["Octobre 2026", "1", "0", C2, "1", "0", C2],
+      // Novembre : 1 entrée CDI (e2), masquée ; la cellule CDD (0) reste à 0.
+      ["Novembre 2026", "0", "0", "0", "1", C2, "0"],
+      ["Décembre 2026", "1", "0", C2, "0", "0", "0"],
       ["Total", "≥ 2", "—", "—", "2", "—", "—"],
     ]);
     // Fin non datée et sans date de début : un contrat d'une personne chacun, sous le seuil → nombre non écrit (n.d. avec la raison) ;

@@ -238,9 +238,13 @@ describe("settings-format : clés, raisons et lignes sans base de données", () 
     const format = readFileSync("src/lib/croisee/settings-format.ts", "utf8");
     for (const m of format.matchAll(/^\s*import\s[^;]*from "([^"]+)";/gm)) expect(m[1]).toBe("@/lib/confidentialite");
     // Le module partagé ne charge aucun module de base de données à l'import : ses importations de valeur restent dans son dossier
-    // ou vers structure.ts ; groups.ts forme les groupes du journal de paie et lit les moteurs purs de la paie et de la projection
+    // ou vers structure.ts ; groups.ts forme les groupes du journal de paie et lit les moteurs purs de la paie et de la projection ;
+    // splits.ts forme les groupes par nature et par établissement et lit le moteur pur des effectifs et les libellés des natures
     // (vérifié en détail par confidentialite.test.ts).
-    const pure: Record<string, RegExp> = { "groups.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/payroll\/(engine|grid)$|@\/lib\/budget\/engine$)/ };
+    const pure: Record<string, RegExp> = {
+      "groups.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/payroll\/(engine|grid)$|@\/lib\/budget\/engine$)/,
+      "splits.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/rh\/headcount$|@\/lib\/dsn\/labels$)/,
+    };
     for (const f of readdirSync("src/lib/confidentialite").filter((x) => x.endsWith(".ts"))) {
       for (const m of readFileSync(`src/lib/confidentialite/${f}`, "utf8").matchAll(/^(?:import|export) (?!type )[^;]*from "([^"]+)";/gm)) expect(m[1], `${f} : ${m[1]}`).toMatch(pure[f] ?? /^(\.\/|@\/lib\/croisee\/structure$)/);
     }
