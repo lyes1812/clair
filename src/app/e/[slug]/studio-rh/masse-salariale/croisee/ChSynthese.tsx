@@ -68,10 +68,9 @@ export function SyntheseView({ model, slug, affichage }: { model: SyntheseModel;
         <div className="cx-syn" data-testid="cx-synthese">
           <section className="cx-syn-cards" id="cx-synthese-cartes" aria-label="Chiffres clés">
             <Tuiles tiles={model.tiles} chapter="synthese" slug={slug} testid="cx-synthese-cartes" />
-            {(model.tileNd.length > 0 || model.trend) && (
+            {model.trend && (
               <div className="cx-syn-under">
-                <NdLines lines={model.tileNd} testid="cx-synthese-cartes-nd" />
-                {model.trend && <TrendLegend slug={slug} />}
+                <TrendLegend slug={slug} />
               </div>
             )}
           </section>
@@ -209,6 +208,7 @@ export function SyntheseView({ model, slug, affichage }: { model: SyntheseModel;
 
         {showTable && keyTables.length > 0 && (
           <Pliant title="Chiffres clés en tableau" id="cx-synthese-chiffres" testid="cx-synthese-chiffres" open={affichage === "tableau"}>
+            <NdLines lines={model.tileNd} testid="cx-synthese-cartes-nd" />
             {keyTables.map((t) => (
               <ModelTable key={t.id} table={t} slug={slug} />
             ))}

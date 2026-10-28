@@ -3,7 +3,7 @@ import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/cr
 import { etpCascade, STEP_LABELS, type Cascade } from "@/lib/budget/cascade";
 import { landing, roundDiv, type Landing } from "@/lib/budget/engine";
 import { compareLanding } from "@/lib/budget/landing-compare";
-import { retraite, type Retraite } from "@/lib/budget/lot3";
+import { retraite, type ActualNonRecurringInput, type Retraite } from "@/lib/budget/lot3";
 import { bridge, budgetSeries, gap, liveSeries, scenarioSeries, total, type Bridge, type Gap, type Layer, type Point, type Series } from "@/lib/budget/series";
 import type { BaseSnapshot, Projection } from "@/lib/budget/types";
 import { aggregate, alignedSeries, diff, nd as ndCell, reelVersion, val, type Agg, type ServiceFilter } from "@/lib/budget/versions";
@@ -704,7 +704,14 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
       // Raisons n.d. de la projection sans identité ; montants identiques à ceux des Hypothèses budgétaires.
       const pub = publicScenario(s.full.base, s.proj);
       const land = landing(pub.base, pub.proj, String(year));
-      const ret = retraite(pub.base, pub.proj, s.full.hypotheses, String(year));
+      let actual: ActualNonRecurringInput;
+      try {
+        const { listActualEvents } = await import("@/lib/payroll/non-recurring-store");
+        actual = { kind: "value", events: await listActualEvents(ctx.workspace.id) };
+      } catch {
+        actual = { kind: "nd", reason: "Les éléments non récurrents du Réel n’ont pas pu être lus. Recharge la page avant de lire l’atterrissage retraité." };
+      }
+      const ret = retraite(pub.base, pub.proj, s.full.hypotheses, String(year), actual);
       scenario = {
         kind: "value",
         name: sc.name,
@@ -714,7 +721,7 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
         landing: land.kind === "nd" ? { ...land, reason: zoomReason(land.reason) } : land,
         // Totaux seulement : le détail par élément (catégories et motifs saisis, texte libre) reste dans Hypothèses budgétaires.
         retraite: ret.kind === "nd" ? { ...ret, reason: zoomReason(ret.reason) } : { ...ret, rows: [] },
-        contributors: nonRecurringContributors(pub.base, pub.proj, s.full.hypotheses, String(year), link),
+        contributors: nonRecurringContributors(pub.base, pub.proj, s.full.hypotheses, String(year), actual, link),
       };
     }
   }

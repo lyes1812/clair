@@ -1,0 +1,32 @@
+/* Studio Restructuring réutilise les cartes, filtres, tableaux et graphiques de Studio RH. */
+.restructuring-view { display: grid; gap: 24px; min-width: 0; }
+.restructuring-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px 24px; }
+.restructuring-filters { align-items: flex-end; }
+.restructuring-filters .field-row { flex: 1 1 340px; min-width: 220px; }
+.restructuring-filters .btn { align-self: flex-end; }
+.restructuring-read .source-badge { flex: 1 1 auto; }
+.restructuring-tiles .ms-tile-compare { margin-top: auto; }
+.restructuring-section { display: grid; gap: 18px; min-width: 0; }
+.restructuring-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.restructuring-notices { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
+.restructuring-scroll { max-height: 640px; }
+.restructuring-monthly td.num { min-width: 125px; vertical-align: top; }
+.restructuring-monthly th:first-child { min-width: 150px; }
+.restructuring-nd-reason { display: block; white-space: normal; color: var(--muted); font-size: var(--clair-type-label); font-weight: 400; text-align: left; margin-top: 5px; max-width: 200px; }
+.restructuring-measures th:first-child { min-width: 145px; }
+.restructuring-measures td { min-width: 190px; vertical-align: top; }
+.restructuring-measures td:last-child { min-width: 300px; }
+.restructuring-measures small { display: block; color: var(--muted); margin-top: 6px; font-size: var(--clair-type-label); }
+.restructuring-values { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.restructuring-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.restructuring-breakdown td.num { min-width: 110px; vertical-align: top; }
+.restructuring-breakdown th:first-child { min-width: 220px; }
+.restructuring-breakdown-reasons { margin: 8px 0 0; padding-left: 16px; max-width: 520px; text-align: left; white-space: normal; color: var(--muted); font-size: var(--clair-type-label); }
+.restructuring-exit-fields { align-items: flex-start; }
+.restructuring-exit-fields .field-row { flex: 1 1 220px; min-width: 180px; }
+.restructuring-exit-editors { display: grid; gap: 12px; }
+.restructuring-exit-editor { border: 1px solid var(--line); border-radius: var(--clair-radius-control); }
+.restructuring-exit-editor > summary { cursor: pointer; padding: 14px 16px; font-size: var(--clair-type-form); font-weight: 500; }
+.restructuring-exit-editor > .form { padding: 8px 16px 18px; }
+@media (max-width: 1100px) { .restructuring-charts { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 650px) { .restructuring-header { display: grid; } .restructuring-filters .field-row { flex-basis: 100%; min-width: 0; } }

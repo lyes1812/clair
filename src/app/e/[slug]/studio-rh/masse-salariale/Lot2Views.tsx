@@ -313,7 +313,7 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
             )}
             {ndReasons([...primesMonths.map((m) => (m.kind === "nd" ? `${formatMonth(m.month)} : ${m.reason}` : null)), ...families.flatMap((f) => [labelNd(f.key).cur, ...months.map((_m, i) => famNd(f, i))])])}
             <p className="tile-foot ms-note" data-testid="fv-non-recurrents">
-              Éléments non récurrents (ruptures conventionnelles, indemnités compensatrices de congés payés) : non distingués par le journal PayFit, ils restent dans la rubrique « Indemnités et avantages ».
+              Les indemnités restent dans la paie source. Leur identification et celle des tuilages passés se renseignent dans « Éléments non récurrents du réel », sans les ajouter une seconde fois.
             </p>
           </section>
         </>

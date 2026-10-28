@@ -1,12 +1,43 @@
 import { ComparisonPicker } from "@/app/e/[slug]/studio-rh/hypotheses/ComparisonPicker";
+import { ActualNonRecurringStatus, type ActualStatusItem } from "@/app/e/[slug]/studio-rh/hypotheses/LandingView";
 import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("@/db/workspace-scope", () => ({ withWorkspace: () => { throw new Error("Accès base interdit dans ce test fictif"); } }));
+vi.mock("@/lib/workspace", () => ({ requireWorkspace: () => { throw new Error("Accès utilisateur interdit dans ce test fictif"); } }));
+vi.mock("@/lib/connectors/sync", () => ({ lastSync: () => { throw new Error("Lecture source interdite dans ce test fictif"); }, activeSync: () => { throw new Error("Lecture source interdite dans ce test fictif"); } }));
 import { landing as landingOf, project } from "@/lib/budget/engine";
 import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
 import { GLOSSARY_HYPOTHESES, HYP_TERMS } from "@/lib/glossary/hypotheses";
 import { formatMoneyDisplay } from "@/lib/money-display";
+
+describe("Atterrissage — statut générique des coûts passés", () => {
+  it("garde chaque élément visible sans montant et expose tous les blocages sans identité ni note libre", () => {
+    const status = { amountMissing: true, sourceMismatch: false, monthUnavailable: false, legacyOverlap: false };
+    const items: ActualStatusItem[] = [
+      { ...status, kind: "rupture-conventionnelle", month: "2026-01", sourceMismatch: true },
+      { ...status, kind: "tuilage", month: "2026-03" },
+      { ...status, kind: "tuilage", month: "2026-06", legacyOverlap: true },
+    ];
+    const enriched = items.map((item) => ({ ...item, contractKeys: ["IDENTITE_FICTIVE_PRIVEE"], note: "JUSTIFICATIF_FICTIF_PRIVE", chargedCents: 123456 }));
+    const html = renderToStaticMarkup(h(ActualNonRecurringStatus, { items: enriched }));
+    expect(html.match(/<li /g)).toHaveLength(3);
+    expect(html).toContain("Rupture conventionnelle · Janvier 2026");
+    expect(html).toContain("Tuilage · Mars 2026");
+    expect(html).toContain("Tuilage · Juin 2026");
+    expect(html.match(/montant chargé à renseigner/g)).toHaveLength(3);
+    expect(html).toContain("lecture différente de la base figée");
+    expect(html).toContain("rapprochement nécessaire");
+    expect(html).not.toMatch(/IDENTITE_FICTIVE_PRIVEE|JUSTIFICATIF_FICTIF_PRIVE|123456/);
+  });
+  it("ne promet aucun inventaire en l’absence de déclaration et distingue le montant renseigné", () => {
+    expect(renderToStaticMarkup(h(ActualNonRecurringStatus, { items: [] }))).toBe("");
+    const html = renderToStaticMarkup(h(ActualNonRecurringStatus, { items: [{ kind: "autre", month: "2026-02", amountMissing: false, sourceMismatch: false, monthUnavailable: false, legacyOverlap: false }] }));
+    expect(html).toContain("montant chargé renseigné");
+    expect(html).not.toContain("n.d.");
+  });
+});
 const displayEuros = (cents: number) => formatMoneyDisplay(cents, "eur");
 import { measures as measuresOf, sensitivities, type Retraite, type SensitivityRow } from "@/lib/budget/lot3";
 import { bridge, budgetSeries, scenarioSeries, shifted, type Bridge, type Layer as SeriesLayer, type Point, type Series } from "@/lib/budget/series";

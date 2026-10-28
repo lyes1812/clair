@@ -16,7 +16,9 @@
 // module partagé, appliquée ici à des groupes déjà reliés).
 
 import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
+import type { ActualNonRecurringInput } from "@/lib/budget/lot3";
 import { maskGroups, maskRelations, personsOfContracts, type MaskCell, type MaskStatus, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { parseActualEvent } from "@/lib/payroll/non-recurring";
 import { groupInput, isHireKey } from "./confidentialite";
 
 // Groupe de contrats reliés par le référentiel, plus ses embauches prévisionnelles.
@@ -147,12 +149,37 @@ export function maskCohorts(p: Extract<CohortPartition, { kind: "value" }>, seui
 // (jetons de personne seulement).
 export type NonRecurringContributors = { realised: LinkedGroup | null; projected: LinkedGroup | null };
 
-export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth">, proj: Projection, hyps: readonly Hypothesis[], year: string, link: PersonLink = new Map()): NonRecurringContributors {
+export function nonRecurringContributors(
+  base: Pick<BaseSnapshot, "refMonth"> & Partial<Pick<BaseSnapshot, "syncId" | "actuals">>,
+  proj: Projection,
+  hyps: readonly Hypothesis[],
+  year: string,
+  actual: ActualNonRecurringInput = { kind: "value", events: [] },
+  link: PersonLink = new Map(),
+): NonRecurringContributors {
   const add = (m: Map<string, number>, key: string, cents: number) => m.set(key, (m.get(key) ?? 0) + cents);
   // Contributeurs comptés (somme non nulle), vus par le lien : la clé de référentiel d'un contrat, inconnue du lien pour une hypothèse.
   const group = (m: Map<string, number>): LinkedGroup => linkedGroup([...m].filter(([, v]) => v !== 0).map(([k]) => k), link);
   const realised = new Map<string, number>();
   for (const h of hyps) if (h.kind === "realise" && h.month.startsWith(year) && h.month <= base.refMonth) add(realised, `hypothese:${h.id}`, h.costCents);
+  let realisedUnknown = actual.kind === "nd";
+  const ids = new Set<string>(), fingerprints = new Set<string>();
+  if (actual.kind === "value") for (const candidate of actual.events) {
+    if (!candidate.month.startsWith(`${year}-`) || candidate.month > base.refMonth) continue;
+    const event = parseActualEvent(candidate);
+    if (!event || !base.syncId || event.syncId.toLowerCase() !== base.syncId.toLowerCase() || !base.actuals?.some((month) => month.month === event.month && month.kind === "value") || event.chargedCents === null) {
+      realisedUnknown = true;
+      continue;
+    }
+    const id = event.id.toLowerCase(), fingerprint = JSON.stringify([event.kind, event.month, [...event.contractKeys].sort()]);
+    if (ids.has(id) || fingerprints.has(fingerprint) || hyps.some((h) => h.kind === "realise" && h.month === event.month)) realisedUnknown = true;
+    ids.add(id); fingerprints.add(fingerprint);
+    if (event.chargedCents === 0) continue;
+    if (!event.contractKeys.length) realisedUnknown = true;
+    // Un binôme peut apparaître plusieurs mois : les mêmes contrats ne deviennent pas plusieurs contributeurs.
+    // Clé de contrat telle quelle : le lien du référentiel la rattache à sa personne.
+    for (const key of event.contractKeys) add(realised, key, event.chargedCents);
+  }
   const projected = new Map<string, number>();
   let unknown = false;
   if (proj.kind === "value") {
@@ -166,7 +193,7 @@ export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth">, p
       }
     }
   }
-  return { realised: group(realised), projected: unknown ? null : group(projected) };
+  return { realised: realisedUnknown ? null : group(realised), projected: unknown ? null : group(projected) };
 }
 
 // Les deux totaux forment un ensemble dont la somme est affichée (« Non récurrents retirés », atterrissage − retraité) : masquage

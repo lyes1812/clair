@@ -9,6 +9,8 @@ import { loadPayrollContext } from "@/lib/payroll/context";
 import { requireWorkspace } from "@/lib/workspace";
 import { periodLabel, serviceLabel, syntheseOf } from "../synthese-data";
 import { monthlySheet, servicesMonthsSheet, servicesSheet } from "./sheets";
+import { listActualEvents } from "@/lib/payroll/non-recurring-store";
+import { actualNonRecurringSheet } from "@/lib/payroll/non-recurring-export";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +46,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     ...(s.notices.length ? [{ label: "Paramètres ignorés", value: s.notices.join(" ; ") }] : []),
   ];
   const sheets: SheetSpec[] = [monthlySheet({ ...s, dsn: ctx.dsn })];
+  sheets.push(actualNonRecurringSheet(s.input, await listActualEvents(workspace.id), s.months, ctx.read?.syncId ?? null));
   if (ctx.service.axis && s.services.length > 0) {
     sheets.push(servicesSheet({ rows: s.services, totalCur: s.totalCur, totalPrev: s.totalPrev, totalEvo: s.totalEvo, year: s.year }));
     sheets.push(servicesMonthsSheet({ rows: s.services, totalCur: s.totalCur, months: s.months }));

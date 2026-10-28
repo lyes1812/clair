@@ -1,6 +1,14 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ActualEvent } from "@/lib/payroll/non-recurring";
+import { tableSheet, unavailableRows } from "@/lib/croisee/export";
+const actualStore = vi.hoisted(() => ({ list: vi.fn() }));
+vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: actualStore.list }));
+vi.mock("@/db/workspace-scope", () => ({ withWorkspace: () => { throw new Error("Accès base interdit dans ce test fictif"); } }));
+vi.mock("@/lib/workspace", () => ({ requireWorkspace: () => { throw new Error("Accès utilisateur interdit dans ce test fictif"); } }));
+vi.mock("@/lib/connectors/sync", () => ({ lastSync: () => { throw new Error("Lecture source interdite dans ce test fictif"); }, activeSync: () => { throw new Error("Lecture source interdite dans ce test fictif"); } }));
+beforeEach(() => actualStore.list.mockReset().mockResolvedValue([]));
 import { BlocksChapter } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/ChBudget";
 import type { CroiseeContext, ScenarioLoad } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";
 import { STEP_LABELS, type Cascade } from "@/lib/budget/cascade";
@@ -945,6 +953,7 @@ function fakeCtx(service: string | undefined, kpiInput: unknown = null, o: FakeO
   const seuil = o.seuil === undefined ? 2 : o.seuil;
   return {
     slug: "demo",
+    workspace: { id: "espace-fictif" },
     settings: { confidentialite: seuil === null ? { kind: "absent" } : { kind: "set", value: seuil, updatedAt: null, updatedBy: null } },
     canEdit: true,
     period: { year: 2026, from: "01", to: "02", years: [2025, 2026], last: "02", months: ["2026-01", "2026-02"], notices: [] },
@@ -965,6 +974,43 @@ function fakeCtx(service: string | undefined, kpiInput: unknown = null, o: FakeO
 }
 
 describe("loadBudgetInput — lectures du contexte et fonctions existantes", () => {
+  it("raccorde les coûts du Réel dans le retraité et son export, sans changer l’atterrissage brut ni exposer le détail", async () => {
+    const syncId = "11111111-1111-4111-8111-111111111111";
+    const event: ActualEvent = { id: "22222222-2222-4222-8222-222222222222", syncId, month: "2026-01", kind: "rupture-conventionnelle", chargedCents: 25000, contractKeys: ["payfit:prive-fictif"], note: "JUSTIFICATIF_FICTIF_PRIVE" };
+    actualStore.list.mockResolvedValueOnce([event]);
+    const input = await loadBudgetInput(fakeCtx(undefined, null, { base: { ...baseSnap, syncId }, seuil: 1 }));
+    if (input.kind !== "value" || input.scenario.kind !== "value") throw new Error("scénario attendu");
+    expect(actualStore.list).toHaveBeenCalledExactlyOnceWith("espace-fictif");
+    expect(input.scenario.landing).toMatchObject({ kind: "value", total: 5488000 });
+    expect(input.scenario.retraite).toMatchObject({ kind: "value", atterrissage: 5488000, realised: 25000, projected: 0, total: 25000, retraite: 5463000, rows: [] });
+    expect(input.scenario.contributors).toEqual({ realised: 1, projected: 0 });
+    const model = buildBudget(input);
+    const exact = table(model, BUDGET_TABLE_IDS.atterrissage);
+    expect(exact.rows.map((row) => row.cells)).toContainEqual(["Éléments non récurrents déjà comptabilisés", -25000]);
+    expect(exact.foot?.cells).toEqual(["Atterrissage retraité 2026", 5463000]);
+    expect(tableSheet(exact).rows).toContainEqual(["Éléments non récurrents déjà comptabilisés", -25000]);
+    expect(JSON.stringify(model)).not.toMatch(/JUSTIFICATIF_FICTIF_PRIVE|payfit:prive-fictif|22222222/);
+    expect(model.blocks.find((block) => block.id === "atterrissage")?.links).toContainEqual({ href: expect.stringContaining("sous=atterrissage"), label: "Atterrissage et éléments non récurrents dans Hypothèses budgétaires" });
+  });
+
+  it("échec de lecture : retraité n.d. dans écran et export, brut conservé, aucune erreur brute divulguée", async () => {
+    actualStore.list.mockRejectedValueOnce(new Error("PAYLOAD_FICTIF_NE_PAS_EXPOSER"));
+    const input = await loadBudgetInput(fakeCtx(undefined));
+    if (input.kind !== "value" || input.scenario.kind !== "value") throw new Error("scénario attendu");
+    expect(input.scenario.landing).toMatchObject({ kind: "value", total: 5488000 });
+    expect(input.scenario.retraite).toMatchObject({ kind: "nd", reason: "Lecture des éléments non récurrents du réel indisponible ou périmètre non validé ; aucun retraitement partiel." });
+    expect(input.scenario.contributors.realised).toBeNull();
+    const model = buildBudget(input);
+    expect(tile(model, "retraite").value.kind).toBe("nd");
+    expect(unavailableRows(model).flat().join(" ")).toContain("Lecture des éléments non récurrents du réel indisponible");
+    expect(JSON.stringify(model)).not.toContain("PAYLOAD_FICTIF");
+  });
+
+  it("un filtre de service ne charge pas les déclarations globales du Réel", async () => {
+    await loadBudgetInput(fakeCtx("TECH"));
+    expect(actualStore.list).not.toHaveBeenCalled();
+  });
+
   it("réalisé du journal, budget saisi, atterrissage du moteur, personnes observées (zoomOf + partition) ; aucune identité dans le modèle", async () => {
     const input = await loadBudgetInput(fakeCtx(undefined));
     if (input.kind !== "value") throw new Error(input.reason);

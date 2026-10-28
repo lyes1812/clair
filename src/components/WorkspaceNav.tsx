@@ -1,8 +1,8 @@
 "use client";
-import { Banknote, BriefcaseBusiness, ChevronDown, Database, FileText, Gauge, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
+import { Banknote, BriefcaseBusiness, ChartNoAxesCombined, ChevronDown, Database, FileText, Gauge, GitCompareArrows, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { DATA_ITEM, STUDIO_RH_ITEMS } from "@/lib/nav";
+import { DATA_ITEM, FINANCE_ITEM, RESTRUCTURING_ITEM, STUDIO_RH_ITEMS } from "@/lib/nav";
 
 const ICONS: Record<string, LucideIcon> = {
   donnees: Database,
@@ -11,6 +11,8 @@ const ICONS: Record<string, LucideIcon> = {
   "studio-rh/masse-salariale": Banknote,
   "studio-rh/hypotheses": SlidersHorizontal,
   "studio-rh/reporting-social": FileText,
+  "studio-finance": ChartNoAxesCombined,
+  "studio-restructuring": GitCompareArrows,
 };
 
 export function WorkspaceNav({ slug }: { slug: string }) {
@@ -51,6 +53,8 @@ export function WorkspaceNav({ slug }: { slug: string }) {
           </div>
         )}
       </div>
+      {link(FINANCE_ITEM.path, FINANCE_ITEM.label)}
+      {link(RESTRUCTURING_ITEM.path, RESTRUCTURING_ITEM.label)}
     </nav>
   );
 }

@@ -23,6 +23,10 @@ import { DsnView } from "./DsnView";
 import { FixeVariableView, PaieComptaView } from "./Lot2Views";
 import { NV, periodLabel, serviceLabel, syntheseOf, VUES } from "./synthese-data";
 import { MS_PREVU } from "./tabs";
+import { ActualNonRecurring } from "./ActualNonRecurring";
+import { actualEventVersion, listActualEvents } from "@/lib/payroll/non-recurring-store";
+import { saveActualEventAction } from "./actual-actions";
+import { personLabel } from "@/lib/rh/view";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +102,11 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
 
   // Période : année, premier et dernier mois, service, onglet et affichage (paramètres GET ; une valeur invalide est remplacée et signalée).
   const { fullInput, notices, vue, aff, knownServices, serviceValue, input, years, year, lastOfYear, from, to, months, prevMonths, cur, prev, evo, etpCur, etpPrev, cost, costPrev, services, link, guard, totalCur, totalPrev, totalEvo, serviceNd, showDsn } = synthese;
+  const editable = ctx.kpi.collab.workspace.role !== "reader";
+  const actualEvents = vue !== "paie-compta" ? await listActualEvents(ctx.kpi.collab.workspace.id) : [];
+  const actualVersions = Object.fromEntries(actualEvents.map((event) => [event.id, actualEventVersion(event)]));
+  const people = new Map(ctx.kpi.collab.data?.persons.map((person) => [person.personKey, person]));
+  const actualContracts = editable ? (ctx.kpi.collab.data?.contracts ?? []).map((contract) => ({ key: contract.contractKey, label: `${personLabel(contract.personKey ? people.get(contract.personKey) : null) ?? "Contrat sans nom"} · ${contract.startDate ?? "début n.d."}` })) : [];
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
   const showGraph = aff !== "tableau";
   const showTable = aff !== "graphique";
@@ -248,6 +257,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
           </div>
         </div>
       </div>
+
+      {vue !== "paie-compta" && <ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} />}
 
       {vue === "fixe-variable" && <FixeVariableView slug={slug} input={input} months={months} prevMonths={prevMonths} aff={aff} tableHref={tableHref} link={link} confidentialite={confidentialite} guard={guard} unfilterHref={href({ svc: "" })} />}
       {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} serviceValue={serviceValue} compta={await ctx.compta()} aff={aff} tableHref={tableHref} unfilterHref={href({ svc: "" })} link={link} confidentialite={confidentialite} guard={guard} />}

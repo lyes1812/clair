@@ -44,7 +44,7 @@ describe("slug d'espace", () => {
 });
 
 describe("menu figé", () => {
-  it("contient Données + exactement les 5 sous-modules Studio RH", () => {
+  it("conserve Données et les 5 sous-modules RH, puis les deux studios demandés", () => {
     expect(ALL_ITEMS.map((i) => i.label)).toEqual([
       "Données",
       "Collaborateurs",
@@ -52,6 +52,8 @@ describe("menu figé", () => {
       "Masse salariale",
       "Hypothèses budgétaires",
       "Reporting social",
+      "Studio Finance",
+      "Studio Restructuring",
     ]);
     expect(STUDIO_RH_ITEMS).toHaveLength(5);
   });
