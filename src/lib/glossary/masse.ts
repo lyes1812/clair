@@ -83,6 +83,7 @@ const MOVED: GlossaryEntry[] = [
       "Une famille de prime est un libellé de ligne de prime du journal PayFit (par exemple « Primes sur objectif », « Primes de vacances »), regroupé par la rubrique de la grille : la somme des familles est le total des primes du mois.",
       "Dans le graphique mensuel, un mois sans colonne n'a aucune prime (0,00 €) : il n'est pas absent. Au-delà de huit familles, le graphique n'est pas tracé : les montants de chaque famille, mois par mois, sont dans le tableau « Primes par famille et par mois ».",
       "Les éléments non récurrents (indemnités de rupture conventionnelle, indemnités compensatrices de congés payés) ne sont pas distingués par le journal PayFit, qui les passe avec les autres lignes du compte 6414 « Indemnités et avantages divers » : ils restent dans la rubrique « Indemnités et avantages ».",
+      "Dans « Éléments non récurrents du réel », on peut désigner un licenciement, une rupture conventionnelle ou un tuilage passé, avec son mois et ses contrats, puis fournir le montant chargé et sa source. La paie reste inchangée ; une lecture analytique séparée soustrait les seuls coûts identifiés. Un montant non renseigné rend ce retraitement n.d. ; ni le compte 6414 entier ni un prorata de tuilage ne sont présumés.",
     ].join("\n\n"),
   },
   {

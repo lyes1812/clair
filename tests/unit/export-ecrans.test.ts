@@ -52,6 +52,8 @@ vi.mock("@/lib/workspace", () => ({
 }));
 vi.mock("@/lib/rh/kpi-context", () => ({ loadKpiContext: async () => mocks.kpiCtx.value }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => mocks.payCtx.value }));
+vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: async () => [], actualEventVersion: () => "fictif" }));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/actual-actions", () => ({ saveActualEventAction: async () => ({ ok: "fictif" }) }));
 vi.mock("@/lib/connectors/sync", () => ({
   lastSync: async (_w: string, p: string) => (p === "payfit" || p === "dsn" ? { status: "applied", startedAt: new Date("2026-01-15T09:00:00Z"), finishedAt: new Date("2026-01-15T09:12:00Z") } : null),
   activeSync: async (_w: string, p: string) => (p === "payfit" || p === "dsn" ? { decidedAt: new Date("2026-01-15T09:30:00Z") } : null),
@@ -342,7 +344,7 @@ for (const m of ["2026-01", "2026-02"]) lines.push(line(m, "641100", 300000, "C1
 lines.push(line("2025-01", "641100", 250000, "C1", "A"), line("2025-01", "645100", 125000, "C1", "A"), line("2025-01", "641100", 150000, "C2", "B"), line("2025-01", "645100", 75000, "C2", "B"));
 const journal: JournalInput = { lines, months: ["2025-01", "2025-02", "2026-01", "2026-02"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
 const payCtx = {
-  kpi: { input: null },
+  kpi: { input: null, collab: { workspace: { id: "w1", role: "reader" }, data: null } },
   source: "payfit",
   grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
   read: { syncId: "s1", startedAt: new Date("2026-03-03T10:00:00Z"), months: journal.months },
@@ -382,7 +384,7 @@ describe("Masse salariale › Synthèse : export Excel", () => {
     const res = await call("masse-salariale", "annee=2026&de=01&a=02&format=xlsx");
     expect(res.status).toBe(200);
     const wb = await load(res);
-    expect(wb.worksheets.map((w) => w.name)).toEqual(["Mois par mois", "Services", "Services par mois", "Filtres", "Sources", "Définitions"]);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Mois par mois", "Non récurrents réalisés", "Services", "Services par mois", "Filtres", "Sources", "Définitions"]);
     const ws = wb.getWorksheet("Mois par mois")!;
     expect(rowValues(ws, 5, 12)).toEqual(["Mois", "Masse chargée", "Masse N-1", "Écart", "Brut", "dont primes", "Cotisations", "ETP fin de mois", "ETP N-1", "Coût / ETP", "Coût / ETP N-1", "Observations"]);
     // Janvier : 8 000 € ; N-1 6 000 € ; écart +2 000 € ; brut 5 500 € dont primes 500 € ; cotisations 2 500 € ; ETP 2 et 2 ; coût par ETP 4 000 € et 3 000 €.

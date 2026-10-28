@@ -11,6 +11,8 @@ import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 // aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif.
 const state = vi.hoisted(() => ({ ctx: null as unknown }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
+vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: async () => [], actualEventVersion: () => "fictif" }));
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/actual-actions", () => ({ saveActualEventAction: async () => ({ ok: "fictif" }) }));
 
 // Journal : janvier 2026 (service A : brut 2 200,00 €, cotisations 1 200,00 € ; service B : brut 1 000,00 €, cotisations 500,00 €),
 // février 2026 identique mais non clôturé, janvier 2025 à 90 % de janvier 2026 ; février 2025 absent du journal (n.d.).
@@ -52,6 +54,7 @@ const compta = {
   error: false,
 };
 state.ctx = {
+  kpi: { collab: { workspace: { id: "w1", role: "reader" }, data: null } },
   source: "payfit",
   grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
   read: { syncId: "s1", startedAt: new Date("2026-03-03T10:00:00Z"), months: input.months },
@@ -176,7 +179,7 @@ describe("Masse salariale, Fixe & variable et Paie & comptabilité (lot 10)", ()
     expect(html).not.toMatch(/rubriques? « (Salaires et appointements|Primes) »[^<]*<\/span>|part du variable|rubrique à part, comptée dans le brut/);
     // Une rubrique sans ligne : la tuile le dit (jamais un zéro présenté comme lu) ; la limite des éléments non récurrents est conservée.
     expect(html).toContain("aucune ligne dans le journal sur la période");
-    expect(html).toContain("non distingués par le journal PayFit, ils restent dans la rubrique « Indemnités et avantages »");
+    expect(html).toContain("Les indemnités restent dans la paie source. Leur identification et celle des tuilages passés se renseignent dans « Éléments non récurrents du réel », sans les ajouter une seconde fois.");
   });
   it("Paie & comptabilité : provision +140,00 € (1 400,00 € contre 1 260,00 €) en rouge ; rapprochement : −50,00 € en vert, +50,00 € en rouge, 0,00 € neutre", async () => {
     const html = await page({ vue: "paie-compta", annee: "2026", de: "01", a: "01" });
