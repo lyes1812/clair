@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRestructuring, type RestructuringModel, type RestructuringScenario } from "@/lib/restructuring/model";
+import { buildRestructuring, nonRecurringBreakdown, type BreakdownId, type RestructuringModel, type RestructuringScenario } from "@/lib/restructuring/model";
 import type { BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 
 // Calculs manuels exclusivement fictifs, sans source métier ni accès base.
@@ -264,5 +264,111 @@ describe("point mort sur l’horizon modélisé", () => {
     const before = JSON.stringify([a, b]); freeze(a); freeze(b);
     expect(buildRestructuring(a, b)).toEqual(buildRestructuring(a, b));
     expect(JSON.stringify([a, b])).toBe(before);
+  });
+});
+
+describe("détail des éléments non récurrents déjà compris dans le projet", () => {
+  const detail = (input: RestructuringScenario | null, id: BreakdownId) => nonRecurringBreakdown(input).find((row) => row.id === id)!;
+  const departureFor = (id: string, contractKey: string, motif: string | undefined, costCents: number | null, date = "2026-10-31"): Hypothesis => ({
+    id, kind: "depart", label: "Libellé fictif sans effet sur le classement", contractKey, lastPaidDate: date, motif,
+    exitCost: costCents === null ? null : { mode: "charge", costCents },
+  });
+  const withContracts = (count: number, salaryCents = 10_000): BaseSnapshot => {
+    const snapshot = base(salaryCents);
+    snapshot.contracts = Array.from({ length: count }, (_, i) => ({ ...snapshot.contracts[0], contractKey: `fictif-${i}`, externalId: `fictif-${i}` }));
+    return snapshot;
+  };
+
+  it("retourne les quatre catégories n.d. sans scénario, puis refuse les projections invalides sans faux zéros", () => {
+    const rows = nonRecurringBreakdown(null);
+    expect(rows.map((row) => row.id)).toEqual(["licenciement", "rupture-conventionnelle", "autres-departs", "autres-non-recurrents"]);
+    expect(rows.every((row) => row.total.value === null && row.months.length === 0 && row.events === 0)).toBe(true);
+    const invalid = scenario("b", [departureFor("inconnu", "absent", "Licenciement", 100)]);
+    const refused = nonRecurringBreakdown(invalid);
+    expect(refused.every((row) => row.total.value === null && row.months.length === 3 && row.months.every((month) => month.amount.value === null))).toBe(true);
+    expect(detail(invalid, "licenciement").events).toBe(1);
+  });
+
+  it("classe seulement le motif normalisé et reprend les charges exactes du moteur une fois", () => {
+    const snapshot = withContracts(4);
+    const rc: Hypothesis = { ...departureFor("rc", "fictif-1", "  RUPTURE   CONVENTIONNELLE individuelle  ", 0), kind: "depart", exitCost: { mode: "brut", brutCents: 10_001, chargesBps: 2_500 } } as Hypothesis;
+    const misleading: Hypothesis = { ...departureFor("autre-2", "fictif-3", undefined, 7_000), label: "Licenciement — rupture conventionnelle" };
+    const input = scenario("b", [departureFor("lic", "fictif-0", " LÍCENCIEMENT économique ", 10_000), rc, departureFor("autre-1", "fictif-2", "Démission", 5_000), misleading], snapshot);
+    const rows = nonRecurringBreakdown(input);
+    expect(rows.map((row) => [row.id, row.events, row.total.value])).toEqual([
+      ["licenciement", 1, 10_000], ["rupture-conventionnelle", 1, 12_501], ["autres-departs", 2, 12_000], ["autres-non-recurrents", 0, 0],
+    ]);
+    expect(rows.every((row) => row.months.map((month) => month.month).join(",") === "2026-10,2026-11,2026-12")).toBe(true);
+    expect(detail(input, "rupture-conventionnelle").months.map((month) => month.amount.value)).toEqual([12_501, 0, 0]);
+    expect(rows.reduce((total, row) => total + row.total.value!, 0)).toBe(buildRestructuring(scenario("a", [], snapshot), input).totals.transitionCost.value);
+  });
+
+  it("un coût absent rend seulement sa catégorie et son mois n.d., tandis qu’un zéro explicite reste un zéro", () => {
+    const snapshot = withContracts(2);
+    const input = scenario("b", [departureFor("lic", "fictif-0", "Licenciement", null), departureFor("rc", "fictif-1", "Rupture conventionnelle", 0)], snapshot);
+    const unknown = detail(input, "licenciement"), zero = detail(input, "rupture-conventionnelle");
+    expect(unknown.events).toBe(1); expect(unknown.months[0].amount).toMatchObject({ value: null, reason: expect.stringContaining("exitCost") });
+    expect(unknown.months.slice(1).map((month) => month.amount.value)).toEqual([0, 0]); expect(unknown.total.value).toBeNull();
+    expect(zero.events).toBe(1); expect(zero.total.value).toBe(0); expect(zero.months.every((month) => month.amount.value === 0)).toBe(true);
+    expect(detail(input, "autres-non-recurrents").total.value).toBe(0);
+  });
+
+  it("compte le tuilage, le ponctuel et l’enveloppe par hypothèse distincte, sans doubler les coûts de sortie ni les économies", () => {
+    const env: Hypothesis = { id: "enveloppe-fictive", kind: "enveloppe", label: "Enveloppe fictive", axis: "service", target: "SERVICE", monthly: { "2026-10": 200, "2026-11": 300 }, chargesBps: 2_500, nonRecurring: true };
+    const dep: Hypothesis = { ...departure(), kind: "depart", motif: "Licenciement" } as Hypothesis;
+    const input = scenario("b", [dep, hire({ start: "2026-10-16", grossFullTimeCents: 6_200 }), oneOff("ponctuel", "2026-10", 100), env, oneOff("zero", "2026-10", 0), oneOff("recurrent", "2026-10", 1_000, false)]);
+    const rows = nonRecurringBreakdown(input), other = detail(input, "autres-non-recurrents");
+    // Tuilage 3 200 + ponctuel 100 + enveloppe chargée 250 + 375 = 3 925 centimes.
+    expect(other.events).toBe(3); expect(other.total.value).toBe(3_925);
+    expect(other.months.map((month) => month.amount.value)).toEqual([3_550, 375, 0]);
+    const model = buildRestructuring(scenario("a"), input);
+    expect(rows.reduce((total, row) => total + row.total.value!, 0)).toBe(13_925);
+    expect(model.totals.transitionCost.value).toBe(13_925);
+    expect(model.totals.proposalCost.value).toBe(37_325);
+    expect(model.totals.savings.value).toBe(-7_325);
+    expect(model.totals.referenceCost.value! - model.totals.proposalCost.value!).toBe(model.totals.savings.value);
+  });
+
+  it("propage un mois n.d. du moteur aux quatre catégories sans transformer l’absence de contribution en zéro", () => {
+    const snapshot = base(); snapshot.contracts[0].base = null;
+    const input = scenario("b", [{ ...departure(), kind: "depart", motif: "Licenciement" } as Hypothesis], snapshot);
+    const rows = nonRecurringBreakdown(input);
+    expect(rows.every((row) => row.months[0].amount.value === null && row.total.value === null)).toBe(true);
+    expect(rows.every((row) => row.months.slice(1).every((month) => month.amount.value === 0))).toBe(true);
+    expect(detail(input, "licenciement").events).toBe(1);
+  });
+
+  it("borne les sommes catégorielles sur plusieurs mois sans arrondi flottant ni total partiel", () => {
+    const snapshot = withContracts(2, 0);
+    const input = scenario("b", [departureFor("lic-1", "fictif-0", "Licenciement", Number.MAX_SAFE_INTEGER), departureFor("lic-2", "fictif-1", "Licenciement", Number.MAX_SAFE_INTEGER, "2026-11-30")], snapshot);
+    const row = detail(input, "licenciement");
+    expect(row.events).toBe(2); expect(row.months.map((month) => month.amount.value)).toEqual([Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 0]);
+    expect(row.total).toMatchObject({ value: null, reason: expect.stringContaining("entiers sûrs") });
+    expect(detail(input, "autres-departs").total.value).toBe(0);
+    const invalid = scenario("b", [oneOff("fraction", "2026-10", 0.5)]);
+    expect(nonRecurringBreakdown(invalid).every((entry) => entry.months[0].amount.value === null && entry.total.value === null)).toBe(true);
+  });
+
+  it("ne compte pas les départs hors horizon et ne devine pas une catégorie depuis une abréviation", () => {
+    const snapshot = withContracts(2);
+    const input = scenario("b", [departureFor("tardif", "fictif-0", "Licenciement", null, "2027-01-31"), departureFor("rc-abrege", "fictif-1", "RC", 50)], snapshot);
+    expect(detail(input, "licenciement").events).toBe(0); expect(detail(input, "licenciement").total.value).toBe(0);
+    expect(detail(input, "rupture-conventionnelle").events).toBe(0);
+    expect(detail(input, "autres-departs").total.value).toBe(50);
+  });
+
+  it("conserve les remboursements non récurrents et ne compte pas une hypothèse à montant nul comme coût effectif", () => {
+    const input = scenario("b", [oneOff("credit", "2026-10", -100), oneOff("nul", "2026-11", 0)]);
+    const row = detail(input, "autres-non-recurrents");
+    expect(row.events).toBe(1); expect(row.total.value).toBe(-100);
+    expect(row.months.map((month) => month.amount.value)).toEqual([-100, 0, 0]);
+  });
+
+  it("laisse le scénario intact et retourne un résultat déterministe", () => {
+    const input = scenario("b", [departure(), hire()]);
+    const freeze = (value: unknown): void => { if (value && typeof value === "object") { Object.freeze(value); for (const child of Object.values(value)) freeze(child); } };
+    const before = JSON.stringify(input); freeze(input);
+    expect(nonRecurringBreakdown(input)).toEqual(nonRecurringBreakdown(input));
+    expect(JSON.stringify(input)).toBe(before);
   });
 });

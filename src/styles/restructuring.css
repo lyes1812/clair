@@ -19,5 +19,14 @@
 .restructuring-measures small { display: block; color: var(--muted); margin-top: 6px; font-size: var(--clair-type-label); }
 .restructuring-values { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .restructuring-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.restructuring-breakdown td.num { min-width: 110px; vertical-align: top; }
+.restructuring-breakdown th:first-child { min-width: 220px; }
+.restructuring-breakdown-reasons { margin: 8px 0 0; padding-left: 16px; max-width: 520px; text-align: left; white-space: normal; color: var(--muted); font-size: var(--clair-type-label); }
+.restructuring-exit-fields { align-items: flex-start; }
+.restructuring-exit-fields .field-row { flex: 1 1 220px; min-width: 180px; }
+.restructuring-exit-editors { display: grid; gap: 12px; }
+.restructuring-exit-editor { border: 1px solid var(--line); border-radius: var(--clair-radius-control); }
+.restructuring-exit-editor > summary { cursor: pointer; padding: 14px 16px; font-size: var(--clair-type-form); font-weight: 500; }
+.restructuring-exit-editor > .form { padding: 8px 16px 18px; }
 @media (max-width: 1100px) { .restructuring-charts { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 650px) { .restructuring-header { display: grid; } .restructuring-filters .field-row { flex-basis: 100%; min-width: 0; } }

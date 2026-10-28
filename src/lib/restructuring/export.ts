@@ -2,6 +2,7 @@ import { safeText } from "@/lib/export/safe-text";
 import type { ExportCell, WorkbookSpec } from "@/lib/export/xlsx";
 import type { RestructuringContext } from "./context";
 import type { Metric, RestructuringScenario } from "./model";
+import { nonRecurringBreakdown } from "./model";
 
 type Context = Pick<RestructuringContext, "workspaceName" | "reference" | "proposal" | "model"> & { generatedAt: string };
 const cell = (metric: Metric): ExportCell => metric.value === null ? { nd: metric.reason ?? "Valeur non disponible." } : metric.value;
@@ -25,6 +26,8 @@ const source = (label: string, scenario: RestructuringScenario | null) => ({
 
 // Export agrégé seulement : aucun contrat, nom de salarié ni détail nominatif des hypothèses.
 export function restructuringWorkbook(ctx: Context): WorkbookSpec {
+  const breakdown = nonRecurringBreakdown(ctx.proposal);
+  const months = breakdown[0].months.map((entry) => entry.month);
   return {
     title: "Studio Restructuring — comparaison de scénarios RH", workspaceName: ctx.workspaceName, generatedAt: ctx.generatedAt,
     filters: [
@@ -36,6 +39,18 @@ export function restructuringWorkbook(ctx: Context): WorkbookSpec {
         name: "Synthèse", columns: [{ key: "metric", header: "Indicateur", kind: "text", width: 58 }, { key: "amount", header: "Montant EUR", kind: "eur", width: 24 }, { key: "reason", header: "Observation", kind: "text", width: 65 }],
         rows: [...TOTALS.map(([key, label]) => [label, cell(ctx.model.totals[key]), ctx.model.totals[key].reason ?? ""]), ["Retour à l’équilibre cumulé", "", ctx.model.payback.month ?? ctx.model.payback.reason]],
         note: ctx.model.kind === "nd" ? ctx.model.reason ?? "Comparaison indisponible." : "Coûts ponctuels et remplacements déjà inclus dans le coût projeté ; aucun retraitement juridique.",
+      },
+      {
+        name: "Non récurrents",
+        columns: [
+          { key: "category", header: "Élément non récurrent", kind: "text", width: 42 },
+          { key: "count", header: "Mesures du projet", kind: "nombre", width: 20 },
+          ...months.map((month) => ({ key: month, header: `${month} EUR`, kind: "eur" as const, width: 20 })),
+          { key: "total", header: "Coût chargé total EUR", kind: "eur", width: 25 },
+          { key: "reason", header: "Observation", kind: "text", width: 60 },
+        ],
+        rows: breakdown.map((row) => [row.label, row.events, ...row.months.map((entry) => cell(entry.amount)), cell(row.total), row.total.reason ?? "Déjà inclus dans le coût total du projet." ]),
+        note: "Ventilation du projet par motif de départ saisi : licenciement, rupture conventionnelle, autres départs. Les autres éléments reprennent les coûts marqués non récurrents, tuilages compris. Aucune indemnité ni exonération juridique estimée ; ne pas ajouter ces montants une seconde fois.",
       },
       {
         name: "Impacts mensuels",
@@ -68,6 +83,11 @@ export function restructuringCsv(ctx: Context): string {
     for (const [key, label] of [["referenceEtp4", "ETP référence fin de mois"], ["proposalEtp4", "ETP projet fin de mois"]] as const) rows.push(["Effectifs", m.month, label, decimal(m[key], 10000n), "ETP", m[key].reason ?? ""]);
   }
   for (const [key, label] of TOTALS) rows.push(["Synthèse", "", label, decimal(ctx.model.totals[key]), "EUR", ctx.model.totals[key].reason ?? ""]);
+  for (const entry of nonRecurringBreakdown(ctx.proposal)) {
+    for (const month of entry.months) rows.push(["Non récurrents", month.month, entry.label, decimal(month.amount), "EUR", month.amount.reason ?? "Déjà inclus dans le coût total du projet."]);
+    rows.push(["Non récurrents", "Total", entry.label, decimal(entry.total), "EUR", entry.total.reason ?? "Déjà inclus dans le coût total du projet."]);
+    rows.push(["Non récurrents", "", `Mesures — ${entry.label}`, String(entry.events), "nombre", ""]);
+  }
   rows.push(["Synthèse", "", "Écart ETP de fin d’horizon (référence − projet)", decimal(ctx.model.endEtpDelta, 10000n), "ETP", ctx.model.endEtpDelta.reason ?? ""]);
   rows.push(["Synthèse", "", "Retour à l’équilibre cumulé", "", "", ctx.model.payback.month ?? ctx.model.payback.reason]);
   const spec = restructuringWorkbook(ctx);
