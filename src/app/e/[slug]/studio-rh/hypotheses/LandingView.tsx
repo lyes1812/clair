@@ -3,13 +3,14 @@ import "@/styles/hypotheses-resultat.css";
 import { BarChart, WaterfallChart } from "@/components/charts";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { GlossaryLink } from "@/components/GlossaryLink";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatMonth } from "@/lib/dates";
 import { formatEuros } from "@/lib/money";
 import { HYP_TERMS } from "@/lib/glossary/hypotheses";
 import type { Measures, Retraite, SensitivityRow, VariantKind } from "@/lib/budget/lot3";
 import { VARIANT_LABELS } from "@/lib/budget/lot3";
 import type { Landing } from "@/lib/budget/engine";
 import type { Hypothesis } from "@/lib/budget/types";
+import type { ActualEvent } from "@/lib/payroll/non-recurring";
 import { costTone, trendClass, type TrendTone } from "@/lib/trend";
 import { affichageOf, frDates, hasNd, landingParts, landingWaterfall, measuresBars, retraiteWaterfall, savingTone, sensitivityBars, showCharts, showTables, slugOf, withAffichage, type WaterfallIn } from "@/lib/viz/hypotheses";
 import { NdKey, PanelTitle, TileTitle, TrendLegend } from "./ProjectionView";
@@ -18,6 +19,25 @@ const signed = (c: number) => `${c > 0 ? "+" : ""}${formatEuros(c)}`;
 // Classe d'une cellule ou d'une valeur dont la couleur dit la tendance du coût (rouge : coût en hausse, vert : coût en baisse) ; la classe
 // hr-gap ajoute la flèche, le signe reste écrit. Neutre : aucune classe.
 const toneClass = (base: string, tone: TrendTone): string => (tone === "flat" ? base : [base, "hr-gap", trendClass(tone)].filter(Boolean).join(" "));
+
+export type ActualStatusItem = { kind: ActualEvent["kind"]; month: string; amountMissing: boolean; sourceMismatch: boolean; monthUnavailable: boolean; legacyOverlap: boolean };
+// Synthèse de statut serveur seulement : aucune identité, note libre ni valeur individuelle n’est reçue ou rendue.
+export function ActualNonRecurringStatus({ items }: { items: ActualStatusItem[] }) {
+  if (!items.length) return null;
+  const labels: Record<ActualStatusItem["kind"], string> = { licenciement: "Licenciement", "rupture-conventionnelle": "Rupture conventionnelle", tuilage: "Tuilage", autre: "Autre élément identifié" };
+  return <div className="tile-foot" data-testid="atr-actual-status">
+    <strong>Coûts passés identifiés dans Réel</strong>
+    <ul>{items.map((item, index) => {
+      const reasons = [
+        item.amountMissing ? "montant chargé à renseigner" : null,
+        item.sourceMismatch ? "lecture différente de la base figée, à vérifier dans Réel" : null,
+        item.monthUnavailable ? "mois absent du réel connu de la base figée" : null,
+        item.legacyOverlap ? "ancienne saisie réalisée du scénario sur ce mois : rapprochement nécessaire" : null,
+      ].filter(Boolean);
+      return <li key={`${item.kind}-${item.month}-${index}`} data-testid={`atr-actual-status-${index}`}><span>{labels[item.kind]} · {formatMonth(item.month)}</span> — {reasons.length ? <span className="nd">n.d. : {reasons.join(" ; ")}</span> : "montant chargé renseigné"}</li>;
+    })}</ul>
+  </div>;
+}
 
 // Variations proposées pour chaque hypothèse (unité écrite dans le libellé ; aucune valeur par défaut).
 export function variantOptions(hyps: Hypothesis[]): { value: string; label: string }[] {

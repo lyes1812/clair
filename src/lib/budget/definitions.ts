@@ -118,7 +118,7 @@ export const BUDGET_DEFINITIONS: { id: string; title: string; text: string }[] =
     id: "retraite",
     title: "Atterrissage retraité",
     text:
-      "Atterrissage de l'année − éléments non récurrents. Déjà en comptabilité : éléments saisis à la main (le journal PayFit passe les indemnités de rupture et de congés payés avec les autres lignes du compte 6414 et ne les distingue pas), avec leur montant chargé. D'ici décembre : coûts de sortie des hypothèses de départ, éléments ponctuels marqués « non récurrent » et tuilages (coût de l'entrant, augmentations comprises, pendant les jours où le salarié remplacé est encore payé). Les catégories sont libres.",
+      "Atterrissage de l'année − éléments non récurrents. Déjà en comptabilité : coûts passés identifiés dans Réel avec leur montant chargé, rattachés à la même lecture PayFit que la base figée du scénario et à un mois réel de cette base. Les anciennes saisies « Non récurrent réalisé » restent conservées ; un même mois déclaré dans les deux endroits doit être vérifié avant retraitement pour éviter un double compte. Un montant manquant ou une lecture différente rend le retraité n.d. ; la paie et l'atterrissage brut restent inchangés. D'ici décembre : coûts de sortie des hypothèses de départ, éléments ponctuels et enveloppes marqués « non récurrent », et tuilages (coût de l'entrant, augmentations comprises, pendant les jours où le salarié remplacé est encore payé). Aucun montant de coût passé n'est déduit automatiquement du journal.",
   },
   {
     id: "mesures",

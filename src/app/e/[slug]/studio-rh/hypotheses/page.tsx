@@ -16,13 +16,14 @@ import { formatEuros } from "@/lib/money";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { monthPayroll } from "@/lib/payroll/engine";
 import { loadPayrollContext } from "@/lib/payroll/context";
+import { listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { ActionForm } from "./ActionForm";
 import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
 import { ComparisonView } from "./ComparisonView";
-import { LandingView, variantOptions } from "./LandingView";
-import { measures, retraite, sensitivities, type Variant, type VariantKind } from "@/lib/budget/lot3";
+import { ActualNonRecurringStatus, LandingView, variantOptions } from "./LandingView";
+import { measures, sensitivities, type ActualNonRecurringInput, type Variant, type VariantKind } from "@/lib/budget/lot3";
 import { toCents } from "@/lib/money";
 import { ProjectionView } from "./ProjectionView";
 import { loadComparison } from "./resultat-data";
@@ -57,7 +58,7 @@ function Header({ children }: { children?: React.ReactNode }) {
 }
 
 // Onglet Atterrissage : retraité, mesures de management, sensibilités (variations lues dans l'URL, jamais enregistrées).
-function landingTab(slug: string, s: ScenarioRow, base: BaseSnapshot, hyps: Hypothesis[], proj: Projection, sp: Search) {
+async function landingTab(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, hyps: Hypothesis[], sp: Search) {
   const year = s.firstMonth.slice(0, 4);
   const options = variantOptions(hyps);
   const svs = (Array.isArray(sp.sv) ? sp.sv : sp.sv ? [sp.sv] : []).map(String);
@@ -74,10 +75,24 @@ function landingTab(slug: string, s: ScenarioRow, base: BaseSnapshot, hyps: Hypo
     if (!options.some((o) => o.value === v) || c === null || c === 0) bad.push(`variation ${i + 1} ignorée (valeur manquante, nulle ou invalide)`);
     else variants.push({ hypothesisId: id, kind, delta: c });
   });
-  const { reference, landing: land, rows } = sensitivities(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year, variants);
+  let actual: ActualNonRecurringInput;
+  try {
+    actual = { kind: "value", events: await listActualEvents(workspaceId) };
+  } catch {
+    actual = { kind: "nd", reason: "Les éléments non récurrents du Réel n’ont pas pu être lus. Recharge la page avant de lire l’atterrissage retraité." };
+  }
+  const { reference, landing: land, rows } = sensitivities(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year, variants, actual);
+  const actualStatuses = actual.kind === "value" ? actual.events.filter((event) => event.month.startsWith(`${year}-`) && event.month <= base.refMonth).sort((a, b) => a.month.localeCompare(b.month) || a.kind.localeCompare(b.kind)).map((event) => ({
+    kind: event.kind, month: event.month, amountMissing: event.chargedCents === null,
+    sourceMismatch: event.syncId.toLowerCase() !== base.syncId.toLowerCase(),
+    monthUnavailable: !base.actuals.some((month) => month.month === event.month && month.kind === "value"),
+    legacyOverlap: hyps.some((hypothesis) => hypothesis.kind === "realise" && hypothesis.month === event.month),
+  })) : [];
   return (
     <>
       {bad.map((b) => <p key={b} className="notice">{b}</p>)}
+      <p className="tile-foot" data-testid="atr-actual-source">L’atterrissage brut reste inchangé. Le retraité isole les coûts passés identifiés dans Réel et les éléments non récurrents prévus. <a href={`/e/${slug}/studio-rh/masse-salariale`}>Identifier les coûts passés dans Réel</a>.</p>
+      <ActualNonRecurringStatus items={actualStatuses} />
       <LandingView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} year={year} landing={land} retraite={reference} measures={measures(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year)} sens={rows} options={options} chosen={chosen} affichage={one(sp.affichage)} />
     </>
   );
@@ -326,7 +341,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
             {sous === "projection" ? (
               <ProjectionView slug={slug} scenario={s} base={full.base} proj={proj} landing={landing(full.base, proj, year)} month={one(sp.mois)} affichage={one(sp.affichage)} />
             ) : sous === "atterrissage" ? (
-              landingTab(slug, s, full.base, full.hypotheses, proj, sp)
+              await landingTab(slug, workspace.id, s, full.base, full.hypotheses, sp)
             ) : (
               await comparison(slug, workspace.id, s, full.base, proj, sp)
             )}
