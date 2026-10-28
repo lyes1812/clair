@@ -44,7 +44,7 @@ describe("slug d'espace", () => {
 });
 
 describe("menu figé", () => {
-  it("conserve Données et les 5 sous-modules RH, puis ajoute le Studio Finance demandé", () => {
+  it("conserve Données et les 5 sous-modules RH, puis les deux studios demandés", () => {
     expect(ALL_ITEMS.map((i) => i.label)).toEqual([
       "Données",
       "Collaborateurs",
@@ -53,6 +53,7 @@ describe("menu figé", () => {
       "Hypothèses budgétaires",
       "Reporting social",
       "Studio Finance",
+      "Studio Restructuring",
     ]);
     expect(STUDIO_RH_ITEMS).toHaveLength(5);
   });

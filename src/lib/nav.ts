@@ -21,4 +21,8 @@ export const FINANCE_ITEM: NavItem = {
   label: "Studio Finance", path: "studio-finance", module: 7,
   summary: "Compte de résultat issu de Pennylane ou du FEC, modèle, budget, prévision et écarts.",
 };
-export const ALL_ITEMS: NavItem[] = [DATA_ITEM, ...STUDIO_RH_ITEMS, FINANCE_ITEM];
+export const RESTRUCTURING_ITEM: NavItem = {
+  label: "Studio Restructuring", path: "studio-restructuring", module: 8,
+  summary: "Comparer les scénarios RH, les coûts de transition et les économies mensuelles d’un projet de réorganisation.",
+};
+export const ALL_ITEMS: NavItem[] = [DATA_ITEM, ...STUDIO_RH_ITEMS, FINANCE_ITEM, RESTRUCTURING_ITEM];

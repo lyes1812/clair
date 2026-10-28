@@ -19,7 +19,7 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email, families
   return (
     <header className="ws-topbar">
       <div className="topbar-left">
-        <MegaMenu families={families} extras={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Studio Finance", href: `/e/${slug}/studio-finance` }, { label: "Paramètres", href: `/e/${slug}/parametres` }, { label: "Membres et accès", href: `/e/${slug}/membres` }, { label: "Glossaire", href: `/e/${slug}/glossaire` }]} />
+        <MegaMenu families={families} extras={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Studio Finance", href: `/e/${slug}/studio-finance` }, { label: "Studio Restructuring", href: `/e/${slug}/studio-restructuring` }, { label: "Paramètres", href: `/e/${slug}/parametres` }, { label: "Membres et accès", href: `/e/${slug}/membres` }, { label: "Glossaire", href: `/e/${slug}/glossaire` }]} />
         <nav className="breadcrumb" aria-label="Fil d'Ariane">
           <span className="crumb-space">Espace {workspaceName}</span>
           {page && (<><span className="crumb-sep" aria-hidden="true">/</span><strong>{page}</strong></>)}
