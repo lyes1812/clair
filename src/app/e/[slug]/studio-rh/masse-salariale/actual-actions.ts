@@ -32,5 +32,7 @@ export async function saveActualEventAction(slug: string, syncId: string, displa
     return { error: error instanceof ActualEventError ? error.message : "Enregistrement indisponible. Aucune donnée source n’a été modifiée." };
   }
   revalidatePath(`/e/${slug}/studio-rh/masse-salariale`);
+  revalidatePath(`/e/${slug}/studio-rh/masse-salariale/croisee`);
+  revalidatePath(`/e/${slug}/studio-rh/hypotheses`);
   return { ok: "Élément réalisé identifié. La paie source reste inchangée et le coût n’est pas ajouté une seconde fois." };
 }

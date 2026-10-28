@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: vi.fn(async () => []) }));
+vi.mock("@/db/workspace-scope", () => ({ withWorkspace: () => { throw new Error("Accès base interdit dans ce test fictif"); } }));
 import { ExportMenu } from "@/components/ExportMenu";
 import { CHAPTERS, chapterDef } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/chapitres";
 import { once, type CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/croisee/context";

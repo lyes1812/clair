@@ -26,6 +26,7 @@ describe("Non récurrents du réel : saisie indépendante des scénarios", () =>
   it("désigne un binôme sans inventer son coût, et ne touche ni paie ni scénario", async () => {
     expect((await saveActualEventAction("fictif", sync, {}, undefined, form()))?.ok).toBeTruthy();
     expect(mocks.save).toHaveBeenCalledExactlyOnceWith("espace-fictif", "editeur-fictif", expect.objectContaining({ kind: "tuilage", month: "2026-06", chargedCents: null, contractKeys: ["payfit:fictif-a", "payfit:fictif-b"], syncId: sync }), null);
+    expect(mocks.revalidate.mock.calls.map(([path]) => path)).toEqual(["/e/fictif/studio-rh/masse-salariale", "/e/fictif/studio-rh/masse-salariale/croisee", "/e/fictif/studio-rh/hypotheses"]);
   });
   it("garde le zéro explicite et le montant en euros exact", async () => {
     await saveActualEventAction("fictif", sync, {}, undefined, form({ chargedEuros: "0" }));

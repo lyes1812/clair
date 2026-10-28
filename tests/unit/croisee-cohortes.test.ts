@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Contribution, ContributionKind, Hypothesis, ProjectedMonth, Projection } from "@/lib/budget/types";
+import type { ActualEvent } from "@/lib/payroll/non-recurring";
 import { maskCohorts, maskNonRecurring, nonRecurringContributors, partitionCohorts, type CohortPartition } from "@/lib/croisee/cohortes";
 
 // Partition des personnes observées (chapitre 06) : valeurs fictives écrites à la main, résultats calculés à la main (centimes).
@@ -177,6 +178,40 @@ describe("nonRecurringContributors — cas de référence", () => {
   it("une part non récurrente sans contrat ni hypothèse : contributeurs prévus non dénombrés (null), jamais devinés", () => {
     const p: Projection = { kind: "value", months: [month("2026-04", [C({ hyp: null, contract: null, nr: 5_000 })])] };
     expect(nonRecurringContributors(base, p, [], "2026")).toEqual({ realised: 0, projected: null });
+  });
+});
+
+describe("nonRecurringContributors — déclarations du Réel rattachées à la base", () => {
+  const syncId = "11111111-1111-4111-8111-111111111111";
+  const base = { refMonth: "2026-02", syncId, actuals: ["2026-01", "2026-02"].map((month) => ({ month, kind: "value" as const, brut: 100000, cotisations: 40000, masse: 140000, headcount: 2, etp4: 20000, etpNd: null })) };
+  const proj: Projection = { kind: "value", months: [] };
+  const event = (patch: Partial<ActualEvent> = {}): ActualEvent => ({ id: "22222222-2222-4222-8222-222222222222", syncId, month: "2026-01", kind: "tuilage", chargedCents: 10000, contractKeys: ["fictif-a", "fictif-b"], note: "Pièce fictive privée", ...patch });
+
+  it("compte les contrats distincts une seule fois entre plusieurs mois et ne restitue aucune identité", () => {
+    const events = [event(), event({ id: "33333333-3333-4333-8333-333333333333", month: "2026-02", kind: "licenciement", contractKeys: ["fictif-b"] })];
+    const result = nonRecurringContributors(base, proj, [], "2026", { kind: "value", events });
+    expect(result).toEqual({ realised: 2, projected: 0 });
+    expect(JSON.stringify(result)).not.toMatch(/fictif-|Pièce|22222222/);
+  });
+
+  it("une déclaration non nulle sans contrat est invérifiable ; un zéro explicite ne décrit aucun contributeur", () => {
+    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event({ kind: "autre", contractKeys: [] })] }).realised).toBeNull();
+    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event({ kind: "autre", contractKeys: [], chargedCents: 0 })] }).realised).toBe(0);
+  });
+
+  it("lecture différente, mois réel absent, montant manquant, doublon ou chargement échoué ne donnent pas de compte partiel", () => {
+    for (const candidate of [event({ syncId: "33333333-3333-4333-8333-333333333333" }), event({ chargedCents: null })]) {
+      expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [candidate] }).realised).toBeNull();
+    }
+    expect(nonRecurringContributors({ ...base, actuals: [] }, proj, [], "2026", { kind: "value", events: [event()] }).realised).toBeNull();
+    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event(), event()] }).realised).toBeNull();
+    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "nd", reason: "lecture indisponible" }).realised).toBeNull();
+  });
+
+  it("ignore les événements hors année ou après bascule et bloque un mois déjà déclaré dans les anciennes hypothèses", () => {
+    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event({ month: "2025-01" }), event({ month: "2026-03" })] }).realised).toBe(0);
+    const legacy: Hypothesis = { id: "legacy-fictif", kind: "realise", label: "Fictif", month: "2026-01", category: "Fictif", costCents: 10000 };
+    expect(nonRecurringContributors(base, proj, [legacy], "2026", { kind: "value", events: [event()] }).realised).toBeNull();
   });
 });
 

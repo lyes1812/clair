@@ -9,6 +9,8 @@
 // à l'écart total. Contribution d'un groupe = montant N − montant N-1 (un groupe absent d'une période n'y a aucune ligne).
 
 import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
+import type { ActualNonRecurringInput } from "@/lib/budget/lot3";
+import { parseActualEvent } from "@/lib/payroll/non-recurring";
 import { maskGroups, maskRelations, type MaskCell, type MaskStatus } from "./structure";
 
 export type CohortGroup = { count: number; prev: number; cur: number; delta: number };
@@ -108,11 +110,28 @@ export function maskCohorts(p: Extract<CohortPartition, { kind: "value" }>, seui
 // ni hypothèse (effectif non dénombré, seuil non vérifiable). Aucune clé ne sort de la fonction.
 export type NonRecurringContributors = { realised: number | null; projected: number | null };
 
-export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth">, proj: Projection, hyps: readonly Hypothesis[], year: string): NonRecurringContributors {
+export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth"> & Partial<Pick<BaseSnapshot, "syncId" | "actuals">>, proj: Projection, hyps: readonly Hypothesis[], year: string, actual: ActualNonRecurringInput = { kind: "value", events: [] }): NonRecurringContributors {
   const add = (m: Map<string, number>, key: string, cents: number) => m.set(key, (m.get(key) ?? 0) + cents);
   const count = (m: Map<string, number>) => [...m.values()].filter((v) => v !== 0).length;
   const realised = new Map<string, number>();
   for (const h of hyps) if (h.kind === "realise" && h.month.startsWith(year) && h.month <= base.refMonth) add(realised, `hypothese:${h.id}`, h.costCents);
+  let realisedUnknown = actual.kind === "nd";
+  const ids = new Set<string>(), fingerprints = new Set<string>();
+  if (actual.kind === "value") for (const candidate of actual.events) {
+    if (!candidate.month.startsWith(`${year}-`) || candidate.month > base.refMonth) continue;
+    const event = parseActualEvent(candidate);
+    if (!event || !base.syncId || event.syncId.toLowerCase() !== base.syncId.toLowerCase() || !base.actuals?.some((month) => month.month === event.month && month.kind === "value") || event.chargedCents === null) {
+      realisedUnknown = true;
+      continue;
+    }
+    const id = event.id.toLowerCase(), fingerprint = JSON.stringify([event.kind, event.month, [...event.contractKeys].sort()]);
+    if (ids.has(id) || fingerprints.has(fingerprint) || hyps.some((h) => h.kind === "realise" && h.month === event.month)) realisedUnknown = true;
+    ids.add(id); fingerprints.add(fingerprint);
+    if (event.chargedCents === 0) continue;
+    if (!event.contractKeys.length) realisedUnknown = true;
+    // Un binôme peut apparaître plusieurs mois : les mêmes contrats ne deviennent pas plusieurs contributeurs.
+    for (const key of event.contractKeys) add(realised, `contrat:${key}`, event.chargedCents);
+  }
   const projected = new Map<string, number>();
   let unknown = false;
   if (proj.kind === "value") {
@@ -126,7 +145,7 @@ export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth">, p
       }
     }
   }
-  return { realised: count(realised), projected: unknown ? null : count(projected) };
+  return { realised: realisedUnknown ? null : count(realised), projected: unknown ? null : count(projected) };
 }
 
 // Les deux totaux forment un ensemble dont la somme est affichée (« Non récurrents retirés », atterrissage − retraité) : masquage
