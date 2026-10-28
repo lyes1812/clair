@@ -9,10 +9,11 @@ import { formatDate, formatMonth } from "@/lib/dates";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import type { Amount, Hypothesis } from "@/lib/budget/types";
 import type { RestructuringContext } from "@/lib/restructuring/context";
-import type { Metric } from "@/lib/restructuring/model";
+import { nonRecurringBreakdown, type Metric } from "@/lib/restructuring/model";
 import { RESTRUCTURING_VIEWS as VIEWS } from "@/lib/restructuring/views";
 import { ChartGuard, PanelHead, ReadDetails, Tile } from "../studio-rh/masse-salariale/components";
 import { detailOf, KIND, pct } from "../studio-rh/hypotheses/shared";
+import { ExitCostForm, type ExitCostAction } from "./ExitCostForm";
 
 const QUESTIONS = {
   overview: "Quelles économies le projet apporte-t-il, et quand absorbe-t-il ses coûts ?",
@@ -20,6 +21,7 @@ const QUESTIONS = {
   monthly: "Comment les coûts, les économies et les ETP évoluent-ils chaque mois ?",
 };
 type Scenario = NonNullable<RestructuringContext["proposal"]>;
+type Props = RestructuringContext & { saveExit?: ExitCostAction };
 const statusLabel = (status: string) => status === "fige" ? "Figé" : status === "brouillon" ? "Brouillon" : status;
 const missingReason = (metric: Metric) => metric.reason ?? "Valeur non disponible dans les scénarios comparés.";
 
@@ -92,6 +94,14 @@ function Overview({ p }: { p: RestructuringContext }) {
   </>;
 }
 
+function NonRecurring({ proposal }: { proposal: Scenario }) {
+  const rows = nonRecurringBreakdown(proposal);
+  return <section className="panel restructuring-section" data-testid="restructuring-non-recurring"><PanelHead title="Éléments non récurrents" desc={<>Coûts du projet · <MoneyUnitLabel /></>} />
+    <p className="desc">Licenciements, ruptures conventionnelles et autres coûts non récurrents du projet. Montants déjà inclus dans le coût projeté et dans l’économie nette : aucun ajout à faire.</p>
+    <div className="table-wrap scroll restructuring-scroll" tabIndex={0} role="region" aria-label="Éléments non récurrents du projet par catégorie"><table className="data-table sticky sticky-first restructuring-breakdown" data-testid="restructuring-non-recurring-table"><thead><tr><th scope="col">Nature</th><th scope="col" className="num">Mesures</th><th scope="col" className="num">Coût sur l’horizon</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id} data-testid={`restructuring-non-recurring-${row.id}`}><th scope="row">{row.label}</th><td className="num">{row.events}</td><td className="num"><Cell metric={row.total} />{row.total.value === null ? <ul className="restructuring-breakdown-reasons">{row.months.filter((month) => month.amount.value === null).map((month) => <li key={month.month}>{formatMonth(month.month)} : {missingReason(month.amount)}</li>)}</ul> : null}</td></tr>)}</tbody></table></div>
+  </section>;
+}
+
 function AmountInput({ amount }: { amount: Amount }) {
   return amount.mode === "charge" ? <><Money cents={amount.costCents} /> chargés</> : <><Money cents={amount.brutCents} /> brut + charges {pct(amount.chargesBps)}</>;
 }
@@ -118,13 +128,18 @@ function MeasureValue({ h, proposal }: { h: Hypothesis; proposal: Scenario }) {
     default: return <MoneyText>{detailOf(h, proposal.base, proposal.hypotheses)}</MoneyText>;
   }
 }
-function Measures({ p }: { p: RestructuringContext }) {
+function Measures({ p }: { p: Props }) {
   const proposal = p.proposal;
   if (!proposal) return <p className="notice">Choisis le scénario du projet pour lire ses mesures.</p>;
   if (!p.canEdit) return <section className="panel restructuring-section" data-testid="restructuring-measures-readonly"><PanelHead title="Mesures du projet" /><p>{proposal.hypotheses.length} hypothèse{proposal.hypotheses.length === 1 ? "" : "s"} dans le projet. Ton rôle donne accès à la synthèse agrégée ; les détails individuels des mesures ne sont pas affichés.</p></section>;
-  return <section className="panel restructuring-section"><PanelHead title="Hypothèses du projet" desc={`${proposal.hypotheses.length} mesure${proposal.hypotheses.length === 1 ? "" : "s"} · montants saisis, sans estimation d’indemnité`} tools={<a className="btn" href={hypothesesHref(p.slug, proposal, "postes")}>{proposal.status === "brouillon" ? "Modifier dans Hypothèses" : "Ouvrir ou dupliquer dans Hypothèses"}</a>} />
+  const editable = proposal.status === "brouillon" && p.saveExit;
+  const departures = proposal.hypotheses.filter((hypothesis): hypothesis is Extract<Hypothesis, { kind: "depart" }> => hypothesis.kind === "depart");
+  return <>
+    {editable ? <section className="panel restructuring-section"><PanelHead title="Ajouter un licenciement ou une rupture conventionnelle" desc="Un départ daté et son coût fourni, sans estimation automatique" /><ExitCostForm proposal={proposal} action={editable} /></section> : null}
+    <section className="panel restructuring-section"><PanelHead title="Hypothèses du projet" desc={`${proposal.hypotheses.length} mesure${proposal.hypotheses.length === 1 ? "" : "s"} · montants saisis, sans estimation d’indemnité`} tools={<a className="btn" href={hypothesesHref(p.slug, proposal, "postes")}>{proposal.status === "brouillon" ? "Modifier dans Hypothèses" : "Ouvrir ou dupliquer dans Hypothèses"}</a>} />
     {proposal.hypotheses.length ? <div className="table-wrap scroll restructuring-scroll" tabIndex={0} role="region" aria-label="Mesures saisies dans le scénario du projet"><table className="data-table sticky sticky-first restructuring-measures" data-testid="restructuring-measures-table"><thead><tr><th scope="col">Type</th><th scope="col">Mesure</th><th scope="col">Dates</th><th scope="col">Coûts et paramètres saisis</th></tr></thead><tbody>{proposal.hypotheses.map((h) => <tr key={h.id}><th scope="row">{h.kind === "embauche" && h.replaces ? "Remplacement" : KIND[h.kind]}</th><td>{h.label}</td><td>{datesOf(h)}</td><td><MeasureValue h={h} proposal={proposal} /></td></tr>)}</tbody></table></div> : <p className="desc">Aucune hypothèse dans ce projet. Prépare les mesures dans les Hypothèses budgétaires.</p>}
-  </section>;
+    {editable && departures.length ? <div className="restructuring-exit-editors" data-testid="restructuring-exit-editors">{departures.map((departure) => <details className="restructuring-exit-editor" key={departure.id}><summary>Modifier le départ : {departure.label}</summary><ExitCostForm proposal={proposal} action={editable} departure={departure} /></details>)}</div> : null}
+  </section></>;
 }
 
 function Monthly({ p }: { p: RestructuringContext }) {
@@ -134,7 +149,7 @@ function Monthly({ p }: { p: RestructuringContext }) {
   </section>;
 }
 
-export function RestructuringView(p: RestructuringContext) {
+export function RestructuringView(p: Props) {
   const valid = p.model.kind === "value";
   const notices = [...new Set([...p.notices, ...p.model.warnings])];
   return <div className="restructuring-view" data-testid="studio-restructuring">
@@ -143,7 +158,9 @@ export function RestructuringView(p: RestructuringContext) {
     <Reading p={p} />
     <Filters p={p} />
     {notices.length ? <ul className="restructuring-notices" data-testid="restructuring-notices">{notices.map((notice) => <li className="notice" key={notice}>{notice}</li>)}</ul> : null}
-    {!valid ? <section className="panel restructuring-section" data-testid="restructuring-unavailable"><h2>Comparaison non disponible</h2><p className="nd">n.d. — {p.model.reason ?? "Choisis une référence et un projet comparables."}</p><a className="btn" href={hypothesesHref(p.slug, p.reference)}>{p.canEdit ? "Préparer ou dupliquer un scénario dans Hypothèses" : "Consulter les scénarios dans Hypothèses"}</a></section> : p.view === "overview" ? <Overview p={p} /> : p.view === "measures" ? <Measures p={p} /> : <Monthly p={p} />}
+    {!valid ? <section className="panel restructuring-section" data-testid="restructuring-unavailable"><h2>Comparaison non disponible</h2><p className="nd">n.d. — {p.model.reason ?? "Choisis une référence et un projet comparables."}</p><a className="btn" href={hypothesesHref(p.slug, p.reference)}>{p.canEdit ? "Préparer ou dupliquer un scénario dans Hypothèses" : "Consulter les scénarios dans Hypothèses"}</a></section> : p.view === "overview" ? <Overview p={p} /> : p.view === "monthly" ? <Monthly p={p} /> : null}
+    {p.proposal && (p.view === "overview" || p.view === "measures") ? <NonRecurring proposal={p.proposal} /> : null}
+    {p.view === "measures" && p.proposal ? <Measures p={p} /> : null}
     {valid ? <div className="restructuring-actions"><a className="btn" href={hypothesesHref(p.slug, p.reference, "postes")}>Lire la référence dans Hypothèses</a><a className="btn" href={hypothesesHref(p.slug, p.proposal, "postes")}>{p.canEdit && p.proposal?.status === "brouillon" ? "Modifier le projet dans Hypothèses" : "Lire le projet dans Hypothèses"}</a>{p.canEdit && p.proposal ? <a className="btn" href={hypothesesHref(p.slug, p.proposal, "embauches")}>Préparer les remplacements</a> : null}</div> : null}
   </div>;
 }

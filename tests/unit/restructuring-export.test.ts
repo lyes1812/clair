@@ -18,7 +18,7 @@ describe("Restructuring : exports exacts et agrégés", () => {
     const ctx = context(), spec = restructuringWorkbook(ctx);
     expect(ctx.model.totals.savings.value).toBe(50_000);
     expect(spec.sheets[0].rows.find((r) => r[0] === "Économie nette")?.[1]).toBe(50_000);
-    expect(spec.sheets[1].rows[0].slice(0, 6)).toEqual(["2026-10", 100_000, 250_000, -150_000, -150_000, 150_000]);
+    expect(spec.sheets.find((sheet) => sheet.name === "Impacts mensuels")?.rows[0].slice(0, 6)).toEqual(["2026-10", 100_000, 250_000, -150_000, -150_000, 150_000]);
     expect(spec.definitions.find((d) => d.term === "Coûts ponctuels supplémentaires")?.definition).toContain("seconde fois");
   });
   it("aucun nom de collaborateur, identifiant individuel ou détail d’hypothèse exporté", () => {
@@ -45,5 +45,21 @@ describe("Restructuring : exports exacts et agrégés", () => {
     const csv = restructuringCsv(context());
     expect(csv.startsWith("\uFEFF")).toBe(true); expect(csv).toContain('"-1500,00";"EUR"');
     expect(csv).toContain('"1,0000";"ETP"'); expect(csv).not.toContain('"=PROJET_FICTIF"'); expect(csv).toContain("'=PROJET_FICTIF");
+  });
+  it("licenciements et ruptures conventionnelles apparaissent séparément, sans réajouter les coûts", () => {
+    const ctx = context();
+    const first = proposal.hypotheses[0];
+    if (first.kind !== "depart") throw new Error("fixture");
+    ctx.proposal = { ...proposal, base: { ...base, contracts: [...base.contracts, { ...base.contracts[0], contractKey: "second-fictif" }] }, hypotheses: [
+      { ...first, motif: "Licenciement" },
+      { ...first, id: "rc-fictive", contractKey: "second-fictif", motif: "Rupture conventionnelle", lastPaidDate: "2026-11-30", exitCost: { mode: "brut", brutCents: 200_000, chargesBps: 1000 } },
+    ] };
+    const spec = restructuringWorkbook(ctx), sheet = spec.sheets.find((entry) => entry.name === "Non récurrents")!;
+    expect(sheet.rows.find((r) => r[0] === "Licenciements")?.at(-2)).toBe(150_000);
+    expect(sheet.rows.find((r) => r[0] === "Ruptures conventionnelles")?.at(-2)).toBe(220_000);
+    const csv = restructuringCsv(ctx);
+    expect(csv).toContain('"Licenciements";"1500,00";"EUR"');
+    expect(csv).toContain('"Ruptures conventionnelles";"2200,00";"EUR"');
+    expect(ctx.model.totals.savings.value).toBe(50_000); // l’export ne modifie pas le modèle reçu.
   });
 });

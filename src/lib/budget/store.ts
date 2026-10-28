@@ -187,11 +187,18 @@ export async function addHypotheses(workspaceId: string, actor: string, scenario
 // Enregistrement d'une grille (taux, enveloppes, constantes) : les lignes modifiées remplacent les anciennes, les lignes
 // retirées sont supprimées, le tout dans une transaction contrôlée par le moteur sur l'ensemble final. Rien n'est
 // enregistré si le scénario final est incalculable.
-export type GridChange = { put: Hypothesis[]; remove: string[] };
+export type GridChange = { put: Hypothesis[]; remove: string[]; expected?: Hypothesis[] };
+export function assertExpectedHypotheses(current: Hypothesis[], expected: Hypothesis[]): void {
+  for (const previous of expected) {
+    const now = current.find((h) => h.id === previous.id);
+    if (!now || canonicalJson(now) !== canonicalJson(previous)) throw new BudgetError("Une mesure a changé entre-temps. Recharge la page avant de modifier son coût.");
+  }
+}
 export async function applyChanges(workspaceId: string, actor: string, scenarioId: string, change: GridChange): Promise<{ put: number; removed: number }> {
   const put = change.put.map((h) => hypothesisSchema.parse(h));
   return withWorkspace(workspaceId, async (tx) => {
     const { scenario: s, base, hypotheses } = await lockDraft(tx, scenarioId);
+    assertExpectedHypotheses(hypotheses, change.expected ?? []);
     const gone = new Set([...change.remove, ...put.map((h) => h.id)]);
     const known = new Set(hypotheses.map((h) => h.id));
     const missing = change.remove.filter((id) => !known.has(id));

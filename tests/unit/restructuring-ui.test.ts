@@ -8,8 +8,10 @@ import type { Metric, RestructuringModel, RestructuringScenario } from "@/lib/re
 
 const REFERENCE = "11111111-1111-4111-8111-111111111111";
 const PROPOSAL = "22222222-2222-4222-8222-222222222222";
+type ViewProps = Parameters<typeof RestructuringView>[0];
 const metric = (value: number | null, reason: string | null = null): Metric => ({ value, reason });
 const base = (): BaseSnapshot => ({ currency: "EUR", refMonth: "2026-09", syncId: "fixture-only", readAt: "2026-10-01T09:00:00.000Z", contracts: [], actuals: [], refMasse: 0, refBaseCost: 0, etpNote: null });
+const contract = (key: string): BaseSnapshot["contracts"][number] => ({ contractKey: key, externalId: `fixture-${key}`, label: `CONTRAT_PERSONNEL_FICTIF_${key}`, service: null, serviceNd: null, startDate: "2025-01-01", endDate: null, counted: true, etp4: 10000, etpNd: null, base: { salaryCents: 300000, refBrutCents: 300000, refCotisationsCents: 120000 }, baseNd: null });
 const hypotheses = (): Hypothesis[] => [
   { id: "depart-fictif", kind: "depart", label: "MESURE_PERSONNELLE_FICTIVE", contractKey: "contrat-fictif", lastPaidDate: "2026-10-15", exitCost: null },
   { id: "embauche-fictive", kind: "embauche", label: "REMPLACEMENT_PERSONNEL_FICTIF", service: "Service fictif", start: "2026-10-16", end: null, grossFullTimeCents: 109876, quotaBps: 8000, chargesBps: 4200, counted: true, replaces: "depart-fictif" },
@@ -27,14 +29,17 @@ const model = (): RestructuringModel => ({
   totals: { referenceCost: metric(200000), proposalCost: metric(195000), savings: metric(5000), transitionCost: metric(15000), exitCost: metric(15000), replacementCost: metric(40000) },
   payback: { month: "2026-11", reason: "Premier retour durable à un cumul positif dans cette fixture." }, endEtpDelta: metric(10000),
 });
-function props(patch: Partial<RestructuringContext> = {}): RestructuringContext {
+function props(patch: Partial<ViewProps> = {}): ViewProps {
   const reference = scenario(REFERENCE, "Référence fictive", [{ id: "ref-only", kind: "ponctuel", label: "REFERENCE_UNIQUEMENT_NON_MONTREE", month: "2026-10", amount: { mode: "charge", costCents: 0 }, service: null }]);
   const proposal = scenario(PROPOSAL, "Projet fictif", hypotheses());
   return { slug: "fixture-only", workspaceName: "Espace fictif", canEdit: true, view: "overview", reference, proposal,
     options: [reference, proposal].map(({ id, name, firstMonth, lastMonth }) => ({ id, name, firstMonth, lastMonth, status: "brouillon" as const })), model: model(), notices: [], ...patch };
 }
-const html = (patch: Partial<RestructuringContext> = {}) => renderToStaticMarkup(createElement(RestructuringView, props(patch)));
+const html = (patch: Partial<ViewProps> = {}) => renderToStaticMarkup(createElement(RestructuringView, props(patch)));
 const select = (value: string, name: string) => value.match(new RegExp(`<select[^>]*name="${name}"[\\s\\S]*?<\\/select>`))?.[0] ?? "";
+const form = (value: string, testid: string) => value.match(new RegExp(`<form[^>]*data-testid="${testid}"[\\s\\S]*?<\\/form>`))?.[0] ?? "";
+const input = (value: string, name: string) => value.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? "";
+const saveExit = async () => ({ ok: "Saisie fictive" });
 
 describe("Studio Restructuring — présentation sur fixtures fictives", () => {
   it("les deux choix sont explicites, obligatoires, et jamais remplacés par le premier scénario", () => {
@@ -131,5 +136,93 @@ describe("Studio Restructuring — présentation sur fixtures fictives", () => {
     for (const id of ["restructuring-kpis", "restructuring-costs", "restructuring-cumulative", "restructuring-export"]) expect(value).not.toContain(`data-testid="${id}"`);
     expect(value).toContain(`hypotheses?scenario=${REFERENCE}`);
     expect(value).toContain("Préparer ou dupliquer un scénario");
+  });
+
+  it("présente les quatre catégories non récurrentes du projet en synthèse et mesures, sans ajout aux économies", () => {
+    const common = props();
+    common.proposal!.base.contracts = [contract("lic"), contract("rc"), contract("autre")];
+    common.proposal!.hypotheses = [
+      { id: "lic-fictif", kind: "depart", label: "NOM_INDIVIDUEL_LIC_FICTIF", contractKey: "lic", motif: "Licenciement", lastPaidDate: "2026-10-15", exitCost: { mode: "charge", costCents: 12345 } },
+      { id: "rc-fictif", kind: "depart", label: "NOM_INDIVIDUEL_RC_FICTIF", contractKey: "rc", motif: "Rupture conventionnelle", lastPaidDate: "2026-11-20", exitCost: { mode: "brut", brutCents: 10000, chargesBps: 2000 } },
+      { id: "autre-fictif", kind: "depart", label: "NOM_INDIVIDUEL_AUTRE_FICTIF", contractKey: "autre", motif: "Autre départ", lastPaidDate: "2026-11-15", exitCost: null },
+      { id: "frais-fictifs", kind: "ponctuel", label: "FRAIS_INDIVIDUELS_FICTIFS", month: "2026-10", service: null, nonRecurring: true, amount: { mode: "charge", costCents: 5678 } },
+    ];
+    for (const view of ["overview", "measures"] as const) {
+      const value = renderToStaticMarkup(createElement(RestructuringView, { ...common, view, canEdit: false }));
+      const breakdown = value.match(/<table[^>]*data-testid="restructuring-non-recurring-table"[\s\S]*?<\/table>/)?.[0] ?? "";
+      for (const label of ["Licenciements", "Ruptures conventionnelles", "Autres départs", "Autres éléments non récurrents"]) expect(breakdown).toContain(label);
+      for (const amount of [12345, 12000, 5678]) expect(breakdown).toContain(`data-money-cents="${amount}"`);
+      expect(breakdown).toContain("Coût de sortie non saisi (exitCost)");
+      expect(value).toContain("Montants déjà inclus dans le coût projeté et dans l’économie nette : aucun ajout à faire");
+      for (const label of ["NOM_INDIVIDUEL_LIC_FICTIF", "NOM_INDIVIDUEL_RC_FICTIF", "NOM_INDIVIDUEL_AUTRE_FICTIF", "FRAIS_INDIVIDUELS_FICTIFS"]) expect(value).not.toContain(label);
+      if (view === "overview") expect(value).toContain('data-money-cents="5000"');
+    }
+  });
+
+  it("nouveau départ : contrat sans départ existant, motif/mode/date obligatoires et aucun montant prérempli", () => {
+    const p = props({ view: "measures", saveExit });
+    p.proposal!.base.contracts = [contract("contrat-fictif"), contract("disponible")];
+    const value = renderToStaticMarkup(createElement(RestructuringView, p));
+    const create = form(value, "restructuring-exit-new");
+    expect(create).toBeTruthy();
+    expect(create).not.toContain('name="hypothesisId"');
+    expect(create).not.toContain('name="label"');
+    const contracts = select(create, "contractKey");
+    expect(contracts).toContain('required=""');
+    expect(contracts).toContain('<option value="" disabled="" selected="">Choisir un contrat…</option>');
+    expect(contracts).toContain('<option value="disponible">');
+    expect(contracts).not.toContain('<option value="contrat-fictif">');
+    for (const name of ["motif", "exitMode"]) expect(select(create, name)).toContain('required=""');
+    for (const motif of ["Licenciement", "Rupture conventionnelle", "Autre départ"]) expect(select(create, "motif")).toContain(`value="${motif}"`);
+    expect(select(create, "exitMode")).toContain('<option value="" disabled="" selected="">Choisir le mode…</option>');
+    expect(select(create, "exitMode")).toContain('<option value="charge">');
+    expect(select(create, "exitMode")).toContain('<option value="brut">');
+    const date = input(create, "lastPaidDate");
+    for (const attribute of ['type="date"', 'required=""', 'min="2026-10-01"', 'max="2026-11-30"', 'value=""']) expect(date).toContain(attribute);
+    for (const name of ["exitCout", "exitBrut", "exitTaux"]) expect(input(create, name)).toContain('value=""');
+    expect(create).toContain("Coût chargé (€)");
+    expect(create).toContain("Brut (€)");
+    expect(create).toContain("Un champ vide n’est pas un zéro");
+    expect(create).toContain("Aucun calcul d’indemnité légale ou conventionnelle");
+  });
+
+  it("édition : conserve id, contrat, ancien motif, date et centimes sans suppression du départ ni conversion du zéro en vide", () => {
+    const p = props({ view: "measures", saveExit });
+    p.proposal!.base.contracts = [contract("contrat-fictif"), contract("zero"), contract("disponible")];
+    const departure = p.proposal!.hypotheses[0] as Extract<Hypothesis, { kind: "depart" }>;
+    departure.motif = "Motif antérieur FICTIF";
+    departure.exitCost = { mode: "brut", brutCents: 12345, chargesBps: 4275 };
+    p.proposal!.hypotheses.push({ ...departure, id: "zero-fictif", contractKey: "zero", label: "ZERO_FICTIF", motif: "Rupture conventionnelle", exitCost: { mode: "charge", costCents: 0 } });
+    const value = renderToStaticMarkup(createElement(RestructuringView, p));
+    const edit = form(value, "restructuring-exit-depart-fictif");
+    expect(input(edit, "hypothesisId")).toContain('value="depart-fictif"');
+    expect(input(edit, "contractKey")).toContain('type="hidden"');
+    expect(input(edit, "contractKey")).toContain('value="contrat-fictif"');
+    expect(select(edit, "contractKey")).toBe("");
+    expect(select(edit, "motif")).toContain('<option value="Motif antérieur FICTIF" selected="">');
+    expect(select(edit, "exitMode")).toContain('<option value="brut" selected="">');
+    expect(input(edit, "lastPaidDate")).toContain('value="2026-10-15"');
+    expect(input(edit, "exitBrut")).toContain('value="123,45"');
+    expect(input(edit, "exitTaux")).toContain('value="42,75"');
+    expect(input(edit, "exitCout")).toContain('value=""');
+    expect(edit).toContain("les liens de remplacement sont conservés");
+    const zero = form(value, "restructuring-exit-zero-fictif");
+    expect(select(zero, "exitMode")).toContain('<option value="charge" selected="">');
+    expect(input(zero, "exitCout")).toContain('value="0"');
+    expect(input(zero, "exitBrut")).toContain('value=""');
+    expect(value).not.toContain("Supprimer le départ");
+  });
+
+  it("absence d'action, lecteur et scénario figé : aucun formulaire ; le figé garde son historique pour l'éditeur", () => {
+    const p = props({ view: "measures" });
+    p.proposal!.base.contracts = [contract("contrat-fictif"), contract("disponible")];
+    expect(renderToStaticMarkup(createElement(RestructuringView, p))).not.toContain('data-testid="restructuring-exit-new"');
+    const viewer = renderToStaticMarkup(createElement(RestructuringView, { ...p, canEdit: false, saveExit }));
+    for (const forbidden of ['data-testid="restructuring-exit-new"', 'data-testid="restructuring-exit-editors"', "CONTRAT_PERSONNEL_FICTIF", "MESURE_PERSONNELLE_FICTIVE", 'name="exitCout"']) expect(viewer).not.toContain(forbidden);
+    p.proposal!.status = "fige";
+    const frozen = renderToStaticMarkup(createElement(RestructuringView, { ...p, saveExit }));
+    expect(frozen).toContain('data-testid="restructuring-measures-table"');
+    expect(frozen).toContain("MESURE_PERSONNELLE_FICTIVE");
+    for (const forbidden of ['data-testid="restructuring-exit-new"', 'data-testid="restructuring-exit-editors"', 'name="exitCout"']) expect(frozen).not.toContain(forbidden);
   });
 });
