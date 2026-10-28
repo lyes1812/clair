@@ -7,7 +7,8 @@ import { ABSENCE_STATUSES } from "@/lib/connectors/payfit/client";
 import { getKpiSettings, KPI_DEFAULT_STATUS, KPI_DEFAULTS_VALIDATED_ON, kpiOriginText, type KpiSettingKey } from "@/lib/rh-kpi-settings";
 import { getHeadcountNatures, getPayfitHistoryMode, HEADCOUNT_NATURES_KEY, natureChoices, PAYFIT_HISTORY_KEY } from "@/lib/rh-settings";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
-import { activePayFitSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
+import { activePayFitSync, loadAbsencesOfSync, loadAbsenceTypes } from "@/lib/rh/referential/store";
+import { absenceTypeGroups } from "@/lib/rh/kpi/absence-motifs";
 import { KpiForm } from "./KpiForm";
 import { requireWorkspace } from "@/lib/workspace";
 import { HeadcountForm } from "./HeadcountForm";
@@ -29,13 +30,13 @@ import { personLabel } from "@/lib/rh/view";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { ParamLayout } from "@/components/ParamLayout";
-import { absenceTypeLabel } from "@/lib/viz/kpi";
+import { absenceTypeLabel, seuilOf, typeCountMask } from "@/lib/viz/kpi";
 import { defaultsNote, PageHead, Pill, type OriginKind, type Tone } from "../donnees/ui";
 import { NavDisclosure } from "./NavDisclosure";
 import { CROISEE_KEYS, croiseeSettingReason, getCroiseeSettings, LIBELLE_MAX, SEUILS_MAX, settingValue, type CroiseeSettingKey } from "@/lib/croisee-settings";
 import { CROISEE_TERMS } from "@/lib/glossary/croisee";
 import { CroiseeForm, type CroiseeFormKey, type CroiseeOrigin } from "./CroiseeForm";
-import { CONFIDENTIALITE_TERM, getConfidentialiteRead } from "@/lib/confidentialite";
+import { CONFIDENTIALITE_TERM, confidentialiteHref, getConfidentialiteRead, linkFromReferential } from "@/lib/confidentialite";
 import { ConfidentialiteForm, type ConfidentialiteOrigin } from "./ConfidentialiteForm";
 
 export const dynamic = "force-dynamic";
@@ -54,10 +55,6 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const isAdmin = workspace.role === "admin";
   const [kpi, active] = await Promise.all([getKpiSettings(workspace.id), activePayFitSync(workspace.id)]);
   const readTypes = active ? await loadAbsenceTypes(workspace.id, active.id) : [];
-  const typeRows = [...new Set([...readTypes.map((t) => t.type), ...kpi.values.absenceTypes])].sort().map((type) => {
-    const t = readTypes.find((x) => x.type === type);
-    return { type, label: absenceTypeLabel(type), count: t?.count ?? 0, inRead: Boolean(t) };
-  });
   const origins = Object.fromEntries((Object.keys(kpi.origins) as KpiSettingKey[]).map((k) => [k, kpiOriginText(k, kpi.origins[k], (d) => dateTimeFmt.format(d))]));
   // Nature de l'origine de chaque règle : seule une règle qui n'est pas un défaut validé porte sa propre mention ; les défauts
   // validés sont dits une seule fois par carte.
@@ -89,6 +86,20 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
       : conf.setting.kind === "invalid"
         ? { kind: "invalid", legacy: conf.source === "croisee" }
         : { kind: "absent" };
+  // Nombre d'absences de chaque motif de la lecture (Définitions des KPI › Absentéisme), ouvert à tous les rôles : c'est la cellule
+  // que publie KPI RH (tuile Absentéisme, « Absences de la lecture » du détail par motif), avec le même statut (typeCountMask : colonne
+  // de tous les motifs de la lecture, personnes distinctes reliées par le référentiel Collaborateurs, total publié par Données ›
+  // lecture). Seuil non défini ou illisible : n.d. avec sa raison et le lien vers la section Confidentialité. Un nombre n.d. n'est
+  // jamais transmis au formulaire (composant client).
+  const typeGroups = absenceTypeGroups(active ? await loadAbsencesOfSync(workspace.id, active.id) : [], linkFromReferential({ contracts: collab.data?.contracts ?? [] }));
+  const countSeuil = seuilOf(conf.setting);
+  const typeRows = [...new Set([...readTypes.map((t) => t.type), ...kpi.values.absenceTypes])].sort().map((type) => {
+    const t = readTypes.find((x) => x.type === type);
+    const count = t?.count ?? 0;
+    const countNd = !t ? null : countSeuil.seuil === null ? countSeuil.reason : typeCountMask(typeGroups, type, count, countSeuil.seuil);
+    return { type, label: absenceTypeLabel(type), count: countNd === null ? count : null, countNd, inRead: Boolean(t) };
+  });
+  const countsNote = countSeuil.seuil === null && readTypes.length > 0 ? { reason: countSeuil.reason, href: confidentialiteHref(slug) } : null;
   // Masse salariale croisée : trois réglages sans valeur par défaut (le seuil de confidentialité a sa section) ; défini (avec sa
   // date), illisible, ou non défini (rien d'enregistré, ou liste de seuils vide).
   const croisee = await getCroiseeSettings(workspace.id);
@@ -204,6 +215,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
               notes={notes}
               natures={natureChoices().map((n) => ({ code: n.code, label: n.label }))}
               types={typeRows}
+              countsNote={countsNote}
               readLabel={active ? `lecture du ${dateTimeFmt.format(active.startedAt)}` : null}
               statuses={[...ABSENCE_STATUSES].map((code) => ({ code, label: ABSENCE_STATUS_LABELS[code] ?? code }))}
               disabled={!isAdmin}

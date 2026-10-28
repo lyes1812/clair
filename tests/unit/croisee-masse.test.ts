@@ -13,7 +13,7 @@ import { glossaryEntry } from "@/lib/glossary";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES, type RubricId } from "@/lib/payroll/grid";
 import { windowPayroll } from "@/lib/payroll/engine";
-import { labelTotals } from "@/lib/payroll/lot2";
+import { labelTotals, maskLabels } from "@/lib/payroll/lot2";
 import { serviceRows as sharedServiceRows } from "@/lib/payroll/service-rows";
 import { cellView, croiseeHref, sortRows, type CroiseeCell, type CroiseeTable } from "@/lib/viz/croisee";
 import {
@@ -624,16 +624,18 @@ describe("loadFixeVariableInput : mêmes fonctions que l'onglet Fixe & variable"
     expect(mNo.blocks.find((b) => b.id === "libelles")!.nd).toEqual([{ label: "Brut par libellé de paie", reason: "seuil de confidentialité non défini (Paramètres)", action: { href: CONF_HREF, label: "Paramètres" } }]);
     expect(table(mNo, FV.libelles).rows).toEqual([{ cells: ["Brut par libellé de paie", { nd: "seuil de confidentialité non défini (Paramètres)" }] }]);
     // Seuil 2 sans filtre : masque de maskLabels (lot2.ts) sur le journal entier, personnes lues par le lien (c1 : salaires A ; c2 :
-    // salaires B ; c3 : primes). N : primes (p3, 1 personne) masquée ; le brut de la période étant publié, salaires (p1, p2) masqué en
-    // second. N-1 : salaires (p1) masqué, primes (0 €, personne) ne protège pas : toute la colonne est n.d. Famille « compte 641300 »
-    // en janvier : p3 masqué (sa cellule de période est celle du libellé).
+    // salaires B ; c3 : primes), une colonne par rubrique et par mois (total de la rubrique du mois publié). Janvier 2026 : Salaires
+    // {p1, p2} 1 500 € affiché ; Primes {p3} 100 € masqué, seul de sa colonne (le total des primes de janvier, publié, reste affiché).
+    // Janvier 2025 : Salaires {p1} 900 € masqué, seul de sa colonne ; aucune prime (0 €, affiché). N et N-1 se déduisent de leur mois.
+    // Famille « compte 641300 » en janvier : p3 masqué (sa cellule de période est celle du libellé).
     const two = await loadFixeVariableInput(fakeCtx({ chapitre: "fixe-variable", settings: seuilSettings(2) }));
     const R2 = confidentialiteReason(2);
-    expect(two.data!.mask).toEqual({ labels: { "salaires\u0000compte 641100": { cur: R2, prev: R2 }, "primes\u0000compte 641300": { cur: R2, prev: R2 } }, families: { "primes\u0000compte 641300": [R2] } });
+    expect(two.data!.mask).toEqual({ labels: { "salaires\u0000compte 641100": { cur: null, prev: R2 }, "primes\u0000compte 641300": { cur: R2, prev: null } }, families: { "primes\u0000compte 641300": [R2] } });
     const m2 = buildFixeVariable(two);
-    expect(table(m2, FV.libelles).rows.map((r) => [r.cells[0], r.cells[1], r.cells[2]])).toEqual([
-      ["compte 641100", { nd: R2 }, { nd: R2 }],
-      ["compte 641300", { nd: R2 }, { nd: R2 }],
+    // Chaque cellule porte son propre statut (le même que l'onglet Fixe & variable) ; l'écart d'une ligne qui en masque une est n.d.
+    expect(table(m2, FV.libelles).rows.map((r) => [r.cells[0], r.cells[1], r.cells[2], r.cells[3]])).toEqual([
+      ["compte 641100", 150000, { nd: R2 }, { nd: R2 }],
+      ["compte 641300", { nd: R2 }, 0, { nd: R2 }],
     ]);
     expect(table(m2, FV.primesFamilles).rows[0].cells).toEqual(["Janvier 2026", 10000, { nd: R2 }]);
     expect(table(m2, FV.libelles).foot!.cells.slice(0, 3)).toEqual(["Brut", 160000, 90000]);
@@ -910,7 +912,7 @@ describe("loadServicesInput : personnes de chaque service lues par le lien du co
   });
 });
 
-describe("buildFixeVariable : primes par famille et brut par libellé suivent le seuil (maskLabels, une seule passe, personnes distinctes, masquage secondaire)", () => {
+describe("buildFixeVariable : primes par famille et brut par libellé suivent le seuil (maskLabels, statut canonique du mois, personnes distinctes, masquage secondaire)", () => {
   // Cas de référence de la relecture. Journal fictif d'un seul mois (janvier 2026 ; janvier 2025 sans aucune ligne : 0 €, personne),
   // libellés du brut et personnes reliées aux contrats qui les portent :
   //   Salaire de base        6 000,00 €   six contrats s1…s6 → p1…p6 (1 000 € chacun) ;
@@ -919,13 +921,12 @@ describe("buildFixeVariable : primes par famille et brut par libellé suivent le
   //   Prime C                  500,00 €   c1…c5 → p1…p5 (100 € chacun) ;
   //   Gratification de stage    80,00 €   g1 → p7.
   // Janvier 2025 : les six salaires seulement (6 000 €, p1…p6) ; les autres libellés sont à 0 € en N-1 (aucun contrat, personne).
-  // Seuil 3. Masquage principal : Prime A (2 personnes) et la gratification (1 personne). Sommes publiées : brut de la période
-  // (6 980,02 €), primes de janvier et de la période (900,02 €). Masquage secondaire (le moteur masque la plus petite valeur affichée
-  // qui ajoute des personnes) : dans la ligne de janvier, A seule masquée ne décrit que 2 personnes (< 3) → Prime B (100,02 €, la plus
-  // petite des affichées, p3-p5) est masquée aussi ; même raisonnement sur les familles de la période. Les mois de B somment vers sa
-  // cellule de période, qui est sa cellule du tableau par libellé : B est n.d. dans les deux tableaux. Dans la colonne N des libellés,
-  // A (p1, p2) et la gratification (p7) masquées décrivent déjà 3 personnes. Prime C (5 personnes, 500 €) et le salaire (6) restent
-  // affichés, le brut et le total des primes aussi.
+  // Seuil 3. Une colonne par rubrique et par mois, total de la rubrique du mois publié (Fixe, dont primes, Gratifications de stage).
+  // Janvier 2026, Primes (900,02 €) : Prime A {p1, p2} masquée (2 < 3) ; seule, elle se lirait par différence → la plus petite valeur
+  // affichée qui ajoute des personnes, Prime B (100,02 €, p3-p5), est masquée aussi : {p1..p5} = 5 ≥ 3 ; Prime C affichée.
+  // Gratifications de stage (80 €) : la gratification {p7} masquée, seule de sa colonne. Salaires : {p1..p6} affiché. Janvier 2025 :
+  // salaires affichés, les autres libellés à 0 € (hors de la colonne, affichés). N et N-1 se déduisent de leur seul mois : A, B et la
+  // gratification n.d. en N, affichés à 0 € en N-1 (même cellule que N d'une période janvier 2025) ; leur écart est n.d.
   const lb = (key: string, accountId: string, name: string, cents: number, contractId: string): LedgerLine => ({ ...ln(key, "2026-01", accountId, cents, contractId), accountName: name });
   const J4: JournalInput = {
     lines: [
@@ -957,14 +958,14 @@ describe("buildFixeVariable : primes par famille et brut par libellé suivent le
   const m = buildFixeVariable({ nd: null, data: dataOf(3) });
   const R3 = { nd: confidentialiteReason(3) };
 
-  it("brut par libellé : Prime A (2 personnes) et la gratification (1) masquées ; Prime B masquée en second (sa période est la somme de ses mois) ; le brut reste affiché", () => {
+  it("brut par libellé : Prime A (2 personnes) et la gratification (1) masquées ; Prime B masquée en second dans la colonne des primes de janvier ; N-1 garde son propre statut ; le brut reste affiché", () => {
     const t = table(m, FV.libelles);
     expect(t.rows.map((r) => [r.cells[0], r.cells[1], r.cells[2], r.cells[3], r.cells[4]])).toEqual([
       ["Salaire de base", 600000, 600000, 0, { exact: 0 }],
-      ["Prime A", R3, R3, R3, R3],
-      ["Prime B", R3, R3, R3, R3],
+      ["Prime A", R3, 0, R3, R3],
+      ["Prime B", R3, 0, R3, R3],
       ["Prime C", 50000, 0, 50000, { nd: N1_NUL }],
-      ["Gratification de stage", R3, R3, R3, R3],
+      ["Gratification de stage", R3, 0, R3, R3],
     ]);
     expect(t.foot!.cells.slice(0, 5)).toEqual(["Brut", 698002, 600000, 98002, { exact: 98002 / 600000 }]);
     expect(t.terms).toContain("croisee-confidentialite");
@@ -997,22 +998,22 @@ describe("buildFixeVariable : primes par famille et brut par libellé suivent le
     });
   });
 
-  it("seuil 2 : seule la gratification (1 personne) est masquée au principal ; B puis A suivent en second (le brut, puis le total des primes, sont publiés)", () => {
-    // Colonne N du tableau par libellé (brut publié) : la gratification seule (p7) décrit 1 personne (< 2) → la plus petite valeur
-    // affichée qui ajoute une personne : Prime B (100,02 €, p3-p5). Familles de la période (total des primes publié) : B seule masquée
-    // se lirait par différence → la plus petite des affichées, Prime A (300 €), est masquée aussi. Les mois de janvier de A et de B
-    // somment vers leur période masquée : masqués. Prime C (500 €) et le salaire restent affichés.
+  it("seuil 2 : seule la gratification (1 personne) est masquée ; les primes (A : 2 personnes, B : 3, C : 5) restent affichées dans leur propre colonne", () => {
+    // Colonne des primes de janvier (900,02 € publié) : A {p1, p2}, B {p3, p4, p5} et C {p1..p5} comptent chacune au moins 2 personnes,
+    // rien n'est masqué. Colonne des gratifications de stage (80 € publié) : la gratification {p7} (1 < 2) est masquée, seule de sa
+    // colonne ; masquer une prime ne la protégerait pas, son montant étant le total des gratifications de janvier, publié comme total
+    // de l'entreprise (tableau « Brut par nature et par mois »).
     const two = buildFixeVariable({ nd: null, data: dataOf(2) });
     const R2 = { nd: confidentialiteReason(2) };
     expect(table(two, FV.libelles).rows.map((r) => [r.cells[0], r.cells[1]])).toEqual([
       ["Salaire de base", 600000],
-      ["Prime A", R2],
-      ["Prime B", R2],
+      ["Prime A", 30000],
+      ["Prime B", 10002],
       ["Prime C", 50000],
       ["Gratification de stage", R2],
     ]);
-    expect(table(two, FV.primesFamilles).rows.map((r) => r.cells.slice(1))).toEqual([[90002, R2, R2, 50000]]);
-    expect(table(two, FV.primesFamilles).foot!.cells).toEqual(["Période", 90002, R2, R2, 50000]);
+    expect(table(two, FV.primesFamilles).rows.map((r) => r.cells.slice(1))).toEqual([[90002, 30000, 10002, 50000]]);
+    expect(table(two, FV.primesFamilles).foot!.cells).toEqual(["Période", 90002, 30000, 10002, 50000]);
   });
 
   it("seuil 1 : rien n'est masqué (cas de base) ; seuil non défini : les deux tableaux n.d. avec la raison et le lien, totaux affichés", () => {
@@ -1029,6 +1030,48 @@ describe("buildFixeVariable : primes par famille et brut par libellé suivent le
     expect(no.blocks.find((b) => b.id === "libelles")!.tables).toEqual([]);
     expect(sp(tile(no, "fixe").value.text)).toBe("8 000,00 €");
     expect(table(no, FV.primesMois).foot!.cells).toEqual(["Période", 100000, 50000, 50000]);
+  });
+});
+
+describe("chapitre 04 sur plusieurs périodes : une prime d'un mois garde son statut, comme dans l'onglet Fixe & variable", () => {
+  // Cas v1 de la relecture rv13, seuil 3. Salaire de base k1..k10 (p1..p10), 3 000 € en janvier et février 2026. Prime P : k1,
+  // janvier 500 €. Prime Q : k2..k4, janvier 3 × 100 €, février 3 × 1 000 €. Prime R : k5..k7, janvier 3 × 200 €.
+  // Calcul à la main : primes de janvier (1 400 € publié) → P {p1} masqué, Q {p2..p4} 300 € masqué en second ({p1..p4} = 4 ≥ 3), R
+  // 600 € affiché ; primes de février (3 000 €) → Q seul, 3 personnes, affiché. Périodes déduites de leurs mois.
+  const lv = (key: string, month: string, name: string, cents: number, contractId: string): LedgerLine => ({ ...ln(key, month, name === "Salaire de base" ? "641100" : "641300", cents, contractId), accountName: name });
+  const lines: LedgerLine[] = [];
+  for (const m of ["2026-01", "2026-02"]) for (let i = 1; i <= 10; i++) lines.push(lv(`s${m}${i}`, m, "Salaire de base", 300000, `k${i}`));
+  lines.push(lv("p1", "2026-01", "Prime P", 50000, "k1"));
+  for (const i of [2, 3, 4]) lines.push(lv(`qj${i}`, "2026-01", "Prime Q", 10000, `k${i}`), lv(`qf${i}`, "2026-02", "Prime Q", 100000, `k${i}`));
+  for (const i of [5, 6, 7]) lines.push(lv(`r${i}`, "2026-01", "Prime R", 20000, `k${i}`));
+  const J: JournalInput = { lines, months: ["2026-01", "2026-02"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
+  const LINKV = linkOf(Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`k${i + 1}`, `p${i + 1}`])));
+  const CONF3: ConfidentialiteSetting = { kind: "set", value: 3, updatedAt: null, updatedBy: null };
+  const R3 = { nd: confidentialiteReason(3) };
+  const modelOf = (months: string[]) => {
+    const prevMonths = months.map((m) => m.replace("2026", "2025"));
+    const cur = windowPayroll(J, months);
+    const prev = windowPayroll(J, prevMonths);
+    const labelsByMonth = Object.fromEntries(months.map((m) => [m, labelTotals(J, [m])]));
+    const labels = { months, prevMonths, prev, labelsN: labelTotals(J, months), labelsN1: null, labelsByMonth };
+    const mask = labelMaskOf(J, labels, LINKV, CONF3);
+    // L'onglet Fixe & variable appelle la même fonction avec ses propres listes : mêmes raisons.
+    const n = labelTotals(J, months);
+    const tab = maskLabels({ input: J, months, prevMonths, keys: n.map((t) => t.key), families: n.filter((t) => t.rubric === "primes").map((t) => t.key), link: LINKV, conf: CONF3, prevNd: true });
+    expect(tab).toEqual(mask);
+    return buildFixeVariable({ nd: null, data: { ...DATA, ...labels, cur, labels: { period: "période", prev: "N-1" }, confidentialite: { kind: "set", value: 3 }, mask } });
+  };
+  it("janvier, janvier → février, février : Q de janvier n.d. partout, Q de février 3 000 € partout ; la période qui contient janvier est n.d.", () => {
+    const fam = (months: string[]) => {
+      const t = table(modelOf(months), FV.primesFamilles);
+      return { head: t.columns.map((c) => c.header), rows: t.rows.map((r) => r.cells.slice(1)), foot: t.foot!.cells.slice(1) };
+    };
+    expect(fam(["2026-01"])).toEqual({ head: ["Mois", "Total primes", "Prime P", "Prime Q", "Prime R"], rows: [[140000, R3, R3, 60000]], foot: [140000, R3, R3, 60000] });
+    expect(fam(["2026-01", "2026-02"])).toEqual({ head: ["Mois", "Total primes", "Prime P", "Prime Q", "Prime R"], rows: [[140000, R3, R3, 60000], [300000, 0, 300000, 0]], foot: [440000, R3, R3, 60000] });
+    expect(fam(["2026-02"])).toEqual({ head: ["Mois", "Total primes", "Prime Q"], rows: [[300000, 300000]], foot: [300000, 300000] });
+    // Tableau par libellé : la cellule N de Q (période janvier → février, 3 300 €) n'est pas publiée.
+    const lib = table(modelOf(["2026-01", "2026-02"]), FV.libelles);
+    expect(lib.rows.map((r) => [r.cells[0], r.cells[1]])).toEqual([["Salaire de base", 6000000], ["Prime P", R3], ["Prime Q", R3], ["Prime R", 60000]]);
   });
 });
 

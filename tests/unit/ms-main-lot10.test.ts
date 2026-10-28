@@ -6,6 +6,7 @@ import { glossaryEntry } from "@/lib/glossary";
 import type { DsnMonth } from "@/lib/payroll/dsn";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
+import { linkOnlyKpi } from "./helpers/link-only-kpi";
 
 // Écrans de la Masse salariale rendus de bout en bout (lot 10) sur un journal fictif écrit à la main : tendances rouge / vert d'un coût,
 // aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif ; le seuil
@@ -55,9 +56,10 @@ const compta = {
   nd: {},
   error: false,
 };
-// Référentiel fictif : C1 et C2 sont les contrats de deux personnes distinctes (seuil compté en personnes).
+// Référentiel fictif : C1 et C2 sont les contrats de deux personnes distinctes (seuil compté en personnes) ; lien seul (linkOnlyKpi),
+// aucun ETP de fin de mois dénombré.
 state.ctx = {
-  kpi: { collab: { workspace: { id: "w1", role: "reader" }, data: null }, input: { data: { contracts: [{ contractKey: "payfit:C1", externalId: "C1", personKey: "P1" }, { contractKey: "payfit:C2", externalId: "C2", personKey: "P2" }] } } },
+  kpi: { collab: { workspace: { id: "w1", role: "reader" }, data: null }, input: linkOnlyKpi({ contracts: [{ contractKey: "payfit:C1", externalId: "C1", personKey: "P1" }, { contractKey: "payfit:C2", externalId: "C2", personKey: "P2" }] }) },
   source: "payfit",
   grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
   read: { syncId: "s1", startedAt: new Date("2026-03-03T10:00:00Z"), months: input.months },

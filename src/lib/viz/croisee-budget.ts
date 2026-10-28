@@ -8,9 +8,9 @@ import { bridge, budgetSeries, gap, liveSeries, scenarioSeries, total, type Brid
 import type { BaseSnapshot, Projection } from "@/lib/budget/types";
 import { aggregate, alignedSeries, diff, nd as ndCell, reelVersion, val, type Agg, type ServiceFilter } from "@/lib/budget/versions";
 import { HORS_SALARIE, zoomOf } from "@/lib/budget/zoom";
-import { confidentialiteHref, confidentialiteReason, isHidden, maskGroups, maskReason, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
-import { maskCohorts, maskNonRecurring, nonRecurringContributors, partitionCohorts, type CohortPartition, type CohortRowId, type NonRecurringContributors } from "@/lib/croisee/cohortes";
-import { confidentialiteOf as seuilOf, masseContracts, projectedCell, serviceGuardOnWindows, type Confidentialite, type ServiceGuard } from "@/lib/croisee/confidentialite";
+import { confidentialiteHref, confidentialiteReason, isHidden, maskReason, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
+import { maskCohorts, partitionCohorts, type CohortPartition, type CohortRowId } from "@/lib/croisee/cohortes";
+import { confidentialiteOf as seuilOf, masseContracts, serviceGuardOnWindows, type Confidentialite, type ServiceGuard } from "@/lib/croisee/confidentialite";
 import { journalReason } from "@/lib/croisee/format";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
 import { withService, type JournalInput } from "@/lib/payroll/engine";
@@ -18,7 +18,7 @@ import { fmtFixed, fmtPercent } from "@/lib/rh/kpi/format";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
 import { costTone } from "@/lib/trend";
 import { costVariation, plainVariation, yearMonths, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeRow, type CroiseeTable, type TileSpec, type TileVariation } from "@/lib/viz/croisee";
-import { pontWaterfall } from "@/lib/viz/ecart";
+import { maskCascade, pontWaterfall } from "@/lib/viz/ecart";
 import { comparisonSeries, frDates, landingParts, landingWaterfall, layerSpans, monthAxis, retraiteWaterfall, type WaterfallIn } from "@/lib/viz/hypotheses";
 import { capital, euros, eurosSigned, monthLongLabel, monthShortYear, ndGroups, ndLines, reasonLines } from "@/lib/viz/masse";
 import { landingView, nd, type TileValue } from "@/lib/viz/synthese";
@@ -41,10 +41,11 @@ import { landingView, nd, type TileValue } from "@/lib/viz/synthese";
 // illisible : bloc n.d. avec le lien vers Paramètres › Confidentialité). Sous le filtre Service, la garde unique de tous les écrans
 // filtrés par service (serviceGuardOnWindows : lignes par service du journal entier sur la période et sur N-1, masquées par le moteur
 // unique, masquage secondaire compris) rend n.d. le réalisé, les contrats observés, le pont, les cartes et la cascade du service dès
-// que sa ligne l'est. Le seuil s'applique aussi aux groupes de contrats observés et aux totaux
-// des éléments non récurrents déjà comptabilisés et prévus (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres
-// d'un service retenu par le filtre (réalisé, contrats observés, pont et ETP). Chaque groupe est compté en PERSONNES DISTINCTES : ses
-// contrats (contrats qui portent une ligne de la masse affichée, masseContracts ; contrats des paliers ; contributeurs) sont reliés à
+// que sa ligne l'est. Le seuil s'applique aussi aux groupes de contrats observés
+// (chapitre 06), aux paliers de la cascade d'ETP (chapitre 08) et aux chiffres d'un service retenu par le filtre (réalisé, contrats
+// observés, pont et ETP) ; les totaux non récurrents « Déjà comptabilisés » et « Prévus » du chapitre 06, totaux de l'entreprise publiés
+// ailleurs, ne le suivent pas (ligne « Limites »). Chaque groupe est compté en PERSONNES DISTINCTES : ses
+// contrats (contrats qui portent une ligne de la masse affichée, masseContracts ; contrats des paliers) sont reliés à
 // leur personne par le référentiel Collaborateurs (lien du contexte) ; un contrat non relié ne protège jamais : un groupe dont les
 // personnes reliées sont sous le seuil et qui compte des contrats non reliés n'est pas dénombré (seuil non vérifiable), de même qu'un
 // groupe sans contrat pour une valeur non nulle (lignes du journal sans contrat). Masquage secondaire par le moteur partagé, personnes
@@ -202,8 +203,7 @@ export function publicScenario(base: BaseSnapshot, proj: Projection): { base: Ba
 
 export type BudgetReading = { kind: "value"; name: string; series: Series } | { kind: "absent" | "na"; reason: string };
 export type LiveReading = { kind: "value"; series: Series } | { kind: "nd"; reason: string };
-// contributors : contributeurs des éléments non récurrents de l'année (déjà comptabilisés, prévus), pour le seuil de confidentialité.
-export type ScenarioReading = { kind: "value"; name: string; refMonth: string; series: Series; landing: Landing; retraite: Retraite; contributors: NonRecurringContributors } | { kind: "nd" | "na"; reason: string };
+export type ScenarioReading = { kind: "value"; name: string; refMonth: string; series: Series; landing: Landing; retraite: Retraite } | { kind: "nd" | "na"; reason: string };
 export type CohortReading = CohortPartition;
 // atterrissage : null quand l'écran Hypothèses › Atterrissage montrerait une autre année que celle de la période (il prend la première
 // année du scénario) : le lien n'est alors pas proposé.
@@ -235,6 +235,9 @@ const COHORT_LABELS: Record<CohortRowId, string> = {
   both: "Contrats observés dans les deux périodes",
   outside: "Lignes du journal sans contrat",
 };
+// Ligne « Limites » du chapitre quand l'atterrissage retraité est chiffré : pourquoi ses deux totaux non récurrents sont affichés.
+export const NON_RECURRING_LIMIT =
+  "Éléments non récurrents « Déjà comptabilisés » et « Prévus » : totaux de l'entreprise, affichés sans seuil de confidentialité comme la tuile « Coûts identifiés » de la Masse salariale et l'atterrissage retraité des Hypothèses budgétaires ; leur détail par nature y suit le seuil.";
 
 export function buildBudget(input: BudgetChapterInput): BudgetModel {
   const base: BudgetModel = { chapter: "budget", tiles: [], alerts: [], tables: [], charts: [], limits: [], nd: null, terms: Object.values(T), blocks: [], prevu: [], tileNd: [], trend: false };
@@ -481,24 +484,11 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       };
       if (gapIn.pct === null) why.push({ label: "Écart annuel (%)", reason: "budget saisi nul ou négatif : pourcentage non défini" });
     }
-    // Éléments non récurrents déjà comptabilisés et prévus : chaque total décrit ses contributeurs (contrats, à défaut hypothèses) et
-    // suit le seuil de confidentialité, avec le masquage secondaire de l'autre total (leur somme est affichée). Réglage absent : n.d.
-    // avec le lien vers les Paramètres. La somme (« Non récurrents retirés ») et l'atterrissage retraité, totaux de l'entreprise, restent
-    // affichés.
-    const nrHidden = { realised: null as string | null, projected: null as string | null };
-    if (r.kind === "value") {
-      if (conf.kind === "nd") nrHidden.realised = nrHidden.projected = conf.reason;
-      else {
-        const st = maskNonRecurring(scenario.contributors, r, conf.value);
-        nrHidden.realised = maskReason(st.realised, conf.value);
-        nrHidden.projected = maskReason(st.projected, conf.value);
-      }
-    }
-    const nrLine = (label: string, cents: number, hidden: string | null): TileVariation => {
-      if (hidden === null) return plainVariation(label, euros(cents));
-      why.push({ label, reason: hidden });
-      return plainVariation(label, null, hidden);
-    };
+    // Éléments non récurrents déjà comptabilisés et prévus : totaux de l'entreprise, jamais masqués (décision par défaut du lot 12,
+    // soumise à Lyes). « Déjà comptabilisés » est publié ailleurs à tous les rôles (tuile « Coûts identifiés » de la Masse salariale sur
+    // janvier → mois de la base, total « déjà en comptabilité » d'Hypothèses › Atterrissage) et « Prévus » s'en déduit (« Non récurrents
+    // retirés » − « Déjà comptabilisés ») : un masque ici ne protégerait rien. La ligne « Limites » le dit ; le détail par nature suit
+    // le seuil dans la Masse salariale et dans Hypothèses › Atterrissage.
     retraiteTile =
       r.kind === "value"
         ? {
@@ -508,7 +498,7 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
             sub: "Hors éléments non récurrents",
             value: money(r.retraite),
             cost: true,
-            variations: [plainVariation("Non récurrents retirés", euros(r.total)), nrLine("Déjà comptabilisés", r.realised, nrHidden.realised), nrLine("Prévus", r.projected, nrHidden.projected)],
+            variations: [plainVariation("Non récurrents retirés", euros(r.total)), plainVariation("Déjà comptabilisés", euros(r.realised)), plainVariation("Prévus", euros(r.projected))],
           }
         : { id: "retraite", label: `Atterrissage retraité ${yearKey}`, term: T.retraite, sub: "Hors éléments non récurrents", value: nd(frDates(r.reason)), cost: true };
 
@@ -521,8 +511,8 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
     } else attRows.push({ cells: [`Atterrissage ${yearKey}`, ndIn(frDates(land.reason))], style: "subtotal" });
     if (r.kind === "value") {
       // 0 − x : jamais « −0 ».
-      attRows.push({ cells: ["Éléments non récurrents déjà comptabilisés", nrHidden.realised ? ndIn(nrHidden.realised) : 0 - r.realised], style: "child" });
-      attRows.push({ cells: ["Éléments non récurrents prévus (hypothèses)", nrHidden.projected ? ndIn(nrHidden.projected) : 0 - r.projected], style: "child" });
+      attRows.push({ cells: ["Éléments non récurrents déjà comptabilisés", 0 - r.realised], style: "child" });
+      attRows.push({ cells: ["Éléments non récurrents prévus (hypothèses)", 0 - r.projected], style: "child" });
     }
     tables.push({
       id: BUDGET_TABLE_IDS.atterrissage,
@@ -547,14 +537,8 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
       else ndCharts.push({ label, reason: frDates(w.reason) });
     };
     wf(BUDGET_CHART_IDS.atterrissage, `Atterrissage ${yearKey} : réel puis projection`, "Cascade de l'atterrissage", landingWaterfall(land));
-    // Un total non récurrent masqué : la cascade du retraité n'est pas tracée (ni sa phrase « vide », qui dirait les totaux nuls) ;
-    // une seule mention n.d. pour les deux totaux et la cascade, avec le lien vers les Paramètres quand le seuil n'est pas défini.
     const rw: WaterfallIn = r.kind === "value" ? retraiteWaterfall(r) : { kind: "nd", reason: r.reason };
-    const nrReason = nrHidden.realised ?? nrHidden.projected;
-    if (nrReason) {
-      const label = `Éléments non récurrents déjà comptabilisés et prévus${rw.kind === "value" ? ", cascade du retraité" : ""}`;
-      att.nd.push({ label, reason: nrReason, ...(conf.kind === "nd" ? { action: paramLink } : {}) });
-    } else wf(BUDGET_CHART_IDS.retraite, `De l'atterrissage ${yearKey} à l'atterrissage retraité`, "Cascade du retraité", rw);
+    wf(BUDGET_CHART_IDS.retraite, `De l'atterrissage ${yearKey} à l'atterrissage retraité`, "Cascade du retraité", rw);
     const byReason = new Map<string, string[]>();
     for (const x of ndCharts) byReason.set(x.reason, [...(byReason.get(x.reason) ?? []), x.label]);
     for (const [reason, ls] of byReason) att.nd.push({ label: ls.length > 1 ? "Cascades de l'atterrissage et du retraité" : ls[0], reason });
@@ -640,7 +624,10 @@ export function buildBudget(input: BudgetChapterInput): BudgetModel {
 
   const tiles = [realTile, budgetTile, gapTile, landTile, annualTile, retraiteTile];
   const trend = tiles.some((t) => t.cost && ((t.valueTone && t.valueTone !== "flat") || (t.variations ?? []).some((x) => x.tone !== "flat" && x.text !== null)));
-  const limits = input.filtered ? ["Budget saisi et scénario : globaux, non filtrables par service ; le réalisé et les contrats observés sont ceux du service choisi, soumis au seuil de confidentialité."] : [];
+  const limits = [
+    ...(input.filtered ? ["Budget saisi et scénario : globaux, non filtrables par service ; le réalisé et les contrats observés sont ceux du service choisi, soumis au seuil de confidentialité."] : []),
+    ...(scenario.kind === "value" && scenario.retraite.kind === "value" ? [NON_RECURRING_LIMIT] : []),
+  ];
   return { ...base, tiles, tables, charts, blocks, prevu, tileNd: reasonLines(why), trend, limits };
 }
 
@@ -719,9 +706,9 @@ export async function loadBudgetInput(ctx: CroiseeContext): Promise<BudgetChapte
         series: scenarioSeries(sc.id, `Scénario « ${sc.name} »`, pub.base, pub.proj),
         // Raison n.d. de l'année (« AAAA-MM : raison » par mois) regroupée par raison identique.
         landing: land.kind === "nd" ? { ...land, reason: zoomReason(land.reason) } : land,
-        // Totaux seulement : le détail par élément (catégories et motifs saisis, texte libre) reste dans Hypothèses budgétaires.
+        // Totaux seulement : le détail (lignes par nature soumises au seuil, liste des déclarations réservée aux éditeurs, catégories et
+        // motifs saisis) reste dans Hypothèses budgétaires.
         retraite: ret.kind === "nd" ? { ...ret, reason: zoomReason(ret.reason) } : { ...ret, rows: [] },
-        contributors: nonRecurringContributors(pub.base, pub.proj, s.full.hypotheses, String(year), actual, link),
       };
     }
   }
@@ -917,15 +904,12 @@ export function buildEffets(input: EffetsInput): EffetsModel {
   else if (conf.kind === "nd") etpBlock.nd.push({ label: "Cascade d'ETP", reason: conf.reason, action: paramLink });
   else {
     const seuil = conf.value;
-    // Taille d'un palier : les personnes de ses contrats réels (reliés par le lien) ; members : leurs jetons, pour qu'une personne
-    // présente dans deux paliers masqués (effet report et changement d'ETP, par exemple) n'y compte qu'une fois ; un contrat non relié
-    // ne protège pas (palier non dénombré sous le seuil) ; un palier porté seulement par des embauches prévues d'un scénario ne protège
-    // jamais et n'est masqué qu'avec toute la cascade (projectedCell du module partagé, comme l'Analyse des écarts).
-    const status = maskGroups(
-      cascade.steps.map((s) => projectedCell(s.people.map((p) => p.key), input.link, seuil, s.etp4)),
-      seuil,
-      true,
-    );
+    // Paliers après seuil : la fonction de l'Analyse des écarts (maskCascade), règle « union » comprise. Taille d'un palier : les
+    // personnes de ses contrats réels (reliés par le lien), une personne présente dans deux paliers masqués n'y comptant qu'une fois ;
+    // un contrat non relié ne protège pas ; un palier porté seulement par des embauches prévues ne protège jamais. Un palier de la
+    // période N-1 → N est n.d. dès qu'il est masqué dans la cascade de la période ou dans celle d'un seul de ses mois (même rang de mois
+    // de N-1 et de N) : sinon trois périodes de la croisée redonneraient un palier masqué d'un mois.
+    const status = maskCascade(cascade, input.link, seuil).status;
     const hidden = status.some(isHidden);
     // Départ et arrivée : les ETP moyens exacts de la carte (fraction sur n × 10 000), jamais leur arrondi au dix-millième arrondi une
     // seconde fois au centième ; le résiduel d'arrondi absorbe l'écart entre ces valeurs exactes et les paliers arrondis.
@@ -1054,7 +1038,9 @@ export async function loadEffetsInput(ctx: CroiseeContext): Promise<EffetsInput>
     cascade: etpCascade(a, b, monthsA, monthsB),
     etp: { cur: aggregate(b, monthsB, "etp"), prev: aggregate(a, monthsA, "etp") },
     confidentialite,
-    serviceGuard: guardOf(journal, filter !== null, [monthsB, monthsA], filter?.value ?? null, link, ctx.settings.confidentialite),
+    // Garde du service retenu : colonne de masse de chaque mois et, l'ETP des versions réelles décrivant l'ETP de fin de mois du service,
+    // colonne des stocks des mêmes mois (celle de KPI RH › Effectifs mensuels, ETP × service, et de la croisée 02).
+    serviceGuard: filter !== null ? serviceGuardOnWindows(journal, [monthsB, monthsA], filter.value, link, ctx.settings.confidentialite, { kpi, months: [...monthsB, ...monthsA] }) : null,
     link,
     hrefs,
   };

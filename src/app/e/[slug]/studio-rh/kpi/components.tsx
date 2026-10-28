@@ -36,6 +36,8 @@ import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
 import { CONFIDENTIALITE_TERM, confidentialiteHref, isHidden, maskReason, type ConfidentialiteSetting, type PersonsOfContracts } from "@/lib/confidentialite";
 import type { MotifWindow } from "@/lib/croisee/conges";
+import type { AbsencePeriodGroups } from "@/lib/rh/kpi/absence-motifs";
+import type { AbsenceTypeGroups } from "@/lib/viz/kpi";
 import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, maskMotifRows, monthAxis, motifMask, motifRows, movementSeries, ndSummary, readingQualifiers, seuilOf, seuilText, typeCountMask, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
@@ -198,9 +200,10 @@ export function ConfidentialiteNote({ slug, setting, testid = "kpi-confidentiali
 
 // Tuile Absentéisme : motifs retenus, motifs présents non retenus, retenus mais sans aucune absence dans la lecture.
 // Le nombre entre parenthèses (absences de toute la lecture) est expliqué au glossaire ; c'est une répartition par motif : il suit
-// le seuil de confidentialité (mask : paramètre de l'espace et personnes distinctes de chaque motif, absenceTypePersons), n.d. avec la
-// raison sous le seuil, ou quand le paramètre n'est pas défini (ou pas transmis par l'écran).
-export type AbsenceTypeMask = { setting: ConfidentialiteSetting | undefined; sizes: Readonly<Record<string, PersonsOfContracts>> };
+// le seuil de confidentialité (mask : paramètre de l'espace, nombre et personnes distinctes de chaque motif, absenceTypePersons ; statut
+// de typeCountMask, colonne de tous les motifs de la lecture, le même que dans Paramètres), n.d. avec la raison sous le seuil (masquage
+// principal ou secondaire), ou quand le paramètre n'est pas défini (ou pas transmis par l'écran).
+export type AbsenceTypeMask = { setting: ConfidentialiteSetting | undefined; sizes: AbsenceTypeGroups };
 export function AbsenceTypeNotes({ chosen, other, missing, slug, mask }: { chosen: { type: string; count: number }[]; other: { type: string; count: number }[]; missing: { type: string }[]; slug: string; mask?: AbsenceTypeMask }) {
   const read = seuilOf(mask?.setting);
   const count = (x: { type: string; count: number }) => {
@@ -851,12 +854,13 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
 // quelle que soit la période. Une ligne qui concerne de 1 à (seuil − 1) personnes distinctes est n.d. (exception : le seul motif retenu
 // présent dans la lecture, qui égale la tuile) ; masquage secondaire ; le taux tous motifs, indicateur de l'entreprise, n'est masqué que
 // lorsqu'il donnerait une ligne masquée par différence. « Absences de la lecture » : le statut de la tuile Absentéisme (typeCountMask,
-// typeSizes : absenceTypePersons ; non transmis, un nombre non nul n'est pas vérifiable). Paramètre absent, illisible ou non transmis :
-// lignes n.d. avec la raison et le lien vers Paramètres ; le taux tous motifs reste affiché.
-export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite, typeSizes }: { motifs: AbsenceMotifs; cells: MotifWindow; slug: string; confidentialite?: ConfidentialiteSetting; typeSizes?: Readonly<Record<string, PersonsOfContracts>> }) {
+// typeSizes : absenceTypePersons ; non transmis, un nombre non nul n'est pas vérifiable). « Absences de la période » : ses propres
+// personnes (motifs.period, lu par absenceByMotif avec les lignes ; absent, un nombre non nul n'est pas vérifiable). Paramètre absent,
+// illisible ou non transmis : lignes n.d. avec la raison et le lien vers Paramètres ; le taux tous motifs reste affiché.
+export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite, typeSizes }: { motifs: AbsenceMotifs & { period?: AbsencePeriodGroups }; cells: MotifWindow; slug: string; confidentialite?: ConfidentialiteSetting; typeSizes?: AbsenceTypeGroups }) {
   const read = seuilOf(confidentialite);
   const mask = read.seuil === null || motifs.lines.length === 0 ? null : motifMask(cells, read.seuil);
-  const rows = maskMotifRows(motifRows(motifs.lines), mask, read.seuil, read.reason, typeSizes ?? {});
+  const rows = maskMotifRows(motifRows(motifs.lines), mask, read.seuil, read.reason, typeSizes ?? {}, motifs.period);
   const allReason = mask && read.seuil !== null && isHidden(mask.all) ? maskReason(mask.all, read.seuil) : null;
   const all = motifs.all;
   const link = <> (<a href={confidentialiteHref(slug)}>Paramètres</a>)</>;
@@ -928,8 +932,9 @@ export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite, type
 
 // confidentialite : seuil de l'espace (getConfidentialite), transmis par la page au détail par motif ; cells : cellules de la fenêtre
 // (motifWindow, lues dans le moteur par la page : motifs × mois et total, absentéisme et taux tous motifs de chaque mois publiés) ;
-// typeSizes : personnes distinctes de chaque motif dans toute la lecture (absenceTypePersons, comme la tuile Absentéisme).
-export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, cells, slug, confidentialite, typeSizes }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; cells?: MotifWindow; slug?: string; confidentialite?: ConfidentialiteSetting; typeSizes?: Readonly<Record<string, PersonsOfContracts>> }) {
+// typeSizes : nombre et personnes distinctes de chaque motif dans toute la lecture (absenceTypePersons, comme la tuile Absentéisme) ;
+// motifs : absenceByMotif, avec les personnes des absences de la période (period).
+export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, cells, slug, confidentialite, typeSizes }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs & { period?: AbsencePeriodGroups }; cells?: MotifWindow; slug?: string; confidentialite?: ConfidentialiteSetting; typeSizes?: AbsenceTypeGroups }) {
   // Une ligne par mois : jours théoriques (toujours calculés s'ils le peuvent) et absences (n.d. avec la raison de la période
   // quand l'absentéisme s'arrête avant le calcul mensuel : arrêts DSN non extraits, types non choisis, absences non lues).
   const abs = new Map(v.months.map((m) => [m.month, m]));

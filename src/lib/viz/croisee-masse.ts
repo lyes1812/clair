@@ -27,7 +27,8 @@ import { MONTH_NAMES, nd as ndTile, type TileValue } from "@/lib/viz/synthese";
 // référentiel ; un contrat non relié ne protège jamais) : les mêmes fonctions que l'écran Masse salariale, pour les mêmes cellules
 // n.d. avec les mêmes raisons. Lignes par service (05, reprises par la Synthèse 01) : maskServiceRows (src/lib/payroll/service-rows.ts,
 // le tableau « Services » de la Synthèse de la Masse salariale et sa feuille Excel). Primes par famille et brut par libellé (04) :
-// maskLabels (src/lib/payroll/lot2.ts, l'onglet Fixe & variable), une seule passe du moteur pour les deux tableaux. Sous le filtre
+// maskLabels (src/lib/payroll/lot2.ts, l'onglet Fixe & variable) : statut canonique de chaque mois (colonne de la rubrique du mois),
+// cellules N, N-1 et de période déduites de leurs mois, les mêmes pour les deux tableaux et pour l'onglet. Sous le filtre
 // Service, la garde unique serviceGuardOnWindows (service n.d. dès que sa ligne est masquée, masquage secondaire compris) rend tout
 // le chapitre 04 n.d. Les totaux de toute l'entreprise ne sont jamais masqués. Seuil absent ou illisible : ces répartitions sont n.d.
 // avec la raison et le lien vers Paramètres › Confidentialité.
@@ -237,7 +238,7 @@ export type FixeVariableData = {
   labelsN1: LabelIn[] | null; // labelTotals sur N-1 (null : N-1 n.d.)
   labelsByMonth: Record<string, LabelIn[]>; // labelTotals de chaque mois connu de la période
   confidentialite: Confidentialite; // seuil de l'espace (primes par famille, brut par libellé), ou la raison de son absence
-  // Raisons du seuil par libellé (N, N-1) et par famille et mois : maskLabels (lot2.ts), la même passe que l'onglet Fixe & variable
+  // Raisons du seuil par libellé (N, N-1) et par famille et mois : maskLabels (lot2.ts), la même fonction que l'onglet Fixe & variable
   // (labelMaskOf) ; vide sans seuil défini (les deux tableaux sont alors n.d. avec la raison du paramètre).
   mask: LabelMask;
   links: { confidentialite: string }; // Paramètres › Confidentialité
@@ -262,9 +263,10 @@ export function labelKeysOf(d: Pick<FixeVariableData, "labelsN" | "labelsN1">): 
   return [...new Map([...(d.labelsN1 ?? []), ...(d.labelsN ?? [])].map((t) => [t.key, t])).values()].sort((a, b) => BRUT_ORDER.indexOf(a.rubric) - BRUT_ORDER.indexOf(b.rubric) || byLabel(a, b));
 }
 
-// Masquage des deux tableaux du chapitre 04 par la fonction de l'onglet Fixe & variable (maskLabels : familles × mois → période de la
-// famille, colonnes N et N-1 des libellés, colonnes des mois, familles de la période, en une seule passe du moteur partagé) sur le
-// journal restreint au service retenu. Les familles font partie des libellés (clé de la rubrique « Primes » de la période).
+// Masquage des deux tableaux du chapitre 04 par la fonction de l'onglet Fixe & variable (maskLabels : chaque mois d'un libellé ou d'une
+// famille jugé dans la colonne de sa rubrique ce mois-là, total du mois publié ; cellules N, N-1 et de période déduites de leurs mois,
+// sans relation propre) sur le journal restreint au service retenu. Les familles font partie des libellés (clé de la rubrique
+// « Primes ») ; les listes de libellés et de familles ne changent aucun statut.
 export function labelMaskOf(input: JournalInput, d: Pick<FixeVariableData, "months" | "prevMonths" | "labelsN" | "labelsN1" | "labelsByMonth" | "prev">, link: PersonLink, conf: ConfidentialiteSetting): LabelMask {
   const families = familiesOf({ ...d, labelsN: d.labelsN }).map((f) => f.key);
   const keys = [...new Set([...labelKeysOf(d).map((t) => t.key), ...families])];
@@ -460,8 +462,8 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     if (!lt) return { month: r.month, kind: "nd", reason: `${monthShortYear(r.month)} : libellés du mois non lus` };
     return { month: r.month, kind: "value", byFamily: families.map((f) => lt.filter((t) => t.key === f.key).reduce((s, t) => s + t.cents, 0)) };
   });
-  // Grille des familles (mois × famille, puis la période) : chaque cellule porte la raison du seuil que maskLabels lui donne (mois
-  // d'une famille → sa cellule de période, colonnes des mois dont le « Total primes » est publié, familles de la période) ; la cellule
+  // Grille des familles (mois × famille, puis la période) : chaque cellule porte la raison du seuil que maskLabels lui donne (mois :
+  // colonne des primes du mois, dont le « Total primes » est publié ; période : n.d. dès qu'un de ses mois est masqué) ; la cellule
   // de période d'une famille est la cellule N de ce libellé dans le tableau par libellé : même raison, même masquage.
   const nFam = families.length;
   const famTitle = "Primes par famille et par mois";
@@ -500,10 +502,9 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
   ];
 
   // --- Brut par libellé de paie, N face à N-1 (même clé de regroupement que le calcul : rubrique + libellé sans accents ni casse).
-  // Chaque libellé porte les raisons de maskLabels sur N et sur N-1 (le brut de la période et de N-1, pied du tableau, est publié :
-  // masquage secondaire dans chacune des deux colonnes, et la cellule N d'une famille de prime est sa cellule de période dans la
-  // grille des familles). Une ligne dont l'une des deux cellules est masquée l'est entièrement (l'écart se déduit de l'une et de
-  // l'autre) : masquer en plus ne découvre rien.
+  // Chaque cellule porte sa raison de maskLabels, comme dans l'onglet Fixe & variable : N et N-1 sont deux fenêtres déduites de leurs
+  // mois (la cellule N-1 d'une année est la cellule N de l'année précédente : même statut), et la cellule N d'une famille de prime est
+  // sa cellule de période dans la grille des familles. L'écart et l'écart en % d'une ligne dont une cellule est masquée sont n.d.
   let libelles: CroiseeTable;
   const libellesNd: BlockNd[] = [];
   if (!d.labelsN) {
@@ -520,16 +521,17 @@ export function buildFixeVariable(input: FixeVariableInput): FixeVariableModel {
     const keys = labelKeysOf(d);
     const val = (list: LabelIn[], k: string) => list.filter((t) => t.key === k).reduce((s, t) => s + t.cents, 0);
     const values = keys.map((t) => ({ a: val(n, t.key) as Val, b: (prevNd ?? val(p!, t.key)) as Val }));
-    // Raison de la ligne : celle de sa cellule masquée (N d'abord), appliquée aux deux cellules.
-    const rowWhy = (i: number): string | null => d.mask.labels[keys[i].key]?.cur ?? d.mask.labels[keys[i].key]?.prev ?? null;
+    // Raisons du seuil de la cellule N et de la cellule N-1 du libellé (null : affichée).
+    const whyOf =(k: string): { cur: string | null; prev: string | null } => d.mask.labels[k] ?? { cur: null, prev: null };
     libelles = {
       id: ID.libelles,
       title: "Brut par libellé de paie",
       columns: [text("libelle", "Libellé (PayFit)"), eur("n", nHead), eur("n1", pHead), gapCol(), pctCol(), text("rubrique", "Rubrique", { term: X.grille })],
       rows: keys.map((t, i) => {
-        const why = rowWhy(i);
-        const a: Val = why === null ? values[i].a : { nd: why };
-        const b: Val = why === null ? values[i].b : { nd: why };
+        const why = whyOf(t.key);
+        const a: Val = why.cur === null ? values[i].a : { nd: why.cur };
+        // N-1 n.d. (période non lue) : sa propre raison, jamais remplacée.
+        const b: Val = why.prev === null || prevNd ? values[i].b : { nd: why.prev };
         return { cells: [t.label, a, b, gap(a, b), pct(a, b), rubricLabel(t.rubric)] };
       }),
       foot: { cells: ["Brut", of(cur, PICK.brut), of(prev, PICK.brut), gap(of(cur, PICK.brut), of(prev, PICK.brut)), pct(of(cur, PICK.brut), of(prev, PICK.brut)), ""] },

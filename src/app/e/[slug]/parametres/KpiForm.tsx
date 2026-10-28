@@ -25,7 +25,11 @@ export type KpiFormProps = {
   kinds: Record<string, OriginKind>; // clé du paramètre → nature de l'origine
   notes: { etp: string | null; turnover: string | null; absence: string | null }; // phrase unique de chaque carte (défauts validés)
   natures: { code: string; label: string }[];
-  types: { type: string; label: string | null; count: number; inRead: boolean }[];
+  // count : nombre d'absences du motif dans la lecture, null quand il est n.d. (jamais transmis au navigateur) ; countNd : raison du n.d.
+  // (seuil de confidentialité : statut de typeCountMask, le même que KPI RH ; ou paramètre non défini ou illisible).
+  types: { type: string; label: string | null; count: number | null; countNd: string | null; inRead: boolean }[];
+  // Nombres n.d. parce que le seuil de confidentialité n'est pas défini ou est illisible : la raison et le lien vers sa section.
+  countsNote?: { reason: string; href: string } | null;
   readLabel: string | null; // « lecture du 21/10/2026 » ; null si aucune lecture PayFit appliquée
   statuses: { code: string; label: string }[];
   disabled: boolean;
@@ -54,7 +58,18 @@ const ItemHead = ({ id, title, help }: { id: string; title: string; help?: React
 const CardNote = ({ id, text }: { id: string; text: string | null }) =>
   text ? <p className="desc pm-origin pm-card-note" data-testid={`setting-kpi-defaults-${id}`}>{text}</p> : null;
 
-export function KpiForm({ slug, values, origins, kinds, notes, natures, types, readLabel, statuses, disabled, helps = {} }: KpiFormProps) {
+// Nombre d'absences d'un motif de la lecture : le nombre, ou n.d. avec sa raison au survol (comme la tuile Absentéisme de KPI RH).
+function TypeCount({ count, nd }: { count: number | null; nd: string | null }) {
+  if (nd !== null || count === null)
+    return (
+      <span className="desc" data-testid="setting-kpi-types-count">
+        absences : <abbr className="nd" title={nd ?? "nombre non transmis"}>n.d.</abbr>
+      </span>
+    );
+  return <span className="desc" data-testid="setting-kpi-types-count">{count} absence{count > 1 ? "s" : ""}</span>;
+}
+
+export function KpiForm({ slug, values, origins, kinds, notes, natures, types, countsNote = null, readLabel, statuses, disabled, helps = {} }: KpiFormProps) {
   const [state, action, pending] = useActionState(saveKpiSettings.bind(null, slug), undefined);
   return (
     <form className="form" action={action}>
@@ -154,11 +169,16 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
                     <input type="checkbox" name="absenceTypes" value={t.type} defaultChecked={values.absenceTypes.includes(t.type)} data-testid="setting-kpi-absence-types" />
                     <span className="pm-type">
                       <span>{t.label ?? "Motif sans libellé connu"} <code>{t.type}</code></span>
-                      {t.inRead ? <span className="desc">{t.count} absence{t.count > 1 ? "s" : ""}</span> : <span className="desc" data-testid="setting-kpi-types-missing">absent de la lecture appliquée (sans effet)</span>}
+                      {t.inRead ? <TypeCount count={t.count} nd={t.countNd} /> : <span className="desc" data-testid="setting-kpi-types-missing">absent de la lecture appliquée (sans effet)</span>}
                     </span>
                   </label>
                 ))}
               </div>
+              {countsNote && (
+                <p className="desc" data-testid="setting-kpi-types-confidentialite">
+                  Nombres d'absences : n.d. — <a href={countsNote.href}>{countsNote.reason}</a>
+                </p>
+              )}
               {values.absenceTypes.length === 0 && <p className="desc">Aucun motif retenu : absentéisme n.d.</p>}
               <Origin id="absence-types" name="absenceTypes" kinds={kinds} origins={origins} />
             </div>

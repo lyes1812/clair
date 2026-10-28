@@ -41,8 +41,10 @@ const ABSENT: ConfidentialiteSetting = { kind: "absent" };
 const ndCell = (reason: string) => <abbr className="nd" title={reason}>n.d.</abbr>;
 
 // --- Onglet « Fixe & variable » : brut par rubrique et par libellé de paie PayFit, N et N-1, primes par famille et par mois.
-// Seuil de confidentialité : chaque libellé et chaque famille de prime (par mois et sur la période) décrit les personnes reliées
-// aux contrats de ses lignes (maskLabels) ; sous le filtre Service, un service masqué (guard) rend tout l'onglet n.d.
+// Seuil de confidentialité : chaque libellé et chaque famille de prime décrit les personnes reliées aux contrats de ses lignes ; son
+// statut de chaque mois est celui de la colonne de sa rubrique ce mois-là, et ses cellules N, N-1 et de période se déduisent de leurs
+// mois (maskLabels, la fonction de la croisée 04) : le même statut quelle que soit la période choisie. Sous le filtre Service, un
+// service masqué (guard) rend tout l'onglet n.d.
 export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout", tableHref = "", link = NO_LINK, confidentialite = ABSENT, guard = null, unfilterHref }: { slug?: string; input: JournalInput; months: string[]; prevMonths: string[]; aff?: Affichage; tableHref?: string; link?: PersonLink; confidentialite?: ConfidentialiteSetting; guard?: ServiceGuard | null; unfilterHref?: string }) {
   if (guard) return <MoneyText><ServiceNd testid="fv-nd" slug={slug} guard={guard} unfilterHref={unfilterHref} service={input.serviceFilter?.value} /></MoneyText>;
   const cur = windowPayroll(input, months);
@@ -123,7 +125,8 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
     const lt = labelTotals(input, [r.month]);
     return { month: r.month, kind: "value", byFamily: families.map((f) => lt.filter((t) => t.key === f.key).reduce((s, t) => s + t.cents, 0)) };
   });
-  // Seuil de confidentialité par libellé (N, N-1) et par famille et mois ; raison du n.d. ou null.
+  // Seuil de confidentialité par libellé (N, N-1) et par famille et mois (statut canonique de chaque mois, fenêtres déduites de leurs
+  // mois) ; raison du n.d. ou null. Les listes de l'écran ne changent aucun statut.
   const mask = maskLabels({ input, months, prevMonths, keys: keys.map((t) => t.key), families: families.map((f) => f.key), link, conf: confidentialite, prevNd: prev.kind === "nd" });
   const famNd = (f: { key: string }, i: number): string | null => mask.families[f.key]?.[i] ?? null;
   const labelNd = (k: string): { cur: string | null; prev: string | null } => mask.labels[k] ?? { cur: null, prev: null };
@@ -369,8 +372,9 @@ export function PaieComptaView(props: {
     return g === null ? "n.d." : eurosSigned(g);
   };
   const services = fullInput.serviceAxis ? servicesOf(fullInput, [last, shiftYear(last, -1)]) : [];
-  // Seuil de confidentialité de la provision par service : chaque fin de mois de la période et de N-1, tous les services du journal
-  // (masquage secondaire par mois). Lu par le tableau par service (dernière fin de mois N et N-1) et par la garde du filtre Service.
+  // Seuil de confidentialité de la provision par service : chaque fin de mois de la période et de N-1, statut canonique de la colonne
+  // de la fin de mois (maskProvisionStatus, la passe de la croisée 07). Lu par le tableau par service (dernière fin de mois N et N-1)
+  // et par la garde du filtre Service.
   const allMonths = [...new Set([...months, ...months.map((m) => shiftYear(m, -1))])];
   const svcInputs = fullInput.serviceAxis ? servicesOf(fullInput, allMonths).map((s) => ({ value: s, input: withService(fullInput, s) })) : [];
   const provMask = maskProvisionServices({ inputs: svcInputs, months: allMonths, link, conf: confidentialite });

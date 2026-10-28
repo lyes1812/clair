@@ -8,7 +8,7 @@ import { effectifsShareOf, loadEffectifs } from "@/app/e/[slug]/studio-rh/kpi/ef
 import { effectifsGridSheet, effectifsShareSheet } from "@/app/e/[slug]/studio-rh/kpi/export/sheets";
 import { confidentialiteReason, SEUIL_ILLISIBLE, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting } from "@/lib/confidentialite";
 import { KPI_DEFAULTS, KPI_KEYS } from "@/lib/rh-kpi-settings";
-import { ABSENCE_ALL_MOTIFS_LABEL, absenceByMotif, absenceTypePersons } from "@/lib/rh/kpi/absence-motifs";
+import { ABSENCE_ALL_MOTIFS_LABEL, absenceByMotif, absenceTypePersons, type AbsencePeriodGroups } from "@/lib/rh/kpi/absence-motifs";
 import { monthWindow } from "@/lib/rh/kpi/period";
 import type { AbsenceMotifs, KpiInput } from "@/lib/rh/kpi/types";
 import type { KpiContext } from "@/lib/rh/kpi-context";
@@ -122,12 +122,26 @@ describe("moteur : personnes distinctes par motif (avril 2026)", async () => {
     for (const l of m.lines) expect(l).toMatchObject({ kind: "nd" });
     expect(m.lines.every((l) => l.persons === undefined)).toBe(true);
   });
-  it("motifs de toute la lecture (tuile) : contrats des absences reliés par le référentiel ; C-3 non relié", () => {
+  it("motifs de toute la lecture (tuile) : nombre d'absences et contrats des absences reliés par le référentiel ; C-3 non relié", () => {
+    // test_sickness : a1 et a4 (C-1) → 2 absences, 1 personne ; test_paid_leave : a2 (C-1), a3 (C-2), a5 (C-3) → 3 absences.
     const by = absenceTypePersons(input);
     expect(Object.keys(by)).toEqual(["test_paid_leave", "test_sickness"]);
-    expect(by.test_sickness).toEqual({ persons: [key("C-1")], unlinked: 0 });
-    expect(by.test_paid_leave).toEqual({ persons: [key("C-1"), key("C-2")].sort(), unlinked: 1 });
+    expect(by.test_sickness).toEqual({ persons: [key("C-1")], unlinked: 0, count: 2 });
+    expect(by.test_paid_leave).toEqual({ persons: [key("C-1"), key("C-2")].sort(), unlinked: 1, count: 3 });
     expect(absenceTypePersons(kpiInput(data, DSN_ABSENCES))).toEqual({});
+  });
+  it("absences de la période (avril 2026) : leurs personnes, celles de chaque mois et le reste de la lecture (a4, mars, hors période)", () => {
+    const p = absenceByMotif(input, monthWindow("2026-04")).period;
+    expect(p.months).toEqual(["2026-04"]);
+    const sick = { persons: [key("C-1")], unlinked: 0, count: 1 };
+    expect(p.types.test_sickness).toEqual({ window: sick, months: [sick], rest: sick, offMonths: 0 });
+    const leave = { persons: [key("C-1"), key("C-2")].sort(), unlinked: 1, count: 3 };
+    expect(p.types.test_paid_leave).toEqual({ window: leave, months: [leave], rest: { persons: [], unlinked: 0, count: 0 }, offMonths: 0 });
+    // Le nombre affiché « Absences de la période » est celui de la période (un seul calcul).
+    expect(absenceByMotif(input, monthWindow("2026-04")).lines.map((l) => [l.type, l.inWindow])).toEqual([
+      ["test_paid_leave", 3],
+      ["test_sickness", 1],
+    ]);
   });
 });
 
@@ -192,14 +206,25 @@ describe("tableau par motif : masquage principal, exception du motif retenu uniq
     const nd = maskMotifRows(rows, null, null, SEUIL_NON_DEFINI);
     expect(nd.map((r) => r.masked)).toEqual([SEUIL_NON_DEFINI, SEUIL_NON_DEFINI]);
   });
-  it("nombre d'absences d'un motif de la lecture : masquage principal seul ; non relié sous le seuil : non vérifiable ; nombre non nul sans personne : non vérifiable", () => {
-    const sizes = { a: P("p1", "p2"), b: P("p1"), c: { persons: ["p1"], unlinked: 1 }, d: P() };
+  it("nombre d'absences d'un motif de la lecture : une colonne de tous les motifs, total publié par Données (masquage principal et secondaire)", () => {
+    // Seuil 2. Colonne a, b, c (ordre canonique), total 5 + 1 + 2 = 8 publié par Données › lecture. b (1 personne) est masqué ; la
+    // plus petite cellule affichée qui apporte une personne, c (2 absences), l'est en second : b + c = 3 personnes ≥ 2, deux cellules.
+    // a (3 personnes) reste. Avant (masquage principal seul) : c affiché, b = 8 − 5 − 2 = 1.
+    const sizes = { a: { ...P("p1", "p2", "p3"), count: 5 }, b: { ...P("p4"), count: 1 }, c: { ...P("p5", "p6"), count: 2 } };
     expect(typeCountMask(sizes, "a", 5, 2)).toBeNull();
     expect(typeCountMask(sizes, "b", 1, 2)).toBe(R2);
-    expect(typeCountMask(sizes, "c", 2, 2)).toBe(SEUIL_NON_VERIFIABLE);
-    expect(typeCountMask(sizes, "d", 3, 2)).toBe(SEUIL_NON_VERIFIABLE);
+    expect(typeCountMask(sizes, "c", 2, 2)).toBe(R2);
+    expect(typeCountMask(sizes, "b", 1, 1)).toBeNull(); // seuil 1 : rien à masquer
     expect(typeCountMask(sizes, "e", 0, 2)).toBeNull(); // aucune absence : rien à protéger
-    expect(typeCountMask(sizes, "b", 1, 1)).toBeNull();
+    // Nombre qui n'est pas celui de la colonne (motif absent, nombre différent) : non vérifiable, jamais affiché.
+    expect(typeCountMask(sizes, "e", 3, 2)).toBe(SEUIL_NON_VERIFIABLE);
+    expect(typeCountMask(sizes, "a", 4, 2)).toBe(SEUIL_NON_VERIFIABLE);
+    // Contrat non relié sous le seuil : non vérifiable ; seul masqué, il se lirait par différence avec le total : a l'est en second.
+    const unlinked = { a: { ...P("p1", "p2", "p3"), count: 5 }, c: { persons: ["p5"], unlinked: 1, count: 2 } };
+    expect(typeCountMask(unlinked, "c", 2, 2)).toBe(SEUIL_NON_VERIFIABLE);
+    expect(typeCountMask(unlinked, "a", 5, 2)).toBe(R2);
+    // Nombre non nul sans aucune personne ni contrat : non vérifiable.
+    expect(typeCountMask({ ...sizes, d: { ...P(), count: 3 } }, "d", 3, 2)).toBe(SEUIL_NON_VERIFIABLE);
   });
 });
 
@@ -217,13 +242,28 @@ const cellsOf = (m: AbsenceMotifs): MotifWindow => {
     published: { months: [true], allMonths: [m.all.kind !== "nd"], all: m.all.kind !== "nd" },
   };
 };
-// Personnes de chaque motif dans toute la lecture (absenceTypePersons) : celles de sa ligne (fenêtre d'un mois, toute la lecture).
-const sizesOf = (m: AbsenceMotifs) => Object.fromEntries(m.lines.map((l) => [l.type, { persons: l.persons ?? [], unlinked: l.unlinked ?? 0 }]));
+// Nombre et personnes de chaque motif dans toute la lecture (absenceTypePersons) : celles de sa ligne (fenêtre d'un mois, toute la
+// lecture).
+const sizesOf = (m: AbsenceMotifs) => Object.fromEntries(m.lines.map((l) => [l.type, { persons: l.persons ?? [], unlinked: l.unlinked ?? 0, count: l.count }]));
+// Absences de la période (absenceByMotif.period) : fenêtre d'un mois, celles de la ligne ; le reste de la lecture (count − inWindow) est
+// porté par les mêmes personnes.
+const periodOf = (m: AbsenceMotifs): AbsenceMotifs & { period: AbsencePeriodGroups } => ({
+  ...m,
+  period: {
+    months: ["2026-04"],
+    types: Object.fromEntries(
+      m.lines.map((l) => {
+        const who = { persons: l.persons ?? [], unlinked: l.unlinked ?? 0 };
+        return [l.type, { window: { ...who, count: l.inWindow }, months: [{ ...who, count: l.inWindow }], rest: { ...who, count: l.count - l.inWindow }, offMonths: 0 }];
+      }),
+    ),
+  },
+});
 describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
   const win = { from: "2026-04", to: "2026-04", label: "avril 2026", months: ["2026-04"] };
   // Maladie (retenue, 2 personnes) ; congés (non retenu, 1 personne : masqué) ; le taux tous motifs, seul à pouvoir révéler les congés
   // par différence avec la tuile, est masqué à son tour.
-  const motifs: AbsenceMotifs = {
+  const motifs = periodOf({
     window: win as never,
     label: ABSENCE_ALL_MOTIFS_LABEL,
     lines: [
@@ -232,7 +272,7 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
     ],
     all: { kind: "exact", ratio: { num: 22, den: 120 }, months: [], qualifiers: [] },
     emptyReason: null,
-  };
+  });
   it("seuil 2 : la ligne des congés est n.d. (quatre nombres, motif et « retenu » conservés), la maladie reste ; le taux tous motifs est n.d. avec la même raison ; ligne Confidentialité", () => {
     const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo", confidentialite: set(2) }));
     const leave = rowOf("test_paid_leave").exec(html)![0];
@@ -241,17 +281,22 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
     expect(text(leave)).not.toMatch(/\b3\b|\b18\b|15,00/);
     const sick = rowOf("fr_maladie_ordinaire").exec(html)![0];
     expect(sick).not.toContain("data-masque");
-    expect(text(sick)).toContain("2 1 oui 10 (5 j) 8,33 %");
+    // Nombres d'absences de la lecture : une colonne, total 2 + 3 = 5 publié par Données. Congés (P1) masqués ; la maladie (2 absences,
+    // P1 et P2) l'est en second (seule autre cellule : P1 + P2 = 2 personnes ≥ 2). Sa période suit le nombre de la lecture masqué.
+    // Demi-journées et taux de la maladie restent (motif retenu unique, égal à la tuile).
+    expect(text(sick)).toContain(`fr_maladie_ordinaire n.d. — ${R2} oui 10 (5 j) 8,33 %`);
     expect(text(/<p[^>]*data-testid="kpi-detail-motifs-all"[\s\S]*?<\/p>/.exec(html)![0])).toBe(`n.d. — ${R2}`);
     expect(html).not.toContain("18,33");
     const note = /<p[^>]*data-testid="kpi-detail-motifs-confidentialite"[\s\S]*?<\/p>/.exec(html)![0];
     expect(text(note)).toBe("Confidentialité : seuil de 2 personnes");
     expect(note).not.toContain("parametres#confidentialite");
   });
-  it("seuil 1 : rien n'est masqué (deux lignes, taux tous motifs 18,33 %)", () => {
+  it("seuil 1 : rien n'est masqué (deux lignes, nombres d'absences de la lecture et de la période, taux tous motifs 18,33 %)", () => {
     const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo", confidentialite: set(1) }));
     expect(html).not.toContain("data-masque");
-    expect(text(html)).toContain("18 (9 j) 15,00 %");
+    expect(html).not.toContain('class="nd"');
+    expect(text(html)).toContain("fr_maladie_ordinaire 2 1 oui 10 (5 j) 8,33 %");
+    expect(text(html)).toContain("test_paid_leave 3 2 non 18 (9 j) 15,00 %");
     expect(text(html)).toContain("22 demi-journées = 11 j ÷ 60 j = 18,33 %");
   });
   it("seuil absent ou non transmis : chaque ligne n.d. « non défini » avec le lien vers Paramètres › Confidentialité ; le taux tous motifs (entreprise entière) reste affiché", () => {
@@ -277,13 +322,16 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
     const none = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, cells: cellsOf(motifs), typeSizes: sizesOf(motifs), slug: "demo" }));
     expect(text(none)).toContain(SEUIL_NON_DEFINI);
   });
-  it("motifs de la lecture (tuile) : un nombre sous le seuil est n.d. avec la raison, les autres restent ; ligne Confidentialité dans la tuile (HTML valide : aucun paragraphe dans un span)", () => {
-    const sizes = { test_sickness: P("P1", "P2"), test_paid_leave: P("P1") };
-    const html = render(h(AbsenceTypeNotes, { chosen: [{ type: "test_sickness", count: 3 }], other: [{ type: "test_paid_leave", count: 5 }], missing: [], slug: "demo", mask: { setting: set(2), sizes } }));
+  it("motifs de la lecture (tuile) : un nombre sous le seuil est n.d. avec la raison, le plus petit autre l'est en second, les autres restent ; ligne Confidentialité dans la tuile (HTML valide : aucun paragraphe dans un span)", () => {
+    // Seuil 2, colonne de la lecture (total 3 + 5 + 2 = 10 publié par Données) : congés (P1) masqués ; plus petite cellule affichée qui
+    // apporte une personne : test_x (2 absences, P3 et P4), masqué en second (P1 + P3 + P4 = 3 ≥ 2) ; la maladie (3) reste.
+    const sizes = { test_sickness: { ...P("P1", "P2"), count: 3 }, test_paid_leave: { ...P("P1"), count: 5 }, test_x: { ...P("P3", "P4"), count: 2 } };
+    const html = render(h(AbsenceTypeNotes, { chosen: [{ type: "test_sickness", count: 3 }], other: [{ type: "test_paid_leave", count: 5 }, { type: "test_x", count: 2 }], missing: [], slug: "demo", mask: { setting: set(2), sizes } }));
     const t = text(html);
     expect(t).toContain("Retenus : test_sickness (3)");
     expect(t).toContain("non retenus : test_paid_leave ( n.d. )");
-    expect(html).toContain(`<abbr class="nd" title="${R2}">n.d.</abbr>`);
+    expect(t).toContain("test_x ( n.d. )");
+    expect(html.match(new RegExp(`<abbr class="nd" title="${R2.replace(/[()]/g, "\\$&")}">n.d.</abbr>`, "g"))).toHaveLength(2);
     expect(t).toContain("Confidentialité : seuil de 2 personnes");
     expect(html).not.toContain("<p");
     // Sans masque transmis : nombres n.d. « non défini », motifs conservés.

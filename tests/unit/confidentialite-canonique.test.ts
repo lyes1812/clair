@@ -8,7 +8,6 @@ import { confidentialiteReason, isHidden, linkFromReferential, type Confidential
 import { canonicalCompare, maskColumn, stockColumn, stockGroups, windowStatus } from "@/lib/confidentialite/columns";
 import { projectedCell, projectedGroupCell } from "@/lib/confidentialite/groups";
 import { croiseeLink } from "@/lib/croisee/confidentialite";
-import { maskNonRecurring } from "@/lib/croisee/cohortes";
 import { monthEnd } from "@/lib/dates";
 import { monthPayroll, withService, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
@@ -288,14 +287,12 @@ describe("(d) embauches prévues seules : affichées, jamais protectrices, masqu
       { id: "etp-change" as const, label: "Changement d'ETP", etp4: 0, people: [] },
     ];
     const link = new Map([["dsn:K-1", "personne-1"]]);
-    const m = maskCascade({ steps }, link, 5);
+    const m = maskCascade({ steps, byMonth: [steps] }, link, 5); // période d'un mois : son seul mois est elle-même
     expect(m.status).toEqual(["secondary", "secondary", "masked", "secondary", "secondary"]);
     expect(m.reasons).toEqual(Array(5).fill(R(5)));
   });
-  it("croisée 06 (maskNonRecurring, seuil 5) : réalisés portés par une hypothèse non reliée, prévus par deux embauches ⇒ les deux n.d.", () => {
-    const st = maskNonRecurring({ realised: { persons: [], unlinked: 1, hires: 0 }, projected: { persons: [], unlinked: 0, hires: 2 } }, { realised: 120000, projected: 300000 }, 5);
-    expect(st).toEqual({ realised: "unverifiable", projected: "secondary" });
-  });
+  // Croisée 06 : « Déjà comptabilisés » et « Prévus » sont des totaux de l'entreprise publiés ailleurs (tuile « Coûts identifiés »,
+  // Hypothèses › Atterrissage) ; ils ne sont plus masqués (décision par défaut du lot 12) : voir croisee-budget.test.ts.
 });
 
 // --- Règles communes de la colonne canonique ------------------------------------------------------------------------------------

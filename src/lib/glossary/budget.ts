@@ -73,6 +73,8 @@ const MORE: Record<string, string> = {
     "Les budgets saisis servent de référence aux comparaisons des scénarios. Un budget se saisit par année : un nom, l'année et douze montants chargés, un par mois, en euros. Il se modifie depuis sa ligne de la liste et se supprime définitivement. Son total annuel est n.d. tant que l'un des douze mois n'est pas saisi, et la liste dit combien de mois manquent.",
   atterrissage:
     "Dans la Synthèse du Studio RH, la carte « Atterrissage » lit le scénario le plus récemment créé parmi ceux qui couvrent l'année de la période (nommé sous le titre de la carte ; aucun : n.d. « aucun scénario ne couvre » l'année) et le budget saisi de la même année modifié le plus récemment. La valeur est l'atterrissage des douze mois. Budget, atterrissage et écart sont comparés sur les seuls mois de l'année dotés d'un montant de budget : un mois sans montant est exclu des deux côtés et nommé ; quand des mois sont exclus, la carte écrit le nombre de mois comparés, le budget de ces mois, l'atterrissage de ces mêmes mois et l'écart (atterrissage des mois comparés − budget des mois comparés = écart). Sans budget saisi pour l'année, ou sans aucun mois doté d'un montant, budget et écart sont n.d. avec la raison. C'est la règle de la Masse salariale croisée (voir « Atterrissage annuel (réel + projection) »).",
+  retraite:
+    "Dans Hypothèses budgétaires › Résultat › Atterrissage, les lignes « … réalisés » des déclarations du Réel (une par nature, jamais fusionnée avec une saisie du scénario de même libellé) suivent le seuil de confidentialité avec les statuts de la Masse salariale, sur janvier → mois de la base : une ligne masquée est n.d. pour son montant déjà dans les comptes et son total, avec la raison sous le tableau. Les totaux « déjà en comptabilité » et « prévus » et la cascade du retraité restent affichés. La liste des déclarations reprises (nature et mois de chacune) est réservée aux éditeurs ; un lecteur n'en voit que le nombre (voir « Seuil de confidentialité »).",
   derivee:
     "Le simulateur N+1 n'est proposé qu'à partir d'un scénario figé. Le scénario dérivé reçoit un nom, un type et un dernier mois projeté (24 mois au plus, à partir du mois qui suit l'horizon du scénario source) ; sa projection commence le mois suivant le dernier mois du scénario source. Ce qui n'est pas repris est listé dans la base du nouveau scénario, à ressaisir si besoin.",
 };
@@ -92,6 +94,7 @@ export const engineText = (id: string, text: string): string => {
 // Entrées voisines (« Voir aussi ») d'une définition du moteur.
 const SEE: Record<string, string[]> = {
   atterrissage: ["croisee-atterrissage", "budget-saisi", "retraite"],
+  retraite: ["atterrissage", "croisee-atterrissage", "confidentialite"],
 };
 
 // Définitions du moteur, avec formule et paragraphes complémentaires.

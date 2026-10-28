@@ -16,7 +16,7 @@ import type { Bridge } from "@/lib/budget/series";
 import { diff, nd, ROW_UNIT, val, type Agg, type Cell, type MonthFacts, type RowKey, type Version } from "@/lib/budget/versions";
 import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
 import { ECART_TERMS, GLOSSARY_ECART, STEP_TERMS } from "@/lib/glossary/ecart";
-import { cascadeView, CHART_LABELS, COST_ROWS, ecartChartData, etpWaterfall, etpWaterfallOf, eurosSigned, gapTone, guardNd, isCostRow, masseWaterfall, neg, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, waterfallAxisBadge, type MasseRubric } from "@/lib/viz/ecart";
+import { cascadeView, CHART_LABELS, COST_ROWS, type CascadeTotals, ecartChartData, etpWaterfall, etpWaterfallOf, eurosSigned, gapTone, guardNd, isCostRow, masseWaterfall, neg, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, waterfallAxisBadge, type MasseRubric } from "@/lib/viz/ecart";
 
 // Adaptateurs de l'écart budgétaire vers les graphiques : valeurs, raisons n.d., unités, styles de courbe, cascades.
 // Cas écrits à la main (mêmes chiffres que le cas de référence de l'écran : base 66 420,00 €, variante 69 970,00 €).
@@ -111,7 +111,7 @@ describe("période en toutes lettres", () => {
 
 describe("cascades", () => {
   it("ETP : cinq contributions, départ + contributions = arrivée (61,00 + 0,33 ... en dix-millièmes), pas de résiduel quand il est nul", () => {
-    const c: Cascade = { kind: "value", months: 3, start: 61000, end: 64300, residual: 0, steps: [step("entrees-new", 3300), step("entrees-report", 0), step("sorties", -1200), step("sorties-deport", 800), step("etp-change", 400)] };
+    const c: CascadeTotals = { kind: "value", months: 3, start: 61000, end: 64300, residual: 0, steps: [step("entrees-new", 3300), step("entrees-report", 0), step("sorties", -1200), step("sorties-deport", 800), step("etp-change", 400)] };
     const w = etpWaterfall(c);
     expect(w).toMatchObject({ kind: "value", unit: "etp", start: 61000, end: 64300 });
     if (w.kind !== "value") throw new Error("attendu : valeur");
@@ -119,7 +119,7 @@ describe("cascades", () => {
     expect(sum(w)).toBe(w.end);
   });
   it("ETP : un résiduel d'arrondi non nul devient une barre, la somme reste égale à l'arrivée", () => {
-    const c: Cascade = { kind: "value", months: 3, start: 61000, end: 64307, residual: 7, steps: [step("entrees-new", 3300), step("entrees-report", 0), step("sorties", -1200), step("sorties-deport", 800), step("etp-change", 400)] };
+    const c: CascadeTotals = { kind: "value", months: 3, start: 61000, end: 64307, residual: 7, steps: [step("entrees-new", 3300), step("entrees-report", 0), step("sorties", -1200), step("sorties-deport", 800), step("etp-change", 400)] };
     const w = etpWaterfall(c);
     if (w.kind !== "value") throw new Error("attendu : valeur");
     expect(w.steps.at(-1)).toEqual({ label: "Résiduel d'arrondi", value: 7 });
@@ -133,7 +133,10 @@ describe("cascades", () => {
     // du moteur) ; le palier nul ne décrit personne. Lien contrat → personne : quatre personnes distinctes.
     const stepOf = (id: StepId, etp4: number, keys: string[]) => ({ id, label: String(id), etp4, people: keys.map((key) => ({ key, etp4 })) });
     const link = new Map([["C1", "a"], ["C2", "b"], ["C3", "c"], ["C4", "d"]]);
-    const c: Cascade = { kind: "value", months: 3, start: 61000, end: 64300, residual: 0, steps: [stepOf("entrees-new", 3300, ["C1"]), stepOf("entrees-report", 0, []), stepOf("sorties", -1200, ["C2"]), stepOf("sorties-deport", 800, ["C3"]), stepOf("etp-change", 400, ["C4"])] };
+    // Paliers de chacun des trois mois (byMonth) : C1 entré, C2 sorti, C3 et C4 dans le changement d'ETP, les mêmes chaque mois ; au
+    // seuil 1, aucun palier de mois n'est masqué (un mois ne connaît ni effet report ni effet déport).
+    const month = [stepOf("entrees-new", 3300, ["C1"]), stepOf("entrees-report", 0, []), stepOf("sorties", -1200, ["C2"]), stepOf("sorties-deport", 0, []), stepOf("etp-change", 1200, ["C3", "C4"])];
+    const c: Cascade = { kind: "value", months: 3, start: 61000, end: 64300, residual: 0, steps: [stepOf("entrees-new", 3300, ["C1"]), stepOf("entrees-report", 0, []), stepOf("sorties", -1200, ["C2"]), stepOf("sorties-deport", 800, ["C3"]), stepOf("etp-change", 400, ["C4"])], byMonth: [month, month, month] };
     // Seuil 1 : aucun palier d'une personne n'est masqué (1 ≥ 1) ; le palier vide ne décrit personne.
     const shown = cascadeView(c, { kind: "set", value: 1 }, link, null);
     expect(etpWaterfallOf(shown)).toEqual(etpWaterfall(c));

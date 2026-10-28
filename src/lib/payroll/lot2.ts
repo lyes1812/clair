@@ -1,9 +1,10 @@
-import { confidentialiteSettingReason, maskRelations, personsOfContracts, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { confidentialiteSettingReason, personsOfContracts, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { columnStatus, maskColumn, windowStatus, type ColumnEntry } from "@/lib/confidentialite/columns";
 import { groupInput } from "@/lib/confidentialite/groups";
 import { monthPayroll, serviceOf, windowPayroll, type JournalInput, type LedgerLine } from "./engine";
 import { monthBounds, monthRange } from "@/lib/connectors/months";
 import { classify, gridRubrics, type AccountGrid, type RubricId } from "./grid";
-import { hiddenReason, worstGuard, type ServiceGuard } from "./service-rows";
+import { hiddenReason, serviceLabel, worstGuard, type ServiceGuard } from "./service-rows";
 
 // Lot 2 de la Masse salariale : fixe et variable par libellé de paie, provision de congés payés, rapprochement avec la
 // comptabilité. Calculs purs sur les lignes du journal de paie (et de la comptabilité), en centimes, débit − crédit.
@@ -108,9 +109,13 @@ export function provisionContracts(input: JournalInput, month: string): string[]
 // --- Seuil de confidentialité : libellés de paie, familles de prime, provision par service (règle de src/lib/confidentialite).
 // Chaque montant d'une répartition décrit les personnes reliées aux contrats qui portent ses lignes (groupes et entrée de masquage du
 // module partagé src/lib/confidentialite/groups.ts : groupInput, valeur absolue, membres non transmis pour une cellule n.d. ou non
-// dénombrée) ; une cellule de 1 à (seuil − 1) personnes est n.d., avec masquage secondaire dans chaque ensemble dont la somme est
-// publiée. Seuil absent ou illisible : toute la répartition est n.d. avec la raison du paramètre. Les fonctions rendent, pour chaque
-// cellule, la raison du n.d. ou null (affichée). Exportées pour l'onglet, son export et la Masse salariale croisée (04 et 07).
+// dénombrée) ; une cellule de 1 à (seuil − 1) personnes est n.d. STATUT CANONIQUE (src/lib/confidentialite/columns.ts) : la cellule
+// d'un mois se juge sur la seule colonne de son mois (maskColumn : total du mois publié et fixe, groupes dans l'ordre canonique de leur
+// libellé, groupe vide hors de la colonne et affiché à 0) ; une période, un N-1 ou un cumul n'a AUCUNE relation propre et se déduit de
+// ses mois (windowStatus : n.d. dès qu'un de ses mois est masqué). Le statut d'une cellule ne dépend donc ni de l'écran, ni de la
+// période choisie, ni de l'ordre d'affichage. Seuil absent ou illisible : toute la répartition est n.d. avec la raison du paramètre.
+// Les fonctions rendent, pour chaque cellule, la raison du n.d. ou null (affichée). Exportées pour l'onglet, son export et la Masse
+// salariale croisée (04 et 07).
 
 // Cellule de masquage d'un montant porté par des contrats du journal (libellé, provision) : personnes reliées, valeur absolue.
 const cellOf = (contracts: Iterable<string>, value: number | null, link: PersonLink, seuil: number, nonZero?: boolean): MaskCell => {
@@ -118,15 +123,69 @@ const cellOf = (contracts: Iterable<string>, value: number | null, link: PersonL
   return groupInput(personsOfContracts(contracts, link), seuil, v, nonZero ?? (v !== null && v !== 0));
 };
 
-// Fixe & variable : brut par libellé (période N et N-1 ; sommes publiées : brut de la période, brut de N-1) et primes par famille et
-// par mois (sommes publiées : primes de chaque mois, primes de la période ; les mois d'une famille somment vers sa cellule de période,
-// qui est la même que dans le tableau par libellé). Les familles sont les libellés de la rubrique « Primes » de la période N.
+// Colonnes d'un mois des libellés du brut. Le total de CHAQUE rubrique du brut est publié chaque mois (onglet et croisée 04 : Fixe =
+// Salaires et appointements, « dont primes », Gratifications de stage, et Indemnités et avantages = Variable − primes) ; le brut du mois
+// est leur somme. Chaque rubrique d'un mois est donc UNE colonne, dont le total publié est la rubrique du mois ; la colonne des Primes
+// est celle des familles de prime (total publié : les primes du mois). Un libellé appartient à une seule rubrique : il n'a qu'un statut
+// par mois, qu'il soit lu dans le tableau par libellé ou dans celui des familles, et le brut du mois ne découvre rien de plus (les
+// cellules masquées d'une colonne y comptent déjà « seuil » personnes). Cellule : contrats qui portent les lignes du libellé ce mois-là
+// (mêmes lignes que labelTotals et labelContracts), reliés à leur personne ; valeur |solde du libellé|. Ordre canonique : la clé du
+// libellé (rubrique + libellé sans accents ni casse), indépendante de la période qui fournit le libellé affiché.
+type LabelMonthCell = { rubric: RubricId; cents: number; contracts: Set<string> };
+function labelCellsByMonth(input: JournalInput, months: readonly string[]): Map<string, Map<string, LabelMonthCell>> {
+  const out = new Map<string, Map<string, LabelMonthCell>>(months.map((m) => [m, new Map()]));
+  for (const { line: l, rubric } of brutLines(input, [...months])) {
+    const byKey = out.get(l.month)!;
+    const k = labelKey(rubric, labelOf(l));
+    let c = byKey.get(k);
+    if (!c) byKey.set(k, (c = { rubric, cents: 0, contracts: new Set() }));
+    c.cents += balance(l);
+    if (l.contractId) c.contracts.add(l.contractId);
+  }
+  return out;
+}
+
+// Statut canonique de chaque libellé du brut (et donc de chaque famille de prime) pour chacun des mois demandés, dans le journal reçu
+// (restreint au service filtré, le cas échéant : les colonnes sont alors celles du service, dont les totaux par rubrique sont publiés
+// sous le filtre). Un libellé sans ligne ce mois-là (ou sans contrat ni montant) est hors de la colonne : 0, affiché. Mois n.d.
+// (monthPayroll) : « nd », le mois garde sa propre raison. Un mois non demandé : erreur de l'appelant.
+export function labelMonthStatus(input: JournalInput, months: readonly string[], link: PersonLink, seuil: number): (key: string, month: string) => MaskStatus {
+  const cells = labelCellsByMonth(input, months);
+  const columns = new Map<string, Map<string, MaskStatus> | null>();
+  for (const m of months) {
+    if (monthPayroll(input, m).kind !== "value") {
+      columns.set(m, null);
+      continue;
+    }
+    const byRubric = new Map<RubricId, ColumnEntry<string>[]>();
+    for (const [key, c] of cells.get(m)!) {
+      const list = byRubric.get(c.rubric) ?? [];
+      list.push({ key, label: key, cell: cellOf(c.contracts, c.cents, link, seuil) });
+      byRubric.set(c.rubric, list);
+    }
+    const col = new Map<string, MaskStatus>();
+    for (const entries of byRubric.values()) for (const [k, s] of maskColumn(entries, seuil, true)) col.set(k, s);
+    columns.set(m, col);
+  }
+  return (key, month) => {
+    const col = columns.get(month);
+    if (col === undefined) throw new Error(`labelMonthStatus : mois ${month} non demandé`);
+    return col === null ? "nd" : columnStatus(col, key, cells.get(month)!.get(key)?.cents ?? 0);
+  };
+}
+
+// Fixe & variable (onglet, croisée 04 et leurs exports) : brut par libellé (colonnes N et N-1) et primes par famille (chaque mois et la
+// période ; la cellule de période d'une famille est sa cellule N du tableau par libellé). Chaque mois reçoit son statut canonique
+// (labelMonthStatus) ; la cellule N, la cellule N-1 et la période d'une famille se déduisent de leurs mois (windowStatus), sans relation
+// propre : une même prime d'un mois a le même statut quelle que soit la période choisie. Les familles sont les libellés de la rubrique
+// « Primes » ; leur liste (celle de l'écran) ne change aucun statut.
 export type LabelMask = {
   labels: Record<string, { cur: string | null; prev: string | null }>; // par clé de libellé (labelKey)
   families: Record<string, (string | null)[]>; // par clé de famille, une raison (ou null) par mois de la période
 };
 export function maskLabels(p: { input: JournalInput; months: string[]; prevMonths: string[]; keys: readonly string[]; families: readonly string[]; link: PersonLink; conf: ConfidentialiteSetting; prevNd: boolean }): LabelMask {
-  const { input, months, prevMonths, keys, families, link, prevNd } = p;
+  const { input, months, prevMonths, families, link, prevNd } = p;
+  const keys = [...new Set([...p.keys, ...families])];
   if (p.conf.kind !== "set") {
     const reason = confidentialiteSettingReason(p.conf) ?? SEUIL_NON_VERIFIABLE;
     return {
@@ -135,34 +194,24 @@ export function maskLabels(p: { input: JournalInput; months: string[]; prevMonth
     };
   }
   const seuil = p.conf.value;
-  const cells: MaskCell[] = [];
-  const relations: MaskRelation[] = [];
-  const add = (c: MaskCell) => cells.push(c) - 1;
-  const sum = (list: LabelTotal[], k: string) => list.filter((t) => t.key === k).reduce((s, t) => s + t.cents, 0);
-  const curTotals = labelTotals(input, months);
-  const curContracts = labelContracts(input, months);
-  const prevTotals = prevNd ? [] : labelTotals(input, prevMonths);
-  const prevContracts = prevNd ? new Map<string, string[]>() : labelContracts(input, prevMonths);
-  const cur = keys.map((k) => add(cellOf(curContracts.get(k) ?? [], sum(curTotals, k), link, seuil)));
-  const prev = keys.map((k) => add(cellOf(prevContracts.get(k) ?? [], prevNd ? null : sum(prevTotals, k), link, seuil)));
-  const monthTotals = months.map((m) => (monthPayroll(input, m).kind === "value" ? labelTotals(input, [m]) : null));
-  const monthContracts = months.map((m) => labelContracts(input, [m]));
-  const fam = families.map((f) => months.map((_m, j) => add(cellOf(monthContracts[j].get(f) ?? [], monthTotals[j] === null ? null : sum(monthTotals[j], f), link, seuil))));
-  // Les mois d'une famille somment vers sa cellule de période (masquable) : ces relations d'abord ; puis les colonnes à somme fixe.
-  families.forEach((f, i) => relations.push({ cells: fam[i], total: cur[keys.indexOf(f)] }));
-  relations.push({ cells: cur });
-  relations.push({ cells: prev });
-  months.forEach((_m, j) => relations.push({ cells: fam.map((row) => row[j]) }));
-  relations.push({ cells: families.map((f) => cur[keys.indexOf(f)]) });
-  const st = maskRelations(cells, relations, seuil);
+  // N-1 n.d. : sa colonne affiche sa propre raison, aucun statut n'y est lu.
+  const at = labelMonthStatus(input, [...new Set([...months, ...(prevNd ? [] : prevMonths)])], link, seuil);
+  const windowReason = (k: string, ms: readonly string[]): string | null => {
+    const st = ms.map((m) => at(k, m));
+    return hiddenReason(windowStatus(st, st.includes("nd")), seuil);
+  };
   return {
-    labels: Object.fromEntries(keys.map((k, i) => [k, { cur: hiddenReason(st[cur[i]], seuil), prev: hiddenReason(st[prev[i]], seuil) }])),
-    families: Object.fromEntries(families.map((f, i) => [f, fam[i].map((c) => hiddenReason(st[c], seuil))])),
+    labels: Object.fromEntries(keys.map((k) => [k, { cur: windowReason(k, months), prev: prevNd ? null : windowReason(k, prevMonths) }])),
+    families: Object.fromEntries(families.map((f) => [f, months.map((m) => hiddenReason(at(f, m), seuil))])),
   };
 }
 
 // Provision de congés payés par service, à chaque fin de mois demandée (journal entier, un journal par service) : la somme des
-// services d'un mois est la provision de l'entreprise, publiée (tuile, tableau mensuel) ; masquage secondaire par mois.
+// services d'un mois est la provision de l'entreprise, publiée (tuile, tableau mensuel). Statut canonique : la colonne de la fin de mois
+// (maskColumn, ordre canonique des libellés de service, « Non ventilé » en dernier ; un service sans dotation ni montant ce mois-là est
+// hors de la colonne et affiché à 0) ; il ne dépend donc ni des services que la période choisie fait lister, ni de l'écran (onglet
+// Paie & comptabilité, son export, croisée 07). La provision d'un service sur plusieurs fins de mois (garde du filtre) se déduit de ses
+// mois (provisionGuard : n.d. dès qu'une fin de mois l'est).
 // RÈGLE DE VALEUR (la même pour l'onglet Paie & comptabilité, son export et la croisée 07) : la valeur de la cellule est le TOTAL de la
 // provision (congés payés + charges sociales) ; quand le total est n.d. parce qu'une part manque, la PART CONNUE (congés payés, à
 // défaut charges sociales) est la valeur : elle est affichée dans la colonne de sa part, elle est donc masquable comme le total. Une
@@ -179,11 +228,12 @@ export function provisionCell(input: JournalInput, month: string, link: PersonLi
 }
 export function maskProvisionStatus(p: { inputs: { value: string | null; input: JournalInput }[]; months: string[]; link: PersonLink; seuil: number }): ProvisionStatus {
   const { inputs, months, link, seuil } = p;
-  const cells: MaskCell[] = [];
-  const idx = inputs.map((s) => months.map((m) => cells.push(provisionCell(s.input, m, link, seuil)) - 1));
-  const relations: MaskRelation[] = months.map((_m, j) => ({ cells: idx.map((row) => row[j]) }));
-  const st = maskRelations(cells, relations, seuil);
-  return Object.fromEntries(inputs.map((s, i) => [provisionServiceKey(s.value), Object.fromEntries(months.map((m, j) => [m, st[idx[i][j]]]))]));
+  const byMonth = months.map((m) => {
+    const entries = inputs.map((s): ColumnEntry<string> => ({ key: provisionServiceKey(s.value), label: serviceLabel(s.value), cell: provisionCell(s.input, m, link, seuil) }));
+    const col = maskColumn(entries, seuil, true);
+    return new Map(entries.map((e) => [e.key, columnStatus(col, e.key, e.cell.value)]));
+  });
+  return Object.fromEntries(inputs.map((s) => [provisionServiceKey(s.value), Object.fromEntries(months.map((m, j) => [m, byMonth[j].get(provisionServiceKey(s.value))!]))]));
 }
 export function maskProvisionServices(p: { inputs: { value: string | null; input: JournalInput }[]; months: string[]; link: PersonLink; conf: ConfidentialiteSetting }): ProvisionMask {
   const { inputs, months, link } = p;

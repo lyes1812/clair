@@ -229,19 +229,21 @@ describe("motifs d'absence de bout en bout : KPI RH et croisée 03 sur le même 
   });
 
   it("nombres d'absences par motif : même statut dans le détail par motif et dans la tuile (typeCountMask), quelle que soit la fenêtre", () => {
-    // Toute la lecture : R 1 absence (R1, 1 personne : n.d.) ; X 7 absences (X1 à X5 reliés, 5 ≥ 5, et le contrat non relié : affiché,
-    // la ligne restant n.d.) ;
-    // Y 2 absences (2 personnes : n.d.) ; Z 6 absences (6 personnes : affiché). Avant, le détail affichait R (1) et Y masqué avec sa
-    // ligne, la tuile masquait R : une même cellule avait deux statuts.
+    // Toute la lecture : R 1 absence (R1, 1 personne : masqué) ; X 7 absences (X1 à X5 reliés, 5 ≥ 5, et le contrat non relié :
+    // affiché, la ligne restant n.d.) ; Y 2 absences (2 personnes : masqué) ; Z 6 absences (6 personnes). Une seule colonne, dont
+    // Données › lecture publie le total (1 + 7 + 2 + 6 = 16) : R et Y masqués ne comptent que 3 personnes ; la plus petite cellule
+    // affichée qui en apporte, Z (6 < 7), est masquée en second (3 + 6 = 9 ≥ 5). Avant (masquage principal seul) : Z affiché, et
+    // R + Y = 16 − 7 − 6 = 3 se lisait par différence. Avant le lot 12, le détail affichait R (1) et Y masqué avec sa ligne, la tuile
+    // masquait R : une même cellule avait deux statuts.
     const html = renderToStaticMarkup(h(AbsenceMotifsDetail, { motifs: absenceByMotif(kin, W), cells: motifWindow(kin, W), slug: "demo", confidentialite: set(5), typeSizes: absenceTypePersons(kin) }));
     const notes = notesOf(kin, 5);
     const types = ["test_r", "test_x", "test_y", "test_z"];
-    expect(types.map((t) => detailCount(html, t))).toEqual([R5, "7", R5, "6"]);
+    expect(types.map((t) => detailCount(html, t))).toEqual([R5, "7", R5, R5]);
     expect(types.map((t) => notesCount(notes, t))).toEqual(types.map((t) => detailCount(html, t)));
     // Une autre fenêtre (avril seul) : mêmes nombres, mêmes statuts.
     const april: Window = { mode: "civil", from: "2026-04", to: "2026-04", months: ["2026-04"], label: "avril 2026" };
     const html1 = renderToStaticMarkup(h(AbsenceMotifsDetail, { motifs: absenceByMotif(kin, april), cells: motifWindow(kin, april), slug: "demo", confidentialite: set(5), typeSizes: absenceTypePersons(kin) }));
-    expect(types.map((t) => detailCount(html1, t))).toEqual([R5, "7", R5, "6"]);
+    expect(types.map((t) => detailCount(html1, t))).toEqual([R5, "7", R5, R5]);
   });
 });
 

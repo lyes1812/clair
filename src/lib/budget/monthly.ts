@@ -1,3 +1,5 @@
+import { countedMovements } from "@/lib/confidentialite/flows";
+import { headcountItems, movementItems, splitLabel, type SplitAxis } from "@/lib/confidentialite/splits";
 import { monthRange } from "@/lib/connectors/months";
 import { monthEnd } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
@@ -56,16 +58,26 @@ const bump = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k
 const nd = (reason: string): MonthResult => ({ kind: "nd", reason });
 
 // --- Réel.
+// Groupe d'un contrat par sa caractéristique au référentiel (catégorie, statut ; nature et établissement pour la masse d'une ligne de
+// paie), libellés de splits.ts pour la nature et l'établissement.
 type ContractLike = { externalId: string; nature: string | null; establishmentId: string | null; executive: boolean | null };
 function realGroup(c: ContractLike, axis: Exclude<Axis, "service">, src: RealSource): string {
   if (axis === "categorie") {
     const id = categoryOfContract(c.externalId, c.nature, src.natures, src.overrides);
     return id ? CATEGORY_LABELS[id] : NO_CATEGORY;
   }
-  if (axis === "contrat") return c.nature ? contractNatureLabel(c.nature) : "Nature n.d.";
-  if (axis === "etablissement") return c.establishmentId ?? "Établissement n.d.";
+  if (axis === "contrat") return splitLabel("nature", c.nature);
+  if (axis === "etablissement") return splitLabel("etablissement", c.establishmentId);
   return c.executive === true ? "Cadre dirigeant" : c.executive === false ? "Hors cadre dirigeant" : "Statut n.d.";
 }
+// Entrées, sorties, ETP et inscrits par nature ou par établissement (mois réalisés) : les groupes de splits.ts, ceux des filtres
+// Nature et Établissement de KPI RH et de la croisée 02 — un mouvement par sa propre nature et son établissement déclarant
+// (movementItems), un contrat de fin de mois par la valeur déclarée ce mois-là (headcountItems), jamais la caractéristique actuelle du
+// contrat (un CDD transformé en CDI reste un CDD pour ses mois de CDD ; un salarié muté compte dans son établissement de chaque mois).
+// Un contrat que deux établissements déclarent le même mois figure sous les deux filtres ; la grille, dont le total est l'effectif, le
+// range une seule fois, sous le premier (ordre des identifiants) : la colonne de ce mois diffère alors des filtres (Effectifs mensuels :
+// non vérifiable).
+export const SPLIT_AXES: Partial<Record<Axis, SplitAxis>> = { contrat: "nature", etablissement: "etablissement" };
 
 function realMonth(src: RealSource, m: string, measure: Measure, axis: Axis): MonthResult {
   const out = new Map<string, number>();
@@ -108,15 +120,19 @@ function realMonth(src: RealSource, m: string, measure: Measure, axis: Axis): Mo
     return { kind: "value", values: out, layer: "reel" };
   }
   if (axis === "service") return nd("effectif et mouvements par service non historisés pour les mois réalisés (le service est un code analytique des lignes de paie)");
+  const split = SPLIT_AXES[axis];
   if (measure === "entrees" || measure === "sorties") {
     const mv = monthMovements(kpi, m);
     const c = measure === "entrees" ? mv.entries : mv.exits;
     if (c.kind === "nd") return nd(c.nd.reason);
     if (c.kind === "lower_bound") return nd(`${measure === "entrees" ? "entrées" : "sorties"} de ${m} en borne basse (source incomplète)`);
-    for (const x of mv.events) if (x.why === "counted" && x.row.event.kind === (measure === "entrees" ? "entry" : "exit")) bump(out, realGroup(x.row.contract as never, axis, src), 1);
+    const kind = measure === "entrees" ? "entry" : "exit";
+    if (split) for (const it of movementItems(mv, kind, split)) bump(out, it.group, 1);
+    else for (const x of countedMovements(mv, kind)) bump(out, realGroup(x.row.contract, axis, src), 1);
     return { kind: "value", values: out, layer: "reel" };
   }
-  const h = headcountAt(kpi.data, monthEnd(m), countedOpts(kpi));
+  const date = monthEnd(m);
+  const h = headcountAt(kpi.data, date, countedOpts(kpi));
   if (h.kind === "nd") return nd(h.nd.reason);
   if (h.kind === "lower_bound") return nd(`effectif de ${m} en borne basse (source incomplète)`);
   const byKey = new Map(kpi.data.contracts.map((c) => [c.contractKey, c]));
@@ -126,10 +142,22 @@ function realMonth(src: RealSource, m: string, measure: Measure, axis: Axis): Mo
     if (e.kind !== "exact") return nd(e.kind === "nd" ? e.nd.reason : `ETP de ${m} en borne basse (contrat sans quotité ou source incomplète)`);
     etp = new Map(e.contributions.map((x) => [x.contractKey, x.etp4]));
   }
+  const add = (group: string, key: string) => bump(out, group, etp ? (etp.get(key) ?? 0) : 1);
+  if (split) {
+    const items = headcountItems(kpi.data, date, countedOpts(kpi), split);
+    if (!items) return nd(`effectif de ${m} n.d.`);
+    const seen = new Set<string>();
+    for (const it of items) {
+      if (seen.has(it.contract)) continue;
+      seen.add(it.contract);
+      add(it.group, it.contract);
+    }
+    return { kind: "value", values: out, layer: "reel" };
+  }
   for (const key of h.contractKeys) {
     const c = byKey.get(key);
     if (!c) continue;
-    bump(out, realGroup(c, axis, src), etp ? (etp.get(key) ?? 0) : 1);
+    add(realGroup(c, axis, src), key);
   }
   return { kind: "value", values: out, layer: "reel" };
 }

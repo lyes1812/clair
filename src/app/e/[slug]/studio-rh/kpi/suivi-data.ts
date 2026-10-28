@@ -3,7 +3,7 @@ import { CATEGORY_IDS, CATEGORY_LABELS } from "@/lib/budget/types";
 import { confidentialiteSettingReason, getConfidentialite, isHidden, linkFromReferential, maskGroups, maskReason, personsOfContracts, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type MaskStatus, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
 import { groupInput, NO_GROUP } from "@/lib/croisee/confidentialite";
 import { columnStatus, stockColumn, stockGroups, type StockGroup } from "@/lib/confidentialite/columns";
-import { headcountItems, splitLabel, type SplitAxis } from "@/lib/confidentialite/splits";
+import { crossKey, crossStockColumn, headcountItems, splitLabel, type SplitAxis } from "@/lib/confidentialite/splits";
 import { formatDate, monthEnd } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { coverageAt, gateAt, headcountAt } from "@/lib/rh/headcount";
@@ -135,16 +135,20 @@ export async function loadKpiSuivi(slug: string, sp: Search): Promise<KpiSuivi> 
 // Effectifs mensuels, le Suivi et la croisée 02), formée des mêmes groupes que les Effectifs mensuels (splits.ts, headcountItems : les
 // contrats de l'effectif rangés par la nature ou l'établissement déclaré ce mois-là, en personnes reliées par le référentiel), dans
 // l'ordre canonique de leurs libellés et non dans l'ordre des listes de l'espace ; valeur d'ordre : l'effectif. Le filtre ne révèle donc
-// jamais par différence ce que la grille masque, et inversement. Effectif de l'ensemble n.d. (aucun total publié) ou valeur inconnue des
-// listes de l'espace : le périmètre seul, masquage principal. null : aucun filtre, ou périmètre affiché. Les flux du périmètre (entrées
-// et sorties de chaque mois) ont leur propre garde, mois par mois, avec les mêmes conventions : flow-guard.ts.
+// jamais par différence ce que la grille masque, et inversement. Les deux filtres ensemble : le périmètre est un croisement du tableau
+// établissement × nature de la fin de mois, masqué en une seule passe avec pour marges les cellules des filtres seuls, à leur statut
+// canonique (crossStockColumn, splits.ts) ; chaque partition masquée seule laissait lire un croisement par différence d'un filtre à
+// l'autre. Effectif de l'entreprise n.d. (aucun total publié) ou valeur inconnue des listes de l'espace : le périmètre seul, masquage
+// principal. null : aucun filtre, ou périmètre affiché. Les flux du périmètre (entrées et sorties de chaque mois) ont leur propre garde,
+// mois par mois, avec les mêmes conventions : flow-guard.ts.
 export type ScopeGuard = { cause: "parametre" | "seuil"; reason: string };
 type ScopeGroup = { contracts: string[]; persons: PersonsOfContracts };
 export function scopeGuard(p: { input: KpiInput; months: string[]; establishments: string[]; natures: string[]; confidentialite: ConfidentialiteSetting }): ScopeGuard | null {
   const { input, confidentialite } = p;
   const scope = input.scope;
   const etab = scope.establishments?.[0];
-  if (etab === undefined && !scope.nature) return null;
+  const nature = scope.nature || undefined;
+  if (etab === undefined && nature === undefined) return null;
   const settingNd = confidentialiteSettingReason(confidentialite);
   if (settingNd !== null || confidentialite.kind !== "set") return { cause: "parametre", reason: settingNd ?? SEUIL_NON_DEFINI };
   const seuil = confidentialite.value;
@@ -153,20 +157,25 @@ export function scopeGuard(p: { input: KpiInput; months: string[]; establishment
     const h = headcountAt(input.data, monthEnd(m), countedOpts({ ...input, scope: s }));
     return h.kind === "nd" ? null : { contracts: h.contractKeys, persons: personsOfContracts(h.contractKeys, link) };
   };
-  const partitions: { axis: SplitAxis; values: string[]; selected: string; whole: KpiScope }[] = [];
-  if (scope.nature) partitions.push({ axis: "nature", values: p.natures, selected: scope.nature, whole: { establishments: scope.establishments } });
-  if (etab !== undefined) partitions.push({ axis: "etablissement", values: p.establishments, selected: etab, whole: { nature: scope.nature } });
+  // Groupes canoniques : l'effectif de l'entreprise sans filtre (natures comptées), rangé par la valeur déclarée ce mois-là.
+  const whole = countedOpts({ ...input, scope: {} });
+  const known = (nature === undefined || p.natures.includes(nature)) && (etab === undefined || p.establishments.includes(etab));
   for (const m of p.months) {
     const selected = group(scope, m);
     if (!selected) continue; // mois n.d. pour le périmètre : aucun chiffre affiché
-    for (const part of partitions) {
-      const items = part.values.includes(part.selected) ? headcountItems(input.data, monthEnd(m), countedOpts({ ...input, scope: part.whole }), part.axis) : null;
-      const st: MaskStatus =
-        items === null
-          ? maskGroups([groupInput(selected.persons, seuil, selected.contracts.length)], seuil, false)[0]
-          : columnStatus(stockColumn(stockGroups(items), seuil), splitLabel(part.axis, part.selected), selected.contracts.length);
-      if (isHidden(st)) return { cause: "seuil", reason: maskReason(st, seuil)! };
+    const date = monthEnd(m);
+    const principal = (): MaskStatus => maskGroups([groupInput(selected.persons, seuil, selected.contracts.length)], seuil, false)[0];
+    let st: MaskStatus;
+    if (!known) st = principal();
+    else if (etab !== undefined && nature !== undefined) {
+      const cross = crossStockColumn(input.data, date, whole, seuil);
+      st = cross === null ? principal() : columnStatus(cross.status, crossKey(splitLabel("etablissement", etab), splitLabel("nature", nature)), selected.contracts.length);
+    } else {
+      const axis: SplitAxis = etab !== undefined ? "etablissement" : "nature";
+      const items = headcountItems(input.data, date, whole, axis);
+      st = items === null ? principal() : columnStatus(stockColumn(stockGroups(items), seuil), splitLabel(axis, etab ?? nature ?? null), selected.contracts.length);
     }
+    if (isHidden(st)) return { cause: "seuil", reason: maskReason(st, seuil)! };
   }
   return null;
 }

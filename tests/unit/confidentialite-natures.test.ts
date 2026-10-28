@@ -8,7 +8,8 @@ import { countedMovements, flowColumn, flowCounts } from "@/lib/confidentialite/
 import { headcountItems, movementItems, movementValue, splitLabel } from "@/lib/confidentialite/splits";
 import { monthEnd } from "@/lib/dates";
 import { KPI_DEFAULTS } from "@/lib/rh-kpi-settings";
-import { countedOpts } from "@/lib/rh/kpi/period";
+import { kpiDashboard } from "@/lib/rh/kpi/dashboard";
+import { civilWindow, countedOpts } from "@/lib/rh/kpi/period";
 import { monthMovements } from "@/lib/rh/kpi/turnover";
 import type { KpiInput } from "@/lib/rh/kpi/types";
 import type { KpiContext } from "@/lib/rh/kpi-context";
@@ -308,38 +309,130 @@ describe("établissements (seuil 5) : flux et stocks, mêmes statuts sur les Eff
 });
 
 // =====================================================================================================================================
-// 4. Groupes divergents : la grille des Effectifs mensuels (budget/monthly.ts) range par la nature ACTUELLE du contrat
+// 4. Transformation et mutation : la grille des Effectifs mensuels range comme les filtres de KPI RH (budget/monthly.ts sur splits.ts)
 // =====================================================================================================================================
 //
-// DSN fictives de janvier à juin 2026 : CDI K-1 … K-6 et CDD K-11 … K-16 depuis le 01/01/2025 ; K-30 entre le 01/02/2026, déclaré en
-// CDD (02) en février et mars, puis en CDI (01) à partir d'avril (transformation du même contrat). Entrée de février : nature du
-// mouvement CDD (celle que comptent KPI RH et la croisée) ; la grille la range en CDI (nature actuelle du contrat). Fin février et
-// fin mars : K-30 est un CDD pour les filtres de KPI RH, un CDI pour la grille. Ces colonnes ne sont pas celles des autres écrans : elles
-// ne sont pas dénombrées, chaque cellule non nulle ou vide est n.d. « non vérifiable » (jamais une répartition différente affichée).
-// Janvier, avril → juin : mêmes groupes ; CDI 6 ou 7 et CDD 6 personnes, rien n'est masqué.
-const TRANSFO: Worker[] = [...range(1, 6).map((i) => W(i, "01")), ...range(11, 16).map((i) => W(i, "02")), { i: 30, start: "2026-02-01", nic: "00011", nature: (m) => (m < "2026-04" ? "02" : "01") }];
+// DSN fictives de juillet 2025 à juin 2026, deux établissements A (…00011) et B (…00022), seuil 5. Depuis le 01/01/2025 : A, CDI K-1 …
+// K-6 et CDD K-11 … K-13 ; B, CDI K-21 … K-23 et CDD K-31. Deux contrats changent en cours d'année (même numéro, même début) :
+//   T (K-40) entre le 01/02/2026 dans A, déclaré en CDD (02) en février et mars, puis en CDI (01) dès avril (transformation) ;
+//   M (K-60) entre le 15/02/2026 en CDI, déclaré par A en février et mars, puis par B dès avril (mutation d'établissement).
+// Rangement des filtres de KPI RH et de la croisée 02 (splits.ts), désormais celui de la grille : un mouvement par sa propre nature et
+// son établissement déclarant ; un contrat de fin de mois par la valeur déclarée ce mois-là. Calcul à la main :
+//   Inscrits × nature    : janvier CDI 9, CDD 4 ; février et mars CDI 10 (+ M), CDD 5 (+ T) ; avril → juin CDI 11 (+ T), CDD 4.
+//   Inscrits × établ.    : janvier A 9, B 4 ; février et mars A 11 (+ T, + M), B 4 ; avril → juin A 10 (+ T), B 5 (+ M).
+//   Entrées de février   : par nature CDD 1 (T), CDI 1 (M) ; par établissement A 2 (T, M). Aucune autre entrée en 2026.
+//   ETP : 1,00 par contrat, mêmes groupes (× 10 000).
+// Statuts (seuil 5, colonne canonique, deux cellules au moins dans l'ensemble masqué) :
+//   nature   : janvier CDD 4 masqué, CDI secondaire ; février, mars CDD 5 et CDI 10 affichés ; avril → juin CDD 4 masqué, CDI secondaire.
+//   établ.   : janvier, février, mars B 4 masqué, A secondaire ; avril → juin A 10 et B 5 affichés.
+//   entrées de février : CDD 1 et CDI 1 masqués ; A 2 masqué (seul groupe, relation impossible : rien d'autre à masquer).
+// Avant (grille rangée par la caractéristique ACTUELLE du contrat : T en CDI, M dans B) : inscrits de février et mars CDI 11, CDD 4 et
+// A 10, B 5 ; entrées de février CDI 2 et A 1, B 1 ; ces colonnes étaient rendues « non vérifiables ». Elles sont maintenant
+// dénombrées, avec les valeurs et les statuts des filtres.
+type Moving = { i: number; start: string; nature: (month: string) => string; nics: (month: string) => string[] };
+const NICS = ["00011", "00022"];
+function buildMoves(workers: Moving[], from: string, to: string) {
+  const specs: DsnDeclarationSpec[] = monthRange(from, to).flatMap((month) => NICS.map((nic) => ({ month, nic, people: workers.filter((w) => w.start <= `${month}-31` && w.nics(month).includes(nic)).map((w) => person({ ...w, nic }, month)) })));
+  return dsnBuild(edgeFiles(specs));
+}
+const fixed = (i: number, nature: string, nic: string): Moving => ({ i, start: "2025-01-01", nature: () => nature, nics: () => [nic] });
+const MOVES: Moving[] = [
+  ...range(1, 6).map((i) => fixed(i, "01", "00011")),
+  ...range(11, 13).map((i) => fixed(i, "02", "00011")),
+  ...range(21, 23).map((i) => fixed(i, "01", "00022")),
+  fixed(31, "02", "00022"),
+  { i: 40, start: "2026-02-01", nature: (m) => (m < "2026-04" ? "02" : "01"), nics: () => ["00011"] },
+  { i: 60, start: "2026-02-15", nature: () => "01", nics: (m) => (m < "2026-04" ? ["00011"] : ["00022"]) },
+];
+const MONTHS_2026 = monthRange("2026-01", "2026-06");
 
-describe("groupes divergents (DSN : nature transformée) : la colonne des Effectifs mensuels n'est pas dénombrée", () => {
-  const data = build(TRANSFO, "2026-01", "2026-06");
+describe("transformation CDD → CDI et mutation d'établissement : la grille et les filtres de KPI RH donnent les mêmes cellules", () => {
+  const data = buildMoves(MOVES, "2025-07", "2026-06");
   const kpi: KpiInput = { ...kpiInput(data, DSN_ABSENCES, { natures: ["01", "02"] }), openMonths: [] };
+  const LIST = [A, B];
+  // Valeurs des filtres de KPI RH (tableau de bord du périmètre, avant seuil) et statuts de leurs gardes, mois par mois.
+  const dash = (scope: KpiInput["scope"]) => kpiDashboard({ ...kpi, scope }, civilWindow(2026));
+  const filterValue = (scope: KpiInput["scope"], m: string, measure: string): number | null => {
+    const r = dash(scope).rows.find((x) => x.month === m)!;
+    if (measure === "entrees") return r.movements.entries.kind === "nd" ? null : r.movements.entries.value;
+    if (measure === "etp") return r.etp.kind === "nd" ? null : r.etp.etp4;
+    return r.headcount.kind === "nd" ? null : r.headcount.contracts;
+  };
+  const filterHidden = (scope: KpiInput["scope"], m: string, measure: string): boolean =>
+    measure === "entrees"
+      ? flowGuard({ base: kpi, scope, months: [m], establishments: LIST, natures: ["01", "02"], seuil: 5 })!.months.get(m)?.entries !== undefined
+      : scopeGuard({ input: { ...kpi, scope }, months: [m], establishments: LIST, natures: ["01", "02"], confidentialite: set(5) }) !== null;
+  const AXIS = {
+    contrat: { [CDI]: { nature: "01" }, [CDD]: { nature: "02" } } as Record<string, KpiInput["scope"]>,
+    etablissement: { [A]: { establishments: [A] }, [B]: { establishments: [B] } } as Record<string, KpiInput["scope"]>,
+  };
 
-  it("entrées de février : KPI RH et croisée comptent un CDD, la grille un CDI ; la colonne de février est non vérifiable", async () => {
-    expect(Object.keys(flowCounts(movementItems(monthMovements(kpi, "2026-02"), "entry", "nature")))).toEqual([CDD]);
-    const e = await loadEffectifs("demo", "w1", kpi, { mesure: "entrees", axe: "contrat", version: "reel", annee: "2026" });
-    // Seule entrée de l'année : la grille n'a qu'un groupe, CDI (1) ; sans la règle, CDI = 1 se lirait face au filtre CDD (1) et CDI (0).
-    expect(effValues(e, "2026-02")).toEqual({ [CDI]: 1 });
-    if (e.grid.kind !== "value") throw new Error("grille attendue");
-    expect(e.grid.cell(CDI, "2026-02")).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
+  it("valeurs calculées à la main : inscrits, ETP et entrées par nature et par établissement", async () => {
+    const values = async (mesure: string, axe: string) => {
+      const e = await loadEffectifs("demo", "w1", kpi, { mesure, axe, version: "reel", annee: "2026" });
+      return Object.fromEntries(MONTHS_2026.map((m) => [m, effValues(e, m)]));
+    };
+    const nat = (cdi: number, cdd: number) => ({ [CDI]: cdi, [CDD]: cdd });
+    const est = (a: number, b: number) => ({ [A]: a, [B]: b });
+    expect(await values("inscrit", "contrat")).toEqual({ "2026-01": nat(9, 4), "2026-02": nat(10, 5), "2026-03": nat(10, 5), "2026-04": nat(11, 4), "2026-05": nat(11, 4), "2026-06": nat(11, 4) });
+    expect(await values("inscrit", "etablissement")).toEqual({ "2026-01": est(9, 4), "2026-02": est(11, 4), "2026-03": est(11, 4), "2026-04": est(10, 5), "2026-05": est(10, 5), "2026-06": est(10, 5) });
+    expect((await values("etp", "contrat"))["2026-02"]).toEqual(nat(100000, 50000));
+    expect((await values("etp", "etablissement"))["2026-04"]).toEqual(est(100000, 50000));
+    const entNat = await values("entrees", "contrat");
+    expect(entNat["2026-02"]).toEqual(nat(1, 1));
+    expect(entNat["2026-03"]).toEqual(nat(0, 0));
+    expect((await values("entrees", "etablissement"))["2026-02"]).toEqual({ [A]: 2 });
   });
 
-  it("inscrits fin février et fin mars : non vérifiables ; janvier, avril → juin : affichés (mêmes groupes que les filtres)", async () => {
-    const e = await loadEffectifs("demo", "w1", kpi, { mesure: "inscrit", axe: "contrat", version: "reel", annee: "2026" });
+  it("chaque mois, chaque groupe : même valeur et même statut que le filtre correspondant ; aucune colonne non vérifiable", async () => {
+    for (const mesure of ["inscrit", "etp", "entrees"])
+      for (const axe of ["contrat", "etablissement"] as const) {
+        const e = await loadEffectifs("demo", "w1", kpi, { mesure, axe, version: "reel", annee: "2026" });
+        if (e.grid.kind !== "value" || e.raw.kind !== "value") throw new Error("grille attendue");
+        for (const m of MONTHS_2026) {
+          const grid = effValues(e, m);
+          const hidden = effHidden(e, m);
+          for (const [g, scope] of Object.entries(AXIS[axe])) {
+            const label = `${mesure} × ${axe}, ${g}, ${m}`;
+            expect(grid[g] ?? 0, label).toBe(filterValue(scope, m, mesure));
+            expect(hidden[g] ?? false, label).toBe(filterHidden(scope, m, mesure));
+          }
+          for (const g of e.raw.groups) expect(e.grid.cell(g, m), `${mesure} × ${axe}, ${g}, ${m}`).not.toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
+        }
+      }
+  });
+
+  it("statuts calculés à la main (seuil 5) : nature et établissement, fin de mois et entrées de février", async () => {
+    const hiddenOf = async (mesure: string, axe: string) => {
+      const e = await loadEffectifs("demo", "w1", kpi, { mesure, axe, version: "reel", annee: "2026" });
+      return Object.fromEntries(MONTHS_2026.map((m) => [m, effHidden(e, m)]));
+    };
+    const nat = (h: boolean) => ({ [CDI]: h, [CDD]: h });
+    const est = (h: boolean) => ({ [A]: h, [B]: h });
+    expect(await hiddenOf("inscrit", "contrat")).toEqual({ "2026-01": nat(true), "2026-02": nat(false), "2026-03": nat(false), "2026-04": nat(true), "2026-05": nat(true), "2026-06": nat(true) });
+    expect(await hiddenOf("inscrit", "etablissement")).toEqual({ "2026-01": est(true), "2026-02": est(true), "2026-03": est(true), "2026-04": est(false), "2026-05": est(false), "2026-06": est(false) });
+    expect((await hiddenOf("entrees", "contrat"))["2026-02"]).toEqual(nat(true));
+    expect((await hiddenOf("entrees", "etablissement"))["2026-02"]).toEqual({ [A]: true });
+  });
+});
+
+// Écart qui subsiste : un contrat que deux établissements déclarent le même mois. A : CDI K-1 … K-6 ; B : CDI K-21 … K-26 ; K-70 (CDI,
+// depuis le 01/01/2025) déclaré par A jusqu'en avril 2026, par A ET B en mai, par B dès juin. Fin mai : chaque filtre le compte (A 7,
+// B 7) ; la grille, dont le total est l'effectif (13), le range une fois, sous A (premier identifiant) : A 7, B 6. La colonne de mai
+// n'est donc pas celle des filtres : non vérifiable. Les autres mois : A 7, B 6 (janvier → avril), A 6, B 7 (juin), affichés.
+describe("contrat déclaré par deux établissements le même mois : seule la colonne de ce mois reste non vérifiable", () => {
+  const TWICE: Moving[] = [...range(1, 6).map((i) => fixed(i, "01", "00011")), ...range(21, 26).map((i) => fixed(i, "01", "00022")), { i: 70, start: "2025-01-01", nature: () => "01", nics: (m) => (m < "2026-05" ? ["00011"] : m === "2026-05" ? NICS : ["00022"]) }];
+  const data = buildMoves(TWICE, "2025-07", "2026-06");
+  const kpi: KpiInput = { ...kpiInput(data, DSN_ABSENCES, { natures: ["01"] }), openMonths: [] };
+
+  it("inscrits × établissement : mai non vérifiable (total 13 conservé) ; les autres mois affichés", async () => {
+    const e = await loadEffectifs("demo", "w1", kpi, { mesure: "inscrit", axe: "etablissement", version: "reel", annee: "2026" });
     if (e.grid.kind !== "value") throw new Error("grille attendue");
-    for (const m of ["2026-02", "2026-03"]) for (const g of [CDI, CDD]) expect(e.grid.cell(g, m), `${g} ${m}`).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
-    for (const m of ["2026-01", "2026-04", "2026-05", "2026-06"]) expect(effHidden(e, m), m).toEqual({ [CDI]: false, [CDD]: false });
-    expect(effValues(e, "2026-04")).toEqual({ [CDI]: 7, [CDD]: 6 });
-    // Les filtres de KPI RH rangent K-30 en CDD fin mars (nature déclarée ce mois-là).
-    const items = headcountItems(data, monthEnd("2026-03"), countedOpts(kpi), "nature")!;
-    expect(items.filter((x) => x.group === CDD)).toHaveLength(7);
+    expect(effValues(e, "2026-05")).toEqual({ [A]: 7, [B]: 6 });
+    expect(headcountItems(data, monthEnd("2026-05"), countedOpts(kpi), "etablissement")!.filter((x) => x.group === B)).toHaveLength(7);
+    for (const g of [A, B]) expect(e.grid.cell(g, "2026-05"), g).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
+    expect(e.grid.total("2026-05")).toEqual({ kind: "value", v: 13 });
+    for (const m of ["2026-01", "2026-04", "2026-06"]) expect(effHidden(e, m), m).toEqual({ [A]: false, [B]: false });
+    expect(effValues(e, "2026-06")).toEqual({ [A]: 6, [B]: 7 });
   });
 });

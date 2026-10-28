@@ -9,7 +9,7 @@ import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
 import { GLOSSARY_KPI, KPI_TERMS } from "@/lib/glossary/kpi";
 import { ABSENCE_ALL_MOTIFS_LABEL } from "@/lib/rh/kpi/absence-motifs";
 import { ETP_PRORATED_LABEL, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
-import type { ConfidentialiteSetting } from "@/lib/confidentialite";
+import { confidentialiteReason, type ConfidentialiteSetting } from "@/lib/confidentialite";
 import type { CongeCell, MotifWindow } from "@/lib/croisee/conges";
 import type { AbsenceMotifs, EtpProrated } from "@/lib/rh/kpi/types";
 import { etpProratedNotes, motifRows, motifsRetenusLine, readingQualifiers, type MotifLineIn } from "@/lib/viz/kpi";
@@ -178,7 +178,7 @@ describe("motifs retenus sous la valeur de la tuile Absentéisme", () => {
     expect(html.indexOf("8,33 %")).toBeLessThan(html.indexOf("Motifs retenus"));
   });
   it("bloc replié des motifs de la lecture : retenus, non retenus, retenus absents ; plus de « types »", () => {
-    const sizes = { test_sickness: { persons: ["P1"], unlinked: 0 }, test_paid_leave: { persons: ["P1", "P2"], unlinked: 0 } };
+    const sizes = { test_sickness: { persons: ["P1"], unlinked: 0, count: 3 }, test_paid_leave: { persons: ["P1", "P2"], unlinked: 0, count: 5 } };
     const html = render(h(AbsenceTypeNotes, { chosen: [{ type: "test_sickness", count: 3 }], other: [{ type: "test_paid_leave", count: 5 }], missing: [{ type: "fr_maladie_ordinaire" }], slug: "demo", mask: { setting: SEUIL_1, sizes } }));
     const t = text(html);
     expect(t).toContain("Retenus : test_sickness (3)");
@@ -250,10 +250,17 @@ describe("détail de l'absentéisme : tableau par motif et taux tous motifs, à 
       published: { months: [true], allMonths: [m.all.kind !== "nd"], all: m.all.kind !== "nd" },
     };
   };
-  // Personnes de chaque motif dans toute la lecture (absenceTypePersons, nombres « Absences de la lecture ») : celles de sa ligne ; le
+  // Nombre et personnes de chaque motif dans toute la lecture (absenceTypePersons, « Absences de la lecture ») : celles de sa ligne ; le
   // motif n.d. (contrat inconnu du référentiel) n'a qu'un contrat non relié.
-  const sizesOf = (m: AbsenceMotifs) => Object.fromEntries(m.lines.map((l) => [l.type, { persons: l.persons ?? [], unlinked: l.kind === "nd" ? 1 : (l.unlinked ?? 0) }]));
-  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") => render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m, cells: m && cellsOf(m), typeSizes: m && sizesOf(m), slug: slug ?? undefined, confidentialite: SEUIL_1 }));
+  const who = (l: AbsenceMotifs["lines"][number]) => ({ persons: l.persons ?? [], unlinked: l.kind === "nd" ? 1 : (l.unlinked ?? 0) });
+  const sizesOf = (m: AbsenceMotifs) => Object.fromEntries(m.lines.map((l) => [l.type, { ...who(l), count: l.count }]));
+  // Absences de la période (absenceByMotif.period, « Absences de la période ») : celles de la ligne ; le reste de la lecture, mêmes personnes.
+  const periodOf = (m: AbsenceMotifs) => ({
+    months: ["2026-04"],
+    types: Object.fromEntries(m.lines.map((l) => [l.type, { window: { ...who(l), count: l.inWindow }, months: [{ ...who(l), count: l.inWindow }], rest: { ...who(l), count: l.count - l.inWindow }, offMonths: 0 }])),
+  });
+  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") =>
+    render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m && { ...m, period: periodOf(m) }, cells: m && cellsOf(m), typeSizes: m && sizesOf(m), slug: slug ?? undefined, confidentialite: SEUIL_1 }));
 
   it("tous les motifs présents : libellé et code, nombres d'absences, retenu oui / non, demi-journées, taux", () => {
     const html = detail(motifs);
@@ -262,7 +269,10 @@ describe("détail de l'absentéisme : tableau par motif et taux tous motifs, à 
     expect(html).toContain('data-motif="fr_maladie_ordinaire" data-retained="oui"');
     expect(html).toContain('data-motif="test_paid_leave" data-retained="non"');
     const t = sp(text(html));
-    expect(t).toContain("Maladie ordinaire fr_maladie_ordinaire 2 1 oui 10 (5 j) 8,33 %");
+    // Nombres d'absences de la lecture, seuil 1 : une colonne dont Données publie le total (2 + 3 + 1 = 6). test_orphan (contrat
+    // inconnu du référentiel) est non vérifiable ; seul masqué, il se lirait par différence : la plus petite autre cellule, la maladie
+    // (2 absences), est masquée en second, avec sa période. Les congés restent (3 et 2).
+    expect(t).toContain(`Maladie ordinaire fr_maladie_ordinaire n.d. — ${confidentialiteReason(1)} oui 10 (5 j) 8,33 %`);
     expect(t).toContain("test_paid_leave 3 2 non 18 (9 j) 15,00 %");
     expect(t).toContain("Absences de la lecture");
     expect(t).toContain("Absences de la période");
@@ -347,9 +357,9 @@ describe("Paramètres › Définitions des KPI : motifs retenus", () => {
     notes: { etp: null, turnover: null, absence: null },
     natures: [{ code: "01", label: "CDI" }],
     types: [
-      { type: "fr_maladie_ordinaire", label: "Maladie ordinaire", count: 3, inRead: true },
-      { type: "test_paid_leave", label: null, count: 1, inRead: true },
-      { type: "test_sickness", label: null, count: 2, inRead: true },
+      { type: "fr_maladie_ordinaire", label: "Maladie ordinaire", count: 3, countNd: null, inRead: true },
+      { type: "test_paid_leave", label: null, count: 1, countNd: null, inRead: true },
+      { type: "test_sickness", label: null, count: 2, countNd: null, inRead: true },
     ],
     readLabel: "lecture du 21/10/2026",
     statuses: [{ code: "approved", label: "approuvée" }],
@@ -390,7 +400,7 @@ describe("Paramètres › Définitions des KPI : motifs retenus", () => {
     expect(text(render(h(KpiForm, props())))).toContain("Base de comptage des jours : absentéisme et prorata de l'ETP proratisé");
   });
   it("les identifiants de test existants sont conservés", () => {
-    const html = render(h(KpiForm, props({ types: [...props().types, { type: "test_gone", label: null, count: 0, inRead: false }] }, ["test_gone"])));
+    const html = render(h(KpiForm, props({ types: [...props().types, { type: "test_gone", label: null, count: 0, countNd: null, inRead: false }] }, ["test_gone"])));
     for (const t of ["setting-kpi-absence-types", "setting-kpi-types-missing", "setting-kpi-absence-statuses", "setting-kpi-absence-basis", "setting-kpi-save"]) expect(html, t).toContain(`data-testid="${t}"`);
   });
 });

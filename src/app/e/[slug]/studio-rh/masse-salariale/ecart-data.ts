@@ -146,7 +146,8 @@ export async function loadVersions(slug: string, workspaceId: string, sp: Search
 // --- Garde du filtre Service : la garde unique de src/lib/payroll/service-rows.ts, appliquée aux versions comparées --------------------
 // Sous le filtre Service, l'Écart budgétaire et l'Analyse des écarts décrivent le service retenu sur chaque version. Ses mois réels
 // (version réelle : les mois de la période ; scénario : ses mois figés) passent par les lignes par service du journal entier, masquées
-// par le moteur unique (serviceGuardOnWindows, masquage secondaire compris, comme la Synthèse de la Masse salariale). Ses mois projetés
+// par le moteur unique (serviceGuardOnWindows, masquage secondaire compris, comme la Synthèse de la Masse salariale), et par la colonne
+// des stocks de chaque mois pour l'ETP de fin de mois (serviceStockMask, comme KPI RH › Effectifs mensuels et la croisée 02). Ses mois projetés
 // (scénario) passent par les colonnes du mois projeté (maskProjectedServices) : le service est n.d. dès qu'une de ses cellules y est
 // masquée, principal ou secondaire. Un budget saisi est global : n.d. sous le filtre, rien à protéger. Seuil absent ou illisible : n.d.
 // avec la raison du paramètre (l'écran ajoute le lien vers Paramètres › Confidentialité). null : rien n'est masqué. Fonction pure.
@@ -223,7 +224,9 @@ export function ecartServiceGuard(loaded: Pick<Loaded, "ctx" | "versions" | "sou
     }
   });
   const journal = loaded.ctx.input;
-  const real = journal ? serviceGuardOnWindows(journal, windows, value, link, conf) : null;
+  // Mois réels : colonne de masse de chaque mois et, la ligne ETP des versions publiant l'ETP de fin de mois du service, colonne des
+  // stocks de ces mêmes mois (celle de KPI RH › Effectifs mensuels, ETP × service, et de la croisée 02).
+  const real = journal ? serviceGuardOnWindows(journal, windows, value, link, conf, { kpi: loaded.ctx.kpi.input, months: windows.flat() }) : null;
   const proj: ServiceGuard | null = projected.some((s) => s === "masked" || s === "secondary")
     ? { cause: "seuil", reason: confidentialiteReason(seuil) }
     : projected.some(isHidden) ? { cause: "seuil", reason: SEUIL_NON_VERIFIABLE } : null;

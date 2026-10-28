@@ -81,7 +81,7 @@ import {
 } from "@/lib/viz/hypotheses";
 import { ComparisonView } from "@/app/e/[slug]/studio-rh/hypotheses/ComparisonView";
 import { EmbauchesView } from "@/app/e/[slug]/studio-rh/hypotheses/EmbauchesView";
-import { LandingView, variantOptions } from "@/app/e/[slug]/studio-rh/hypotheses/LandingView";
+import { ACTUAL_SHOWN, LandingView, variantOptions } from "@/app/e/[slug]/studio-rh/hypotheses/LandingView";
 import { ProjectionView } from "@/app/e/[slug]/studio-rh/hypotheses/ProjectionView";
 
 // Adaptateurs « résultat du moteur → série de graphique » des écrans de résultat des hypothèses budgétaires :
@@ -739,7 +739,7 @@ describe("LandingView rendue", () => {
     const chosen = [{ value: options[0].value, delta: "5" }];
     const variants = [{ hypothesisId: "dB", kind: "jours" as const, delta: 5 }];
     const { reference, landing, rows } = sensitivities(base, "2026-10", "2026-12", hs, conv, "2026", variants);
-    return { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: scenario.id, year: "2026", landing, retraite: reference, measures: measuresOf(base, "2026-10", "2026-12", hs, conv, "2026"), sens: rows, options, chosen, affichage };
+    return { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: scenario.id, year: "2026", landing, retraite: reference, measures: measuresOf(base, "2026-10", "2026-12", hs, conv, "2026"), sens: rows, options, chosen, affichage, actualHidden: ACTUAL_SHOWN };
   };
   const render = (affichage?: string) => clean(renderToStaticMarkup(h(LandingView, props(affichage))));
   it("tout : cascades, graphiques des mesures et des sensibilités, et les trois tableaux", () => {
@@ -1055,7 +1055,7 @@ describe("lot 10 : atterrissage, mesures et sensibilités", () => {
     const options = variantOptions(hs);
     const chosen = [{ value: options[0].value, delta: "5" }];
     const { reference, landing, rows } = sensitivities(base, "2026-10", "2026-12", hs, conv, "2026", [{ hypothesisId: "dB", kind: "jours" as const, delta: 5 }]);
-    return { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: scenario.id, year: "2026", landing, retraite: reference, measures: measuresOf(base, "2026-10", "2026-12", hs, conv, "2026"), sens: rows, options, chosen, affichage };
+    return { hrefBase: "/e/demo/studio-rh/hypotheses", scenarioId: scenario.id, year: "2026", landing, retraite: reference, measures: measuresOf(base, "2026-10", "2026-12", hs, conv, "2026"), sens: rows, options, chosen, affichage, actualHidden: ACTUAL_SHOWN };
   };
   const render = (affichage?: string) => clean(renderToStaticMarkup(h(LandingView, props(affichage))));
   it("savingTone : une économie positive est une baisse de coût (vert), négative une hausse (rouge), nulle ou n.d. neutre", () => {

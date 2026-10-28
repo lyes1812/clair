@@ -683,9 +683,10 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
     return list.map((value) => ({ value, input: withService(full, value) }));
   })();
   // Statuts de la provision par service et par fin de mois (maskProvisionStatus de lot2.ts : la passe de l'onglet Paie & comptabilité,
-  // règle de valeur « total, à défaut la part connue », contrats portant une ligne de dotation, masquage secondaire par mois), sur la
-  // période et N-1, calculés une fois : lus par le tableau par service et par la vue filtrée (un service masqué dans l'un l'est dans
-  // l'autre). Mois absent : la provision est déjà n.d.
+  // règle de valeur « total, à défaut la part connue », contrats portant une ligne de dotation, statut canonique de la colonne de la
+  // fin de mois : un service ajouté à la liste sans dotation ce mois-là reste hors de la colonne), sur la période et N-1, calculés une
+  // fois : lus par le tableau par service et par la vue filtrée (un service masqué dans l'un l'est dans l'autre). Mois absent : la
+  // provision est déjà n.d.
   const seuil = conf.kind === "set" ? conf.value : null;
   const provStatus = seuil === null ? {} : maskProvisionStatus({ inputs: groups, months: scope, link, seuil });
   const provisionAt = (value: string | null, m: string): MaskStatus => provStatus[provisionServiceKey(value)]?.[m] ?? "nd";

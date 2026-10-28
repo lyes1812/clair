@@ -211,9 +211,9 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
     id: DONNEES_TERMS.absenceTypes,
     term: "Paramètre : motifs d'absence retenus",
     family: FAMILY,
-    see: ["kpi-types-absence", "absenteeism"],
+    see: ["kpi-types-absence", "absenteeism", "confidentialite"],
     definition: [
-      "Motifs d'absence PayFit dont les jours entrent dans l'absentéisme. Les motifs proposés sont ceux de la dernière lecture PayFit appliquée, avec leur nombre d'absences ; un motif retenu mais absent de la lecture est signalé « sans effet ». Un motif sans libellé français est affiché tel que reçu de PayFit, avec son code.",
+      "Motifs d'absence PayFit dont les jours entrent dans l'absentéisme. Les motifs proposés sont ceux de la dernière lecture PayFit appliquée, avec leur nombre d'absences, qui a le statut du même nombre dans KPI RH : n.d. quand le seuil de confidentialité le masque, ou tant que ce seuil n'est pas défini (lien vers sa section) ; un motif retenu mais absent de la lecture est signalé « sans effet ». Un motif sans libellé français est affiché tel que reçu de PayFit, avec son code.",
       "À défaut de choix enregistré, c'est la valeur par défaut validée qui s'applique (son origine est indiquée dans Paramètres) ; l'administrateur coche explicitement les motifs à compter. Aucun motif retenu : l'absentéisme est n.d. Aucune lecture PayFit appliquée : les motifs ne peuvent pas encore être choisis ; en DSN, les arrêts ne sont pas extraits.",
     ].join("\n\n"),
   },

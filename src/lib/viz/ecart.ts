@@ -2,6 +2,7 @@ import type { Cascade, CascadeStep, masseByRubric } from "@/lib/budget/cascade";
 import type { Bridge } from "@/lib/budget/series";
 import { ROW_LABELS, ROW_UNIT, type Cell, type Diff, type RowKey, type Version } from "@/lib/budget/versions";
 import { isHidden, maskGroups, maskReason, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { windowStatus } from "@/lib/confidentialite/columns";
 import { projectedCell, type Confidentialite } from "@/lib/croisee/confidentialite";
 import { formatEuros } from "@/lib/money";
 import type { ServiceGuard } from "@/lib/payroll/service-rows";
@@ -107,7 +108,9 @@ export type WaterfallData =
   | { kind: "nd"; reason: string };
 
 // ETP (dix-millièmes) : les cinq contributions de la cascade, plus le résiduel d'arrondi s'il n'est pas nul (il l'est par construction).
-export function etpWaterfall(c: Cascade): WaterfallData {
+// Les paliers des mois (byMonth) ne servent qu'au seuil de confidentialité : le graphique ne les lit pas.
+export type CascadeTotals = Omit<Extract<Cascade, { kind: "value" }>, "byMonth"> | Extract<Cascade, { kind: "nd" }>;
+export function etpWaterfall(c: CascadeTotals): WaterfallData {
   if (c.kind === "nd") return { kind: "nd", reason: c.reason };
   const steps = c.steps.map((s) => ({ label: s.label, value: s.etp4 }));
   if (c.residual !== 0) steps.push({ label: "Résiduel d'arrondi", value: c.residual });
@@ -165,14 +168,41 @@ export type SeuilNd = { reason: string; param: boolean };
 // mention du service retenu va dans le titre du bloc n.d. null : rien n'est masqué.
 export const guardNd = (g: ServiceGuard | null): SeuilNd | null => (g ? { reason: g.reason, param: g.cause === "parametre" } : null);
 
-// Paliers de la cascade après seuil : un palier de 1 à (seuil − 1) personnes est masqué ; l'écart total étant publié, les paliers
+// Paliers d'UNE cascade après seuil : un palier de 1 à (seuil − 1) personnes est masqué ; l'écart total étant publié, les paliers
 // masqués doivent compter ensemble au moins « seuil » personnes distinctes (masquage secondaire, maskGroups) ; une personne présente
 // dans deux paliers masqués (effet report et changement d'ETP, par exemple) n'y compte qu'une fois. La valeur d'un palier est prise en
-// valeur absolue : elle ne sert qu'à ordonner le masquage secondaire. `chart` : raison pour laquelle la cascade n'est pas tracée (un
-// palier masqué suffit : une cascade ne se trace pas avec un n.d.) ; null : tracée.
+// valeur absolue : elle ne sert qu'à ordonner le masquage secondaire. La même fonction masque la cascade de la période et celle de
+// chacun de ses mois (maskCascade).
+export function maskCascadeSteps(steps: readonly CascadeStep[], link: PersonLink, seuil: number): MaskStatus[] {
+  return maskGroups(steps.map((s) => projectedCell(s.people.map((p) => p.key), link, seuil, s.etp4)), seuil, true);
+}
+
+// Paliers d'une période (règle « union » du lot 12). Les paliers ne sont pas des sommes de mois : quand les salariés restent présents,
+// le « Changement d'ETP » d'une période de deux mois est la moyenne de ceux de chaque mois ; départ, arrivée et écart total étant
+// publiés pour toute période, trois périodes (janvier, février, janvier → février) redonneraient un palier masqué d'un mois. Un palier
+// de la période est donc n.d. dès qu'il est masqué dans la cascade de la période OU dans la cascade d'un seul de ses mois (byMonth :
+// mêmes versions comparées, même rang de mois ; même fonction maskCascadeSteps), avec la raison du seuil (windowStatus). Un palier
+// masqué par un mois, seul masqué de la période, se lirait par différence avec l'écart total publié : la relation de la période est
+// donc reprise par le moteur avec ces paliers déjà masqués (comptés pour leurs personnes), qui masque au besoin un palier de plus.
+// `chart` : raison pour laquelle la cascade n'est pas tracée (un palier masqué suffit : une cascade ne se trace pas avec un n.d.) ;
+// null : tracée.
 export type CascadeMask = { status: MaskStatus[]; reasons: (string | null)[]; chart: string | null };
-export function maskCascade(c: Pick<Extract<Cascade, { kind: "value" }>, "steps">, link: PersonLink, seuil: number): CascadeMask {
-  const status = maskGroups(c.steps.map((s) => projectedCell(s.people.map((p) => p.key), link, seuil, s.etp4)), seuil, true);
+export function maskCascade(c: Pick<Extract<Cascade, { kind: "value" }>, "steps" | "byMonth">, link: PersonLink, seuil: number): CascadeMask {
+  const own = maskCascadeSteps(c.steps, link, seuil);
+  const months = c.byMonth.map((steps) => {
+    const st = maskCascadeSteps(steps, link, seuil);
+    return new Map(steps.map((s, i) => [s.id, st[i]]));
+  });
+  const union = c.steps.map((s, i): MaskStatus => (isHidden(own[i]) ? own[i] : windowStatus(months.map((m) => m.get(s.id) ?? "shown"))));
+  // Relation de la période reprise : un palier masqué qui décrit quelqu'un entre déjà masqué (effectif « non dénombré » pour le moteur,
+  // ses personnes restant comptées par leurs jetons) ; un palier vide ou porté seulement par des embauches prévues (taille 0) reste
+  // compté comme connu, ce qui ne peut que masquer davantage.
+  const cells = c.steps.map((s, i) => {
+    const cell = projectedCell(s.people.map((p) => p.key), link, seuil, s.etp4);
+    return isHidden(union[i]) && cell.size !== 0 ? { ...cell, size: null } : cell;
+  });
+  const again = maskGroups(cells, seuil, true);
+  const status = c.steps.map((_, i): MaskStatus => (isHidden(union[i]) ? union[i] : again[i]));
   const reasons = status.map((st) => (isHidden(st) ? maskReason(st, seuil) : null));
   // Un palier sous le seuil (ou masqué pour le protéger) l'emporte sur un palier non dénombré dans la raison du graphique.
   const worst = status.find((st) => st === "masked" || st === "secondary") ?? status.find(isHidden);

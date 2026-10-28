@@ -32,7 +32,7 @@ describe("Atterrissage retraité — événements du réel rattachés à la base
     expect(gross).toMatchObject({ kind: "value", actual: 90_000, projected: 30_000, total: 120_000 });
     const result = retraite(snapshot, proj, [], "2026", input);
     expect(result).toEqual({ kind: "value", year: "2026", atterrissage: 120_000,
-      rows: [{ label: "Ruptures conventionnelles réalisées", realised: 1_000, projected: 0 }, { label: "Tuilages réalisés", realised: 5_000, projected: 0 }],
+      rows: [{ label: "Ruptures conventionnelles réalisées", realised: 1_000, projected: 0, actual: "rupture-conventionnelle" }, { label: "Tuilages réalisés", realised: 5_000, projected: 0, actual: "tuilage" }],
       realised: 6_000, projected: 0, total: 6_000, retraite: 114_000 });
     expect(landing(snapshot, proj, "2026")).toEqual(gross);
     expect(JSON.stringify([snapshot, proj, input])).toBe(before);
@@ -61,10 +61,24 @@ describe("Atterrissage retraité — événements du réel rattachés à la base
     const snapshot = base(), proj = projection(snapshot);
     const missing = event(1, { chargedCents: null, note: "MARQUEUR_NOTE_FICTIVE_PRIVE", contractKeys: ["MARQUEUR_CONTRAT_FICTIF_PRIVE"] });
     const result = retraite(snapshot, proj, [], "2026", actual([event(2, { month: "2026-02" }), missing]));
-    expect(result).toMatchObject({ kind: "nd", reason: expect.stringContaining("Ruptures conventionnelles réalisées — 2026-01") });
-    expect(result.kind === "nd" && result.reason).toContain("montant chargé non saisi");
+    // Raison publiée à tous les rôles (Atterrissage, croisée 06) : ni nature ni mois de la déclaration (liste réservée aux éditeurs).
+    expect(result).toEqual({ kind: "nd", year: "2026", reason: "Déclaration du Réel : montant chargé non saisi ; aucun total partiel." });
+    expect(JSON.stringify(result)).not.toMatch(/Rupture|2026-01|janvier/i);
     expect(JSON.stringify(result)).not.toContain("MARQUEUR_"); expect(JSON.stringify(result)).not.toContain(missing.id);
     expect(retraite(snapshot, proj, [], "2026", actual([event(1, { chargedCents: 0 })]))).toMatchObject({ kind: "value", realised: 0, retraite: 120_000 });
+  });
+
+  it("une saisie « réalisé » du scénario au libellé d’une nature du Réel reste sur sa propre ligne (seule la ligne du Réel porte sa nature)", () => {
+    // Saisie fictive de mars 2026, catégorie « Ruptures conventionnelles réalisées », 500,00 € ; déclaration du Réel de janvier,
+    // 10,00 €. Deux lignes de même libellé : 500,00 € (saisie) et 10,00 € (Réel, actual) ; réalisé total 510,00 €.
+    const snapshot = base();
+    const legacy: Hypothesis = { id: "saisie-fictive", kind: "realise", label: "Saisie fictive", category: "Ruptures conventionnelles réalisées", month: "2026-03", costCents: 50_000 };
+    const result = retraite(snapshot, projection(snapshot, [legacy]), [legacy], "2026", actual([event()]));
+    expect(result).toMatchObject({ kind: "value", realised: 51_000 });
+    expect(result.kind === "value" && result.rows).toEqual([
+      { label: "Ruptures conventionnelles réalisées", realised: 50_000, projected: 0 },
+      { label: "Ruptures conventionnelles réalisées", realised: 1_000, projected: 0, actual: "rupture-conventionnelle" },
+    ]);
   });
 
   it("se rattache à la lecture figée et ne reprend pas une déclaration d’une autre lecture", () => {

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import AnalysePage from "@/app/e/[slug]/studio-rh/masse-salariale/analyse/page";
 import { ecartServiceGuard, type Loaded } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
-import { cascadePersons, etpCascade, STEP_LABELS, type Cascade, type StepId } from "@/lib/budget/cascade";
+import { cascadePersons, etpCascade, STEP_LABELS, type Cascade, type CascadeStep, type StepId } from "@/lib/budget/cascade";
 import { nd, val, type Cell, type MonthFacts, type Version } from "@/lib/budget/versions";
 import type { ZoomSource } from "@/lib/budget/zoom";
 import { confidentialiteReason, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting } from "@/lib/confidentialite";
@@ -11,6 +11,7 @@ import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import { cascadeView, etpWaterfallOf, guardNd, maskCascade } from "@/lib/viz/ecart";
+import { linkOnlyKpi } from "./helpers/link-only-kpi";
 
 // Analyse des écarts et seuil de confidentialité (règle de toute l'application, en PERSONNES DISTINCTES du référentiel) : cas écrits
 // à la main. Les paliers de la cascade d'ETP suivent la règle avec masquage secondaire (l'écart total est publié) ; une embauche
@@ -112,8 +113,12 @@ describe("cascade de référence (calcul à la main)", () => {
   });
 });
 
-describe("paliers après seuil (maskCascade) : masquage principal et secondaire, écart total publié", () => {
-  const c = value(CASCADE);
+// La cascade seule, sans ses mois (byMonth vide) : une seule relation, masquage principal et secondaire du moteur. La règle « union »
+// avec les cascades de chaque mois est testée plus bas et dans cascade-union.test.ts.
+const alone = (c: { steps: CascadeStep[] }) => ({ steps: c.steps, byMonth: [] as CascadeStep[][] });
+
+describe("paliers d'une cascade seule (maskCascade sans ses mois) : masquage principal et secondaire, écart total publié", () => {
+  const c = alone(value(CASCADE));
   it("seuil 3 : entrées nouvelles (2 personnes), sorties (1) et changement d'ETP (1) masqués ; ensemble 4 personnes ≥ 3 : rien d'autre ; cascade non tracée", () => {
     const m = maskCascade(c, LINK, 3);
     expect(m.status).toEqual(["masked", "shown", "masked", "shown", "masked"]);
@@ -147,7 +152,7 @@ describe("paliers après seuil (maskCascade) : masquage principal et secondaire,
     expect(maskCascade(c, LINK, 1).reasons).not.toContain(SEUIL_NON_VERIFIABLE);
   });
   it("embauche prévue mêlée à un contrat réel (C6) dans « entrées nouvelles » : le palier se juge sur C6 seul (1 personne) ; seuil 3 : les trois paliers masqués réunissent P6, P2 et P5 ; seuil 4 : impossible, toute la cascade est n.d.", () => {
-    const h = value(etpCascade(A, bOf("embauche:h1"), MA, MB));
+    const h = alone(value(etpCascade(A, bOf("embauche:h1"), MA, MB)));
     const m2 = maskCascade(h, LINK, 2);
     expect(m2.status).toEqual(["masked", "shown", "masked", "shown", "masked"]);
     expect(m2.reasons).toEqual([R(2), null, R(2), null, R(2)]);
@@ -173,17 +178,25 @@ describe("paliers après seuil (maskCascade) : masquage principal et secondaire,
     // l'effet déport {P3, P4, P5, P6} (4 personnes) est masqué à son tour ; additionner les tailles (2 + 2 = 4 ≥ 3) l'aurait laissé affiché.
     const step = (id: StepId, etp4: number, keys: string[]) => ({ id, label: STEP_LABELS[id], etp4, people: keys.map((key) => ({ key, etp4 })) });
     const steps = [step("entrees-new", 0, []), step("entrees-report", 2000, ["C1", "C2"]), step("sorties", 0, []), step("sorties-deport", -4000, ["C3", "C4", "C5", "C6"]), step("etp-change", 1500, ["C1", "C2"])];
-    expect(maskCascade({ steps }, LINK, 3).status).toEqual(["shown", "masked", "shown", "secondary", "masked"]);
+    expect(maskCascade(alone({ steps }), LINK, 3).status).toEqual(["shown", "masked", "shown", "secondary", "masked"]);
   });
 });
 
 describe("cascade telle que l'écran la présente (cascadeView)", () => {
   const c = value(CASCADE);
-  it("seuil défini : paliers masqués avec leur raison, départ, arrivée et résiduel conservés, cascade non tracée", () => {
+  it("seuil défini : paliers masqués avec leur raison (règle « union » avec les mois), départ, arrivée et résiduel conservés, cascade non tracée", () => {
+    // Cascades de chaque mois (byMonth), calculées à la main : octobre, C2 seul sorti (−1,00), rien d'autre ne bouge (C1, C3, C4, C5 à
+    // 1,00 les deux années : contributions nulles) ; novembre, entrées {C6} +1,00, sorties {C2} −1,00, changement {C5} −0,50 ;
+    // décembre, entrées {C6, C7} +1,50, sorties {C2} −1,00, changement {C5} −0,50.
+    expect(c.byMonth.map((steps) => steps.map((s) => s.etp4))).toEqual([[0, 0, -10000, 0, 0], [10000, 0, -10000, 0, -5000], [15000, 0, -10000, 0, -5000]]);
+    // Seuil 3 : la période seule masque entrées (2 personnes), sorties (1) et changement (1) ; octobre ne peut pas protéger la sortie
+    // de C2 (aucun autre palier ne décrit quelqu'un) : ses cinq paliers sont n.d. ; l'effet report et l'effet déport de la période,
+    // nuls, sont donc n.d. eux aussi (masqués dans un de ses mois). Raison : celle du seuil, partout.
     const v = cascadeView(c, confidentialiteOf(set(3)), LINK, null);
     if (v.kind !== "value") throw new Error(v.reason);
     expect([v.start, v.end, v.residual, v.param]).toEqual([50000, 45000, 0, false]);
-    expect(v.steps.map((s) => [s.id, s.nd === null ? s.etp4 : "n.d."])).toEqual([["entrees-new", "n.d."], ["entrees-report", 0], ["sorties", "n.d."], ["sorties-deport", 0], ["etp-change", "n.d."]]);
+    expect(v.steps.map((s) => [s.id, s.nd === null ? s.etp4 : "n.d."])).toEqual([["entrees-new", "n.d."], ["entrees-report", "n.d."], ["sorties", "n.d."], ["sorties-deport", "n.d."], ["etp-change", "n.d."]]);
+    expect(new Set(v.steps.map((s) => s.nd))).toEqual(new Set([R(3)]));
     expect(etpWaterfallOf(v)).toEqual({ kind: "nd", reason: R(3) });
     const one = cascadeView(c, confidentialiteOf(set(1)), LINK, null);
     expect(etpWaterfallOf(one)).toMatchObject({ kind: "value", unit: "etp", start: 50000, end: 45000 });
@@ -214,7 +227,7 @@ describe("cascade telle que l'écran la présente (cascadeView)", () => {
 // --- Chargement doublé de la page : versions, sources et journal fictif (ctx.input : la garde partagée lit le journal entier).
 const loadedOf = (filter: { value: string | null } | null, versions: [Version, Version] = [A, B]): Loaded =>
   ({
-    ctx: { unavailable: null, input: JOURNAL, kpi: { input: { data: DATA } } },
+    ctx: { unavailable: null, input: JOURNAL, kpi: { input: linkOnlyKpi(DATA) } }, // lien seul : aucun ETP de fin de mois dénombré (garde de masse)
     options: [{ value: "reel:2025", label: "Réel PayFit 2025" }, { value: versions[1].key, label: versions[1].label }],
     selected: ["reel:2025", versions[1].key], versions, shorts: ["Réel 2025", versions[1].kind === "reel" ? "Réel 2026" : "Remplacement 2026"], sources: [reel(filter), reel(filter)], scenarios: new Map(),
     from: "10", to: "12", months: (y: string) => [`${y}-10`, `${y}-11`, `${y}-12`], services: ["TECH", "VENTE"], hasNv: false, filter, notices: [],
@@ -256,7 +269,8 @@ describe("page Analyse des écarts : seuil, filtre de service, ligne « Confiden
     expect(text(cell(html, "analyse-etp-table", "end")!)).toBe("4,50");
     expect(text(cell(html, "analyse-etp-table", "total")!)).toBe("−0,50");
     expect(text(cell(html, "analyse-etp-table", "residual")!)).toBe("0,00");
-    expect(text(cell(html, "analyse-etp-table", "entrees-report")!)).toBe("0,00");
+    // Effet report nul de la période : n.d. aussi, car octobre (C2 seul sorti) ne peut pas être protégé (règle « union » des mois).
+    expect(cell(html, "analyse-etp-table", "entrees-report")).toContain(`<abbr class="nd" title="${R(3)}">n.d.</abbr>`);
     expect(cell(html, "analyse-etp-table", "entrees-new")).toContain(`<abbr class="nd" title="${R(3)}">n.d.</abbr>`);
     expect(cell(html, "analyse-etp-table", "sorties")).toContain(">n.d.</abbr>");
     expect(cell(html, "analyse-etp-table", "etp-change")).toContain(">n.d.</abbr>");
@@ -265,7 +279,7 @@ describe("page Analyse des écarts : seuil, filtre de service, ligne « Confiden
     expect(row.match(/>n\.d\.<\/abbr>/g)).toHaveLength(2);
     expect(/data-label="Poids des écarts"[^>]*>([\s\S]*?)<\/td>/.exec(row)![1]).not.toContain("%");
     // La raison est écrite sous le tableau, pas seulement au survol.
-    expect(text(html)).toContain(`Paliers n.d. (3) : Entrées nouvelles, Sorties, Changement d'ETP — ${R(3)}`);
+    expect(text(html)).toContain(`Paliers n.d. (5) : Entrées nouvelles, Entrées : effet report, Sorties, Sorties : effet déport, Changement d'ETP — ${R(3)}`);
     // Graphique : la rubrique ETP est n.d. avec la raison ; la masse de l'entreprise se trace ; le pont est affiché (total, jamais masqué).
     expect(html).toContain('data-testid="analyse-graph-nd"');
     expect(html).toContain(`n.d. — ${R(3)}`);

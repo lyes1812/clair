@@ -1,8 +1,11 @@
 import { confidentialiteReason, confidentialiteSettingReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
-import { maskColumn, windowStatus } from "@/lib/confidentialite/columns";
+import { maskColumn, stockColumn, stockGroups, windowStatus, type StockGroup } from "@/lib/confidentialite/columns";
 import { groupCell, masseWindow } from "@/lib/confidentialite/groups";
+import { etpMonthEnd } from "@/lib/rh/kpi/etp";
+import type { KpiInput } from "@/lib/rh/kpi/types";
 import { evolution, monthPayroll, serviceOf, servicesOf, windowPayroll, withService, type Evolution, type JournalInput, type LedgerLine, type MonthPayroll, type PayrollWindow } from "./engine";
 import { classify, gridRubrics } from "./grid";
+import { buildContractServiceMap } from "./service-map";
 
 // Lignes par service de la masse salariale : une seule règle pour l'écran Masse salariale (tableau « Services » et son export
 // Excel, via syntheseOf) et pour la Masse salariale croisée (chapitres 01 et 05). Toujours calculées sur tout le journal : la somme
@@ -100,6 +103,44 @@ export function maskServiceWindows(services: readonly { input: JournalInput; win
   );
 }
 
+// --- Statut canonique du stock de fin de mois d'un service (ETP et effectif) ----------------------------------------------------------
+// L'ETP de fin de mois d'un service pour un mois réel est publié par KPI RH › Effectifs mensuels (ETP × service) et la croisée 02 (axe
+// service), et, sous le filtre Service, par la Synthèse de la Masse salariale (ETP fin de mois, N-1, coût par ETP, export), l'Écart
+// budgétaire et l'Analyse des écarts (ligne ETP des versions réelles), les croisées 01 (coût par ETP-mois) et 08 (ETP des versions
+// réelles). Son statut est celui de la colonne des stocks du mois (stockColumn : valeur d'ordre l'effectif, jamais l'ETP ; effectif et
+// ETP masqués ensemble ; total de l'entreprise publié), formée des mêmes groupes que la croisée 02 (serviceSizes) et que les Effectifs
+// mensuels (realMembers, ETP × service) : contrats qui portent l'ETP de fin de mois (contributions de etpMonthEnd), rangés par le
+// service de leurs lignes de paie du mois (buildContractServiceMap, la règle de l'ETP par service ; sans ligne : « Non ventilé »),
+// reliés à leur personne par le référentiel. Tout service qui porte un ETP non nul y a donc son groupe. Ce n'est pas la colonne de
+// masse (serviceMonthMask) : groupes et valeur d'ordre diffèrent, un service peut être affiché dans l'une et masqué dans l'autre.
+export type ServiceStocks = { kpi: KpiInput | null; journal: JournalInput };
+// Service d'un contrat pour un mois (mémo par lecture : la même table sert à tous les mois et à tous les écrans d'une requête).
+const serviceMapMemo = new WeakMap<readonly LedgerLine[], Map<string, Map<string, string | null>>>();
+function contractServices(journal: JournalInput): Map<string, string | null> | null {
+  const axis = journal.serviceAxis;
+  if (!axis) return null;
+  let byKey = serviceMapMemo.get(journal.lines);
+  if (!byKey) serviceMapMemo.set(journal.lines, (byKey = new Map()));
+  const key = JSON.stringify([axis, journal.grid]);
+  let map = byKey.get(key);
+  if (!map) byKey.set(key, (map = buildContractServiceMap(journal.lines, journal.grid, axis)));
+  return map;
+}
+// Groupes de la fin de mois, par libellé de service ; null : stock non dénombré (ETP de fin de mois n.d. ou en borne basse, référentiel
+// ou axe de service absent) : aucun ETP par service n'est publié pour ce mois.
+export function serviceStockGroups(stocks: ServiceStocks, month: string, link: PersonLink): Record<string, StockGroup> | null {
+  const map = contractServices(stocks.journal);
+  if (!stocks.kpi || !map) return null;
+  const e = etpMonthEnd(stocks.kpi, month);
+  if (e.kind !== "exact") return null;
+  return stockGroups(e.contributions.map((c) => ({ group: serviceLabel(map.get(`${month}|${c.externalId}`) ?? null), contract: c.externalId, person: link.get(c.externalId) ?? null })));
+}
+// Colonne des stocks de la fin de mois : statut de chaque libellé de service ; null : stock non dénombré.
+export function serviceStockMask(stocks: ServiceStocks, month: string, link: PersonLink, seuil: number): Map<string, MaskStatus> | null {
+  const groups = serviceStockGroups(stocks, month, link);
+  return groups ? stockColumn(groups, seuil) : null;
+}
+
 // Mois et fenêtre après seuil : la forme du moteur (MonthPayroll, PayrollWindow) ou un n.d. qui porte seulement sa raison. Une
 // valeur du moteur est assignable à la forme masquée : les écrans et les exports typés sur celle-ci lisent les deux.
 export type MaskedMonth = Extract<MonthPayroll, { kind: "value" }> | { month: string; kind: "nd"; open: boolean; nd: { reason: string } };
@@ -155,16 +196,38 @@ export function maskServiceRows(rows: ServiceRow[], link: PersonLink, conf: Conf
 // --- Garde du filtre Service (la seule, pour tous les écrans qui filtrent sur un service) -------------------------------------------
 // Sous le filtre Service, tous les chiffres de l'écran décrivent le service retenu : il est n.d. dans son ensemble dès que sa ligne
 // est masquée sans filtre (période, N-1 ou un mois, masquage secondaire compris : sinon le filtre révélerait par différence ce que
-// le tableau cache), ou que le seuil n'est pas défini (lien vers les Paramètres). La raison est celle du moteur, nue, la même que
-// celle de toute cellule masquée ; la mention du service retenu va dans le titre du bloc n.d., pas dans la raison. null : affiché.
-// Un service absent des lignes (aucune ligne sur la période ni sur N-1) ne décrit personne.
+// le tableau cache), ou que le seuil n'est pas défini (lien vers les Paramètres). L'écran qui publie aussi l'ETP de fin de mois du
+// service (stock : ETP du mois, N-1, coût par ETP, ETP d'une version) le rend n.d. de même dès que le service est masqué, pour un de ces
+// mois, dans la colonne des stocks (serviceStockMask), comme KPI RH › Effectifs mensuels et la croisée 02 : chaque mois porte le pire de
+// ses deux statuts, masse et stock. La raison est celle du moteur, nue, la même que celle de toute cellule masquée ; la mention du
+// service retenu va dans le titre du bloc n.d., pas dans la raison. null : affiché. Un service absent des lignes (aucune ligne sur la
+// période ni sur N-1) ne décrit personne ; hors de la colonne des stocks d'un mois, il n'y porte aucun contrat (ETP 0, affiché).
 export type ServiceGuard = { cause: "parametre" | "seuil"; reason: string };
-export function serviceGuard(rows: MaskedServiceRow[], value: string | null, conf: ConfidentialiteSetting): ServiceGuard | null {
+// Mois réels dont l'écran publie l'ETP de fin de mois du service retenu, et la source de leurs stocks (référentiel, journal complet).
+export type ServiceStockCheck = ServiceStocks & { months: readonly string[]; link: PersonLink };
+export function serviceGuard(rows: MaskedServiceRow[], value: string | null, conf: ConfidentialiteSetting, stock?: ServiceStockCheck): ServiceGuard | null {
   const settingNd = confidentialiteSettingReason(conf);
   if (settingNd !== null) return { cause: "parametre", reason: settingNd };
   const row = rows.find((r) => r.value === value);
-  if (!row || !row.hidden || row.reason === null) return null;
-  return { cause: "seuil", reason: row.reason };
+  const masse: ServiceGuard | null = !row || !row.hidden || row.reason === null ? null : { cause: "seuil", reason: row.reason };
+  return withStockGuard(masse, stock, value, conf);
+}
+
+// Garde de la colonne des stocks sur les mois de stock.months : n.d. dès qu'un mois y masque le service (principal ou secondaire),
+// non vérifiable si seul un mois non dénombré pour le seuil l'est (windowStatus) ; un mois dont le stock n'est pas dénombré ne publie
+// aucun ETP par service. Ajoutée à la garde de masse (worstGuard) ; inutile quand celle-ci masque déjà avec la raison du seuil.
+function withStockGuard(masse: ServiceGuard | null, stock: ServiceStockCheck | undefined, value: string | null, conf: ConfidentialiteSetting): ServiceGuard | null {
+  if (!stock || conf.kind !== "set") return masse;
+  const seuil = conf.value;
+  if (masse?.reason === confidentialiteReason(seuil)) return masse;
+  const label = serviceLabel(value);
+  const st = windowStatus([...new Set(stock.months)].map((m): MaskStatus => {
+    const col = serviceStockMask(stock, m, stock.link, seuil);
+    return col === null ? "nd" : (col.get(label) ?? "shown");
+  }));
+  const own: ServiceGuard | null =
+    st === "masked" || st === "secondary" ? { cause: "seuil", reason: confidentialiteReason(seuil) } : st === "unverifiable" ? { cause: "seuil", reason: SEUIL_NON_VERIFIABLE } : null;
+  return worstGuard([masse, own], seuil);
 }
 
 // La garde la plus grave de plusieurs : le paramètre absent, puis un masquage (principal ou secondaire : la raison du seuil), puis un
@@ -176,10 +239,14 @@ export function worstGuard(guards: readonly (ServiceGuard | null)[], seuil: numb
 
 // Même garde sur des fenêtres de mois réels quelconques (versions comparées de l'Écart budgétaire et de l'Analyse des écarts, mois
 // d'un chapitre de la croisée) : les lignes par service sont formées sur chaque fenêtre (tout le journal, comme le tableau Services)
-// et masquées par le moteur unique ; le service retenu est n.d. dès qu'une fenêtre le masque. Sans fenêtre : rien à protéger.
-export function serviceGuardOnWindows(journal: JournalInput, windows: readonly (readonly string[])[], value: string | null, link: PersonLink, conf: ConfidentialiteSetting): ServiceGuard | null {
+// et masquées par le moteur unique ; le service retenu est n.d. dès qu'une fenêtre le masque. Sans fenêtre : rien à protéger. stock :
+// l'écran publie aussi l'ETP de fin de mois du service sur stock.months (versions réelles de l'Écart et de l'Analyse, coût par ETP-mois
+// de la croisée 01, ETP des versions de la croisée 08) : colonne des stocks de ces mois en plus (serviceGuard), même journal, même lien.
+export function serviceGuardOnWindows(
+  journal: JournalInput, windows: readonly (readonly string[])[], value: string | null, link: PersonLink, conf: ConfidentialiteSetting, stock?: { kpi: KpiInput | null; months: readonly string[] },
+): ServiceGuard | null {
   const settingNd = confidentialiteSettingReason(conf);
   if (settingNd !== null || conf.kind !== "set") return { cause: "parametre", reason: settingNd ?? SEUIL_NON_VERIFIABLE };
   const guards = windows.filter((ms) => ms.length > 0).map((ms) => serviceGuard(maskServiceRows(serviceRows(journal, [...ms], []), link, conf), value, conf));
-  return worstGuard(guards, conf.value);
+  return withStockGuard(worstGuard(guards, conf.value), stock && { kpi: stock.kpi, journal, months: stock.months, link }, value, conf);
 }

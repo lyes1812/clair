@@ -34,6 +34,7 @@ import { rollingWindow } from "@/lib/rh/kpi/period";
 import type { KpiContext } from "@/lib/rh/kpi-context";
 import { fmtInt, showCount, showHeadcount, type Shown } from "@/lib/rh/view";
 import { DSN_ABSENCES, kpiInput } from "./helpers/kpi";
+import { linkOnlyKpi } from "./helpers/link-only-kpi";
 import { dsnFixtureBuild } from "./helpers/rh";
 
 // Exports Excel des écrans chiffrés (KPI RH, Masse salariale, Hypothèses budgétaires). Données entièrement fictives (fixtures DSN de
@@ -380,9 +381,10 @@ lines.push(line("2025-01", "641100", 250000, "C1", "A"), line("2025-01", "645100
 const journal: JournalInput = { lines, months: ["2025-01", "2025-02", "2026-01", "2026-02"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
 const payCtx = {
   // Référentiel fictif : C1 et C2 sont les contrats de deux personnes distinctes (le seuil de confidentialité compte des personnes).
-  // Ce double de KpiInput est partiel (data.contracts seulement) : il ne sert qu'au lien contrat → personne de la Masse salariale et de
-  // l'Écart budgétaire sous un filtre de service ; les tests des Hypothèses ont leur propre contexte (hypCtx, référentiel absent).
-  kpi: { collab: { workspace: { id: "w1", role: "reader" }, data: null }, input: { data: { build: { source: "payfit" }, contracts: [{ contractKey: "payfit:C1", externalId: "C1", personKey: "P1" }, { contractKey: "payfit:C2", externalId: "C2", personKey: "P2" }] } } },
+  // Ce double de KpiInput est réduit au lien contrat → personne (linkOnlyKpi : aucun ETP de fin de mois dénombré) : il ne sert qu'au
+  // lien de la Masse salariale et de l'Écart budgétaire sous un filtre de service ; les tests des Hypothèses ont leur propre contexte
+  // (hypCtx, référentiel absent).
+  kpi: { collab: { workspace: { id: "w1", role: "reader" }, data: null }, input: linkOnlyKpi({ build: { source: "payfit" }, contracts: [{ contractKey: "payfit:C1", externalId: "C1", personKey: "P1" }, { contractKey: "payfit:C2", externalId: "C2", personKey: "P2" }] }) },
   source: "payfit",
   grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
   read: { syncId: "s1", startedAt: new Date("2026-03-03T10:00:00Z"), months: journal.months },

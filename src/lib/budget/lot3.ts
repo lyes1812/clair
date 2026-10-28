@@ -10,7 +10,11 @@ type Hire = Extract<Hypothesis, { kind: "embauche" }>;
 
 // --- Atterrissage retraité : atterrissage − éléments non récurrents (déjà en comptabilité, saisis à la main, + prévus
 // par les hypothèses : coûts de sortie, éléments ponctuels marqués, tuilages = coût de l'entrant pendant le recouvrement).
-export type NonRecurringRow = { label: string; realised: number; projected: number };
+// actual : nature des déclarations du Réel que porte la ligne (une ligne par nature, jamais fusionnée avec une saisie du scénario de
+// même libellé) ; l'écran lui applique le statut de la Masse salariale (seuil de confidentialité, maskNonRecurring). Les raisons n.d.
+// ne nomment ni la nature ni le mois d'une déclaration : ce détail élément par élément est réservé aux éditeurs.
+export type NonRecurringRow = { label: string; realised: number; projected: number; actual?: ActualEvent["kind"] };
+type RowSum = { label: string; realised: bigint; projected: bigint; actual?: ActualEvent["kind"] };
 export type Retraite =
   | { kind: "value"; year: string; atterrissage: number; rows: NonRecurringRow[]; realised: number; projected: number; total: number; retraite: number }
   | { kind: "nd"; year: string; reason: string };
@@ -32,15 +36,16 @@ export function retraite(base: BaseSnapshot, proj: Projection, hyps: Hypothesis[
   const ids = new Set<string>(), signatures = new Set<string>();
   for (const event of selected) {
     if (!parseActualEvent(event)) return unavailable("Déclaration non récurrente du réel invalide ; aucun retraitement partiel.");
-    const context = `${ACTUAL_LABELS[event.kind]} — ${event.month}`;
-    if (event.syncId.toLowerCase() !== base.syncId.toLowerCase()) return unavailable(`${context} : déclaration rattachée à une autre lecture que celle de la base figée.`);
+    // Raison publiée à tous les rôles (Atterrissage, croisée 06) : ni nature ni mois (liste par élément réservée aux éditeurs).
+    const context = "Déclaration du Réel";
+    if (event.syncId.toLowerCase() !== base.syncId.toLowerCase()) return unavailable(`${context} rattachée à une autre lecture que celle de la base figée ; aucun retraitement partiel.`);
     const month = base.actuals.find((month) => month.month === event.month);
-    if (month?.kind !== "value") return unavailable(`${context} : mois absent du réel connu de la base figée.`);
+    if (month?.kind !== "value") return unavailable(`${context} sur un mois absent du réel connu de la base figée ; aucun retraitement partiel.`);
     if (event.chargedCents === null) return unavailable(`${context} : montant chargé non saisi ; aucun total partiel.`);
     const id = event.id.toLowerCase(), signature = JSON.stringify([event.kind, event.month, [...event.contractKeys].sort()]);
-    if (ids.has(id) || signatures.has(signature)) return unavailable(`${context} : déclarations en doublon ; aucun retraitement partiel.`);
+    if (ids.has(id) || signatures.has(signature)) return unavailable("Déclarations du Réel en doublon ; aucun retraitement partiel.");
     ids.add(id); signatures.add(signature);
-    if (hyps.some((hypothesis) => hypothesis.kind === "realise" && hypothesis.month === event.month)) return unavailable(`${context} : une ancienne saisie réalisée du scénario couvre aussi ce mois ; rapprocher les déclarations avant retraitement.`);
+    if (hyps.some((hypothesis) => hypothesis.kind === "realise" && hypothesis.month === event.month)) return unavailable(`${context} : une ancienne saisie réalisée du scénario couvre aussi son mois ; rapprocher les déclarations avant retraitement.`);
   }
   // La source figée reste inchangée. Ses agrégats sont contrôlés avant d'en soustraire les coûts déclarés.
   const annualParts = [
@@ -52,16 +57,19 @@ export function retraite(base: BaseSnapshot, proj: Projection, hyps: Hypothesis[
     || part.values.reduce<bigint>((sum, value) => sum + BigInt(value!), 0n) !== BigInt(part.value))) return unavailable("Atterrissage hors des centimes entiers sûrs ou incohérent avec les mois figés.");
   const exactLanding = annualParts.reduce((sum, part) => sum + BigInt(part.value), 0n);
   if (!Number.isSafeInteger(land.total) || safeCents(exactLanding) === null || exactLanding !== BigInt(land.total)) return unavailable("Atterrissage hors des centimes entiers sûrs.");
-  const rows = new Map<string, { label: string; realised: bigint; projected: bigint }>();
+  // Saisies du scénario regroupées par libellé ; déclarations du Réel regroupées par nature, sur leurs propres lignes.
+  const rows = new Map<string, RowSum>();
+  const fromActual = new Map<ActualEvent["kind"], RowSum>();
   let unsafe = false;
-  const add = (label: string, side: "realised" | "projected", cents: number) => {
+  const add = (label: string, side: "realised" | "projected", cents: number, actualKind?: ActualEvent["kind"]) => {
     if (!Number.isSafeInteger(cents)) { unsafe = true; return; }
-    const r = rows.get(label) ?? { label, realised: 0n, projected: 0n };
+    const r = (actualKind ? fromActual.get(actualKind) : rows.get(label)) ?? { label, realised: 0n, projected: 0n, ...(actualKind ? { actual: actualKind } : {}) };
     r[side] += BigInt(cents);
-    rows.set(label, r);
+    if (actualKind) fromActual.set(actualKind, r);
+    else rows.set(label, r);
   };
   for (const h of hyps) if (h.kind === "realise" && h.month.startsWith(year) && h.month <= base.refMonth) add(h.category, "realised", h.costCents);
-  for (const event of selected) add(ACTUAL_LABELS[event.kind], "realised", event.chargedCents!);
+  for (const event of selected) add(ACTUAL_LABELS[event.kind], "realised", event.chargedCents!, event.kind);
   for (const m of proj.months) {
     if (!m.month.startsWith(year) || m.kind !== "value") continue;
     for (const c of m.contributions) {
@@ -70,11 +78,11 @@ export function retraite(base: BaseSnapshot, proj: Projection, hyps: Hypothesis[
     }
   }
   if (unsafe) return unavailable("Éléments non récurrents hors des centimes entiers sûrs.");
-  const list = [...rows.values()].sort((a, b) => a.label.localeCompare(b.label));
+  const list = [...rows.values(), ...fromActual.values()].sort((a, b) => a.label.localeCompare(b.label));
   const realised = list.reduce((sum, row) => sum + row.realised, 0n), projected = list.reduce((sum, row) => sum + row.projected, 0n);
   const total = realised + projected, adjusted = exactLanding - total;
   if ([realised, projected, total, adjusted, ...list.flatMap((row) => [row.realised, row.projected])].some((value) => safeCents(value) === null)) return unavailable("Total des éléments non récurrents ou atterrissage retraité hors des centimes entiers sûrs.");
-  return { kind: "value", year, atterrissage: land.total, rows: list.map((row) => ({ label: row.label, realised: Number(row.realised), projected: Number(row.projected) })), realised: Number(realised), projected: Number(projected), total: Number(total), retraite: Number(adjusted) };
+  return { kind: "value", year, atterrissage: land.total, rows: list.map((row) => ({ label: row.label, realised: Number(row.realised), projected: Number(row.projected), ...(row.actual ? { actual: row.actual } : {}) })), realised: Number(realised), projected: Number(projected), total: Number(total), retraite: Number(adjusted) };
 }
 
 // --- Mesures de management : pour chaque départ, effet sur l'année du premier mois projeté, en comparant la projection

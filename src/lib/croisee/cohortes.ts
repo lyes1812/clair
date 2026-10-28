@@ -1,5 +1,7 @@
-// Masse salariale croisée, chapitre 06 · Budget & prévisions : partition des contrats observés sur deux périodes (N-1 et N), et
-// contributeurs des éléments non récurrents de l'atterrissage retraité (fin du fichier). Fonctions pures. L'entrée est le détail par
+// Masse salariale croisée, chapitre 06 · Budget & prévisions : partition des contrats observés sur deux périodes (N-1 et N). Les
+// éléments non récurrents de l'atterrissage retraité (« Déjà comptabilisés », « Prévus ») sont des totaux de l'entreprise publiés
+// ailleurs (tuile « Coûts identifiés » de la Masse salariale, atterrissage retraité des Hypothèses budgétaires) : ni contributeurs ni
+// masque ici (décision par défaut du lot 12, soumise à Lyes). Fonctions pures. L'entrée est le détail par
 // clé d'observation que calcule déjà zoomOf (src/lib/budget/zoom.ts) sur chaque période : clé = contrat de paie du journal, valeur =
 // montant de la période en centimes. La sortie ne contient que des nombres, des montants et des jetons de personne (lien contrat →
 // jeton, src/lib/croisee/confidentialite.ts), jamais une clé de contrat : aucune identité ne sort de cette fonction.
@@ -15,11 +17,8 @@
 // relation quand celle-ci ne peut pas être protégée ; un groupe qui mêle embauches et contrats réels se juge sur ses contrats réels
 // (projectedGroupCell du module partagé, la même fonction pour toute l'application, appliquée ici à des groupes déjà reliés).
 
-import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
-import type { ActualNonRecurringInput } from "@/lib/budget/lot3";
-import { maskGroups, maskRelations, type MaskCell, type MaskStatus, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { maskRelations, type MaskCell, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
 import { projectedGroup, projectedGroupCell } from "@/lib/confidentialite/groups";
-import { parseActualEvent } from "@/lib/payroll/non-recurring";
 
 // Groupe de contrats reliés par le référentiel, plus ses embauches prévisionnelles.
 export type LinkedGroup = PersonsOfContracts & { hires: number };
@@ -132,75 +131,3 @@ export function maskCohorts(p: Extract<CohortPartition, { kind: "value" }>, seui
   return out;
 }
 
-// --- Éléments non récurrents de l'atterrissage retraité : contributeurs et seuil de confidentialité --------------------------------
-//
-// Mêmes éléments que retraite (src/lib/budget/lot3.ts), sans recalcul des montants : « déjà comptabilisés » = hypothèses « réalisé »
-// de l'année jusqu'au mois de bascule de la base ; « prévus » = parts non récurrentes des contributions des mois projetés de l'année
-// (coûts de sortie, tuilages, ponctuels et enveloppes marqués non récurrents). Contributeur : le contrat que porte la contribution
-// (salarié, ou embauche prévue) ; à défaut, l'hypothèse. Plusieurs hypothèses sur un même contrat comptent pour un contributeur. Un
-// contributeur dont la somme de l'année est nulle n'entre pas dans le total : il n'est pas compté. Chaque total est un groupe en
-// personnes distinctes : un contrat relié par le référentiel (link, clé de référentiel) apporte sa personne ; un contrat non relié ou
-// une hypothèse sans contrat (toutes les hypothèses « réalisé ») est un contributeur non relié, qui ne protège jamais ; une embauche
-// prévue (clé « embauche:… ») est comptée à part (hires : un total porté seulement par des embauches prévues ne protège jamais).
-// null : contribution sans contrat ni hypothèse (effectif non dénombré, seuil non vérifiable). Aucune clé ne sort de la fonction
-// (jetons de personne seulement).
-export type NonRecurringContributors = { realised: LinkedGroup | null; projected: LinkedGroup | null };
-
-export function nonRecurringContributors(
-  base: Pick<BaseSnapshot, "refMonth"> & Partial<Pick<BaseSnapshot, "syncId" | "actuals">>,
-  proj: Projection,
-  hyps: readonly Hypothesis[],
-  year: string,
-  actual: ActualNonRecurringInput = { kind: "value", events: [] },
-  link: PersonLink = new Map(),
-): NonRecurringContributors {
-  const add = (m: Map<string, number>, key: string, cents: number) => m.set(key, (m.get(key) ?? 0) + cents);
-  // Contributeurs comptés (somme non nulle), vus par le lien : la clé de référentiel d'un contrat, inconnue du lien pour une hypothèse.
-  const group = (m: Map<string, number>): LinkedGroup => linkedGroup([...m].filter(([, v]) => v !== 0).map(([k]) => k), link);
-  const realised = new Map<string, number>();
-  for (const h of hyps) if (h.kind === "realise" && h.month.startsWith(year) && h.month <= base.refMonth) add(realised, `hypothese:${h.id}`, h.costCents);
-  let realisedUnknown = actual.kind === "nd";
-  const ids = new Set<string>(), fingerprints = new Set<string>();
-  if (actual.kind === "value") for (const candidate of actual.events) {
-    if (!candidate.month.startsWith(`${year}-`) || candidate.month > base.refMonth) continue;
-    const event = parseActualEvent(candidate);
-    if (!event || !base.syncId || event.syncId.toLowerCase() !== base.syncId.toLowerCase() || !base.actuals?.some((month) => month.month === event.month && month.kind === "value") || event.chargedCents === null) {
-      realisedUnknown = true;
-      continue;
-    }
-    const id = event.id.toLowerCase(), fingerprint = JSON.stringify([event.kind, event.month, [...event.contractKeys].sort()]);
-    if (ids.has(id) || fingerprints.has(fingerprint) || hyps.some((h) => h.kind === "realise" && h.month === event.month)) realisedUnknown = true;
-    ids.add(id); fingerprints.add(fingerprint);
-    if (event.chargedCents === 0) continue;
-    if (!event.contractKeys.length) realisedUnknown = true;
-    // Un binôme peut apparaître plusieurs mois : les mêmes contrats ne deviennent pas plusieurs contributeurs.
-    // Clé de contrat telle quelle : le lien du référentiel la rattache à sa personne.
-    for (const key of event.contractKeys) add(realised, key, event.chargedCents);
-  }
-  const projected = new Map<string, number>();
-  let unknown = false;
-  if (proj.kind === "value") {
-    for (const m of proj.months) {
-      if (!m.month.startsWith(year) || m.kind !== "value") continue;
-      for (const c of m.contributions) {
-        if (!c.nonRecurringCents) continue;
-        const key = c.contractKey ?? (c.hypothesisId ? `hypothese:${c.hypothesisId}` : null);
-        if (key === null) unknown = true;
-        else add(projected, key, c.nonRecurringCents);
-      }
-    }
-  }
-  return { realised: realisedUnknown ? null : group(realised), projected: unknown ? null : group(projected) };
-}
-
-// Les deux totaux forment un ensemble dont la somme est affichée (« Non récurrents retirés », atterrissage − retraité) : masquage
-// principal d'un total de 1 à (seuil − 1) personnes, ou non dénombré (contributeurs non reliés sous le seuil, contribution sans
-// contrat ni hypothèse) ; l'autre total est alors masqué aussi (maskGroups), sinon le premier se lirait par différence. Un total sans
-// contributeur (0) n'est masqué qu'à ce titre ; un total porté seulement par des embauches prévues (linkedGroupCell) est affiché et ne
-// protège jamais l'autre : si l'autre est masqué, il l'est aussi (sinon « non récurrents retirés − prévus » le redonnerait).
-export type NonRecurringMask = { realised: MaskStatus; projected: MaskStatus };
-export function maskNonRecurring(sizes: NonRecurringContributors, amounts: { realised: number; projected: number }, seuil: number): NonRecurringMask {
-  const cell = (g: LinkedGroup | null, cents: number): MaskCell => (g === null ? { size: null, value: Math.abs(cents) } : linkedGroupCell(g, seuil, cents, g.persons.length + g.unlinked > 0));
-  const [realised, projected] = maskGroups([cell(sizes.realised, amounts.realised), cell(sizes.projected, amounts.projected)], seuil, true);
-  return { realised, projected };
-}

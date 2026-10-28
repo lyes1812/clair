@@ -513,7 +513,7 @@ describe("écrans KPI RH : tuile, titres, graphiques sans note (lot 10)", () => 
   });
   it("types d'absence : listes de la lecture conservées, phrase d'explication retirée", () => {
     // Seuil de confidentialité de 1 personne, chaque motif relié à une personne : les nombres restent affichés (masquage : kpi-confidentialite.test.ts).
-    const mask = { setting: { kind: "set", value: 1, updatedAt: null, updatedBy: null } as const, sizes: { fr_maladie_ordinaire: { persons: ["P1"], unlinked: 0 }, test_maternity: { persons: ["P2"], unlinked: 0 } } };
+    const mask = { setting: { kind: "set", value: 1, updatedAt: null, updatedBy: null } as const, sizes: { fr_maladie_ordinaire: { persons: ["P1"], unlinked: 0, count: 3 }, test_maternity: { persons: ["P2"], unlinked: 0, count: 1 } } };
     const html = render(h(AbsenceTypeNotes, { chosen: [{ type: "fr_maladie_ordinaire", count: 3 }], other: [{ type: "test_maternity", count: 1 }], missing: [{ type: "fr_conges_x" }], slug: "demo", mask }));
     expect(html).toContain("Retenus</strong> : <span>");
     expect(html).toContain("Maladie ordinaire");

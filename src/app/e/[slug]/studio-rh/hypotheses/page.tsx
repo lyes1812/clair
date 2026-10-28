@@ -17,12 +17,16 @@ import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { monthPayroll } from "@/lib/payroll/engine";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { listActualEvents } from "@/lib/payroll/non-recurring-store";
+import { getConfidentialite } from "@/lib/confidentialite";
+import { declaredLink, maskNonRecurring, NON_RECURRING_KINDS } from "@/lib/payroll/non-recurring-mask";
+import { loadCollabContext } from "@/lib/rh/view";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
+import { ConfidentialiteLine } from "../masse-salariale/components";
 import { ActionForm } from "./ActionForm";
 import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
 import { ComparisonView } from "./ComparisonView";
-import { ActualNonRecurringStatus, LandingView, variantOptions } from "./LandingView";
+import { ACTUAL_SHOWN, ActualNonRecurringCount, ActualNonRecurringStatus, LandingView, variantOptions, type ActualHidden } from "./LandingView";
 import { measures, sensitivities, type ActualNonRecurringInput, type Variant, type VariantKind } from "@/lib/budget/lot3";
 import { toCents } from "@/lib/money";
 import { ProjectionView } from "./ProjectionView";
@@ -58,7 +62,10 @@ function Header({ children }: { children?: React.ReactNode }) {
 }
 
 // Onglet Atterrissage : retraité, mesures de management, sensibilités (variations lues dans l'URL, jamais enregistrées).
-async function landingTab(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, hyps: Hypothesis[], sp: Search) {
+// Déclarations du Réel reprises par le retraité (janvier → mois de la base figée) : leurs lignes par nature suivent le seuil de
+// confidentialité avec les statuts de la Masse salariale (même fonction, même fenêtre de mois) ; la liste élément par élément (nature
+// et mois de chaque déclaration) est réservée aux éditeurs (canEdit, rôle lu côté serveur), un lecteur n'en voit que le nombre.
+async function landingTab(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, hyps: Hypothesis[], sp: Search, canEdit: boolean) {
   const year = s.firstMonth.slice(0, 4);
   const options = variantOptions(hyps);
   const svs = (Array.isArray(sp.sv) ? sp.sv : sp.sv ? [sp.sv] : []).map(String);
@@ -82,7 +89,24 @@ async function landingTab(slug: string, workspaceId: string, s: ScenarioRow, bas
     actual = { kind: "nd", reason: "Les éléments non récurrents du Réel n’ont pas pu être lus. Recharge la page avant de lire l’atterrissage retraité." };
   }
   const { reference, landing: land, rows } = sensitivities(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year, variants, actual);
-  const actualStatuses = actual.kind === "value" ? actual.events.filter((event) => event.month.startsWith(`${year}-`) && event.month <= base.refMonth).sort((a, b) => a.month.localeCompare(b.month) || a.kind.localeCompare(b.kind)).map((event) => ({
+  // Fenêtre des déclarations reprises : janvier de l'année → mois de la base (les mêmes que retraite, lot3.ts).
+  const nrMonths = monthRange(`${year}-01`, base.refMonth < `${year}-12` ? base.refMonth : `${year}-12`);
+  const declared = actual.kind === "value" ? actual.events.filter((event) => nrMonths.includes(event.month)) : [];
+  let actualHidden: ActualHidden = ACTUAL_SHOWN;
+  const confidentialite = declared.length ? await getConfidentialite(workspaceId) : null;
+  if (confidentialite) {
+    // Lien contrat → personne du référentiel Collaborateurs, le même que la Masse salariale ; illisible : aucun contrat relié, les
+    // natures sous le seuil sont alors « non vérifiables » (jamais affichées par défaut).
+    let contracts: { contractKey: string; externalId?: string; personKey: string | null }[] = [];
+    try {
+      contracts = (await loadCollabContext(slug)).data?.contracts ?? [];
+    } catch {
+      contracts = [];
+    }
+    const mask = maskNonRecurring(declared.map((event) => ({ event })), nrMonths, declaredLink(contracts), confidentialite);
+    actualHidden = Object.fromEntries(NON_RECURRING_KINDS.map((kind) => [kind, mask[kind].reason])) as ActualHidden;
+  }
+  const actualStatuses = canEdit ? [...declared].sort((a, b) => a.month.localeCompare(b.month) || a.kind.localeCompare(b.kind)).map((event) => ({
     kind: event.kind, month: event.month, amountMissing: event.chargedCents === null,
     sourceMismatch: event.syncId.toLowerCase() !== base.syncId.toLowerCase(),
     monthUnavailable: !base.actuals.some((month) => month.month === event.month && month.kind === "value"),
@@ -92,8 +116,9 @@ async function landingTab(slug: string, workspaceId: string, s: ScenarioRow, bas
     <>
       {bad.map((b) => <p key={b} className="notice">{b}</p>)}
       <p className="tile-foot" data-testid="atr-actual-source">L’atterrissage brut reste inchangé. Le retraité isole les coûts passés identifiés dans Réel et les éléments non récurrents prévus. <a href={`/e/${slug}/studio-rh/masse-salariale`}>Identifier les coûts passés dans Réel</a>.</p>
-      <ActualNonRecurringStatus items={actualStatuses} />
-      <LandingView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} year={year} landing={land} retraite={reference} measures={measures(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year)} sens={rows} options={options} chosen={chosen} affichage={one(sp.affichage)} />
+      {canEdit ? <ActualNonRecurringStatus items={actualStatuses} /> : <ActualNonRecurringCount count={declared.length} from={nrMonths[0] ?? `${year}-01`} to={nrMonths.at(-1) ?? `${year}-01`} />}
+      {confidentialite ? <ConfidentialiteLine slug={slug} setting={confidentialite} testid="atr-actual-confidentialite" /> : null}
+      <LandingView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} year={year} landing={land} retraite={reference} measures={measures(base, s.firstMonth, s.lastMonth, hyps, s.conventions, year)} sens={rows} options={options} chosen={chosen} affichage={one(sp.affichage)} actualHidden={actualHidden} />
     </>
   );
 }
@@ -341,7 +366,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
             {sous === "projection" ? (
               <ProjectionView slug={slug} scenario={s} base={full.base} proj={proj} landing={landing(full.base, proj, year)} month={one(sp.mois)} affichage={one(sp.affichage)} />
             ) : sous === "atterrissage" ? (
-              await landingTab(slug, workspace.id, s, full.base, full.hypotheses, sp)
+              await landingTab(slug, workspace.id, s, full.base, full.hypotheses, sp, canEdit)
             ) : (
               await comparison(slug, workspace.id, s, full.base, proj, sp)
             )}

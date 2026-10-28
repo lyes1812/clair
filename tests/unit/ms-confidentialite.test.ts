@@ -9,11 +9,12 @@ import { confidentialiteReason, linkFromReferential, personsOfContracts, SEUIL_N
 import { groupCell, groupInput, isHireKey, masseContracts, masseGroup, masseWindow, projectedCell } from "@/lib/confidentialite/groups";
 import * as croisee from "@/lib/croisee/confidentialite";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
-import { withService } from "@/lib/payroll/engine";
+import { servicesOf, withService } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
-import { labelContracts, labelKey, labelTotals, maskLabels, maskProvisionServices, maskProvisionStatus, provisionContracts, provisionGuard, provisionMonth, provisionValue } from "@/lib/payroll/lot2";
+import { labelContracts, labelKey, labelMonthStatus, labelTotals, maskLabels, maskProvisionServices, maskProvisionStatus, provisionContracts, provisionGuard, provisionMonth, provisionValue } from "@/lib/payroll/lot2";
 import { maskServiceRows, maskServiceWindows, serviceGuard, serviceGuardOnWindows, serviceRows, worstGuard } from "@/lib/payroll/service-rows";
 import type { RhBuildData } from "@/lib/rh/referential/types";
+import { linkOnlyKpi } from "./helpers/link-only-kpi";
 
 // Seuil de confidentialité de la Masse salariale (Synthèse, Fixe & variable, Paie & comptabilité et export Excel), en PERSONNES
 // DISTINCTES du référentiel Collaborateurs : cas écrits à la main sur un journal fictif. Le contexte (base) est remplacé par un contexte
@@ -264,15 +265,19 @@ describe("libellés de paie : contrats et seuil (cas écrits à la main)", () =>
     expect(labelTotals(FV, MONTHS).map((t) => t.key).sort()).toEqual(Object.values(K).sort());
     expect(labelTotals(FV, MONTHS).find((t) => t.key === K.obj)?.cents).toBe(50000);
   });
-  it("seuil 3 : « Primes sur objectif » (1 personne) masquée ; le brut étant publié, « Primes de vacances » (300 € < salaires) est masquée à son tour ; les salaires restent", () => {
+  it("seuil 3 : « Primes sur objectif » (1 personne) masquée ; les primes de janvier étant publiées, « Primes de vacances » de janvier est masquée à son tour ; les salaires restent", () => {
     const m = maskLabels({ input: FV, months: MONTHS, prevMonths: PREV, keys: [K.sal, K.obj, K.vac], families: [K.obj, K.vac], link, conf: set(3), prevNd: true });
+    // Calcul à la main, colonne par colonne (une colonne par rubrique et par mois, total du mois publié) :
+    // janvier, Primes (600 €) : objectif {P1} 300 € masqué (1 < 3) ; seul, il se lirait par différence → la plus petite cellule
+    //   affichée qui ajoute des personnes, vacances {P1, P2, P3} 300 €, est masquée : ensemble {P1, P2, P3} = 3 ≥ 3 ;
+    // février, Primes (200 €) : objectif {P1} 200 € masqué ; vacances n'a aucune ligne : hors de la colonne, 0 affiché ;
+    // janvier et février, Salaires : {P1, P2, P3} 6 000 € affiché.
+    // Période (janvier → février) : n.d. dès qu'un mois est masqué → objectif et vacances n.d., salaires affichés.
     expect(m.labels[K.sal]).toEqual({ cur: null, prev: null });
     expect(m.labels[K.obj]).toEqual({ cur: R3, prev: null });
     expect(m.labels[K.vac]).toEqual({ cur: R3, prev: null });
-    // Familles par mois : objectif masquée les deux mois (1 personne) ; vacances : janvier masqué pour protéger sa cellule de période,
-    // février (aucune prime, aucun contrat) masqué avec objectif dans la colonne de février (sans lui, objectif se lirait par différence).
     expect(m.families[K.obj]).toEqual([R3, R3]);
-    expect(m.families[K.vac]).toEqual([R3, R3]);
+    expect(m.families[K.vac]).toEqual([R3, null]);
   });
   it("seuil 1 : rien n'est masqué ; seuil absent : tout est n.d. avec la raison du paramètre", () => {
     const one = maskLabels({ input: FV, months: MONTHS, prevMonths: PREV, keys: [K.sal, K.obj, K.vac], families: [K.obj, K.vac], link, conf: set(1), prevNd: true });
@@ -294,7 +299,9 @@ describe("libellés de paie : contrats et seuil (cas écrits à la main)", () =>
     expect(primes).toContain('data-money-cents="60000"');
     expect(primes).toContain('data-money-cents="20000"');
     expect(primes).not.toContain('data-money-cents="30000"'); // les 300,00 € de « Primes sur objectif » (C1 seule) ne se lisent nulle part
-    expect((primes.match(/title="non affiché \(seuil de confidentialité : 3 personnes\)"/g) ?? []).length).toBe(6); // 2 mois × 2 familles + 2 cellules de période
+    // Objectif janvier et février, vacances janvier, et les deux cellules de période ; vacances février (aucune prime) reste à 0,00 €.
+    expect((primes.match(/title="non affiché \(seuil de confidentialité : 3 personnes\)"/g) ?? []).length).toBe(5);
+    expect(primes).toContain('data-money-cents="0"');
     for (const bad of ["NaN", "undefined", "[object"]) expect(html).not.toContain(bad);
   });
   it("écran Fixe & variable sous le filtre Service masqué : tout l'onglet n.d., le titre nomme le service retenu, avec l'action « Retirer le filtre Service »", () => {
@@ -305,6 +312,118 @@ describe("libellés de paie : contrats et seuil (cas écrits à la main)", () =>
     expect(html).toContain('href="/e/demo/parametres#confidentialite"');
     expect(html).not.toContain('data-testid="fv-labels"');
     expect(html).not.toContain("data-money-cents");
+  });
+});
+
+// --- Fixe & variable et croisée 04 : statut canonique (colonne de la rubrique du mois, fenêtres déduites de leurs mois) ---------------
+// Constat de la relecture rv13 : l'ancienne passe formait des relations propres à la période choisie (« mois d'une famille → période »,
+// « libellés de la période → brut de la période ») ; une même prime d'un mois changeait de statut selon la fenêtre et se reconstituait
+// avec deux ou trois fenêtres. Les deux cas des relecteurs sont rejoués ici : chaque mois a désormais le même statut sur toutes les
+// fenêtres, et aucune fenêtre ne publie une somme qui contient un mois masqué.
+describe("libellés et familles de prime : même statut sur toutes les périodes (cas des relecteurs rejoués, cas écrit à la main)", () => {
+  const lk = (k: number) => [`k${k}`, `p${k}`] as const;
+  const LINK10 = new Map(Array.from({ length: 10 }, (_, i) => lk(i + 1)));
+  const N = (v: string | null, cents: number): number | "n.d." => (v === null ? cents : "n.d.");
+  const KP = { p: labelKey("primes", "Prime P"), q: labelKey("primes", "Prime Q"), r: labelKey("primes", "Prime R") };
+
+  // Cas v1-labels-screen (rv13/verif-coherence). Seuil 3. Salaire de base k1..k10 (p1..p10), 3 000 € en janvier et février 2026.
+  // Prime P : k1, janvier 500 €. Prime Q : k2..k4, janvier 3 × 100 €, février 3 × 1 000 €. Prime R : k5..k7, janvier 3 × 200 €.
+  // Primes publiées : janvier 1 400 €, février 3 000 €.
+  // Calcul à la main. Colonne des primes de janvier (total 1 400 € publié), ordre des clés P, Q, R : P {p1} 500 € masqué ; seul, il se
+  // lirait par différence → la plus petite cellule affichée qui ajoute des personnes, Q {p2, p3, p4} 300 €, est masquée : {p1..p4}
+  // = 4 ≥ 3 ; R {p5, p6, p7} 600 € affiché. Colonne des primes de février (3 000 €) : Q seul, 3 personnes, affiché ; P et R n'ont
+  // aucune ligne : hors de la colonne, 0 affiché. Salaires : 10 personnes, affichés.
+  // Fenêtres : janvier → P et Q n.d., R 600 € ; janvier → février → P et Q n.d. (janvier masqué), R 600 € ; février → Q 3 000 €.
+  // Q-janvier (300 €) n'est publié par aucune fenêtre : P = 1 400 − Q-janvier − 600 ne se calcule plus.
+  const v1: LedgerLine[] = [];
+  for (const m of ["2026-01", "2026-02"]) for (let i = 1; i <= 10; i++) v1.push(line(m, "641100", "Salaire de base", 300000, `k${i}`, null));
+  v1.push(line("2026-01", "641300", "Prime P", 50000, "k1", null));
+  for (const i of [2, 3, 4]) v1.push(line("2026-01", "641300", "Prime Q", 10000, `k${i}`, null), line("2026-02", "641300", "Prime Q", 100000, `k${i}`, null));
+  for (const i of [5, 6, 7]) v1.push(line("2026-01", "641300", "Prime R", 20000, `k${i}`, null));
+  const V1 = journalOf(v1, ["2026-01", "2026-02"]);
+  // Vue de l'écran pour une fenêtre (mêmes listes que l'onglet : libellés par rubrique puis libellé, familles par libellé) : valeur
+  // publiée de chaque famille, sur la période et pour chaque mois, ou « n.d. ».
+  const view = (months: string[]) => {
+    const nT = labelTotals(V1, months);
+    const families = nT.filter((t) => t.rubric === "primes").sort((a, b) => a.label.localeCompare(b.label));
+    const mask = maskLabels({ input: V1, months, prevMonths: months.map((m) => `2025${m.slice(4)}`), keys: nT.map((t) => t.key), families: families.map((f) => f.key), link: LINK10, conf: set(3), prevNd: true });
+    const out: Record<string, { periode: number | "n.d."; mois: (number | "n.d.")[] }> = {};
+    for (const f of families) out[f.key] = { periode: N(mask.labels[f.key].cur, f.cents), mois: mask.families[f.key].map((r, i) => N(r, labelTotals(V1, [months[i]]).find((t) => t.key === f.key)?.cents ?? 0)) };
+    return out;
+  };
+  it("cas v1 rejoué : P et Q de janvier n.d. sur toutes les fenêtres, Q de février 3 000 € partout, R 600 € ; Q-janvier jamais publié", () => {
+    const jan = view(["2026-01"]);
+    const janFev = view(["2026-01", "2026-02"]);
+    const fev = view(["2026-02"]);
+    expect(jan).toEqual({ [KP.p]: { periode: "n.d.", mois: ["n.d."] }, [KP.q]: { periode: "n.d.", mois: ["n.d."] }, [KP.r]: { periode: 60000, mois: [60000] } });
+    expect(janFev).toEqual({ [KP.p]: { periode: "n.d.", mois: ["n.d.", 0] }, [KP.q]: { periode: "n.d.", mois: ["n.d.", 300000] }, [KP.r]: { periode: 60000, mois: [60000, 0] } });
+    expect(fev).toEqual({ [KP.q]: { periode: 300000, mois: [300000] } });
+    // Aucune valeur publiée ne contient Q-janvier : 330 000 c (période janvier → février) n'apparaît nulle part.
+    expect(JSON.stringify([jan, janFev, fev])).not.toContain("330000");
+  });
+  it("le statut d'un mois ne dépend pas des mois demandés (labelMonthStatus) ; la colonne N-1 d'une année est la colonne N de l'année précédente", () => {
+    const one = labelMonthStatus(V1, ["2026-01"], LINK10, 3);
+    const two = labelMonthStatus(V1, ["2026-02", "2026-01"], LINK10, 3);
+    for (const k of [KP.p, KP.q, KP.r, labelKey("salaires", "Salaire de base")]) expect(two(k, "2026-01")).toBe(one(k, "2026-01"));
+    expect([KP.p, KP.q, KP.r].map((k) => one(k, "2026-01"))).toEqual(["masked", "secondary", "shown"]);
+    expect([KP.p, KP.q, KP.r].map((k) => two(k, "2026-02"))).toEqual(["shown", "shown", "shown"]);
+    // Janvier 2026 vu comme N-1 (période janvier 2027, hors de la lecture) : mêmes raisons que janvier 2026 vu comme N.
+    const asPrev = maskLabels({ input: V1, months: ["2027-01"], prevMonths: ["2026-01"], keys: [KP.p, KP.q, KP.r], families: [], link: LINK10, conf: set(3), prevNd: false });
+    const asCur = maskLabels({ input: V1, months: ["2026-01"], prevMonths: ["2025-01"], keys: [KP.p, KP.q, KP.r], families: [], link: LINK10, conf: set(3), prevNd: true });
+    expect([KP.p, KP.q, KP.r].map((k) => asPrev.labels[k].prev)).toEqual([KP.p, KP.q, KP.r].map((k) => asCur.labels[k].cur));
+    expect([KP.p, KP.q, KP.r].map((k) => asCur.labels[k].cur)).toEqual([R3, R3, null]);
+    expect(() => one(KP.p, "2026-02")).toThrow(/non demandé/);
+  });
+
+  // Cas c1-c2-fenetres, constat 2 (rv13/verif-regles), N-1 lisible. Seuil 3. 2025-01 à 2026-02 : salaires k1..k6 (p1..p6) 2 000 € ;
+  // « Prime de vacances » k4, k5, k6 300 € chacun. « Prime exceptionnelle » : janvier 2026 k1 (p1) 1 000 € ; février 2026 k2, k3, k4
+  // 3 × 1 000 €. Calcul à la main. Primes de janvier 2026 (1 900 € publié), ordre « prime de vacances » puis « prime exceptionnelle » :
+  // exceptionnelle {p1} masquée ; la plus petite cellule affichée qui ajoute des personnes, vacances {p4, p5, p6} 900 €, est masquée :
+  // {p1, p4, p5, p6} = 4 ≥ 3. Février 2026 : exceptionnelle {p2, p3, p4} et vacances {p4, p5, p6} affichées. 2025 : vacances affichée,
+  // exceptionnelle sans ligne (0). Fenêtres : janvier → n.d. ; janvier → février → n.d. (janvier masqué) ; février → 3 000 € affiché.
+  // Avant : janvier → février publiait 4 000 €, février 3 000 €, d'où la prime de p1 (1 000 €) par différence.
+  it("cas c2 rejoué : la prime exceptionnelle de janvier est n.d. sur toutes les fenêtres ; janvier → février n'est plus publié", () => {
+    const c2: LedgerLine[] = [];
+    const ALL = ["2025-01", "2025-02", "2026-01", "2026-02"];
+    for (const m of ALL) for (const k of [1, 2, 3, 4, 5, 6]) c2.push(line(m, "641100", "Salaires", 200000, `k${k}`, "A"));
+    for (const m of ALL) for (const k of [4, 5, 6]) c2.push(line(m, "641300", "Prime de vacances", 30000, `k${k}`, "A"));
+    c2.push(line("2026-01", "641300", "Prime exceptionnelle", 100000, "k1", "A"));
+    for (const k of [2, 3, 4]) c2.push(line("2026-02", "641300", "Prime exceptionnelle", 100000, `k${k}`, "A"));
+    const J = journalOf(c2, ALL);
+    const K2 = { sal: labelKey("salaires", "Salaires"), pex: labelKey("primes", "Prime exceptionnelle"), vac: labelKey("primes", "Prime de vacances") };
+    const mask = (months: string[]) => maskLabels({ input: J, months, prevMonths: months.map((m) => m.replace("2026", "2025")), keys: [K2.sal, K2.pex, K2.vac], families: [K2.pex, K2.vac], link: LINK10, conf: set(3), prevNd: false });
+    const jan = mask(["2026-01"]);
+    const janFev = mask(["2026-01", "2026-02"]);
+    const fev = mask(["2026-02"]);
+    expect([jan.labels[K2.pex], janFev.labels[K2.pex], fev.labels[K2.pex]]).toEqual([{ cur: R3, prev: null }, { cur: R3, prev: null }, { cur: null, prev: null }]);
+    expect([jan.families[K2.pex], janFev.families[K2.pex], fev.families[K2.pex]]).toEqual([[R3], [R3, null], [null]]);
+    expect([jan.families[K2.vac], janFev.families[K2.vac], fev.families[K2.vac]]).toEqual([[R3], [R3, null], [null]]);
+    expect([jan.labels[K2.sal], janFev.labels[K2.sal], fev.labels[K2.sal]]).toEqual([{ cur: null, prev: null }, { cur: null, prev: null }, { cur: null, prev: null }]);
+  });
+
+  // Cas de référence écrit à la main : chaque rubrique d'un mois est une colonne, car son total est publié (Fixe, dont primes,
+  // Gratifications de stage, Variable − primes). Seuil 3, mars 2026 :
+  //   Salaire de base (641100)        k1..k4 (p1..p4)  4 × 2 000 € = 8 000 €
+  //   Heures supplémentaires (641110) k1 (p1)                       150 €
+  //   Prime annuelle (641300)         k2..k4 (p2..p4)  3 × 40 €   =   120 €
+  //   Prime d'équipe (641300)         k5..k7 (p5..p7)  3 × 500 €  = 1 500 €
+  // Fixe de mars (publié) : 8 150 €. Colonne Salaires : heures supplémentaires {p1} masquées ; la plus petite cellule affichée qui
+  // ajoute des personnes, le salaire de base {p1..p4}, est masquée : {p1..p4} = 4 ≥ 3. Colonne Primes (1 620 € publié) : deux
+  // familles de 3 personnes, affichées. Une seule colonne du brut aurait masqué la prime annuelle (120 €, la plus petite) à la place
+  // du salaire de base, et les heures supplémentaires se seraient lues par différence : 8 150 − 8 000 = 150 €.
+  it("cas de référence : la colonne des salaires du mois protège ses propres libellés (le Fixe du mois est publié)", () => {
+    const l: LedgerLine[] = [];
+    for (const k of [1, 2, 3, 4]) l.push(line("2026-03", "641100", "Salaire de base", 200000, `k${k}`, "A"));
+    l.push(line("2026-03", "641110", "Heures supplémentaires", 15000, "k1", "A"));
+    for (const k of [2, 3, 4]) l.push(line("2026-03", "641300", "Prime annuelle", 4000, `k${k}`, "A"));
+    for (const k of [5, 6, 7]) l.push(line("2026-03", "641300", "Prime d'équipe", 50000, `k${k}`, "A"));
+    const J = journalOf(l, ["2026-03"]);
+    const K3 = { base: labelKey("salaires", "Salaire de base"), hs: labelKey("salaires", "Heures supplémentaires"), ann: labelKey("primes", "Prime annuelle"), eq: labelKey("primes", "Prime d'équipe") };
+    const m = maskLabels({ input: J, months: ["2026-03"], prevMonths: ["2025-03"], keys: Object.values(K3), families: [K3.ann, K3.eq], link: LINK10, conf: set(3), prevNd: true });
+    expect(Object.values(K3).map((k) => m.labels[k].cur)).toEqual([R3, R3, null, null]);
+    expect(m.families).toEqual({ [K3.ann]: [null], [K3.eq]: [null] });
+    // Les deux libellés masqués ne se lisent qu'ensemble, par le Fixe publié (8 150 €, 4 personnes).
+    expect(labelTotals(J, ["2026-03"]).filter((t) => t.rubric === "salaires").reduce((s, t) => s + t.cents, 0)).toBe(815000);
   });
 });
 
@@ -370,6 +489,30 @@ describe("provision par service : contrats et seuil (cas écrits à la main)", (
     expect(filtered).toContain("n.d. — service B retenu par le filtre");
     expect(filtered).not.toContain('data-money-cents="10000"');
   });
+  it("statut canonique de la fin de mois (seuil 3) : un service que la période fait lister sans dotation ce mois-là reste hors de la colonne, affiché à 0, quelle que soit la liste", () => {
+    // Fin janvier 2026, dotations « Mois courant » : A (C1, P1) 100 € + 40 € = 140 € ; B (C4, P4) 100 € + 40 € = 140 €. Z n'a qu'un
+    // salaire en février (C7). Calcul à la main : A et B masqués (1 personne chacun) ; ensemble {P1, P4} = 2 < 3 : la colonne ne peut
+    // pas être protégée, toute la répartition est n.d. (la provision de l'entreprise, 280 €, reste publiée). Z (aucune dotation, aucun
+    // contrat, 0 €) ne décrit personne : hors de la colonne, affiché à 0 €, que la période le fasse lister (janvier → février) ou non
+    // (janvier). Avant, il était masqué avec la colonne dans le premier cas seulement (et, sous le filtre Z de la croisée 07, toute sa
+    // provision devenait n.d.).
+    const l: LedgerLine[] = [];
+    const d = (c: string, svc: string) => l.push(line("2026-01", "641200", "Provisions pour conges payes - Mois courant", 10000, c, svc), line("2026-01", "648500", "Provisions pour charges sociales - Mois courant", 4000, c, svc));
+    d("C1", "A");
+    d("C4", "B");
+    l.push(...paid("2026-01", "C1", "A", 100000), ...paid("2026-01", "C4", "B", 100000), ...paid("2026-02", "C7", "Z", 100000));
+    const j = journalOf(l, ["2026-01", "2026-02"]);
+    const inputsOf = (months: string[]) => servicesOf(j, months).map((s) => ({ value: s, input: withService(j, s) }));
+    expect(inputsOf(["2026-01"]).map((s) => s.value)).toEqual(["A", "B"]);
+    expect(inputsOf(["2026-01", "2026-02"]).map((s) => s.value)).toEqual(["A", "B", "Z"]);
+    expect(provisionValue(provisionMonth(withService(j, "Z"), "2026-01"))).toBe(0);
+    expect(maskProvisionStatus({ inputs: inputsOf(["2026-01"]), months: ["2026-01"], link, seuil: 3 })).toEqual({ A: { "2026-01": "masked" }, B: { "2026-01": "masked" } });
+    expect(maskProvisionStatus({ inputs: inputsOf(["2026-01", "2026-02"]), months: ["2026-01"], link, seuil: 3 })).toEqual({ A: { "2026-01": "masked" }, B: { "2026-01": "masked" }, Z: { "2026-01": "shown" } });
+    // Garde du filtre Service Z : rien à masquer ; B reste gardé.
+    const mask = maskProvisionServices({ inputs: inputsOf(["2026-01", "2026-02"]), months: ["2026-01"], link, conf: set(3) });
+    expect(provisionGuard(mask, "Z", ["2026-01"], set(3))).toBeNull();
+    expect(provisionGuard(mask, "B", ["2026-01"], set(3))).toEqual({ cause: "seuil", reason: R3 });
+  });
   it("écran Paie & comptabilité (seuil 3) : tuile de l'entreprise 770,00 € conservée ; lignes B et E n.d. avec la raison ; A 420,00 €", () => {
     const compta = { source: null, reason: "aucune", lines: [], months: [], nd: {}, error: false };
     const html = renderToStaticMarkup(h(PaieComptaView, { slug: "demo", input: PROV, fullInput: PROV, months: ["2026-01"], serviceFiltered: false, compta, link, confidentialite: set(3) }));
@@ -401,7 +544,7 @@ describe("provision par service : contrats et seuil (cas écrits à la main)", (
 
 // --- Synthèse (page) et export Excel ---------------------------------------------------------------------------------------------
 const ctxOf = (input: JournalInput) => ({
-  kpi: { collab: { workspace: { id: "w1" } }, input: { data: DATA } },
+  kpi: { collab: { workspace: { id: "w1" } }, input: linkOnlyKpi(DATA) }, // lien seul : aucun ETP de fin de mois dénombré (garde de masse)
   source: "payfit",
   grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
   read: { syncId: "s1", startedAt: new Date("2026-03-03T10:00:00Z"), months: input.months },

@@ -9,8 +9,9 @@ import type { Affichage } from "./components";
 // et affichage lus dans l'adresse ; une valeur invalide est remplacée et signalée. Montants de la période et de son N-1, ETP fin de
 // mois, coût par ETP, tableau par service (toujours sur tout le journal). Aucun autre calcul que ceux du moteur de paie.
 // Seuil de confidentialité (paramètre d'espace, src/lib/confidentialite) : les lignes par service sont masquées en personnes distinctes
-// (services), et, sous le filtre Service, un service masqué rend tous les chiffres de l'écran n.d. (guard) : période, N-1, mois, ETP,
-// coût par ETP sont alors remplacés par des n.d. qui portent la raison, pour l'écran comme pour l'export.
+// (services), et, sous le filtre Service, un service masqué (colonne de masse ou colonne des stocks d'un mois de la période ou de N-1)
+// rend tous les chiffres de l'écran n.d. (guard) : période, N-1, mois, ETP, coût par ETP sont alors remplacés par des n.d. qui portent
+// la raison, pour l'écran comme pour l'export.
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const MM = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
@@ -125,8 +126,10 @@ export function syntheseOf(ctx: PayrollContext, sp: Search, confidentialite: Con
   const link: PersonLink = ctx.kpi.input ? linkFromReferential(ctx.kpi.input.data) : new Map();
   const services = maskServiceRows(serviceRows, link, confidentialite);
   // Service retenu par le filtre : masqué sans filtre (masquage secondaire compris), ou seuil non défini → tous les chiffres du service
-  // sont n.d. (écran et export), avec la raison nue du moteur ; la garde est la même pour tous les écrans filtrés par service.
-  const guard = serviceValue === undefined ? null : serviceGuard(services, serviceValue, confidentialite);
+  // sont n.d. (écran et export), avec la raison nue du moteur ; la garde est la même pour tous les écrans filtrés par service. L'écran
+  // publie aussi l'ETP de fin de mois du service (période et N-1 : ETP, coût par ETP) : la garde lit en plus la colonne des stocks de
+  // ces mois, celle de KPI RH › Effectifs mensuels (ETP × service) et de la croisée 02.
+  const guard = serviceValue === undefined ? null : serviceGuard(services, serviceValue, confidentialite, { kpi: ctx.kpi.input, journal: fullInput, months: [...months, ...prevMonths], link });
   if (guard) {
     const reason = guard.reason;
     const nd = { code: "month-nd" as const, reason }; // code générique du moteur : seule la raison est lue par les écrans et l'export

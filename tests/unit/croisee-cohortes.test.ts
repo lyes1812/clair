@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Contribution, ContributionKind, Hypothesis, ProjectedMonth, Projection } from "@/lib/budget/types";
 import type { PersonLink } from "@/lib/confidentialite";
 import { projectedGroupCell } from "@/lib/confidentialite/groups";
-import { linkedGroupCell, maskCohorts, maskNonRecurring, nonRecurringContributors, partitionCohorts, type CohortPartition, type LinkedGroup } from "@/lib/croisee/cohortes";
-import type { ActualEvent } from "@/lib/payroll/non-recurring";
+import { linkedGroupCell, maskCohorts, partitionCohorts, type CohortPartition, type LinkedGroup } from "@/lib/croisee/cohortes";
 
 // Partition des contrats observés (chapitre 06) : valeurs fictives écrites à la main, résultats calculés à la main (centimes).
 const HORS = "hors-salarie";
@@ -177,140 +175,11 @@ describe("maskCohorts — seuil de confidentialité", () => {
   });
 });
 
-// Éléments non récurrents de l'atterrissage retraité : contributeurs (contrat, à défaut hypothèse), mêmes éléments que retraite
-// (lot3.ts). Projection écrite à la main, sans moteur ; résultats comptés à la main.
-describe("nonRecurringContributors — cas de référence", () => {
-  const C = (o: { hyp: string | null; contract: string | null; nr?: number; kind?: ContributionKind }): Contribution => ({
-    hypothesisId: o.hyp,
-    kind: o.kind ?? "ponctuel",
-    label: "fictif",
-    contractKey: o.contract,
-    who: "fictif",
-    service: null,
-    brut: null,
-    charges: null,
-    cost: o.nr ?? 1_000,
-    ...(o.nr !== undefined ? { nonRecurringCents: o.nr } : {}),
-  });
-  const month = (m: string, contributions: Contribution[]): ProjectedMonth => ({ month: m, kind: "value", brut: null, charges: null, cost: 0, headcount: 0, etp4: null, etpNd: null, contributions });
-  const R = (id: string, m: string, cents: number): Hypothesis => ({ id, kind: "realise", label: "fictif", category: "Catégorie fictive", month: m, costCents: cents });
-  const base = { refMonth: "2026-03" };
-  // Déjà comptabilisés (2026, jusqu'à mars inclus) : r1 1 200,00 € et r5 −100,00 € comptés ; r2 (0,00 €) ne contribue pas ; r3 (mai,
-  // après la bascule) et r4 (2025) hors du total → 2 contributeurs.
-  const hyps = [R("r1", "2026-01", 120_000), R("r2", "2026-02", 0), R("r3", "2026-05", 50_000), R("r4", "2025-12", 70_000), R("r5", "2026-03", -10_000)];
-  // Prévus : c1 porte un coût de sortie (3 000,00 €) et un ponctuel (200,00 €) → 1 contributeur ; l'embauche e1 (tuilage 400,00 €)
-  // → 1 ; l'enveloppe v1 (100,00 € en avril, −100,00 € en mai) se compense → 0 ; la contribution de base (sans part non récurrente)
-  // et 2027 sont hors du total ; un mois n.d. n'a pas de contribution → 2 contributeurs.
-  const proj: Projection = {
-    kind: "value",
-    months: [
-      month("2026-04", [C({ hyp: "d1", contract: "c1", nr: 300_000, kind: "sortie" }), C({ hyp: "p1", contract: "c1", nr: 20_000 }), C({ hyp: "e1", contract: "embauche:e1", nr: 40_000, kind: "embauche" }), C({ hyp: "v1", contract: null, nr: 10_000, kind: "enveloppe" }), C({ hyp: null, contract: "c2", kind: "base" })]),
-      month("2026-05", [C({ hyp: "v1", contract: null, nr: -10_000, kind: "enveloppe" })]),
-      { month: "2026-06", kind: "nd", reasons: ["raison fictive"] },
-      month("2027-01", [C({ hyp: "d9", contract: "c9", nr: 900_000, kind: "sortie" })]),
-    ],
-  };
-
-  // Jetons de personne sans la clé du contrat (le test vérifie qu'aucune clé ne sort de la fonction).
-  const LINK = link({ c1: "personne-un", c2: "personne-deux", c9: "personne-neuf" });
-
-  it("2 hypothèses « réalisé » (sans contrat : non reliées) ; 2 contributeurs prévus : c1 (relié, une fois) et l'embauche (non reliée) ; l'enveloppe compensée ne compte pas", () => {
-    expect(nonRecurringContributors(base, proj, hyps, "2026", undefined, LINK)).toEqual({ realised: G([], 2), projected: G(["personne-un"], 0, 1) });
-    // Sans lien : c1 est un contrat non relié.
-    expect(nonRecurringContributors(base, proj, hyps, "2026")).toEqual({ realised: G([], 2), projected: G([], 1, 1) });
-  });
-
-  it("aucune clé ne sort de la fonction ; une autre année ne lit que ses éléments", () => {
-    expect(JSON.stringify(nonRecurringContributors(base, proj, hyps, "2026", undefined, LINK))).not.toMatch(/c1|e1|v1|r1/);
-    // 2027 : aucune hypothèse « réalisé » avant la bascule de mars 2026 ; c9 → 1 contributeur prévu (relié).
-    expect(nonRecurringContributors(base, proj, hyps, "2027", undefined, LINK)).toEqual({ realised: G([]), projected: G(["personne-neuf"]) });
-  });
-
-  it("une part non récurrente sans contrat ni hypothèse : contributeurs prévus non dénombrés (null), jamais devinés", () => {
-    const p: Projection = { kind: "value", months: [month("2026-04", [C({ hyp: null, contract: null, nr: 5_000 })])] };
-    expect(nonRecurringContributors(base, p, [], "2026", undefined, LINK)).toEqual({ realised: G([]), projected: null });
-  });
-});
-
-describe("nonRecurringContributors — déclarations du Réel rattachées à la base", () => {
-  const syncId = "11111111-1111-4111-8111-111111111111";
-  const base = { refMonth: "2026-02", syncId, actuals: ["2026-01", "2026-02"].map((month) => ({ month, kind: "value" as const, brut: 100000, cotisations: 40000, masse: 140000, headcount: 2, etp4: 20000, etpNd: null })) };
-  const proj: Projection = { kind: "value", months: [] };
-  const event = (patch: Partial<ActualEvent> = {}): ActualEvent => ({ id: "22222222-2222-4222-8222-222222222222", syncId, month: "2026-01", kind: "tuilage", chargedCents: 10000, contractKeys: ["fictif-a", "fictif-b"], note: "Pièce fictive privée", ...patch });
-
-  it("compte les contrats distincts une seule fois entre plusieurs mois et ne restitue aucune identité", () => {
-    const events = [event(), event({ id: "33333333-3333-4333-8333-333333333333", month: "2026-02", kind: "licenciement", contractKeys: ["fictif-b"] })];
-    const result = nonRecurringContributors(base, proj, [], "2026", { kind: "value", events });
-    expect(result).toEqual({ realised: G([], 2), projected: G([]) });
-    // Reliés par le référentiel : deux personnes distinctes, comptées une fois chacune.
-    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events }, new Map([["fictif-a", "personne-un"], ["fictif-b", "personne-deux"]])).realised).toEqual(G(["personne-deux", "personne-un"]));
-    expect(JSON.stringify(result)).not.toMatch(/fictif-|Pièce|22222222/);
-  });
-
-  it("une déclaration non nulle sans contrat est invérifiable ; un zéro explicite ne décrit aucun contributeur", () => {
-    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event({ kind: "autre", contractKeys: [] })] }).realised).toBeNull();
-    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event({ kind: "autre", contractKeys: [], chargedCents: 0 })] }).realised).toEqual(G([]));
-  });
-
-  it("lecture différente, mois réel absent, montant manquant, doublon ou chargement échoué ne donnent pas de compte partiel", () => {
-    for (const candidate of [event({ syncId: "33333333-3333-4333-8333-333333333333" }), event({ chargedCents: null })]) {
-      expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [candidate] }).realised).toBeNull();
-    }
-    expect(nonRecurringContributors({ ...base, actuals: [] }, proj, [], "2026", { kind: "value", events: [event()] }).realised).toBeNull();
-    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event(), event()] }).realised).toBeNull();
-    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "nd", reason: "lecture indisponible" }).realised).toBeNull();
-  });
-
-  it("ignore les événements hors année ou après bascule et bloque un mois déjà déclaré dans les anciennes hypothèses", () => {
-    expect(nonRecurringContributors(base, proj, [], "2026", { kind: "value", events: [event({ month: "2025-01" }), event({ month: "2026-03" })] }).realised).toEqual(G([]));
-    const legacy: Hypothesis = { id: "legacy-fictif", kind: "realise", label: "Fictif", month: "2026-01", category: "Fictif", costCents: 10000 };
-    expect(nonRecurringContributors(base, proj, [legacy], "2026", { kind: "value", events: [event()] }).realised).toBeNull();
-  });
-});
-
-describe("maskNonRecurring — seuil de confidentialité sur les deux totaux (leur somme est affichée), en personnes distinctes", () => {
-  const amounts = { realised: 80_000, projected: 150_000 };
-  const P = (n: number, prefix = "p") => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
-
-  it("seuil 1 : rien n'est masqué quand chaque total compte une personne reliée", () => {
-    expect(maskNonRecurring({ realised: G(["q1"]), projected: G(["p1"]) }, amounts, 1)).toEqual({ realised: "shown", projected: "shown" });
-  });
-
-  it("seuil 2 : 1 personne déjà comptabilisée masquée, l'autre total (3 personnes) masqué en second", () => {
-    expect(maskNonRecurring({ realised: G(["q1"]), projected: G(P(3)) }, amounts, 2)).toEqual({ realised: "masked", projected: "secondary" });
-  });
-
-  it("seuil 2 : 2 et 3 personnes, rien n'est masqué ; seuil 3 : 2 sous le seuil, l'autre en second", () => {
-    expect(maskNonRecurring({ realised: G(["q1", "q2"]), projected: G(P(3)) }, amounts, 2)).toEqual({ realised: "shown", projected: "shown" });
-    expect(maskNonRecurring({ realised: G(["q1", "q2"]), projected: G(P(3)) }, amounts, 3)).toEqual({ realised: "masked", projected: "secondary" });
-  });
-
-  it("un total vide (0 contributeur, 0,00 €) n'est masqué qu'en second ; deux totaux vides restent affichés", () => {
-    expect(maskNonRecurring({ realised: G([]), projected: G(["p1"]) }, { realised: 0, projected: 150_000 }, 3)).toEqual({ realised: "secondary", projected: "masked" });
-    expect(maskNonRecurring({ realised: G([]), projected: G([]) }, { realised: 0, projected: 0 }, 3)).toEqual({ realised: "shown", projected: "shown" });
-  });
-
-  it("contributeurs non reliés (hypothèses sans contrat, embauche prévue) : total non dénombré sous le seuil, l'autre masqué en second ; au moins « seuil » personnes reliées suffisent", () => {
-    // Déjà comptabilisés : 2 hypothèses, aucune personne → non vérifiable (seuil 2) ; prévus (4 personnes) masqués en second.
-    expect(maskNonRecurring({ realised: G([], 2), projected: G(P(4)) }, amounts, 2)).toEqual({ realised: "unverifiable", projected: "secondary" });
-    // Prévus : 2 personnes reliées + 1 contrat non relié : 2 ≥ 2, affiché ; au seuil 3, non dénombré.
-    expect(maskNonRecurring({ realised: G(["q1", "q2"]), projected: G(P(2), 1) }, amounts, 2)).toEqual({ realised: "shown", projected: "shown" });
-    expect(maskNonRecurring({ realised: G(["q1", "q2"]), projected: G(P(2), 1) }, amounts, 3)).toEqual({ realised: "masked", projected: "unverifiable" });
-  });
-
-  it("embauches prévisionnelles (décision du lot 12) : un total porté seulement par des embauches est affiché, ne protège jamais, et n'est masqué qu'avec toute la relation ; mêlé à des contrats réels, il se juge sur ceux-ci", () => {
-    // Prévus : 2 embauches prévues seulement (taille 0) ; déjà comptabilisés : 1 personne → masqué. Aucune cellule ne peut le protéger
-    // (les embauches n'apportent personne) : cas « impossible », la somme « Non récurrents retirés » étant publiée, toute la relation
-    // est n.d. (sinon « retirés − prévus » redonnerait les réalisés : fuite relevée par la relecture du lot 12 quand les embauches
-    // étaient exemptes et restaient affichées).
-    expect(maskNonRecurring({ realised: G(["q1"]), projected: G([], 0, 2) }, amounts, 2)).toEqual({ realised: "masked", projected: "secondary" });
-    // Cas de la relecture : réalisés portés par une hypothèse non reliée (non vérifiable), prévus par deux embauches : tout n.d.
-    expect(maskNonRecurring({ realised: G([], 1), projected: G([], 0, 2) }, amounts, 5)).toEqual({ realised: "unverifiable", projected: "secondary" });
-    // Réalisés affichés (5 personnes ≥ 5) : les embauches seules restent affichées, même au seuil 5.
-    expect(maskNonRecurring({ realised: G(P(5, "q")), projected: G([], 0, 2) }, amounts, 5)).toEqual({ realised: "shown", projected: "shown" });
-    // Prévus : 1 personne reliée + 1 embauche : jugé sur la personne (1 < 2) → masqué ; 2 reliées + 1 embauche → affiché.
-    expect(maskNonRecurring({ realised: G(P(3, "q")), projected: G(["p1"], 0, 1) }, amounts, 2)).toEqual({ realised: "secondary", projected: "masked" });
-    expect(maskNonRecurring({ realised: G(P(3, "q")), projected: G(P(2), 0, 1) }, amounts, 2)).toEqual({ realised: "shown", projected: "shown" });
+// Cellule d'un groupe relié (linkedGroupCell, celle du module partagé) et embauches prévues dans la partition. Les éléments non
+// récurrents de l'atterrissage retraité (« Déjà comptabilisés », « Prévus ») ne sont plus des groupes de la croisée 06 : ce sont des
+// totaux de l'entreprise publiés ailleurs (décision par défaut du lot 12, voir croisee-budget.test.ts).
+describe("linkedGroupCell et embauches prévues", () => {
+  it("cellule du module : embauches seules de taille 0, sans membre, jamais exemptes ; sinon les contrats réels", () => {
     // Cellule du module : celle du module partagé (projectedGroupCell) ; embauches seules : taille 0, sans membre, JAMAIS exempte ;
     // sinon l'entrée du module partagé sur les contrats réels (valeur absolue).
     expect(linkedGroupCell(G([], 0, 2), 2, -300)).toEqual({ size: 0, value: 300, members: [] });
@@ -329,9 +198,5 @@ describe("maskNonRecurring — seuil de confidentialité sur les deux totaux (le
     // colonne ne peut atteindre le seuil : le moteur masque toute la relation, la ligne des embauches comprise (elle n'est plus
     // exempte : sinon « les deux » se lirait par différence du total publié et de la ligne des embauches, limite levée au lot 12).
     expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "secondary", onlyCur: "secondary", both: "masked", outside: "shown" });
-  });
-
-  it("contributeurs non dénombrés (contribution sans contrat ni hypothèse) : total non vérifiable, l'autre masqué en second", () => {
-    expect(maskNonRecurring({ realised: G(P(4)), projected: null }, amounts, 2)).toEqual({ realised: "secondary", projected: "unverifiable" });
   });
 });

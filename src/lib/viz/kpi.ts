@@ -1,5 +1,6 @@
 import type { ChartSeries } from "@/components/charts/shared";
-import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskStatus, type PersonsOfContracts } from "@/lib/confidentialite";
+import { confidentialiteSettingReason, isHidden, maskReason, maskRelations, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type MaskCell, type MaskStatus } from "@/lib/confidentialite";
+import type { AbsenceCountGroup, AbsencePeriodGroups } from "@/lib/rh/kpi/absence-motifs";
 import { columnStatus, maskColumn, stockColumn, stockCount, windowStatus, type StockGroup } from "@/lib/confidentialite/columns";
 import { groupInput, projectedGroupCell } from "@/lib/confidentialite/groups";
 import { motifWindowMask, type MotifWindow } from "@/lib/croisee/conges";
@@ -290,28 +291,67 @@ export function motifMask(cells: MotifWindow, seuil: number): MotifMask {
 
 // Lignes du tableau par motif après masquage : une ligne masquée garde son motif et « retenu » ; ses demi-journées, son taux et ses
 // absences de la période sont n.d. avec la raison du seuil, jamais 0. « Absences de la lecture » (countMasked) est la cellule que publie
-// aussi la tuile Absentéisme (« Motifs de la lecture ») : son statut est celui de typeCountMask, le même sur les deux blocs, quelle que
-// soit la fenêtre. « Absences de la période » (inWindowMasked) : n.d. avec la ligne ; n.d. aussi quand le nombre de toute la lecture est
-// masqué (ses absences en sont une partie : elles décrivent au plus autant de personnes) ; ligne n.d. du moteur : ses personnes ne
-// sont pas dénombrées (non vérifiable). sizes : personnes distinctes de chaque motif dans toute la lecture (absenceTypePersons) ;
-// absentes, un nombre non nul n'est pas vérifiable (typeCountMask).
+// aussi la tuile Absentéisme (« Motifs de la lecture ») et Paramètres › Définitions des KPI : son statut est celui de typeCountMask, le
+// même partout, quelle que soit la fenêtre. « Absences de la période » (inWindowMasked) : n.d. avec la ligne ; n.d. aussi quand le nombre
+// de toute la lecture est masqué (ses absences en sont une partie) ; sinon le statut de ses propres personnes (periodCountMask : la
+// période et ses mois, absences du motif qui touchent la fenêtre). sizes : nombre et personnes distinctes de chaque motif dans toute la
+// lecture (absenceTypePersons) ; period : personnes des absences de la fenêtre (absenceByMotif.period). Absents, un nombre non nul n'est
+// pas vérifiable (aucune valeur de repli).
 export type MaskedMotifRow = MotifRow & { masked: string | null; countMasked: string | null; inWindowMasked: string | null };
-export function maskMotifRows(rows: MotifRow[], mask: MotifMask | null, seuil: number | null, settingReason: string | null, sizes: Readonly<Record<string, PersonsOfContracts>> = {}): MaskedMotifRow[] {
+export function maskMotifRows(rows: MotifRow[], mask: MotifMask | null, seuil: number | null, settingReason: string | null, sizes: AbsenceTypeGroups = {}, period?: AbsencePeriodGroups): MaskedMotifRow[] {
+  const periodStatus = seuil === null ? null : periodCountMask(period, seuil);
   return rows.map((r, i): MaskedMotifRow => {
     const reason = settingReason ?? (mask && seuil !== null && isHidden(mask.lines[i]) ? maskReason(mask.lines[i], seuil) : null);
     const countMasked = settingReason ?? (seuil === null ? null : typeCountMask(sizes, r.type, r.count, seuil));
-    const inWindowMasked = reason ?? (r.kind === "nd" ? SEUIL_NON_VERIFIABLE : null) ?? (countMasked !== null && r.inWindow > 0 ? countMasked : null);
+    const own = periodStatus === null || seuil === null ? null : maskReason(periodStatus(r.type, r.inWindow), seuil);
+    const inWindowMasked = reason ?? (countMasked !== null && r.inWindow > 0 ? countMasked : null) ?? own;
     return reason ? { ...r, kind: "nd", halfText: "n.d.", rateText: "n.d.", reason, masked: reason, countMasked, inWindowMasked } : { ...r, masked: null, countMasked, inWindowMasked };
   });
 }
 
-// Nombre d'absences par motif de toute la lecture (bloc « Motifs de la lecture » de la tuile, colonne « Absences de la lecture » du
-// détail par motif) : masquage principal seulement (aucun total publié), en personnes distinctes des contrats des absences ; il ne
-// dépend d'aucune fenêtre. null : nombre affiché ; sinon la raison du n.d.
-export function typeCountMask(sizes: Readonly<Record<string, PersonsOfContracts>>, type: string, count: number, seuil: number): string | null {
-  const g = sizes[type] ?? { persons: [], unlinked: 0 };
-  const [st] = maskGroups([groupInput(g, seuil, count)], seuil, false);
-  return isHidden(st) ? maskReason(st, seuil) : null;
+// --- Nombres d'absences par motif (tuile Absentéisme « Motifs de la lecture », Paramètres › Définitions des KPI › Absentéisme,
+// colonnes « Absences de la lecture » et « Absences de la période » du détail par motif) ------------------------------------------------
+// Nombre et personnes distinctes de chaque motif (absenceTypePersons, absenceTypeGroups).
+export type AbsenceTypeGroups = Readonly<Record<string, AbsenceCountGroup>>;
+// Cellule de masquage d'un nombre d'absences : personnes reliées des contrats de ses absences (groupInput : un contrat non relié ne
+// protège jamais ; non dénombrée quand des contrats non reliés laissent les personnes reliées sous le seuil), valeur = nombre d'absences
+// (ordre du masquage secondaire).
+const absenceCountCell = (g: AbsenceCountGroup, seuil: number): MaskCell => groupInput(g, seuil, g.count);
+
+// Colonne « Absences de la lecture » : TOUS les motifs de la lecture (sizes), dans l'ordre canonique de leurs codes. Son total est publié
+// par Données › lecture (nombre d'éléments de la collection absences : toutes les absences de la lecture, quel que soit leur motif) :
+// masquage principal et secondaire (maskColumn, total fixe). Elle ne dépend d'aucune fenêtre.
+export function typeCountColumn(sizes: AbsenceTypeGroups, seuil: number): Map<string, MaskStatus> {
+  return maskColumn(Object.entries(sizes).map(([type, g]) => ({ key: type, label: type, cell: absenceCountCell(g, seuil) })), seuil, true);
+}
+
+// Statut du nombre d'absences d'un motif dans toute la lecture, lu dans sa colonne (typeCountColumn). Un nombre qui n'est pas celui de la
+// colonne (motif absent de sizes, nombre différent) n'est pas vérifiable ; un motif sans absence (0) n'a rien à protéger. null : nombre
+// affiché ; sinon la raison du n.d.
+export function typeCountMask(sizes: AbsenceTypeGroups, type: string, count: number, seuil: number): string | null {
+  const g = sizes[type];
+  const st: MaskStatus = g === undefined || g.count !== count ? (count === 0 ? "shown" : "unverifiable") : typeCountColumn(sizes, seuil).get(type)!;
+  return maskReason(st, seuil);
+}
+
+// Statut du nombre « Absences de la période » d'un motif (absences du motif qui touchent la fenêtre), sur ses propres personnes :
+//   1. la période et le reste de la lecture (absences du motif qui ne touchent pas la fenêtre) somment au nombre de toute la lecture,
+//      publié sur la même ligne : une période sous le seuil est masquée, et une période dont le reste décrit de 1 à (seuil − 1)
+//      personnes, ou n'est pas dénombré, l'est en second (maskRelations : sinon « lecture − période » le publierait) ;
+//   2. règle canonique des fenêtres : n.d. dès qu'un de ses mois est masqué (windowStatus). Mois : sa colonne, tous les motifs de la
+//      lecture dans l'ordre canonique, cellule = absences du motif qui touchent le mois ; aucun total publié (le nombre d'absences d'un
+//      mois, tous motifs, n'est affiché nulle part) : masquage principal seul (maskColumn).
+// period non transmis, motif absent ou nombre différent de celui de la période : non vérifiable ; aucune absence : rien à protéger.
+export function periodCountMask(period: AbsencePeriodGroups | undefined, seuil: number): (type: string, inWindow: number) => MaskStatus {
+  const types = Object.entries(period?.types ?? {});
+  const months = (period?.months ?? []).map((_, j) => maskColumn(types.map(([type, l]) => ({ key: type, label: type, cell: absenceCountCell(l.months[j], seuil) })), seuil, false));
+  return (type, inWindow) => {
+    const l = period?.types[type];
+    if (inWindow === 0 && (l === undefined || l.window.count === 0)) return "shown";
+    if (l === undefined || l.window.count !== inWindow || l.offMonths > 0) return "unverifiable";
+    const [own] = maskRelations([absenceCountCell(l.window, seuil), absenceCountCell(l.rest, seuil)], [{ cells: [0, 1] }], seuil);
+    return isHidden(own) ? own : windowStatus(months.map((col) => col.get(type) ?? "unverifiable"));
+  };
 }
 
 // --- Effectifs mensuels : cellules d'une répartition (groupe × mois), une seule passe de masquage pour la grille ET la répartition ---

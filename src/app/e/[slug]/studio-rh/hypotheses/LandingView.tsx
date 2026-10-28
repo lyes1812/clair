@@ -39,6 +39,20 @@ export function ActualNonRecurringStatus({ items }: { items: ActualStatusItem[] 
   </div>;
 }
 
+// Lecteur : la liste élément par élément (nature et mois de chaque déclaration) est réservée aux éditeurs ; seul le nombre de
+// déclarations du Réel que le retraité reprend sur la fenêtre (janvier → mois de la base) est écrit, un total de l'entreprise.
+export function ActualNonRecurringCount({ count, from, to }: { count: number; from: string; to: string }) {
+  if (count === 0) return null;
+  return <p className="tile-foot" data-testid="atr-actual-count">
+    <strong>Coûts passés identifiés dans Réel</strong> : {count} déclaration{count > 1 ? "s" : ""} à reprendre, {formatMonth(from).toLowerCase()} → {formatMonth(to).toLowerCase()}. Le détail par élément est réservé aux éditeurs.
+  </p>;
+}
+
+// Statut de chaque ligne issue des déclarations du Réel (par nature), calculé par la page avec la fonction de la Masse salariale
+// (maskNonRecurring, fenêtre janvier → mois de la base) : raison du n.d., ou null quand la ligne est affichée.
+export type ActualHidden = Record<ActualEvent["kind"], string | null>;
+export const ACTUAL_SHOWN: ActualHidden = { licenciement: null, "rupture-conventionnelle": null, tuilage: null, autre: null };
+
 // Variations proposées pour chaque hypothèse (unité écrite dans le libellé ; aucune valeur par défaut).
 export function variantOptions(hyps: Hypothesis[]): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = [];
@@ -70,11 +84,15 @@ function Wf({ w, testid, title, label }: { w: WaterfallIn; testid: string; title
   );
 }
 
+// actualHidden : statut des lignes issues du Réel (seuil de confidentialité, comme la Masse salariale) ; une ligne masquée est n.d. pour
+// son montant déjà en comptabilité et son total, avec la raison écrite sous le tableau. Les totaux (« déjà en comptabilité », « prévus »,
+// cascade du retraité) sont des totaux de l'entreprise, publiés comme la tuile « Coûts identifiés » : jamais masqués.
 export function LandingView({
-  hrefBase, scenarioId, year, landing, retraite, measures, sens, options, chosen, affichage,
+  hrefBase, scenarioId, year, landing, retraite, measures, sens, options, chosen, affichage, actualHidden,
 }: {
   hrefBase: string; scenarioId: string; year: string; landing: Landing; retraite: Retraite; measures: Measures;
   sens: SensitivityRow[]; options: { value: string; label: string }[]; chosen: { value: string; delta: string }[]; affichage?: string;
+  actualHidden: ActualHidden;
 }) {
   const slug = slugOf(hrefBase);
   const rows = chosen.length ? chosen : [{ value: "", delta: "" }];
@@ -156,12 +174,29 @@ export function LandingView({
               <thead><tr><th>Éléments non récurrents de {year}</th><th className="num">Déjà dans les comptes</th><th className="num">D'ici décembre (hypothèses)</th><th className="num">Total</th></tr></thead>
               <tbody>
                 {retraite.rows.length === 0 && <tr><td colSpan={4} className="desc">Aucun élément non récurrent saisi ni prévu.</td></tr>}
-                {retraite.rows.map((r) => (
-                  <tr key={r.label} data-row={r.label}><td>{r.label}</td><td className="num" data-col="realised">{formatEuros(r.realised)}</td><td className="num" data-col="projected">{formatEuros(r.projected)}</td><td className="num" data-col="total">{formatEuros(r.realised + r.projected)}</td></tr>
-                ))}
+                {retraite.rows.map((r) => {
+                  const hidden = r.actual ? actualHidden[r.actual] : null;
+                  return (
+                    <tr key={`${r.actual ?? ""}|${r.label}`} data-row={r.label}>
+                      <td>{r.label}</td>
+                      {hidden ? <td className="num nd" data-col="realised" title={hidden}>n.d.</td> : <td className="num" data-col="realised">{formatEuros(r.realised)}</td>}
+                      <td className="num" data-col="projected">{formatEuros(r.projected)}</td>
+                      {hidden ? <td className="num nd" data-col="total" title={hidden}>n.d.</td> : <td className="num" data-col="total">{formatEuros(r.realised + r.projected)}</td>}
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot><tr className="total" data-testid="atr-nonrec-total"><td>Total retiré de l'atterrissage</td><td className="num">{formatEuros(retraite.realised)}</td><td className="num">{formatEuros(retraite.projected)}</td><td className="num" data-col="total">{formatEuros(retraite.total)}</td></tr></tfoot>
             </table>
+            {(() => {
+              // Raisons des n.d. sous le tableau (jamais seulement en infobulle), une ligne par raison.
+              const byReason = new Map<string, string[]>();
+              for (const r of retraite.rows) {
+                const hidden = r.actual ? actualHidden[r.actual] : null;
+                if (hidden) byReason.set(hidden, [...(byReason.get(hidden) ?? []), r.label]);
+              }
+              return byReason.size ? <p className="tile-foot nd" data-testid="atr-nonrec-nd">n.d. : {[...byReason].map(([reason, labels]) => `${labels.join(", ")} : ${reason}`).join(" ; ")}</p> : null;
+            })()}
           </div>
         )}
       </section>

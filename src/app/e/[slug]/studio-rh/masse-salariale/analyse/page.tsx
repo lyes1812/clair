@@ -78,7 +78,8 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
   // journal masquées par le moteur, masquage secondaire compris, comme la Synthèse de la Masse salariale et l'Écart budgétaire ; mois
   // projetés d'un scénario par les colonnes du mois, maskProjectedServices : une embauche prévue y est affichée sans jamais protéger
   // personne et masquée avec toute la colonne quand celle-ci ne peut pas être protégée) ; gardé, tout le bloc est n.d. Sans filtre,
-  // seuls les paliers de la cascade sont masqués ; les totaux et le pont de toute l'entreprise ne le sont jamais.
+  // seuls les paliers de la cascade sont masqués (cascadeView → maskCascade : la période et chacun de ses mois, règle « union ») ;
+  // les totaux et le pont de toute l'entreprise ne le sont jamais.
   const setting = await getConfidentialite(workspace.id);
   const conf = confidentialiteOf(setting);
   const kpiData = loaded.ctx.kpi.input?.data ?? null;

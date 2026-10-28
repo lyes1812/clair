@@ -9,6 +9,7 @@ import { confidentialiteReason, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type Con
 import { croiseeLink } from "@/lib/croisee/confidentialite";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
+import { linkOnlyKpi } from "./helpers/link-only-kpi";
 
 // Écart budgétaire : versions comparables, rubriques, agrégation et écart — cas écrits à la main.
 // A : salaire 3 000 €, charges 40 % (1 200 €), TECH, 1 ETP. B : 2 000 €, 45 % (900 €), SALES, 0,5 ETP.
@@ -134,7 +135,7 @@ describe("garde du filtre Service sur les versions comparées (seuil de confiden
   const line = (month: string, accountId: string, debit: number, contractId: string, svc: string): LedgerLine => ({ key: `${month}#${n++}`, month, accountId, accountName: null, debitCents: debit, creditCents: null, contractId, analytic: [{ type: "Service", code: svc, value: svc }] });
   const j26: JournalInput = { lines: [line("2026-01", "641100", 300000, "A", "TECH"), line("2026-01", "645100", 120000, "A", "TECH"), line("2026-01", "641100", 200000, "B", "SALES"), line("2026-01", "645100", 90000, "B", "SALES")], months: ["2026-01"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
   const loadedOf = (versions: Version[], sources: ZoomSource[], filter: ServiceFilter, journal: JournalInput | null = j26, withRef = true) =>
-    ({ ctx: { input: journal, kpi: { input: withRef ? { data } : null } }, versions, sources, filter, months: (year: string) => monthsOfYear(year, "01", "12") }) as never;
+    ({ ctx: { input: journal, kpi: { input: withRef ? linkOnlyKpi(data) : null } }, versions, sources, filter, months: (year: string) => monthsOfYear(year, "01", "12") }) as never; // lien seul : aucun ETP de fin de mois dénombré
   const scenario = (hyps: Hypothesis[], filter: ServiceFilter, journal: JournalInput | null = j26) => {
     const proj = project(base, "2026-10", "2026-12", hyps, conv);
     return { v: scenarioVersion("s", "Révisé", "2026", base, proj, journal, null, filter), src: { kind: "scenario", base, proj, journal, filter } as ZoomSource };

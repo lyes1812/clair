@@ -43,7 +43,11 @@ export const STEP_LABELS: Record<StepId, string> = {
   "etp-change": "Changement d'ETP",
 };
 export type CascadeStep = { id: StepId; label: string; etp4: number; people: { key: string; etp4: number }[] };
-export type Cascade = { kind: "value"; months: number; start: number; end: number; steps: CascadeStep[]; residual: number } | { kind: "nd"; reason: string };
+// byMonth : paliers de la cascade de chacun des mois de la période, dans l'ordre (rang i : mois monthsA[i] de A face au mois
+// monthsB[i] de B, mêmes versions), calculés par la même fonction que la période. Ils ne sont pas affichés : le seuil de
+// confidentialité les lit (maskCascade de src/lib/viz/ecart.ts), car un palier d'une période combine ceux de ses mois. Période d'un
+// mois : byMonth = [steps].
+export type Cascade = { kind: "value"; months: number; start: number; end: number; steps: CascadeStep[]; residual: number; byMonth: CascadeStep[][] } | { kind: "nd"; reason: string };
 
 function peopleOf(v: Version, months: string[]): { kind: "value"; list: Record<string, number>[] } | { kind: "nd"; reason: string } {
   const list: Record<string, number>[] = [];
@@ -62,8 +66,15 @@ export function etpCascade(a: Version, b: Version, monthsA: string[], monthsB: s
   if (A.kind === "nd") return A;
   const Bp = peopleOf(b, monthsB);
   if (Bp.kind === "nd") return Bp;
-  const n = B(monthsA.length);
-  const keys = [...new Set([...A.list.flatMap((x) => Object.keys(x)), ...Bp.list.flatMap((x) => Object.keys(x))])].sort();
+  const period = cascadeOf(A.list, Bp.list);
+  const byMonth = A.list.map((x, i) => cascadeOf([x], [Bp.list[i]]).steps);
+  return { kind: "value", months: monthsA.length, ...period, byMonth };
+}
+
+// Cascade de compositions mois par mois (listes de même longueur n ≥ 1) : départ, paliers, arrivée, résiduel.
+function cascadeOf(listA: Record<string, number>[], listB: Record<string, number>[]): { start: number; end: number; steps: CascadeStep[]; residual: number } {
+  const n = B(listA.length);
+  const keys = [...new Set([...listA.flatMap((x) => Object.keys(x)), ...listB.flatMap((x) => Object.keys(x))])].sort();
   const totals: Record<StepId, Frac> = { "entrees-new": frac(0n, 1n), "entrees-report": frac(0n, 1n), sorties: frac(0n, 1n), "sorties-deport": frac(0n, 1n), "etp-change": frac(0n, 1n) };
   const who: Record<StepId, Map<string, Frac>> = { "entrees-new": new Map(), "entrees-report": new Map(), sorties: new Map(), "sorties-deport": new Map(), "etp-change": new Map() };
   const put = (id: StepId, key: string, x: Frac) => {
@@ -74,8 +85,8 @@ export function etpCascade(a: Version, b: Version, monthsA: string[], monthsB: s
   let sumA = 0n;
   let sumB = 0n;
   for (const k of keys) {
-    const ea = A.list.map((x) => x[k]).filter((x) => x !== undefined);
-    const eb = Bp.list.map((x) => x[k]).filter((x) => x !== undefined);
+    const ea = listA.map((x) => x[k]).filter((x) => x !== undefined);
+    const eb = listB.map((x) => x[k]).filter((x) => x !== undefined);
     const pa = B(ea.length);
     const pb = B(eb.length);
     const sa = B(ea.reduce((s, x) => s + x, 0));
@@ -107,7 +118,7 @@ export function etpCascade(a: Version, b: Version, monthsA: string[], monthsB: s
     prev = r;
   }
   const end = round(frac(sumB, n));
-  return { kind: "value", months: monthsA.length, start, end, steps, residual: end - start - steps.reduce((s, x) => s + x.etp4, 0) };
+  return { start, end, steps, residual: end - start - steps.reduce((s, x) => s + x.etp4, 0) };
 }
 
 // Personnes distinctes décrites par chaque palier (unité du seuil de confidentialité) : les contrats réels du palier (clé de

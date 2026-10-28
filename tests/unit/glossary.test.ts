@@ -19,11 +19,19 @@ import {
   type GlossaryEntry,
 } from "@/lib/glossary";
 import { GLOSSARY_ECRAN } from "@/lib/glossary/ecran";
-import { CONFIDENTIALITE_TERM, confidentialiteReason, maskGroups, SEUIL_ILLISIBLE, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE } from "@/lib/confidentialite";
+import { DONNEES_TERMS } from "@/lib/glossary/donnees";
+import { CONFIDENTIALITE_TERM, confidentialiteReason, isHidden, maskGroups, SEUIL_ILLISIBLE, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE } from "@/lib/confidentialite";
 import { canonicalCompare, maskColumn, stockColumn, windowStatus } from "@/lib/confidentialite/columns";
 import { projectedGroupCell } from "@/lib/confidentialite/groups";
+import { crossKey, crossMask } from "@/lib/confidentialite/splits";
+import { SPLIT_AXES } from "@/lib/budget/monthly";
 import { provisionValue } from "@/lib/payroll/lot2";
-import { seuilText } from "@/lib/viz/kpi";
+import type { ActualEvent } from "@/lib/payroll/non-recurring";
+import { maskNonRecurring, natureMonthMask } from "@/lib/payroll/non-recurring-mask";
+import type { AbsencePeriodGroups } from "@/lib/rh/kpi/absence-motifs";
+import { maskCascade } from "@/lib/viz/ecart";
+import { periodCountMask, seuilText, typeCountMask } from "@/lib/viz/kpi";
+import { ActualNonRecurringCount } from "@/app/e/[slug]/studio-rh/hypotheses/LandingView";
 
 // Accès : la page demande l'espace comme les autres pages (un non-membre est refusé, 404 côté application).
 const access = vi.hoisted(() => ({ asked: [] as string[] }));
@@ -347,7 +355,132 @@ describe("Glossaire : Seuil de confidentialité (règle de l'application)", () =
     expect(provisionValue({ month: m, kind: "value", conges: null, charges: 4_000, total: null, missing: ["congés"] })).toBe(4_000);
     expect(provisionValue({ month: m, kind: "nd", reason: "mois non lu" })).toBeNull();
     expect(glossaryEntry("primes")!.definition).toContain("La répartition par nature (nombre d'éléments et coût) suit le seuil de confidentialité");
-    expect(general.definition).toContain("les mois d'une ligne et son total, pour une famille de prime, une nature d'éléments non récurrents du réel");
+    // Finition du lot 12 : familles de prime et éléments non récurrents n'ont plus de relation « mois → période » (règle canonique).
+    expect(general.definition).toContain("les mois d'une ligne et son total, pour les absences posées à venir d'un motif");
+    expect(general.definition).toContain("le brut d'un libellé de paie ou d'une famille de prime, la provision de congés payés d'un service, le nombre et le coût d'une nature d'éléments non récurrents du réel se jugent sur la seule colonne de leur mois");
+  });
+
+  // Finition du lot 12 : le glossaire suit le code final des correctifs. Chaque phrase est vérifiée sur la fonction qui la met en œuvre,
+  // avec un cas écrit à la main (valeurs fictives, seuil indiqué dans chaque cas).
+  it("primes et provision : statut de chaque mois dans sa colonne ; aucune relation « mois → période » ne subsiste", () => {
+    for (const e of GLOSSARY) {
+      for (const gone of ["les mois d'une ligne et son total, pour une famille de prime", "la période d'une famille de prime, le taux", "vers la cellule de période de la famille", "brut par libellé, paliers"]) expect(e.definition, `${e.id} : ${gone}`).not.toContain(gone);
+    }
+    expect(glossaryEntry("primes")!.definition).toContain("Chaque mois d'un libellé (une famille est un libellé de la rubrique « Primes ») est jugé dans la colonne de sa rubrique du brut ce mois-là");
+    expect(glossaryEntry("primes")!.definition).toContain("une prime d'un mois garde le même statut quelle que soit la période choisie");
+    expect(glossaryEntry("provision")!.definition).toContain("avec masquage secondaire dans la colonne de la fin de mois, dont la provision de l'entreprise, qui reste affichée, est le total");
+    // Fenêtre déduite de ses mois (windowStatus) : janvier masqué, février affiché → la période janvier → février est n.d. (secondary).
+    expect(windowStatus(["masked", "shown"])).toBe("secondary");
+  });
+
+  it("éléments non récurrents du réel : colonne de chaque mois, total « Coûts identifiés » ; nature vide gardée dans la colonne", () => {
+    const masse = glossaryEntry("primes")!.definition;
+    expect(masse).toContain("Chaque mois d'une nature est jugé dans la colonne de son mois, dont les « Coûts identifiés » du mois sont le total");
+    expect(masse).toContain("toute la répartition de ce mois est n.d., zéros compris");
+    expect(general.definition).toContain("seuls un motif d'absence sans demi-journée et une nature sans élément restent dans la colonne de leur mois");
+    // Seuil 3. Janvier : un licenciement (p1, 100,00 €) et trois ruptures (p2, p3, p4, 30,00 € chacune). Ordre canonique des libellés :
+    // Autres (vide), Licenciements (1 personne), Ruptures (3), Tuilages (vide). Licenciements masqué ; Ruptures masqué en second (1 + 3 =
+    // 4 personnes ≥ 3) ; les natures vides n'apportent personne et restent affichées. Février : un seul licenciement (p5), seule nature
+    // non vide : impossible à protéger, toute la répartition du mois est n.d., natures vides comprises.
+    const ev = (id: string, month: string, kind: ActualEvent["kind"], contract: string, cents: number): { event: ActualEvent } => ({ event: { id, syncId: "s", month, kind, chargedCents: cents, contractKeys: [contract], note: "" } });
+    const items = [ev("e1", "2026-01", "licenciement", "c1", 10_000), ev("e2", "2026-01", "rupture-conventionnelle", "c2", 3_000), ev("e3", "2026-01", "rupture-conventionnelle", "c3", 3_000), ev("e4", "2026-01", "rupture-conventionnelle", "c4", 3_000), ev("e5", "2026-02", "licenciement", "c5", 10_000)];
+    const link = new Map([1, 2, 3, 4, 5].map((i) => [`c${i}`, `p${i}`] as const));
+    const jan = natureMonthMask(items, "2026-01", link, 3);
+    expect([jan.get("licenciement"), jan.get("rupture-conventionnelle"), jan.get("tuilage"), jan.get("autre")]).toEqual(["masked", "secondary", "shown", "shown"]);
+    const feb = natureMonthMask(items, "2026-02", link, 3);
+    for (const k of ["licenciement", "rupture-conventionnelle", "tuilage", "autre"] as const) expect(isHidden(feb.get(k)!), k).toBe(true);
+    // Période janvier → février : les ruptures, masquées en janvier, sont n.d. sur la période ; le mois de janvier garde son statut.
+    const conf = { kind: "set", value: 3, updatedAt: null, updatedBy: null } as const;
+    const win = maskNonRecurring(items, ["2026-01", "2026-02"], link, conf);
+    expect(win["rupture-conventionnelle"].reason).toBe(confidentialiteReason(3));
+    expect(win["rupture-conventionnelle"].months["2026-01"]).toBe(confidentialiteReason(3));
+  });
+
+  it("Hypothèses › Atterrissage : lignes du Réel au seuil, liste des déclarations réservée aux éditeurs ; croisée 06 : totaux de l'entreprise", () => {
+    const r = glossaryEntry("retraite")!;
+    expect(r.see).toContain("confidentialite");
+    expect(r.definition).toContain("suivent le seuil de confidentialité avec les statuts de la Masse salariale, sur janvier → mois de la base");
+    expect(r.definition).toContain("La liste des déclarations reprises (nature et mois de chacune) est réservée aux éditeurs ; un lecteur n'en voit que le nombre");
+    // Ce que voit un lecteur (composant de l'écran) : 2 déclarations de janvier à mars 2026, sans nature ni mois de chacune.
+    const html = renderToStaticMarkup(h(ActualNonRecurringCount, { count: 2, from: "2026-01", to: "2026-03" }));
+    expect(html).toContain("2 déclarations à reprendre");
+    expect(html).toContain("Le détail par élément est réservé aux éditeurs.");
+    expect(general.definition).toContain("« Coûts identifiés » du réel et totaux « Déjà comptabilisés » et « Prévus » de l'atterrissage retraité");
+    expect(general.definition).toContain("(dans Hypothèses budgétaires › Atterrissage, un lecteur ne voit que le nombre de déclarations reprises)");
+    expect(general.definition).not.toContain("les contrats observés et les éléments non récurrents (Budget & prévisions)");
+  });
+
+  it("nombres d'absences par motif : colonne de tous les motifs de la lecture (KPI RH et Paramètres) ; absences de la période sur leurs propres personnes", () => {
+    expect(glossaryEntry("kpi-types-absence")!.definition).toContain("avec masquage secondaire entre tous les motifs de la lecture, dont le total est le nombre d'absences que publie la lecture dans Données ; Paramètres › Définitions des KPI affiche le même nombre avec le même statut");
+    expect(glossaryEntry(DONNEES_TERMS.absenceTypes)!.definition).toContain("qui a le statut du même nombre dans KPI RH");
+    // Seuil 3. Motif A : 2 absences, 1 personne ; B : 5 absences, 3 personnes ; C : 4 absences, 4 personnes. Total de la colonne publié
+    // (Données). A masqué ; le plus petit autre nombre, C (4 < 5), masqué en second (1 + 4 = 5 personnes) ; B affiché. Un nombre qui
+    // n'est pas celui de la colonne (B affiché à 6) n'est pas vérifiable.
+    const g = (persons: string[], count: number) => ({ persons, unlinked: 0, count });
+    const sizes = { A: g(["p1"], 2), B: g(["p2", "p3", "p4"], 5), C: g(["p5", "p6", "p7", "p8"], 4) };
+    expect([typeCountMask(sizes, "A", 2, 3), typeCountMask(sizes, "B", 5, 3), typeCountMask(sizes, "C", 4, 3)]).toEqual([confidentialiteReason(3), null, confidentialiteReason(3)]);
+    expect(typeCountMask(sizes, "B", 6, 3)).toBe(SEUIL_NON_VERIFIABLE);
+    // Absences de la période, seuil 3 : motif A, 3 absences de la période (p1, p2, p3, toutes en janvier) et 1 absence hors de la période
+    // (p4) ; le reste (1 personne) se déduit du nombre de la lecture : la période est masquée en second. Motif B : 3 absences de la
+    // période (p5, p6, p7), aucun reste, janvier à 3 personnes : affiché.
+    expect(glossaryEntry("absence-par-motif")!.definition).toContain("quand le reste de la lecture (absences du motif hors de la période), qui s'en déduit, est sous le seuil ou non dénombré, ou dès qu'un de ses mois est masqué");
+    const none = g([], 0);
+    const period: AbsencePeriodGroups = {
+      months: ["2026-01", "2026-02"],
+      types: {
+        A: { window: g(["p1", "p2", "p3"], 3), months: [g(["p1", "p2", "p3"], 3), none], rest: g(["p4"], 1), offMonths: 0 },
+        B: { window: g(["p5", "p6", "p7"], 3), months: [g(["p5", "p6", "p7"], 3), none], rest: none, offMonths: 0 },
+      },
+    };
+    const st = periodCountMask(period, 3);
+    expect([st("A", 3), st("B", 3)]).toEqual(["secondary", "shown"]);
+  });
+
+  it("filtres : garde Service sur la masse et l'ETP ; Établissement + Nature en une passe ; valeur affichée comparée à la cellule contrôlée", () => {
+    const d = general.definition;
+    expect(d).toContain("dans la colonne des masses du mois et, quand l'écran publie aussi l'ETP de fin de mois du service (ETP et coût par ETP, ETP des versions réelles), dans celle de l'ETP de fin de mois par service, la même que les Effectifs mensuels");
+    expect(glossaryEntry("service")!.definition).toContain("dans la répartition de l'ETP de fin de mois par service (KPI RH › Effectifs mensuels), l'écran publiant aussi son ETP et son coût par ETP");
+    expect(glossaryEntry("pont-volume-cout")!.definition).toContain("dans celle de l'ETP de fin de mois par service (effectif et ETP masqués ensemble");
+    expect(d).toContain("ou quand le nombre affiché sous le filtre diffère de celui de cette cellule");
+    expect(d).toContain("Avec les deux filtres, la cellule examinée est un croisement du tableau établissement × nature du mois (effectif ou mouvements), masqué en une seule passe");
+    // Seuil 2. E1 : CDD 1 personne (a), CDI 3 ; E2 : CDD 3, CDI 4 ; les quatre marges (E1 = 4, E2 = 7, CDD = 4, CDI = 7) sont publiées
+    // par les filtres seuls. Masquées partition par partition, E2 × CDI resterait affichée : 7 − 4 = 3 (E2 × CDD), puis 4 − 3 = 1 (E1 ×
+    // CDD). En une passe : E1 × CDD masqué, E1 × CDI (ligne E1) et E2 × CDD (colonne CDD) en second, puis E2 × CDI (colonne CDI).
+    const cell = (members: string[]) => ({ size: members.length, value: members.length, members });
+    const cells = {
+      [crossKey("E1", "CDD")]: cell(["a"]),
+      [crossKey("E1", "CDI")]: cell(["b", "c", "d"]),
+      [crossKey("E2", "CDD")]: cell(["e", "f", "g"]),
+      [crossKey("E2", "CDI")]: cell(["h", "i", "j", "k"]),
+    };
+    const shown = (labels: string[]) => new Map(labels.map((l) => [l, "shown" as const]));
+    const st = crossMask(cells, { etablissement: shown(["E1", "E2"]), nature: shown(["CDD", "CDI"]) }, 2);
+    expect([st.get(crossKey("E1", "CDD")), st.get(crossKey("E1", "CDI")), st.get(crossKey("E2", "CDD")), st.get(crossKey("E2", "CDI"))]).toEqual(["masked", "secondary", "secondary", "secondary"]);
+  });
+
+  it("cascade d'ETP : un palier de la période est n.d. dès qu'il l'est dans la cascade d'un seul de ses mois (règle « union »)", () => {
+    expect(general.definition).toContain("un palier d'une période est n.d. dès qu'il l'est dans la cascade de la période ou dans celle d'un seul de ses mois");
+    // Seuil 2, chaque contrat relié à sa propre personne. Période : entrées nouvelles a, b, c ; sorties x, y, z : tous affichés dans la
+    // cascade de la période. Janvier : sorties x seule (masquée) et entrées a, b, c (masquées en second) ; février : sorties y, z et
+    // entrées a, b, c, affichées. Union : les deux paliers de la période sont n.d. (secondary).
+    const step = (id: "entrees-new" | "sorties", keys: string[]) => ({ id, label: id, etp4: (id === "sorties" ? -1 : 1) * keys.length * 10_000, people: keys.map((key) => ({ key, etp4: 10_000 })) });
+    const link = new Map(["a", "b", "c", "x", "y", "z"].map((k) => [k, `P-${k}`] as const));
+    const own = maskCascade({ steps: [step("entrees-new", ["a", "b", "c"]), step("sorties", ["x", "y", "z"])], byMonth: [[step("entrees-new", ["a", "b", "c"]), step("sorties", ["x", "y", "z"])]] }, link, 2);
+    expect(own.status).toEqual(["shown", "shown"]);
+    const union = maskCascade(
+      { steps: [step("entrees-new", ["a", "b", "c"]), step("sorties", ["x", "y", "z"])], byMonth: [[step("entrees-new", ["a", "b", "c"]), step("sorties", ["x"])], [step("entrees-new", ["a", "b", "c"]), step("sorties", ["y", "z"])]] },
+      link,
+      2,
+    );
+    expect(union.status).toEqual(["secondary", "secondary"]);
+  });
+
+  it("Effectifs mensuels par nature et par établissement : groupes des filtres ; seul un contrat déclaré par deux établissements diverge", () => {
+    const d = glossaryEntry("effectifs-ventilation")!.definition;
+    expect(SPLIT_AXES).toEqual({ contrat: "nature", etablissement: "etablissement" });
+    expect(d).toContain("un mouvement est rangé sous sa propre nature et l'établissement qui le déclare, un inscrit et son ETP sous la nature et l'établissement déclarés ce mois-là");
+    expect(d).toContain("un contrat que deux établissements déclarent le même mois compte sous chacun des deux filtres mais une seule fois dans la grille");
+    expect(d).not.toContain("nature transformée, mutation");
   });
 });
 

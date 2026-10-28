@@ -261,7 +261,7 @@ describe("Données : écrans sans narratif, avec renvoi au glossaire", () => {
       origins: {}, kinds: { fullTimeIsOne: "validated", capAtOne: "validated", forfaitJoursIsOne: "validated", etpDecimals: "validated", turnoverFormula: "validated", neutralizeContinuity: "validated", excludedExitNatures: "validated", absenceTypes: "validated", absenceStatuses: "validated", dayBasis: "validated" },
       notes: { etp: "Valeurs par défaut validées le 22/10/2026.", turnover: null, absence: null },
       natures: [{ code: "01", label: "CDI" }, { code: "02", label: "CDD" }],
-      types: [{ type: "fr_maladie_ordinaire", label: "Maladie ordinaire", count: 3, inRead: true }, { type: "test_conge", label: null, count: 0, inRead: false }],
+      types: [{ type: "fr_maladie_ordinaire", label: "Maladie ordinaire", count: 3, countNd: null, inRead: true }, { type: "test_conge", label: null, count: 0, countNd: null, inRead: false }],
       readLabel: "lecture du 21/10/2026",
       statuses: [{ code: "approved", label: "approuvée" }],
       disabled: false,

@@ -6,8 +6,10 @@ import { maskNonRecurring } from "./non-recurring-mask";
 import type { ServiceGuard } from "./service-rows";
 
 const categories: [ActualEvent["kind"], string][] = [["licenciement", "Licenciements"], ["rupture-conventionnelle", "Ruptures conventionnelles"], ["tuilage", "Tuilages"], ["autre", "Autres éléments identifiés"]];
-// conf : seuil de confidentialité, mêmes statuts que l'écran (maskNonRecurring) ; une nature masquée est n.d. sur toute sa ligne, un mois
-// masqué d'une nature affichée l'est seul. guard : garde du filtre Service, la masse du service retenu est n.d. comme à l'écran.
+// conf : seuil de confidentialité, mêmes statuts que l'écran (maskNonRecurring, règle canonique) : chaque cellule de mois d'une nature
+// porte le statut de la nature dans la colonne de ce mois ; le nombre d'éléments et le total de la nature sur la période, celui de la
+// période déduit de ses mois (n.d. dès qu'un mois est masqué). guard : garde du filtre Service, la masse du service retenu est n.d.
+// comme à l'écran.
 export type NonRecurringConf = { link: PersonLink; confidentialite: ConfidentialiteSetting; guard: ServiceGuard | null };
 export function actualNonRecurringSheet(input: JournalInput, events: ActualEvent[], months: string[], syncId: string | null, conf: NonRecurringConf): SheetSpec {
   const built = buildActualNonRecurring(input, events, months, syncId);
@@ -26,12 +28,12 @@ export function actualNonRecurringSheet(input: JournalInput, events: ActualEvent
         const total = selected.reduce((value, row) => value + BigInt(row.amount!), 0n);
         return total > BigInt(Number.MAX_SAFE_INTEGER) || total < BigInt(Number.MIN_SAFE_INTEGER) ? { nd: "somme hors borne entière exacte" } : Number(total);
       };
-      const hidden = mask[kind].reason;
-      if (hidden) return [label, { nd: hidden }, ...months.map((): ExportCell => ({ nd: hidden })), { nd: hidden }, "Non affiché : seuil de confidentialité (voir l'onglet Filtres)."];
       const monthCell = (month: string): ExportCell => {
         const r = mask[kind].months[month];
         return r ? { nd: r } : sum(rows.filter((row) => row.event.month === month));
       };
+      const hidden = mask[kind].reason;
+      if (hidden) return [label, { nd: hidden }, ...months.map(monthCell), { nd: hidden }, "Nombre et total de la période non affichés : seuil de confidentialité (voir l'onglet Filtres)."];
       return [label, rows.length, ...months.map(monthCell), sum(rows), "Déclaration du client, rattachée à la lecture PayFit ; montants déjà compris dans la paie. Liste non exhaustive, aucun prorata de tuilage présumé."];
     }).concat([
       ["Masse chargée source", "", ...months.map(() => ""), money(result.raw, conf.guard?.reason ?? "masse source indisponible"), "Journal PayFit inchangé"],

@@ -1144,10 +1144,13 @@ export async function loadSyntheseInput(ctx: CroiseeContext): Promise<SyntheseIn
   // (serviceGuardOnWindows : lignes par service du journal entier, masquées par le moteur unique, masquage secondaire compris) s'y
   // applique sur chaque fenêtre affichée (période, N-1, douze mois glissants, années N et N-1) ; service masqué ou non dénombré, tout
   // le bloc est n.d. avec la raison et le lien « Retirer le filtre Service » ; sans seuil défini, avec le lien vers Paramètres ›
-  // Confidentialité.
+  // Confidentialité. Le coût par ETP-mois publie aussi l'ETP de fin de mois du service sur la période et N-1 : la garde y lit en plus la
+  // colonne des stocks de ces mois (celle de KPI RH › Effectifs mensuels, ETP × service, et de la croisée 02).
   const journal = pay.input;
   let payIn: SynthesePay;
-  const guard = journal && filtered ? serviceGuardOnWindows(journal, [months, prevMonths, rolling, yearMonths(year), yearMonths(year - 1)], svc ?? null, await ctx.load.persons(), ctx.settings.confidentialite) : null;
+  const guard = journal && filtered
+    ? serviceGuardOnWindows(journal, [months, prevMonths, rolling, yearMonths(year), yearMonths(year - 1)], svc ?? null, await ctx.load.persons(), ctx.settings.confidentialite, { kpi: kpi.input, months: [...months, ...prevMonths] })
+    : null;
   if (!journal) payIn = { kind: "nd", reason: journalReason(pay) ?? "journal de paie indisponible", action: dataAction };
   else if (guard) {
     const action = guard.cause === "parametre" ? { href: confidentialiteHref(slug), label: "Paramètres" } : { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
