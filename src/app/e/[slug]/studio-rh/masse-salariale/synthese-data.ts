@@ -124,7 +124,8 @@ export function syntheseOf(ctx: PayrollContext, sp: Search, confidentialite: Con
   // Seuil de confidentialité : lignes par service en personnes distinctes (contrats du journal reliés par le référentiel).
   const link: PersonLink = ctx.kpi.input ? linkFromReferential(ctx.kpi.input.data) : new Map();
   const services = maskServiceRows(serviceRows, link, confidentialite);
-  // Service retenu par le filtre : masqué sans filtre, ou seuil non défini → tous les chiffres du service sont n.d. (écran et export).
+  // Service retenu par le filtre : masqué sans filtre (masquage secondaire compris), ou seuil non défini → tous les chiffres du service
+  // sont n.d. (écran et export), avec la raison nue du moteur ; la garde est la même pour tous les écrans filtrés par service.
   const guard = serviceValue === undefined ? null : serviceGuard(services, serviceValue, confidentialite);
   if (guard) {
     const reason = guard.reason;

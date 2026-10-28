@@ -1,5 +1,5 @@
 import type { ChartSeries } from "@/components/charts/shared";
-import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, maskRelations, maskSize, type ConfidentialiteSetting, type MaskCell, type MaskInput, type MaskRelation, type MaskStatus, type PersonsOfContracts } from "@/lib/confidentialite";
+import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, maskRelations, maskSize, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type MaskStatus, type PersonsOfContracts } from "@/lib/confidentialite";
 import { groupInput, unionGroups } from "@/lib/croisee/confidentialite";
 import { fmtEtp4, fmtFixed, fmtFraction, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { roundHalfUp } from "@/lib/rh/kpi/fraction";
@@ -27,8 +27,11 @@ export type RowIn = {
   absenteeism: RatioIn;
   previous: { month: string; etp: EtpIn; absenteeism: RatioIn };
 };
+// Cellule d'une catégorie un mois donné : effectif et ETP, ou n.d. avec sa raison (seuil de confidentialité) ; une catégorie sans contrat
+// ce mois-là n'a pas de cellule (sans objet, jamais 0).
+export type CategoryCellIn = { kind: "value"; headcount: number; etp4: number | null } | { kind: "nd"; reason: string };
 export type CategoryMonthIn =
-  | { kind: "value"; month: string; lowerBound: boolean; byCategory: Record<string, { headcount: number; etp4: number | null }> }
+  | { kind: "value"; month: string; lowerBound: boolean; byCategory: Record<string, CategoryCellIn> }
   | { kind: "nd"; month: string; reason: string };
 type CellIn = { kind: "value"; v: number } | { kind: "nd"; reason: string } | { kind: "na" };
 export type GridIn = { months: string[]; groups: string[]; cell: (group: string, month: string) => CellIn; total: (month: string) => CellIn };
@@ -114,7 +117,8 @@ export function comparedRate(name: string, previous: { label: string; value: Rat
 
 // Effectif et ETP de fin de mois par catégorie (même calcul que l'ETP contractuel de fin de mois). Une catégorie absente
 // d'un mois connu n'a aucun contrat ce mois-là : zéro réel, comme dans le tableau (« — »). Un mois n.d. ou en borne basse
-// n'est pas tracé ; un ETP n.d. (contrat sans quotité) reste n.d.
+// n'est pas tracé ; un ETP n.d. (contrat sans quotité) reste n.d. ; une cellule masquée par le seuil de confidentialité n'est
+// pas tracée, sa raison est dans l'infobulle (jamais 0).
 export function categorySeries(months: CategoryMonthIn[], keys: string[], labels: Record<string, string>, measure: "etp" | "headcount"): ChartSeries[] {
   const gate = (m: CategoryMonthIn): Point | null => (m.kind === "nd" ? absent(m.reason) : m.lowerBound ? absent(`borne basse : ${LOWER}`) : null);
   // Aucune catégorie lue : une série « Total » porte les raisons des mois n.d. (et 0 pour un mois connu sans contrat).
@@ -125,6 +129,7 @@ export function categorySeries(months: CategoryMonthIn[], keys: string[], labels
       if (g) return g;
       const x = m.kind === "value" ? m.byCategory[k] : undefined;
       if (!x) return known(0);
+      if (x.kind === "nd") return absent(x.reason);
       if (measure === "headcount") return known(x.headcount);
       return x.etp4 === null ? absent("ETP n.d. : au moins un contrat de la catégorie sans quotité lisible") : known(x.etp4);
     });
@@ -315,22 +320,53 @@ export function typeCountMask(sizes: Readonly<Record<string, PersonsOfContracts>
   return isHidden(st) ? maskReason(st, seuil) : null;
 }
 
-// --- Effectifs mensuels : cellules d'une répartition (groupe × mois), masquage secondaire par colonne (total du mois publié) ------
-// sizes : personnes distinctes d'un groupe un mois donné (contrats reliés par le référentiel), null quand elles ne sont pas dénombrées.
-export type GridSizes = (group: string, month: string) => PersonsOfContracts | null;
-export type GridMask = Map<string, MaskStatus[]>; // mois → statut de chaque groupe (ordre de g.groups) ; mois absent : total n.d.
-const sizeInput = (g: PersonsOfContracts | null, seuil: number, value: number | null): MaskInput => (g ? groupInput(g, seuil, value) : { size: null, value });
-export function gridMask(g: GridIn, sizes: GridSizes, seuil: number): GridMask {
-  const out: GridMask = new Map();
-  for (const m of g.months) {
-    if (g.total(m).kind !== "value") continue;
-    const cells = g.groups.map((grp) => {
-      const c = g.cell(grp, m);
-      return sizeInput(sizes(grp, m), seuil, c.kind === "value" ? c.v : null);
+// --- Effectifs mensuels : cellules d'une répartition (groupe × mois), une seule passe de masquage pour la grille ET la répartition ---
+// sizes : personnes distinctes d'un groupe un mois donné (contrats reliés par le référentiel), null quand elles ne sont pas dénombrées ;
+// hires : embauches prévisionnelles d'un scénario qui portent la cellule. Décision de l'intégrateur (à soumettre à Lyes) : une embauche
+// prévue ne décrit aucune personne réelle ; une cellule portée seulement par des embauches prévues est EXEMPTE du masquage (affichée,
+// MaskCell.exempt) et n'apporte aucune personne protectrice ; une cellule qui mêle embauches et contrats réels se juge sur ses
+// contrats réels.
+export type GridGroup = PersonsOfContracts & { hires?: number };
+export type GridSizes = (group: string, month: string) => GridGroup | null;
+// months : mois connu (total publié) → statut de chaque groupe, dans l'ordre de g.groups ; mois absent : total n.d. share : statut du
+// cumul de chaque groupe (répartition d'un flux) ; null pour un stock, dont la répartition lit la colonne du dernier mois connu.
+export type GridMask = { months: Map<string, MaskStatus[]>; share: MaskStatus[] | null };
+const exemptGroup = (g: GridGroup): boolean => (g.hires ?? 0) > 0 && g.persons.length === 0 && g.unlinked === 0;
+const sizeInput = (g: GridGroup | null, seuil: number, value: number | null): MaskCell =>
+  g === null ? { size: null, value } : exemptGroup(g) ? { size: 0, value, members: [], exempt: true } : groupInput(g, seuil, value);
+// Personnes de plusieurs mois réunis (distinctes), contrats non reliés et embauches additionnés ; null dès qu'un mois n'est pas dénombré.
+const unionGrid = (parts: readonly (GridGroup | null)[]): GridGroup | null => {
+  const known = parts.filter((p): p is GridGroup => p !== null);
+  return known.length < parts.length ? null : { ...unionGroups(...known), hires: known.reduce((s, p) => s + (p.hires ?? 0), 0) };
+};
+
+// Relations dont la somme est publiée, dans l'ordre de lecture du moteur partagé (maskRelations, jamais recodé) : d'abord, pour un
+// flux, les mois connus de chaque groupe → sa cellule de cumul (total masquable : la valeur de la répartition) ; puis chaque colonne de
+// mois connu (total du mois publié, jamais masqué) et la colonne des cumuls (total du cumul publié). Un stock n'a pas de cumul : sa
+// répartition est la colonne du dernier mois connu.
+export function gridMask(g: GridIn, sizes: GridSizes, seuil: number, stock: boolean): GridMask {
+  const known = g.months.filter((m) => g.total(m).kind === "value");
+  const cells: MaskCell[] = [];
+  const add = (c: MaskCell) => cells.push(c) - 1;
+  const value = (grp: string, m: string): number | null => {
+    const c = g.cell(grp, m);
+    return c.kind === "value" ? c.v : null;
+  };
+  const columns = new Map(known.map((m) => [m, g.groups.map((grp) => add(sizeInput(sizes(grp, m), seuil, value(grp, m))))]));
+  const relations: MaskRelation[] = [];
+  let share: number[] | null = null;
+  if (!stock && known.length > 0) {
+    share = g.groups.map((grp, i) => {
+      const cumul = known.reduce((s, m) => s + (value(grp, m) ?? 0), 0);
+      const k = add(sizeInput(unionGrid(known.map((m) => sizes(grp, m))), seuil, cumul));
+      relations.push({ cells: known.map((m) => columns.get(m)![i]), total: k });
+      return k;
     });
-    out.set(m, maskGroups(cells, seuil, true));
   }
-  return out;
+  for (const m of known) relations.push({ cells: columns.get(m)! });
+  if (share) relations.push({ cells: share });
+  const st = maskRelations(cells, relations, seuil);
+  return { months: new Map(known.map((m) => [m, columns.get(m)!.map((k) => st[k])])), share: share ? share.map((k) => st[k]) : null };
 }
 
 // Grille après masquage : même forme, une cellule masquée est n.d. avec la raison du seuil ; le total du mois n'est jamais modifié.
@@ -339,32 +375,31 @@ export function maskedGrid<G extends GridIn>(g: G, mask: GridMask | null, seuil:
   const cell = (grp: string, m: string): CellIn => {
     const c = g.cell(grp, m);
     if (c.kind !== "value") return c;
-    if (seuil === null) return { kind: "nd", reason: reason ?? "seuil de confidentialité non défini (Paramètres)" };
-    const st = mask?.get(m)?.[g.groups.indexOf(grp)];
+    if (seuil === null) return { kind: "nd", reason: reason ?? SEUIL_NON_DEFINI };
+    const st = mask?.months.get(m)?.[g.groups.indexOf(grp)];
     return st !== undefined && isHidden(st) ? { kind: "nd", reason: maskReason(st, seuil)! } : c;
   };
   return { ...g, cell } as G;
 }
 
-// Nombre de cellules masquées par le seuil (information de l'écran et de l'export).
-export const maskedCount = (mask: GridMask | null): number => (mask ? [...mask.values()].reduce((n, st) => n + st.filter(isHidden).length, 0) : 0);
+// Nombre de cellules de la grille masquées par le seuil (information de l'écran et de l'export) ; les cumuls ne sont pas comptés.
+export const maskedCount = (mask: GridMask | null): number => (mask ? [...mask.months.values()].reduce((n, st) => n + st.filter(isHidden).length, 0) : 0);
 
-// Répartition par groupe après masquage : un stock se lit au dernier mois connu (mêmes cellules, même masquage que la colonne) ; un
-// flux se cumule sur les mois connus, et le cumul d'un groupe est masqué selon les personnes distinctes de ces mois réunis (le total
-// du cumul est publié : masquage secondaire). v null : n.d. avec sa raison. Sans seuil : chaque groupe est n.d. avec la raison du
-// paramètre, le total reste.
+// Répartition par groupe après masquage, lue dans la même passe que la grille (gridMask) : un stock se lit au dernier mois connu
+// (mêmes cellules, même statut que la colonne) ; un flux se cumule sur les mois connus et le cumul d'un groupe porte le statut de sa
+// cellule de cumul (relation « ses mois → son cumul », puis colonne des cumuls au total publié). v null : n.d. avec sa raison. Sans
+// seuil : chaque groupe est n.d. avec la raison du paramètre, le total reste.
+export type GridRead = { seuil: number; mask: GridMask } | { seuil: null; reason: string };
 export type MaskedRepartition = { known: string[]; used: string[]; items: { group: string; v: number | null; reason: string | null }[]; total: number };
-export function repartitionMasked(g: GridIn, stock: boolean, sizes: GridSizes, seuil: number | null, reason: string | null): MaskedRepartition {
+export function repartitionMasked(g: GridIn, stock: boolean, read: GridRead): MaskedRepartition {
   const r = repartition(g, stock);
-  if (seuil === null) return { ...r, items: r.items.map((it) => ({ group: it.group, v: null, reason: reason ?? "seuil de confidentialité non défini (Paramètres)" })) };
-  const union = (group: string): PersonsOfContracts | null => {
-    const parts = r.used.map((m) => sizes(group, m));
-    return parts.some((p) => p === null) ? null : unionGroups(...(parts as PersonsOfContracts[]));
+  if (read.seuil === null) return { ...r, items: r.items.map((it) => ({ group: it.group, v: null, reason: read.reason })) };
+  const st = stock ? (r.used[0] === undefined ? undefined : read.mask.months.get(r.used[0])) : read.mask.share;
+  return {
+    ...r,
+    items: r.items.map((it, i) => {
+      const s = st?.[i];
+      return s !== undefined && isHidden(s) ? { group: it.group, v: null, reason: maskReason(s, read.seuil)! } : { group: it.group, v: it.v, reason: null };
+    }),
   };
-  const st = maskGroups(
-    r.items.map((it) => sizeInput(r.used.length ? union(it.group) : { persons: [], unlinked: 0 }, seuil, it.v)),
-    seuil,
-    true,
-  );
-  return { ...r, items: r.items.map((it, i) => (isHidden(st[i]) ? { group: it.group, v: null, reason: maskReason(st[i], seuil)! } : { group: it.group, v: it.v, reason: null })) };
 }

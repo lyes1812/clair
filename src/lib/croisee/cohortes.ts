@@ -8,14 +8,32 @@
 // ligne dans la période (même si ses lignes se compensent à 0). Les lignes sans clé (clé `outsideKey`, par exemple les lignes du
 // journal sans contrat) ne sont pas des personnes : elles forment une ligne à part, pour que la somme des contributions soit égale
 // à l'écart total. Contribution d'un groupe = montant N − montant N-1 (un groupe absent d'une période n'y a aucune ligne).
-// Chaque groupe porte aussi ses personnes distinctes (contrats reliés par le référentiel) et le nombre de ses contrats non reliés :
-// c'est en personnes que le seuil de confidentialité le compte (maskCohorts).
+// Chaque groupe porte aussi ses personnes distinctes (contrats reliés par le référentiel), le nombre de ses contrats non reliés et le
+// nombre de ses embauches prévisionnelles (clés « embauche:… » d'un scénario, isHireKey) : c'est en personnes que le seuil de
+// confidentialité le compte (maskCohorts). Décision du lot 12 (à confirmer par Lyes) : une embauche prévue ne décrit aucune personne
+// réelle ; un groupe porté seulement par des embauches prévues est EXEMPT du masquage (affiché) et n'apporte aucune personne
+// protectrice ; un groupe qui mêle embauches et contrats réels se juge sur ses contrats réels (même règle que projectedCell du
+// module partagé, appliquée ici à des groupes déjà reliés).
 
 import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
 import { maskGroups, maskRelations, personsOfContracts, type MaskCell, type MaskStatus, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
-import { groupInput } from "./confidentialite";
+import { groupInput, isHireKey } from "./confidentialite";
 
-export type CohortGroup = PersonsOfContracts & { count: number; prev: number; cur: number; delta: number };
+// Groupe de contrats reliés par le référentiel, plus ses embauches prévisionnelles.
+export type LinkedGroup = PersonsOfContracts & { hires: number };
+export function linkedGroup(keys: readonly string[], link: PersonLink): LinkedGroup {
+  const real = keys.filter((k) => !isHireKey(k));
+  return { ...personsOfContracts(real, link), hires: keys.length - real.length };
+}
+// Cellule de masquage d'un tel groupe : exempte quand seules des embauches prévues le portent ; sinon l'entrée du module partagé sur
+// ses contrats réels (groupInput : valeur absolue, membres non transmis pour une cellule non dénombrée).
+export function linkedGroupCell(g: LinkedGroup, seuil: number, value: number | null, nonZero?: boolean): MaskCell {
+  const v = value === null ? null : Math.abs(value);
+  if (g.hires > 0 && g.persons.length === 0 && g.unlinked === 0) return { size: 0, value: v, members: [], exempt: true };
+  return groupInput(g, seuil, v, nonZero);
+}
+
+export type CohortGroup = LinkedGroup & { count: number; prev: number; cur: number; delta: number };
 export type CohortOutside = { prev: number | null; cur: number | null; delta: number }; // null : aucune ligne sans clé dans la période
 export type CohortPartition =
   | {
@@ -53,7 +71,7 @@ export function partitionCohorts(prev: ReadonlyMap<string, number>, cur: Readonl
     keys.onlyCur.push(k);
     sums.onlyCur.cur += c;
   }
-  const group = (id: "onlyPrev" | "onlyCur" | "both"): CohortGroup => ({ count: keys[id].length, ...sums[id], delta: sums[id].cur - sums[id].prev, ...personsOfContracts(keys[id], link) });
+  const group = (id: "onlyPrev" | "onlyCur" | "both"): CohortGroup => ({ count: keys[id].length, ...sums[id], delta: sums[id].cur - sums[id].prev, ...linkedGroup(keys[id], link) });
   const onlyPrev = group("onlyPrev");
   const onlyCur = group("onlyCur");
   const both = group("both");
@@ -67,7 +85,7 @@ export function partitionCohorts(prev: ReadonlyMap<string, number>, cur: Readonl
     prev: totalPrev,
     cur: totalCur,
     delta: totalCur - totalPrev,
-    ...personsOfContracts([...keys.onlyPrev, ...keys.onlyCur, ...keys.both], link),
+    ...linkedGroup([...keys.onlyPrev, ...keys.onlyCur, ...keys.both], link),
   };
   if (![onlyPrev, onlyCur, both, total].every((g) => safe(g.prev) && safe(g.cur) && safe(g.delta)) || (outside && !safe(outside.delta))) return { kind: "nd", reason: "somme hors des entiers de centimes" };
   return { kind: "value", onlyPrev, onlyCur, both, outside, total };
@@ -93,9 +111,10 @@ export const COHORT_ROWS: readonly CohortRowId[] = ["onlyPrev", "onlyCur", "both
 export function maskCohorts(p: Extract<CohortPartition, { kind: "value" }>, seuil: number): CohortMask {
   const o = p.outside;
   const outsideSize = o && [o.prev, o.cur, o.delta].some((v) => v !== null && v !== 0) ? null : 0;
-  // Entrée d'une cellule : la ligne sans contrat (taille 0 ou non dénombrée), ou le groupe en personnes reliées (groupInput ; la
-  // valeur n'est jamais nulle pour un groupe qui compte des contrats, sa taille vient des personnes).
-  const input = (id: CohortRowId, v: number): MaskCell => (id === "outside" ? { size: outsideSize, value: Math.abs(v) } : groupInput(p[id], seuil, Math.abs(v), p[id].count > 0));
+  // Entrée d'une cellule : la ligne sans contrat (taille 0 ou non dénombrée), ou le groupe en personnes reliées (linkedGroupCell :
+  // embauches prévues seules exemptes ; la valeur n'est jamais nulle pour un groupe qui compte des contrats, sa taille vient des
+  // personnes).
+  const input = (id: CohortRowId, v: number): MaskCell => (id === "outside" ? { size: outsideSize, value: Math.abs(v) } : linkedGroupCell(p[id], seuil, v, p[id].count > 0));
   // Colonnes : lignes qui y ont une cellule (une ligne vide par construction n'y figure pas) et leur valeur dans la colonne.
   const columns: [CohortRowId, number][][] = [
     [["onlyPrev", p.onlyPrev.count], ["onlyCur", p.onlyCur.count], ["both", p.both.count]],
@@ -121,16 +140,17 @@ export function maskCohorts(p: Extract<CohortPartition, { kind: "value" }>, seui
 // (coûts de sortie, tuilages, ponctuels et enveloppes marqués non récurrents). Contributeur : le contrat que porte la contribution
 // (salarié, ou embauche prévue) ; à défaut, l'hypothèse. Plusieurs hypothèses sur un même contrat comptent pour un contributeur. Un
 // contributeur dont la somme de l'année est nulle n'entre pas dans le total : il n'est pas compté. Chaque total est un groupe en
-// personnes distinctes : un contrat relié par le référentiel (link, clé de référentiel) apporte sa personne ; un contrat non relié
-// (embauche prévue, par exemple) ou une hypothèse sans contrat (toutes les hypothèses « réalisé ») est un contributeur non relié, qui
-// ne protège jamais. null : contribution sans contrat ni hypothèse (effectif non dénombré, seuil non vérifiable). Aucune clé ne sort
-// de la fonction (jetons de personne seulement).
-export type NonRecurringContributors = { realised: PersonsOfContracts | null; projected: PersonsOfContracts | null };
+// personnes distinctes : un contrat relié par le référentiel (link, clé de référentiel) apporte sa personne ; un contrat non relié ou
+// une hypothèse sans contrat (toutes les hypothèses « réalisé ») est un contributeur non relié, qui ne protège jamais ; une embauche
+// prévue (clé « embauche:… ») est comptée à part (hires : un total porté seulement par des embauches prévues est exempt du masquage).
+// null : contribution sans contrat ni hypothèse (effectif non dénombré, seuil non vérifiable). Aucune clé ne sort de la fonction
+// (jetons de personne seulement).
+export type NonRecurringContributors = { realised: LinkedGroup | null; projected: LinkedGroup | null };
 
 export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth">, proj: Projection, hyps: readonly Hypothesis[], year: string, link: PersonLink = new Map()): NonRecurringContributors {
   const add = (m: Map<string, number>, key: string, cents: number) => m.set(key, (m.get(key) ?? 0) + cents);
   // Contributeurs comptés (somme non nulle), vus par le lien : la clé de référentiel d'un contrat, inconnue du lien pour une hypothèse.
-  const group = (m: Map<string, number>): PersonsOfContracts => personsOfContracts([...m].filter(([, v]) => v !== 0).map(([k]) => k), link);
+  const group = (m: Map<string, number>): LinkedGroup => linkedGroup([...m].filter(([, v]) => v !== 0).map(([k]) => k), link);
   const realised = new Map<string, number>();
   for (const h of hyps) if (h.kind === "realise" && h.month.startsWith(year) && h.month <= base.refMonth) add(realised, `hypothese:${h.id}`, h.costCents);
   const projected = new Map<string, number>();
@@ -152,10 +172,10 @@ export function nonRecurringContributors(base: Pick<BaseSnapshot, "refMonth">, p
 // Les deux totaux forment un ensemble dont la somme est affichée (« Non récurrents retirés », atterrissage − retraité) : masquage
 // principal d'un total de 1 à (seuil − 1) personnes, ou non dénombré (contributeurs non reliés sous le seuil, contribution sans
 // contrat ni hypothèse) ; l'autre total est alors masqué aussi (maskGroups), sinon le premier se lirait par différence. Un total sans
-// contributeur (0) n'est masqué qu'à ce titre.
+// contributeur (0) n'est masqué qu'à ce titre ; un total porté seulement par des embauches prévues est exempt (linkedGroupCell).
 export type NonRecurringMask = { realised: MaskStatus; projected: MaskStatus };
 export function maskNonRecurring(sizes: NonRecurringContributors, amounts: { realised: number; projected: number }, seuil: number): NonRecurringMask {
-  const cell = (g: PersonsOfContracts | null, cents: number): MaskCell => (g === null ? { size: null, value: Math.abs(cents) } : groupInput(g, seuil, Math.abs(cents), g.persons.length + g.unlinked > 0));
+  const cell = (g: LinkedGroup | null, cents: number): MaskCell => (g === null ? { size: null, value: Math.abs(cents) } : linkedGroupCell(g, seuil, cents, g.persons.length + g.unlinked > 0));
   const [realised, projected] = maskGroups([cell(sizes.realised, amounts.realised), cell(sizes.projected, amounts.projected)], seuil, true);
   return { realised, projected };
 }

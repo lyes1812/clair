@@ -922,7 +922,7 @@ describe("page Masse salariale croisée", () => {
     const sources = part(out, /data-testid="cx-commun-sources"[\s\S]*?<\/details>/);
     expect(sources).toContain("« Budget révisé » · modifié le 01/06/2026 · par défaut, le plus récent de l&#x27;année");
     expect(sources).toContain("« Scénario A » · figé · mois du scénario : avr. 2026 → déc. 2026 · base figée sur mars 2026 · par défaut, le plus récent qui couvre l&#x27;année");
-    expect(sources).toContain("Seuil de confidentialité</dt>");
+    expect(sources).toContain("Confidentialité</dt>");
     expect(sources).toContain('<span class="nd">n.d.</span> — seuil de confidentialité non défini (Paramètres)');
     expect(sources).toContain('<span class="nd">n.d.</span> — seuils d&#x27;effectif non définis (Paramètres)');
     expect(sources).toContain('href="/e/demo/parametres#croisee"');

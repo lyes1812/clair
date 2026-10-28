@@ -14,13 +14,16 @@ import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
 import { effectifsShareOf, loadEffectifs } from "../effectifs-data";
 import { CATEGORY_TABLE_LABELS, categoryScopeNote, loadCategoryMonths, loadKpiSuivi, suiviColumnOn, type KpiSuivi } from "../suivi-data";
 import { KPI_VUES } from "../tabs";
-import { categoriesSheet, effectifsGridSheet, effectifsShareSheet, suiviSheet } from "./sheets";
+import { categoriesSheet, effectifsGridSheet, effectifsShareSheet, guardedSheet, suiviSheet } from "./sheets";
 
 export const dynamic = "force-dynamic";
 
 // Export Excel de KPI RH : tableau « Mois par mois » (Suivi des effectifs, Turnover, Absentéisme) ou grille des Effectifs mensuels.
 // Mêmes paramètres d'adresse et mêmes fonctions que l'écran ; onglets Filtres, Sources et Définitions. Aucun CSV n'existait pour
 // ces tableaux : l'export est Excel seulement. Aucune donnée nominative : ouvert à tous les rôles de l'espace, comme l'écran.
+// Seuil de confidentialité : la feuille « Par catégorie » porte les mêmes cellules n.d. que l'écran ; sous un filtre Établissement ou
+// Nature gardé (périmètre sous le seuil, ou seuil non défini), chaque feuille porte les cellules n.d. de l'écran, avec la raison, et
+// l'onglet Filtres dit le seuil appliqué et le périmètre retenu.
 type Ready = Extract<KpiSuivi, { kind: "ready" }>;
 type Search = Record<string, string | string[] | undefined>;
 const TABLE_VUES = ["suivi", "turnover", "absenteisme"] as const;
@@ -64,13 +67,17 @@ function scopeFilters(s: Ready): FilterSpec[] {
 }
 
 async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABLE_VUES)[number]): Promise<Response> {
-  const sheets: SheetSpec[] = [suiviSheet({ dash: s.dash, data: s.data, establishments: s.input.scope.establishments, rawLimit: s.rawLimit, vue })];
+  let sheets: SheetSpec[] = [suiviSheet({ dash: s.dash, data: s.data, establishments: s.input.scope.establishments, rawLimit: s.rawLimit, vue })];
+  let catMasked = 0;
   if (vue === "suivi") {
     // Même entrée filtrée que les tuiles et le tableau « Mois par mois » (établissement, nature), comme l'écran : la note de la
-    // feuille dit que les filtres s'appliquent et nomme les catégories hors du périmètre.
-    const cat = await loadCategoryMonths(s.input, s.w, workspace.id);
+    // feuille dit que les filtres s'appliquent et nomme les catégories hors du périmètre ; mêmes cellules masquées que l'écran.
+    const cat = await loadCategoryMonths(s.input, s.w, workspace.id, s.confidentialite);
+    catMasked = cat.masked;
     sheets.push(categoriesSheet(cat.months, cat.keys, CATEGORY_TABLE_LABELS, { scope: categoryScopeNote(s, cat.hidden) }));
   }
+  // Périmètre retenu gardé : aucun chiffre du périmètre, ni à l'écran ni dans le classeur.
+  if (s.guard) sheets = sheets.map((sh) => guardedSheet(sh, s.guard!.reason));
   const on = (c: string) => suiviColumnOn(vue, c);
   const label = KPI_VUES.find((v) => v.key === vue)!.label;
   const buffer = await buildWorkbook({
@@ -83,6 +90,8 @@ async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABL
       { label: "N-1", value: s.dash.previousWindow.label },
       { label: "Date de référence", value: formatDate(s.data.build.referenceDate) },
       ...scopeFilters(s),
+      { label: "Confidentialité", value: `${seuilFilterText(s.confidentialite)}${!s.guard && catMasked > 0 ? ` ; ${catMasked} cellule${catMasked > 1 ? "s" : ""} non affichée${catMasked > 1 ? "s" : ""} (par catégorie)` : ""}` },
+      ...(s.guard ? [{ label: "Périmètre retenu", value: `n.d. — ${s.guard.reason}` }] : []),
     ],
     sheets,
     sources: await sourcesOf(s, workspace.id),
@@ -97,6 +106,7 @@ async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABL
       ...(on("absenteeism") ? [KPI_TERMS.absenteeism] : []),
       ...(vue === "suivi" ? [KPI_TERMS.categories] : []),
       KPI_TERMS.ndReasons,
+      ...(glossaryEntry(CONFIDENTIALITE_TERM) ? [CONFIDENTIALITE_TERM] : []),
     ]),
   });
   return xlsxResponse(buffer, `kpi-rh-${vue}`);

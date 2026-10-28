@@ -4,17 +4,21 @@ import { describe, expect, it, vi } from "vitest";
 import { FixeVariableView, PaieComptaView } from "@/app/e/[slug]/studio-rh/masse-salariale/Lot2Views";
 import { servicesMonthsSheet, servicesSheet } from "@/app/e/[slug]/studio-rh/masse-salariale/export/sheets";
 import { syntheseOf } from "@/app/e/[slug]/studio-rh/masse-salariale/synthese-data";
-import { confidentialiteReason, linkFromReferential, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting } from "@/lib/confidentialite";
+import { hireKey } from "@/lib/budget/engine";
+import { confidentialiteReason, linkFromReferential, personsOfContracts, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting } from "@/lib/confidentialite";
+import { groupCell, groupInput, isHireKey, masseContracts, masseGroup, masseWindow, projectedCell } from "@/lib/confidentialite/groups";
+import * as croisee from "@/lib/croisee/confidentialite";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import { withService } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
-import { labelContracts, labelKey, labelTotals, maskLabels, maskProvisionServices, provisionContracts } from "@/lib/payroll/lot2";
-import { journalCell, maskServiceRows, serviceGuard, serviceRows } from "@/lib/payroll/service-rows";
+import { labelContracts, labelKey, labelTotals, maskLabels, maskProvisionServices, maskProvisionStatus, provisionContracts, provisionGuard, provisionMonth, provisionValue } from "@/lib/payroll/lot2";
+import { maskServiceRows, maskServiceWindows, serviceGuard, serviceGuardOnWindows, serviceRows, worstGuard } from "@/lib/payroll/service-rows";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 
 // Seuil de confidentialité de la Masse salariale (Synthèse, Fixe & variable, Paie & comptabilité et export Excel), en PERSONNES
 // DISTINCTES du référentiel Collaborateurs : cas écrits à la main sur un journal fictif. Le contexte (base) est remplacé par un contexte
-// fictif ; le seuil est fourni par un double de getConfidentialite.
+// fictif ; le seuil est fourni par un double de getConfidentialite. Les groupes sont ceux du socle commun src/lib/confidentialite/groups.ts
+// (une seule convention : contrats qui portent une ligne de masse, brut ou cotisations), testés ici en premier.
 const state = vi.hoisted(() => ({ ctx: null as unknown, conf: { kind: "absent" } as unknown }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
 vi.mock("@/lib/confidentialite", async (orig) => ({ ...(await orig<typeof import("@/lib/confidentialite")>()), getConfidentialite: async () => state.conf }));
@@ -64,15 +68,72 @@ const MONTHS = ["2026-01", "2026-02"];
 const PREV = ["2025-01", "2025-02"];
 const rows = serviceRows(REF, MONTHS, PREV);
 
-describe("cellule de masquage d'un montant du journal (journalCell)", () => {
-  it("personnes reliées ; non dénombrée quand un contrat non relié existe sous le seuil ; montant non nul sans contrat : non vérifiable", () => {
-    expect(journalCell(["C1", "C2", "C3"], 900000, link, 3)).toEqual({ size: 3, value: 900000, members: ["P1", "P2", "P3"] });
-    expect(journalCell(["C5", "C6"], 225000, link, 3)).toEqual({ size: 1, value: 225000, members: ["P5"] }); // deux contrats, une personne
-    expect(journalCell(["C9", "C10"], 100, link, 3)).toEqual({ size: null, value: 100, members: ["P8"] }); // C9 non relié, P8 seule sous le seuil
-    expect(journalCell(["C9", "C1", "C2", "C3"], 100, link, 3).size).toBe(3); // trois personnes reliées suffisent
-    expect(journalCell([], 100, link, 1)).toEqual({ size: null, value: 100, members: [] }); // lignes sans contrat, quel que soit le seuil
-    expect(journalCell([], 0, link, 3)).toEqual({ size: 0, value: 0, members: [] }); // groupe vide : ne désigne personne
-    expect(journalCell(["C1"], null, link, 3)).toEqual({ size: 1, value: null, members: ["P1"] }); // déjà n.d. pour une autre raison
+describe("socle commun : groupes du journal et entrée de masquage (groups.ts)", () => {
+  it("groupInput : personnes reliées ; non dénombrée (null) quand un contrat non relié existe sous le seuil ; montant non nul sans contrat : non vérifiable ; membres vides pour une cellule n.d. ou non dénombrée", () => {
+    const g = (ids: string[]) => personsOfContracts(ids, link);
+    expect(groupInput(g(["C1", "C2", "C3"]), 3, 900000)).toEqual({ size: 3, value: 900000, members: ["P1", "P2", "P3"] });
+    expect(groupInput(g(["C5", "C6"]), 3, 225000)).toEqual({ size: 1, value: 225000, members: ["P5"] }); // deux contrats, une personne
+    expect(groupInput(g(["C9", "C10"]), 3, 100)).toEqual({ size: null, value: 100, members: [] }); // C9 non relié, P8 seule sous le seuil : aucune personne transmise
+    expect(groupInput(g(["C9", "C1", "C2", "C3"]), 3, 100).size).toBe(3); // trois personnes reliées suffisent
+    expect(groupInput(g([]), 1, 100)).toEqual({ size: null, value: 100, members: [] }); // lignes sans contrat, quel que soit le seuil
+    expect(groupInput(g([]), 3, 0)).toEqual({ size: 0, value: 0, members: [] }); // groupe vide : ne désigne personne
+    expect(groupInput(g(["C1"]), 3, null)).toEqual({ size: 1, value: null, members: [] }); // déjà n.d. pour une autre raison : aucune personne transmise
+    // groupCell : valeur absolue (elle n'ordonne que le masquage secondaire), nonZero du groupe ; groupe non dénombré (fenêtre n.d.).
+    expect(groupCell({ ...g(["C1", "C2", "C3"]), nonZero: true }, 3, -900000)).toEqual({ size: 3, value: 900000, members: ["P1", "P2", "P3"] });
+    expect(groupCell({ ...g([]), nonZero: true }, 3, 0)).toEqual({ size: null, value: 0, members: [] }); // lignes non nulles sans contrat, solde nul : non vérifiable
+    expect(groupCell(null, 3, 100)).toEqual({ size: null, value: 100 });
+    expect(groupCell(null, 3, null)).toEqual({ size: null, value: null });
+  });
+  it("cas de référence (seuil 3) : X = 2 reliées + 1 non relié, W = 1 reliée + 1 non relié, Y = 3, Z = 4 ⇒ X et W non vérifiables, Y masqué en secondaire, Z affiché", () => {
+    // X : C1, C2 (P1, P2) + C9 (non relié) × 3 000 = 9 000 € ; W : C4 (P4) + C11 (non relié) × 3 000 = 6 000 € ; Y : C7, C8, C10 (P6, P7, P8)
+    // × 1 500 = 4 500 € ; Z : C3, C12, C13, C5 (P3, P9, P10, P5) × 3 000 = 12 000 €. Les cellules non vérifiables n'apportent aucune
+    // personne comptée : il faut masquer la plus petite ligne affichée qui en apporte (Y, 4 500 € < 12 000 €) pour atteindre 3 personnes.
+    const lines = [
+      ...["C1", "C2", "C9"].flatMap((c) => paid("2026-01", c, "X", 200000)),
+      ...["C4", "C11"].flatMap((c) => paid("2026-01", c, "W", 200000)),
+      ...["C7", "C8", "C10"].flatMap((c) => paid("2026-01", c, "Y", 100000)),
+      ...["C3", "C12", "C13", "C5"].flatMap((c) => paid("2026-01", c, "Z", 200000)),
+    ];
+    const m = maskServiceRows(serviceRows(journalOf(lines, ["2026-01"]), ["2026-01"], ["2025-01"]), link, set(3));
+    expect(m.map((r) => [r.value, r.cur.kind, r.reason])).toEqual([["Z", "value", null], ["X", "nd", SEUIL_NON_VERIFIABLE], ["W", "nd", SEUIL_NON_VERIFIABLE], ["Y", "nd", R3]]);
+    // Même réponse par le moteur de fenêtres, lu directement.
+    const rows = serviceRows(journalOf(lines, ["2026-01"]), ["2026-01"], []);
+    const st = maskServiceWindows(rows.map((r) => ({ input: r.input, windows: [r.cur] })), link, 3);
+    expect(rows.map((r, i) => [r.value, st[i][0].window, st[i][0].months[0]])).toEqual([["Z", "shown", "shown"], ["X", "unverifiable", "unverifiable"], ["W", "unverifiable", "unverifiable"], ["Y", "secondary", "secondary"]]);
+  });
+  it("cas de référence (seuil 5) : S1 = 4 personnes rémunérées + 1 contrat ne portant qu'une ligne de cotisations ⇒ le contrat compte, S1 (5 personnes) est affiché ; sans lui, S1 (4) et S2 (5, secondaire) sont n.d.", () => {
+    // S1 : C1, C2, C3, C4 (P1 à P4) × 3 000 = 12 000 € + un rappel de cotisations de C10 (P8) 300,00 € sans salaire ⇒ 12 300,00 €, 5 personnes.
+    // S2 : C5, C7, C8, C12, C13 (P5, P6, P7, P9, P10) × 1 500 = 7 500 €. Entreprise : 19 800,00 €.
+    const s1 = ["C1", "C2", "C3", "C4"].flatMap((c) => paid("2026-01", c, "S1", 200000));
+    const rappel = line("2026-01", "645100", "Rappel de cotisations", 30000, "C10", "S1");
+    const s2 = ["C5", "C7", "C8", "C12", "C13"].flatMap((c) => paid("2026-01", c, "S2", 100000));
+    const j = journalOf([...s1, rappel, ...s2], ["2026-01"]);
+    expect(masseContracts(withService(j, "S1"), "2026-01")).toEqual({ contracts: ["C1", "C10", "C2", "C3", "C4"], nonZero: true });
+    expect(masseGroup(withService(j, "S1"), ["2026-01"], link)).toEqual({ persons: ["P1", "P2", "P3", "P4", "P8"], unlinked: 0, nonZero: true });
+    const m = maskServiceRows(serviceRows(j, ["2026-01"], ["2025-01"]), link, set(5));
+    expect(m.map((r) => [r.value, r.cur.kind === "value" ? r.cur.masse : r.cur.nd.reason])).toEqual([["S1", 1230000], ["S2", 750000]]);
+    // Sans le rappel : S1 compte 4 personnes < 5 ; la somme de l'entreprise étant publiée, S2 (5 personnes) est masqué à son tour.
+    const without = maskServiceRows(serviceRows(journalOf([...s1, ...s2], ["2026-01"]), ["2026-01"], ["2025-01"]), link, set(5));
+    expect(without.map((r) => [r.value, r.cur.kind, r.reason])).toEqual([["S1", "nd", confidentialiteReason(5)], ["S2", "nd", confidentialiteReason(5)]]);
+  });
+  it("masseWindow : la fenêtre réunit ses mois (null dès qu'un mois est n.d.), chaque mois garde son groupe ; la croisée lit les mêmes fonctions", () => {
+    const w = masseWindow(withService(REF, "C"), ["2026-01", "2026-02"], link);
+    expect(w.window).toEqual({ persons: ["P5"], unlinked: 0, nonZero: true });
+    expect(w.months.map((g) => g?.persons)).toEqual([["P5"], ["P5"]]);
+    const nd = masseWindow(withService(REF, "C"), ["2026-01", "2026-03"], link);
+    expect(nd.window).toBeNull();
+    expect(nd.months[1]).toBeNull();
+    expect(croisee.masseGroup).toBe(masseGroup);
+    expect(croisee.masseContracts).toBe(masseContracts);
+    expect(croisee.groupInput).toBe(groupInput);
+  });
+  it("embauches prévisionnelles (décision du lot 12) : une cellule portée seulement par des embauches est exempte ; mêlée à des contrats réels, elle se juge sur eux", () => {
+    expect(isHireKey(hireKey("h1"))).toBe(true);
+    expect(isHireKey("payfit:C1")).toBe(false);
+    expect(projectedCell([hireKey("h1"), hireKey("h2")], link, 5, 420000)).toEqual({ size: 0, value: 420000, members: [], exempt: true });
+    expect(projectedCell(["C1", hireKey("h1")], link, 3, -420000)).toEqual({ size: 1, value: 420000, members: ["P1"] }); // masquée : 1 personne réelle
+    expect(projectedCell(["C9", hireKey("h1")], link, 3, 100)).toEqual({ size: null, value: 100, members: [] }); // contrat réel non relié : non vérifiable
+    expect(projectedCell([], link, 3, 0)).toEqual({ size: 0, value: 0, members: [] }); // personne : rien à protéger
   });
 });
 
@@ -157,12 +218,25 @@ describe("lignes par service après seuil (cas de référence écrit à la main)
     expect(m[0].cur.months.map((x) => (x.kind === "nd" ? x.nd.reason : "valeur"))).toEqual([SEUIL_NON_DEFINI, SEUIL_NON_DEFINI]);
     expect(maskServiceRows(rows, link, { kind: "invalid", raw: "5" })[0].reason).toBe("seuil de confidentialité illisible : à ré-enregistrer (Paramètres)");
   });
-  it("garde du filtre Service : service masqué (même secondaire) → n.d. ; service affiché → rien ; seuil absent → lien vers Paramètres", () => {
+  it("garde du filtre Service : service masqué (même secondaire) → n.d. avec la raison nue du moteur ; service affiché → rien ; seuil absent → lien vers Paramètres", () => {
     const m = maskServiceRows(rows, link, set(3));
-    expect(serviceGuard(m, "B", set(3))).toEqual({ cause: "seuil", reason: `${R3} — service retenu par le filtre` });
+    expect(serviceGuard(m, "B", set(3))).toEqual({ cause: "seuil", reason: R3 });
+    expect(serviceGuard(m, "E", set(3))).toEqual({ cause: "seuil", reason: R3 }); // E (2 personnes) masqué ; même raison, principal ou secondaire
     expect(serviceGuard(m, "A", set(3))).toBeNull();
     expect(serviceGuard(m, "ZZ", set(3))).toBeNull();
     expect(serviceGuard(m, "A", ABSENT)).toEqual({ cause: "parametre", reason: SEUIL_NON_DEFINI });
+  });
+  it("même garde sur des fenêtres quelconques (versions comparées) : chaque fenêtre forme ses lignes par service ; la plus grave l'emporte", () => {
+    expect(serviceGuardOnWindows(REF, [MONTHS, PREV], "B", link, set(3))).toEqual({ cause: "seuil", reason: R3 });
+    expect(serviceGuardOnWindows(REF, [MONTHS, PREV], "A", link, set(3))).toBeNull();
+    expect(serviceGuardOnWindows(REF, [["2026-01"]], "A", link, set(1))).toBeNull();
+    expect(serviceGuardOnWindows(REF, [], "B", link, set(3))).toBeNull(); // aucune fenêtre : rien à protéger
+    expect(serviceGuardOnWindows(REF, [MONTHS], "B", link, ABSENT)).toEqual({ cause: "parametre", reason: SEUIL_NON_DEFINI });
+    // Sans référentiel : non vérifiable ; un masquage l'emporte sur un effectif non dénombré, le paramètre sur tout.
+    expect(serviceGuardOnWindows(REF, [MONTHS], "A", new Map(), set(3))).toEqual({ cause: "seuil", reason: SEUIL_NON_VERIFIABLE });
+    expect(worstGuard([{ cause: "seuil", reason: SEUIL_NON_VERIFIABLE }, { cause: "seuil", reason: R3 }], 3)).toEqual({ cause: "seuil", reason: R3 });
+    expect(worstGuard([{ cause: "seuil", reason: R3 }, { cause: "parametre", reason: SEUIL_NON_DEFINI }], 3)).toEqual({ cause: "parametre", reason: SEUIL_NON_DEFINI });
+    expect(worstGuard([null, null], 3)).toBeNull();
   });
 });
 
@@ -216,9 +290,10 @@ describe("libellés de paie : contrats et seuil (cas écrits à la main)", () =>
     expect((primes.match(/title="non affiché \(seuil de confidentialité : 3 personnes\)"/g) ?? []).length).toBe(6); // 2 mois × 2 familles + 2 cellules de période
     for (const bad of ["NaN", "undefined", "[object"]) expect(html).not.toContain(bad);
   });
-  it("écran Fixe & variable sous le filtre Service masqué : tout l'onglet n.d., avec l'action « Retirer le filtre Service »", () => {
+  it("écran Fixe & variable sous le filtre Service masqué : tout l'onglet n.d., le titre nomme le service retenu, avec l'action « Retirer le filtre Service »", () => {
     const html = renderToStaticMarkup(h(FixeVariableView, { slug: "demo", input: withService(FV, "A"), months: MONTHS, prevMonths: PREV, link, confidentialite: ABSENT, guard: { cause: "parametre", reason: SEUIL_NON_DEFINI }, unfilterHref: "/x" }));
     expect(html).toContain('data-testid="fv-nd"');
+    expect(html).toContain("n.d. — service A retenu par le filtre");
     expect(html).toContain("Retirer le filtre Service");
     expect(html).toContain('href="/e/demo/parametres#confidentialite"');
     expect(html).not.toContain('data-testid="fv-labels"');
@@ -250,8 +325,43 @@ describe("provision par service : contrats et seuil (cas écrits à la main)", (
     const inputs = ["A", "B", "E"].map((s) => ({ value: s, input: withService(PROV, s) }));
     const m = maskProvisionServices({ inputs, months: ["2026-01", "2025-01"], link, conf: set(3) });
     expect(m).toEqual({ A: { "2026-01": null, "2025-01": null }, B: { "2026-01": R3, "2025-01": R3 }, E: { "2026-01": R3, "2025-01": R3 } });
+    // Statuts du moteur (lus par la croisée 07 pour le passage) : E est secondaire, B principal.
+    expect(maskProvisionStatus({ inputs, months: ["2026-01"], link, seuil: 3 })).toEqual({ A: { "2026-01": "shown" }, B: { "2026-01": "masked" }, E: { "2026-01": "secondary" } });
     expect(maskProvisionServices({ inputs, months: ["2026-01"], link, conf: set(1) })).toEqual({ A: { "2026-01": null }, B: { "2026-01": null }, E: { "2026-01": null } });
     expect(maskProvisionServices({ inputs, months: ["2026-01"], link, conf: ABSENT })).toEqual({ A: { "2026-01": SEUIL_NON_DEFINI }, B: { "2026-01": SEUIL_NON_DEFINI }, E: { "2026-01": SEUIL_NON_DEFINI } });
+    // Garde du filtre Service sur la provision : raison nue, un mois masqué suffit ; seuil absent : paramètre.
+    expect(provisionGuard(m, "E", ["2026-01", "2025-01"], set(3))).toEqual({ cause: "seuil", reason: R3 });
+    expect(provisionGuard(m, "A", ["2026-01", "2025-01"], set(3))).toBeNull();
+    expect(provisionGuard(m, "A", ["2026-01"], ABSENT)).toEqual({ cause: "parametre", reason: SEUIL_NON_DEFINI });
+  });
+  it("cas de référence : mois sans aucune ligne de charges sociales (total n.d.), part congés connue ⇒ la part connue est la valeur masquable, même cellule n.d. partout (seuil 3)", () => {
+    // Fin janvier 2026, dotations « Mois courant » de congés payés seulement : A (C1, C2, C3) 100,00 € chacun = 300,00 € ; B (C4) 100,00 € ;
+    // E (C7, C8, C10) 50,00 € chacun = 150,00 €. Aucune ligne de charges : total n.d. pour chaque service, part congés connue.
+    const l: LedgerLine[] = [];
+    for (const c of ["C1", "C2", "C3"]) l.push(line("2026-01", "641200", "Provisions pour conges payes - Mois courant", 10000, c, "A"));
+    l.push(line("2026-01", "641200", "Provisions pour conges payes - Mois courant", 10000, "C4", "B"));
+    for (const c of ["C7", "C8", "C10"]) l.push(line("2026-01", "641200", "Provisions pour conges payes - Mois courant", 5000, c, "E"));
+    for (const c of ["C1", "C2", "C3", "C4", "C7", "C8", "C10"]) l.push(...paid("2026-01", c, c === "C4" ? "B" : ["C1", "C2", "C3"].includes(c) ? "A" : "E", 100000));
+    const j = journalOf(l, ["2026-01"]);
+    const b = provisionMonth(withService(j, "B"), "2026-01");
+    expect([b.kind === "value" ? b.total : "nd", b.kind === "value" ? b.conges : "nd", b.kind === "value" ? b.charges : "nd"]).toEqual([null, 10000, null]);
+    expect(provisionValue(b)).toBe(10000); // total n.d. : la part connue (congés) est la valeur
+    const inputs = ["A", "B", "E"].map((s) => ({ value: s, input: withService(j, s) }));
+    // B (1 personne, 100 €) masqué ; la somme des parts congés étant publiée, E (150 € < 300 €) est masqué à son tour ; A reste.
+    expect(maskProvisionServices({ inputs, months: ["2026-01"], link, conf: set(3) })).toEqual({ A: { "2026-01": null }, B: { "2026-01": R3 }, E: { "2026-01": R3 } });
+    // Écran : la ligne B est n.d. dans chaque colonne (total, parts, écart), avec la raison du seuil ; A garde sa part congés 300,00 €.
+    const compta = { source: null, reason: "aucune", lines: [], months: [], nd: {}, error: false };
+    const html = renderToStaticMarkup(h(PaieComptaView, { slug: "demo", input: j, fullInput: j, months: ["2026-01"], serviceFiltered: false, compta, link, confidentialite: set(3) }));
+    const table = html.slice(html.indexOf('data-testid="pc-provision-services"'), html.indexOf("</table>", html.indexOf('data-testid="pc-provision-services"')));
+    // (N-1 hors du journal : sa propre raison, jamais remplacée.)
+    expect(table).toMatch(new RegExp(`data-service="B"><th scope="row">B</th><td class="num" data-col="total">${rx(ABBR3)}</td><td class="num n1"><abbr class="nd" title="mois 2025-01 hors de la lecture PayFit appliquée">n.d.</abbr></td><td class="num">${rx(ABBR3)}</td><td class="num">${rx(ABBR3)}</td><td class="num">${rx(ABBR3)}</td>`));
+    expect(table).toMatch(/data-service="A"><th scope="row">A<\/th><td class="num" data-col="total">n\.d\.<\/td><td class="num n1">[^]*?<td class="num"><span class="money-display" data-money-cents="30000"/);
+    expect(table).not.toContain('data-money-cents="10000"');
+    // Sous le filtre Service B : la provision du service est n.d. (garde de la provision), même sans garde de la masse.
+    const filtered = renderToStaticMarkup(h(PaieComptaView, { slug: "demo", input: withService(j, "B"), fullInput: j, months: ["2026-01"], serviceFiltered: true, serviceValue: "B", compta, link, confidentialite: set(3), unfilterHref: "/x" }));
+    expect(filtered).toContain('data-testid="pc-provision-nd"');
+    expect(filtered).toContain("n.d. — service B retenu par le filtre");
+    expect(filtered).not.toContain('data-money-cents="10000"');
   });
   it("écran Paie & comptabilité (seuil 3) : tuile de l'entreprise 770,00 € conservée ; lignes B et E n.d. avec la raison ; A 420,00 €", () => {
     const compta = { source: null, reason: "aucune", lines: [], months: [], nd: {}, error: false };
@@ -263,16 +373,22 @@ describe("provision par service : contrats et seuil (cas écrits à la main)", (
     expect(table).toContain(`data-service="B"><th scope="row">B</th><td class="num" data-col="total">${ABBR3}</td><td class="num n1">${ABBR3}</td><td class="num">${ABBR3}</td><td class="num">${ABBR3}</td><td class="num">${ABBR3}</td>`);
     expect(table).not.toContain('data-money-cents="14000"');
     expect(html).toContain(`B 2026-01 : ${R3}`);
-    // Sous le filtre Service B : toute la provision du service est n.d. (tuile et tableau mensuel), avec l'action pour retirer le filtre.
+    // Sous le filtre Service B : toute la provision du service est n.d. (tuile et tableau mensuel), raison nue du moteur, le titre nomme
+    // le service, avec l'action pour retirer le filtre.
     const filtered = renderToStaticMarkup(h(PaieComptaView, { slug: "demo", input: withService(PROV, "B"), fullInput: PROV, months: ["2026-01"], serviceFiltered: true, serviceValue: "B", compta, link, confidentialite: set(3), unfilterHref: "/x" }));
     expect(filtered).toContain('data-testid="pc-provision-nd"');
-    expect(filtered).toContain(`Non affiché (seuil de confidentialité : 3 personnes) — service retenu par le filtre`);
+    expect(filtered).toContain("n.d. — service B retenu par le filtre");
+    expect(filtered).toContain("Non affiché (seuil de confidentialité : 3 personnes)</p>");
+    expect(filtered).not.toContain("— service retenu par le filtre");
     expect(filtered).not.toContain('data-testid="pc-tile-provision"');
     expect(filtered).not.toContain('data-testid="pc-provision-months"');
-    // Service A (3 personnes) : affiché sous le filtre.
+    // Service A (3 personnes) : affiché sous le filtre ; la garde de la masse de l'écran (guard), quand elle existe, l'emporte.
     const shown = renderToStaticMarkup(h(PaieComptaView, { slug: "demo", input: withService(PROV, "A"), fullInput: PROV, months: ["2026-01"], serviceFiltered: true, serviceValue: "A", compta, link, confidentialite: set(3) }));
     expect(shown).not.toContain('data-testid="pc-provision-nd"');
     expect(shown).toContain('data-money-cents="42000"');
+    const guarded = renderToStaticMarkup(h(PaieComptaView, { slug: "demo", input: withService(PROV, "A"), fullInput: PROV, months: ["2026-01"], serviceFiltered: true, serviceValue: "A", compta, link, confidentialite: set(3), guard: { cause: "seuil", reason: R3 } }));
+    expect(guarded).toContain('data-testid="pc-provision-nd"');
+    expect(guarded).not.toContain('data-money-cents="42000"');
   });
 });
 
@@ -332,8 +448,10 @@ describe("Synthèse : tableau par service, graphiques, filtre Service, export (s
     const b = await page({ service: "B", mois: "2026-01" }, set(3));
     expect(b).toContain('data-testid="ms-service-guard"');
     expect(b).toContain("Retirer le filtre Service");
-    expect(b).toContain(`${R3} — service retenu par le filtre`); // raison listée sous les tuiles
-    expect(b).toContain(`Non affiché (seuil de confidentialité : 3 personnes) — service retenu par le filtre`); // état vide
+    expect(b).toContain(`Période (janvier → février 2026), N-1 (janvier → février 2025), Coût par ETP-mois, Coût par ETP-mois N-1 : ${R3}`); // raison nue listée sous les tuiles
+    expect(b).toContain("n.d. — service B retenu par le filtre"); // le titre de l'état vide nomme le service
+    expect(b).toContain(`Non affiché (seuil de confidentialité : 3 personnes)</p>`); // la raison est celle du moteur, telle quelle
+    expect(b).not.toContain("— service retenu par le filtre");
     expect(b).toMatch(/data-testid="ms-tile-masse"[^]*?<dd class="nd">n\.d\.<\/dd>/);
     expect(b).toContain('data-testid="ms-detail-nd"');
     expect(b).not.toContain('data-testid="ms-composition"');
@@ -371,7 +489,7 @@ describe("Synthèse : tableau par service, graphiques, filtre Service, export (s
     // Filtre Service B : la période, N-1, les mois, l'ETP et le coût par ETP portent la raison de la garde (lus par « Mois par mois »).
     const g = syntheseOf(ctxOf(REF) as never, { annee: "2026", de: "01", a: "02", service: "B" }, set(3));
     if (g.kind !== "ready") throw new Error("contexte fictif incomplet");
-    expect(g.guard).toEqual({ cause: "seuil", reason: `${R3} — service retenu par le filtre` });
+    expect(g.guard).toEqual({ cause: "seuil", reason: R3 });
     expect(g.cur.kind).toBe("nd");
     expect(g.cur.months.every((m) => m.kind === "nd" && m.nd.reason === g.guard!.reason)).toBe(true);
     expect(g.etpCur.every((e) => e.etp4 === null && e.reason === g.guard!.reason)).toBe(true);

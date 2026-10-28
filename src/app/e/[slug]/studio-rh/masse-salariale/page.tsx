@@ -250,7 +250,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       </div>
 
       {vue === "fixe-variable" && <FixeVariableView slug={slug} input={input} months={months} prevMonths={prevMonths} aff={aff} tableHref={tableHref} link={link} confidentialite={confidentialite} guard={guard} unfilterHref={href({ svc: "" })} />}
-      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} serviceValue={serviceValue} compta={await ctx.compta()} aff={aff} tableHref={tableHref} unfilterHref={href({ svc: "" })} link={link} confidentialite={confidentialite} />}
+      {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} serviceValue={serviceValue} compta={await ctx.compta()} aff={aff} tableHref={tableHref} unfilterHref={href({ svc: "" })} link={link} confidentialite={confidentialite} guard={guard} />}
       {vue === "synthese" && (
         <>
           <section className="panel">
@@ -314,7 +314,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
             </dl>
             <NdLines lines={tileNd} testid="ms-tiles-nd" />
             {guard && (
-              <NdState testid="ms-service-guard" title={`n.d. — service ${serviceLabel(serviceValue ?? null)}`} reason={capital(guard.reason)} action={{ href: href({ svc: "" }), label: "Retirer le filtre Service" }}>
+              <NdState testid="ms-service-guard" title={`n.d. — service ${serviceLabel(serviceValue ?? null)} retenu par le filtre`} reason={capital(guard.reason)} action={{ href: href({ svc: "" }), label: "Retirer le filtre Service" }}>
                 {guardHref && <p className="ms-nd-reason"><a href={guardHref}>Définir le seuil de confidentialité dans Paramètres</a></p>}
               </NdState>
             )}

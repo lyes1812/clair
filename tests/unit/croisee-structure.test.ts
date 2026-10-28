@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { groupInput } from "@/lib/confidentialite/groups";
 import type { PersonLink } from "@/lib/confidentialite";
 import { maskCohorts, partitionCohorts, type CohortPartition } from "@/lib/croisee/cohortes";
-import { confidentialiteReason, effectifStructure, maskGroups, maskReason, maskRelations, membersByGroup, personOf, personsByGroup, SEUIL_NON_VERIFIABLE, type MaskCell, type StructureContract } from "@/lib/croisee/structure";
+import { confidentialiteReason, effectifStructure, groupsOfContracts, maskGroups, maskReason, maskRelations, membersByGroup, personOf, personsByGroup, SEUIL_NON_VERIFIABLE, type MaskCell, type StructureContract } from "@/lib/croisee/structure";
 
 // Structure de l'effectif (chapitre 02) : cas de référence écrits à la main, valeurs fictives. Six contrats de cinq personnes (la
 // personne p1 a deux contrats) :
@@ -205,28 +206,28 @@ describe("maskRelations : plusieurs relations, total masquable, lignes en bloc (
 });
 
 describe("personsByGroup : effectif d'un groupe en personnes distinctes (cas écrits à la main)", () => {
-  it("une personne avec deux contrats simultanés dans un groupe y compte une fois ; un contrat sans personne compte pour une personne", () => {
+  it("une personne avec deux contrats simultanés dans un groupe y compte une fois ; un contrat sans personne est NON RELIÉ (jamais une personne)", () => {
     // Groupe A : contrats a1 et a2 de la personne q1, contrat a3 de q2 → 3 contrats, 2 personnes.
-    // Groupe B : contrat b1 de q1 (déjà comptée dans A : elle compte aussi dans B), contrats b2 et b3 sans personne → 3 personnes.
+    // Groupe B : contrat b1 de q1 (déjà comptée dans A : elle compte aussi dans B), contrats b2 et b3 sans personne → 1 personne reliée
+    // et 2 contrats non reliés.
     // Groupe C : contrats c1 et c2 de la personne q3 → 2 contrats, 1 personne.
-    const members = [
-      { group: "A", person: personOf({ contractKey: "a1", personKey: "q1" }) },
-      { group: "A", person: personOf({ contractKey: "a2", personKey: "q1" }) },
-      { group: "A", person: personOf({ contractKey: "a3", personKey: "q2" }) },
-      { group: "B", person: personOf({ contractKey: "b1", personKey: "q1" }) },
-      { group: "B", person: personOf({ contractKey: "b2", personKey: null }) },
-      { group: "B", person: personOf({ contractKey: "b3", personKey: null }) },
-      { group: "C", person: personOf({ contractKey: "c1", personKey: "q3" }) },
-      { group: "C", person: personOf({ contractKey: "c2", personKey: "q3" }) },
-    ];
-    expect(personsByGroup(members)).toEqual({ A: 2, B: 3, C: 1 });
-    expect(personOf({ contractKey: "b2", personKey: null })).toBe("contrat:b2");
+    const c = (group: string, contract: string, personKey: string | null) => ({ group, contract, person: personOf({ contractKey: contract, personKey }) });
+    const items = [c("A", "a1", "q1"), c("A", "a2", "q1"), c("A", "a3", "q2"), c("B", "b1", "q1"), c("B", "b2", null), c("B", "b3", null), c("C", "c1", "q3"), c("C", "c2", "q3")];
+    expect(personOf({ contractKey: "b2", personKey: null })).toBeNull();
+    expect(groupsOfContracts(items)).toEqual({ A: { persons: ["q1", "q2"], unlinked: 0 }, B: { persons: ["q1"], unlinked: 2 }, C: { persons: ["q3"], unlinked: 0 } });
+    expect(groupsOfContracts([])).toEqual({});
+    // Un contrat présent deux fois dans un groupe compte une fois.
+    expect(groupsOfContracts([c("D", "d1", "q9"), c("D", "d1", "q9"), c("D", "d2", null), c("D", "d2", null)])).toEqual({ D: { persons: ["q9"], unlinked: 1 } });
+    // Seuil 2 : C (2 contrats, 1 personne) est masqué ; B (1 personne reliée et des contrats non reliés sous le seuil) n'est pas dénombré ;
+    // A (2 personnes, seule cellule affichée) l'est en secondaire : les cellules masquées n'apportent aucune personne comptée.
+    const g = groupsOfContracts(items);
+    expect(maskGroups([groupInput(g.A, 2, 3), groupInput(g.B, 2, 3), groupInput(g.C, 2, 2)], 2, true)).toEqual(["secondary", "unverifiable", "masked"]);
+    // personsByGroup et membersByGroup (jetons déjà reliés) : les mêmes personnes, distinctes et triées, par groupe (q1 figure dans A et
+    // dans B).
+    const members = items.flatMap((x) => (x.person === null ? [] : [{ group: x.group, person: x.person }]));
+    expect(personsByGroup(members)).toEqual({ A: 2, B: 1, C: 1 });
     expect(personsByGroup([])).toEqual({});
-    // Seuil 2 : C (2 contrats, 1 personne) est masqué ; A (2 personnes, plus petite cellule affichée) l'est en secondaire.
-    const sizes = personsByGroup(members);
-    expect(maskGroups([{ size: sizes.A, value: 3 }, { size: sizes.B, value: 3 }, { size: sizes.C, value: 2 }], 2, true)).toEqual(["secondary", "shown", "masked"]);
-    // membersByGroup : les mêmes personnes, distinctes et triées, par groupe (q1 figure dans A et dans B).
-    expect(membersByGroup(members)).toEqual({ A: ["q1", "q2"], B: ["contrat:b2", "contrat:b3", "q1"], C: ["q3"] });
+    expect(membersByGroup(members)).toEqual({ A: ["q1", "q2"], B: ["q1"], C: ["q3"] });
   });
 
   it("members : une personne présente dans deux groupes masqués n'y compte qu'une fois (maskGroups)", () => {
@@ -336,11 +337,22 @@ describe("effectifStructure : cas de référence", () => {
     ]);
   });
 
-  it("un contrat sans personne rattachée compte pour une personne distincte", () => {
+  it("un contrat sans personne rattachée est non relié : il ne protège jamais et ne compte pour aucune personne distincte", () => {
+    // Deux contrats sans personne, à temps partiel : 0 personne reliée, 2 contrats non reliés (< seuil 2) → effectif non dénombré
+    // (non vérifiable) ; le total (2) étant affiché, « Temps plein » (0, personne) ne protège pas : toute la caractéristique est n.d.
     const orphelins = [c("o1", null, false, "standard", false), c("o2", null, false, "standard", false)];
     const s = flat(effectifStructure({ contracts: orphelins, confidentialite: { kind: "set", value: 2 } }));
-    expect(s["Temps partiel"]).toBe(2);
-    expect(s["Temps plein"]).toBe(0);
+    expect(s["Temps partiel"]).toBe(`n.d. : ${SEUIL_NON_VERIFIABLE}`);
+    expect(s["Temps plein"]).toBe(`n.d. : ${confidentialiteReason(2)}`);
+    expect(s.total).toBe(2);
+    // Avec deux personnes reliées à temps plein (k-p1, k-p2) : « Temps plein » (2 ≥ 2) affiché, le partiel reste non vérifiable, et
+    // le plein est masqué en secondaire (le partiel masqué n'apporte aucune personne comptée).
+    const mixte = [...orphelins, c("o3", "k-p1", true, "standard", false), c("o4", "k-p2", true, "standard", false)];
+    const m = flat(effectifStructure({ contracts: mixte, confidentialite: { kind: "set", value: 2 } }));
+    expect(m["Temps partiel"]).toBe(`n.d. : ${SEUIL_NON_VERIFIABLE}`);
+    expect(m["Temps plein"]).toBe(`n.d. : ${confidentialiteReason(2)}`);
+    // Au seuil 1, les contrats non reliés restent non dénombrés (aucune personne reliée) : même lecture.
+    expect(flat(effectifStructure({ contracts: orphelins, confidentialite: { kind: "set", value: 1 } }))["Temps partiel"]).toBe(`n.d. : ${SEUIL_NON_VERIFIABLE}`);
   });
 
   it("sans seuil de confidentialité : toute la structure est n.d. avec la raison (aucun masquage par défaut)", () => {

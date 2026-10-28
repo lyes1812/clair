@@ -1,4 +1,5 @@
-import { confidentialiteReason, confidentialiteSettingReason, isHidden, maskRelations, maskReason, maskSize, personsOfContracts, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { confidentialiteReason, confidentialiteSettingReason, isHidden, maskRelations, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { groupCell, masseWindow } from "@/lib/confidentialite/groups";
 import { evolution, servicesOf, windowPayroll, withService, type Evolution, type JournalInput, type MonthPayroll, type PayrollWindow } from "./engine";
 
 // Lignes par service de la masse salariale : une seule règle pour l'écran Masse salariale (tableau « Services » et son export
@@ -7,7 +8,8 @@ import { evolution, servicesOf, windowPayroll, withService, type Evolution, type
 // masse de N-1 et évolution de la masse ; classement par coût de la période décroissant (un service n.d. après les services
 // de coût positif ou nul), « Non ventilé » toujours en dernier. Aucun autre calcul que ceux du moteur de paie.
 
-export type ServiceRow = { value: string | null; cur: PayrollWindow; prev: PayrollWindow; evo: Evolution };
+// input : le journal restreint au service (withService), celui que le seuil de confidentialité lit pour former ses groupes.
+export type ServiceRow = { value: string | null; cur: PayrollWindow; prev: PayrollWindow; evo: Evolution; input: JournalInput };
 
 // Libellé d'un service : son code analytique, ou « Non ventilé » pour les lignes sans code de l'axe.
 export const serviceLabel = (v: string | null): string => (v === null ? "Non ventilé" : v);
@@ -19,7 +21,7 @@ export function serviceRows(journal: JournalInput, months: string[], prevMonths:
     const si = withService(journal, v);
     const c = windowPayroll(si, months);
     const p = windowPayroll(si, prevMonths);
-    return { value: v, cur: c, prev: p, evo: evolution(c, p, (w) => w.masse) };
+    return { value: v, cur: c, prev: p, evo: evolution(c, p, (w) => w.masse), input: si };
   });
   const masseOf = (w: PayrollWindow) => (w.kind === "value" ? w.masse : -1);
   return rows.sort((a, b) => (a.value === null ? 1 : b.value === null ? -1 : masseOf(b.cur) - masseOf(a.cur)));
@@ -27,21 +29,42 @@ export function serviceRows(journal: JournalInput, months: string[], prevMonths:
 
 // --- Seuil de confidentialité sur le journal de paie ------------------------------------------------------------------------------
 // Unité : les personnes distinctes du référentiel Collaborateurs (src/lib/confidentialite), reliées contrat par contrat (identifiant
-// de contrat des lignes du journal → clé de personne). Une valeur (montant d'un service, d'un libellé, d'une provision) décrit les
-// contrats qui portent ses lignes. Un contrat non relié ne protège jamais ; un montant non nul sans aucun contrat rattaché (lignes
-// sans contrat) n'est pas dénombré : non vérifiable, quel que soit le seuil. Le moteur maskRelations est la seule implémentation.
-
-// Cellule de masquage d'un montant : taille en personnes reliées (null : non dénombré), valeur (null : déjà n.d. pour une autre
-// raison), personnes (comptées une fois d'une cellule masquée à l'autre).
-export function journalCell(contracts: Iterable<string>, value: number | null, link: PersonLink, seuil: number): MaskCell {
-  const g = personsOfContracts(contracts, link);
-  let size = maskSize(g, seuil);
-  if (size === 0 && value !== null && value !== 0) size = null;
-  return { size, value, members: g.persons };
-}
+// de contrat des lignes du journal → clé de personne). Les groupes sont ceux de src/lib/confidentialite/groups.ts (une seule
+// convention : contrats qui portent une ligne de masse, brut ou cotisations) ; le moteur maskRelations est la seule implémentation.
 
 // Raison d'un masquage (principal et secondaire : la même) ou d'un effectif non dénombré ; null si la cellule est affichée.
 export const hiddenReason = (s: MaskStatus, seuil: number): string | null => (isHidden(s) ? maskReason(s, seuil) : null);
+
+// Statuts du seuil pour des fenêtres de mois par service, par le moteur unique. Cellules : la masse de chaque fenêtre de chaque
+// service, et la masse de chacun de ses mois (groupes de masseWindow : contrats qui portent une ligne de masse, reliés à leur
+// personne ; valeur n.d. quand la fenêtre ou le mois l'est). Relations, dans l'ordre : les mois d'une fenêtre d'un service somment
+// vers sa fenêtre (total masquable) ; puis, pour chaque fenêtre, la colonne des services (total de l'entreprise, jamais masqué) ;
+// puis, pour chaque rang de mois de chaque fenêtre, la colonne des services (total du mois, jamais masqué). Les fenêtres sont
+// indépendantes entre elles : les masquer ensemble ou une à une donne le même résultat.
+export type WindowStatus = { window: MaskStatus; months: MaskStatus[] };
+export function maskServiceWindows(services: readonly { input: JournalInput; windows: readonly PayrollWindow[] }[], link: PersonLink, seuil: number): WindowStatus[][] {
+  const cells: MaskCell[] = [];
+  const relations: MaskRelation[] = [];
+  const add = (c: MaskCell) => cells.push(c) - 1;
+  const idx = services.map((s) =>
+    s.windows.map((w) => {
+      const g = masseWindow(s.input, w.months.map((m) => m.month), link);
+      const cell = add(groupCell(g.window, seuil, w.kind === "value" ? w.masse : null));
+      const months = w.months.map((m, j) => add(groupCell(g.months[j], seuil, m.kind === "value" ? m.masse : null)));
+      return { cell, months };
+    }),
+  );
+  for (const s of idx) for (const w of s) relations.push({ cells: w.months, total: w.cell });
+  const windowCount = Math.max(0, ...idx.map((s) => s.length));
+  for (let j = 0; j < windowCount; j++) {
+    const column = idx.flatMap((s) => (s[j] === undefined ? [] : [s[j]]));
+    relations.push({ cells: column.map((w) => w.cell) });
+    const monthCount = Math.max(0, ...column.map((w) => w.months.length));
+    for (let k = 0; k < monthCount; k++) relations.push({ cells: column.flatMap((w) => (w.months[k] === undefined ? [] : [w.months[k]])) });
+  }
+  const st = maskRelations(cells, relations, seuil);
+  return idx.map((s) => s.map((w) => ({ window: st[w.cell], months: w.months.map((c) => st[c]) })));
+}
 
 // Mois et fenêtre après seuil : la forme du moteur (MonthPayroll, PayrollWindow) ou un n.d. qui porte seulement sa raison. Une
 // valeur du moteur est assignable à la forme masquée : les écrans et les exports typés sur celle-ci lisent les deux.
@@ -58,14 +81,22 @@ export type MaskedServiceRow = {
 };
 
 const ndMonth = (m: MonthPayroll, reason: string): MaskedMonth => ({ month: m.month, kind: "nd", open: m.open, nd: { reason } });
-const contractsOf = (w: PayrollWindow): string[] => (w.kind === "value" ? w.months.flatMap((m) => (m.kind === "value" ? m.paidContracts : [])) : []);
 
-// Lignes par service après application du seuil de confidentialité, dans l'ordre reçu. Chaque cellule affichée est un groupe de
-// personnes : la masse du service sur la période (contrats rémunérés sur la période), sur N-1, et chaque mois de la période et de
-// N-1 (contrats rémunérés dans le mois). Totaux publiés, qui portent le masquage secondaire : chaque colonne (période, N-1, chaque
-// mois) somme sur tous les services vers le total de l'entreprise, jamais masqué ; les mois d'un service somment vers sa période,
-// cellule masquable. Une période ou un mois déjà n.d. (mois hors journal) garde sa raison. L'évolution d'une valeur masquée est
-// masquée. Seuil absent ou illisible : toutes les valeurs sont n.d. avec la raison du paramètre, les totaux restent affichés.
+// Fenêtre après seuil : chaque mois masqué porte sa raison ; la fenêtre masquée est n.d. avec la seule raison du seuil ; une fenêtre
+// ou un mois déjà n.d. (mois hors journal) garde sa raison.
+function maskedWindow(w: PayrollWindow, st: WindowStatus, seuil: number): MaskedWindow {
+  const months = w.months.map((m, j) => {
+    const r = hiddenReason(st.months[j], seuil);
+    return r === null ? m : ndMonth(m, r);
+  });
+  const r = hiddenReason(st.window, seuil);
+  if (r !== null) return { kind: "nd", nd: { reason: r }, months };
+  return w.kind === "value" ? { ...w, months } : { kind: "nd", nd: { reason: w.nd.reason }, months };
+}
+
+// Lignes par service après application du seuil de confidentialité, dans l'ordre reçu (maskServiceWindows sur deux fenêtres par
+// service : la période et N-1). L'évolution d'une valeur masquée est masquée. Seuil absent ou illisible : toutes les valeurs sont
+// n.d. avec la raison du paramètre, les totaux restent affichés.
 export function maskServiceRows(rows: ServiceRow[], link: PersonLink, conf: ConfidentialiteSetting): MaskedServiceRow[] {
   if (conf.kind !== "set") {
     const reason = confidentialiteSettingReason(conf) ?? SEUIL_NON_VERIFIABLE;
@@ -73,62 +104,48 @@ export function maskServiceRows(rows: ServiceRow[], link: PersonLink, conf: Conf
     return rows.map((r) => ({ value: r.value, cur: nd(r.cur), prev: nd(r.prev), evo: { kind: "nd", nd: { reason } }, hidden: true, reason }));
   }
   const seuil = conf.value;
-  const cells: MaskCell[] = [];
-  const relations: MaskRelation[] = [];
-  const add = (c: MaskCell) => cells.push(c) - 1;
-  const winCell = (w: PayrollWindow) => add(journalCell(contractsOf(w), w.kind === "value" ? w.masse : null, link, seuil));
-  const monthCells = (w: PayrollWindow) => w.months.map((m) => add(journalCell(m.kind === "value" ? m.paidContracts : [], m.kind === "value" ? m.masse : null, link, seuil)));
-  const idx = rows.map((r) => {
-    const cur = winCell(r.cur);
-    const prev = winCell(r.prev);
-    const curMonths = monthCells(r.cur);
-    const prevMonths = monthCells(r.prev);
-    return { cur, prev, curMonths, prevMonths };
-  });
-  // D'abord les relations dont le total est une cellule masquable (les mois d'un service → sa période), puis les colonnes à total fixe.
-  for (const i of idx) {
-    relations.push({ cells: i.curMonths, total: i.cur });
-    relations.push({ cells: i.prevMonths, total: i.prev });
-  }
-  relations.push({ cells: idx.map((i) => i.cur) });
-  relations.push({ cells: idx.map((i) => i.prev) });
-  const monthCount = Math.max(0, ...idx.map((i) => i.curMonths.length));
-  const prevCount = Math.max(0, ...idx.map((i) => i.prevMonths.length));
-  for (let j = 0; j < monthCount; j++) relations.push({ cells: idx.flatMap((i) => (i.curMonths[j] === undefined ? [] : [i.curMonths[j]])) });
-  for (let j = 0; j < prevCount; j++) relations.push({ cells: idx.flatMap((i) => (i.prevMonths[j] === undefined ? [] : [i.prevMonths[j]])) });
-  const st = maskRelations(cells, relations, seuil);
-
-  const window = (w: PayrollWindow, cell: number, monthIdx: number[]): MaskedWindow => {
-    const months = w.months.map((m, j) => {
-      const r = hiddenReason(st[monthIdx[j]], seuil);
-      return r === null ? m : ndMonth(m, r);
-    });
-    const r = hiddenReason(st[cell], seuil);
-    if (r !== null) return { kind: "nd", nd: { reason: r }, months };
-    return w.kind === "value" ? { ...w, months } : { kind: "nd", nd: { reason: w.nd.reason }, months };
-  };
+  const st = maskServiceWindows(rows.map((r) => ({ input: r.input, windows: [r.cur, r.prev] })), link, seuil);
   return rows.map((r, k) => {
-    const i = idx[k];
-    const all = [i.cur, i.prev, ...i.curMonths, ...i.prevMonths].map((c) => st[c]);
+    const [c, p] = st[k];
+    const all = [c.window, p.window, ...c.months, ...p.months];
     const hidden = all.some(isHidden);
     const reason = all.some((s) => s === "masked" || s === "secondary") ? confidentialiteReason(seuil) : all.some((s) => s === "unverifiable") ? SEUIL_NON_VERIFIABLE : null;
-    const cur = window(r.cur, i.cur, i.curMonths);
-    const prev = window(r.prev, i.prev, i.prevMonths);
-    const evoNd = hiddenReason(st[i.cur], seuil) ?? hiddenReason(st[i.prev], seuil);
+    const cur = maskedWindow(r.cur, c, seuil);
+    const prev = maskedWindow(r.prev, p, seuil);
+    const evoNd = hiddenReason(c.window, seuil) ?? hiddenReason(p.window, seuil);
     const evo: MaskedEvolution = evoNd !== null ? { kind: "nd", nd: { reason: evoNd } } : r.evo;
     return { value: r.value, cur, prev, evo, hidden, reason };
   });
 }
 
+// --- Garde du filtre Service (la seule, pour tous les écrans qui filtrent sur un service) -------------------------------------------
 // Sous le filtre Service, tous les chiffres de l'écran décrivent le service retenu : il est n.d. dans son ensemble dès que sa ligne
 // est masquée sans filtre (période, N-1 ou un mois, masquage secondaire compris : sinon le filtre révélerait par différence ce que
-// le tableau cache), ou que le seuil n'est pas défini (lien vers les Paramètres). null : affiché. Un service absent des lignes
-// (aucune ligne sur la période ni sur N-1) ne décrit personne.
+// le tableau cache), ou que le seuil n'est pas défini (lien vers les Paramètres). La raison est celle du moteur, nue, la même que
+// celle de toute cellule masquée ; la mention du service retenu va dans le titre du bloc n.d., pas dans la raison. null : affiché.
+// Un service absent des lignes (aucune ligne sur la période ni sur N-1) ne décrit personne.
 export type ServiceGuard = { cause: "parametre" | "seuil"; reason: string };
 export function serviceGuard(rows: MaskedServiceRow[], value: string | null, conf: ConfidentialiteSetting): ServiceGuard | null {
   const settingNd = confidentialiteSettingReason(conf);
   if (settingNd !== null) return { cause: "parametre", reason: settingNd };
   const row = rows.find((r) => r.value === value);
   if (!row || !row.hidden || row.reason === null) return null;
-  return { cause: "seuil", reason: `${row.reason} — service retenu par le filtre` };
+  return { cause: "seuil", reason: row.reason };
+}
+
+// La garde la plus grave de plusieurs : le paramètre absent, puis un masquage (principal ou secondaire : la raison du seuil), puis un
+// effectif non dénombré ; null si aucune.
+export function worstGuard(guards: readonly (ServiceGuard | null)[], seuil: number): ServiceGuard | null {
+  const list = guards.filter((g): g is ServiceGuard => g !== null);
+  return list.find((g) => g.cause === "parametre") ?? list.find((g) => g.reason === confidentialiteReason(seuil)) ?? list[0] ?? null;
+}
+
+// Même garde sur des fenêtres de mois réels quelconques (versions comparées de l'Écart budgétaire et de l'Analyse des écarts, mois
+// d'un chapitre de la croisée) : les lignes par service sont formées sur chaque fenêtre (tout le journal, comme le tableau Services)
+// et masquées par le moteur unique ; le service retenu est n.d. dès qu'une fenêtre le masque. Sans fenêtre : rien à protéger.
+export function serviceGuardOnWindows(journal: JournalInput, windows: readonly (readonly string[])[], value: string | null, link: PersonLink, conf: ConfidentialiteSetting): ServiceGuard | null {
+  const settingNd = confidentialiteSettingReason(conf);
+  if (settingNd !== null || conf.kind !== "set") return { cause: "parametre", reason: settingNd ?? SEUIL_NON_VERIFIABLE };
+  const guards = windows.filter((ms) => ms.length > 0).map((ms) => serviceGuard(maskServiceRows(serviceRows(journal, [...ms], []), link, conf), value, conf));
+  return worstGuard(guards, conf.value);
 }

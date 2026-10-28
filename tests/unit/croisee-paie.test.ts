@@ -10,11 +10,10 @@ import { glossaryEntry } from "@/lib/glossary";
 import type { DsnMonth } from "@/lib/payroll/dsn";
 import { monthPayroll, windowPayroll, withService, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
-import { provisionMonth, reconcile, type ComptaLine } from "@/lib/payroll/lot2";
+import { provisionCell, provisionMonth, reconcile, type ComptaLine } from "@/lib/payroll/lot2";
 import { cellView, croiseeHref, type CroiseeCell, type CroiseeTable } from "@/lib/viz/croisee";
 import {
   buildPaieCompta,
-  guardProvision,
   loadPaieComptaInput,
   maskedWindow,
   maskServices,
@@ -30,7 +29,6 @@ import {
   PREVU_PAIE,
   PROVISION_SERVICES_LIMITE,
   provisionContracts,
-  provisionGroup,
   ratioOf,
   SANS_DSN,
   SANS_PRODUITS,
@@ -577,23 +575,7 @@ describe("seuil de confidentialité : maskServices = maskGroups du module partag
     expect(passageStatus("unverifiable", "masked")).toBe("unverifiable");
   });
 
-  it("guardProvision (un service seul) : 1 à seuil − 1 personnes ⇒ n.d. ; aucune personne et provision non nulle ⇒ non vérifiable ; au moins le seuil ⇒ valeurs", () => {
-    const v = provisionMonth(JOURNAL, "2026-01");
-    const two = G(["p1", "p2"]);
-    expect(guardProvision(v, two, 3).total).toEqual({ nd: sousSeuil(3) });
-    expect(guardProvision(v, two, 3).conges).toEqual({ nd: sousSeuil(3) });
-    expect(guardProvision(v, G(["p1", "p2", "p3"]), 3).total).toBe(16500);
-    // 0 personne et 165 € de provision : non vérifiable, même au seuil 1.
-    expect(guardProvision(v, G([]), 3).total).toEqual({ nd: SEUIL_NON_VERIFIABLE });
-    expect(guardProvision(v, G([]), 1).total).toEqual({ nd: SEUIL_NON_VERIFIABLE });
-    // 0 personne et provision nulle (0 € + 0 €) : affichée.
-    expect(guardProvision({ month: "2026-01", kind: "value", conges: 0, charges: 0, total: 0, missing: [] }, G([]), 3).total).toBe(0);
-    // Un contrat non relié ne protège pas : 2 personnes reliées + 1 contrat non relié restent non dénombrées au seuil 3.
-    expect(guardProvision(v, G(["p1", "p2"], 1), 3).total).toEqual({ nd: SEUIL_NON_VERIFIABLE });
-    expect(guardProvision(v, G(["p1", "p2", "p3"], 1), 3).total).toBe(16500);
-    expect(guardProvision(v, null, 3).total).toEqual({ nd: SEUIL_NON_VERIFIABLE });
-    expect(guardProvision({ month: "2024-01", kind: "nd", reason: "mois hors lecture" }, null, 3).total).toEqual({ nd: "mois hors lecture" });
-    // Une seule raison dans toute l'application, en personnes.
+  it("raisons du seuil : une seule raison dans toute l'application, en personnes ; effectif non dénombré", () => {
     expect(sousSeuil(2)).toBe("non affiché (seuil de confidentialité : 2 personnes)");
     expect(sousSeuil(1)).toBe("non affiché (seuil de confidentialité : 1 personne)");
     expect(sousSeuil(2)).toBe(confidentialiteReason(2));
@@ -615,13 +597,15 @@ describe("seuil de confidentialité : maskServices = maskGroups du module partag
     expect(provisionContracts(nv, "2026-01")).toEqual([]);
     expect(passageContracts(nv, "2026-01")).toEqual([]);
     expect(passageGroup(nv, "2026-01", LINK)).toEqual({ group: G([]), value: 6000, nonZero: true });
-    expect(provisionGroup(nv, "2026-01", LINK)).toEqual({ group: G([]), value: 0, nonZero: false });
-    // Provision de B (150 € + 60 €) et passage (provisions 210 €) : le contrat b9 relié à sa personne ; sans lien, contrat non relié.
-    expect(provisionGroup(b, "2026-01", LINK)).toEqual({ group: G(["personne-b9"]), value: 21000, nonZero: true });
+    // Provision : la cellule de provisionCell (lot2.ts, la fonction de l'onglet Paie & comptabilité) : « Non ventilé » à 0 € sans
+    // contrat ne décrit personne (taille 0) ; B (150 € + 60 €) : le contrat b9 relié à sa personne (taille 1, membre transmis) ; sans
+    // lien, contrat non relié : taille non dénombrée (null) ; mois n.d. : aucune valeur.
+    expect(provisionCell(nv, "2026-01", LINK, 2)).toEqual({ size: 0, value: 0, members: [] });
+    expect(provisionCell(b, "2026-01", LINK, 2)).toEqual({ size: 1, value: 21000, members: ["personne-b9"] });
     expect(passageGroup(b, "2026-01", LINK)).toEqual({ group: G(["personne-b9"]), value: 21000, nonZero: true });
-    expect(provisionGroup(b, "2026-01")).toEqual({ group: G([], 1), value: 21000, nonZero: true });
-    // Mois n.d. : groupe non dénombré, aucune valeur.
-    expect(provisionGroup(b, "2024-01", LINK)).toEqual({ group: null, value: null });
+    expect(provisionCell(b, "2026-01", new Map(), 2)).toEqual({ size: null, value: 21000, members: [] });
+    expect(provisionCell(b, "2024-01", LINK, 2)).toEqual({ size: 0, value: null, members: [] });
+    expect(provisionCell(a, "2026-01", LINK, 3)).toEqual({ size: 3, value: 12000, members: ["personne-a1", "personne-a2", "personne-a3"] });
     // Une reprise « Mois précédent » (contrat sorti, sans dotation) et une contrepartie 428 ne font pas partie du stock affiché : leur
     // contrat ne compte pas pour la provision ; la reprise compte pour le passage (ligne de charges de personnel).
     const extra: JournalInput = {
@@ -687,10 +671,15 @@ describe("provision par service : seuil de confidentialité et masquage secondai
     const pub = published(m);
     // Valeurs de B (210 €, 150 €, 60 €) et de A (120 €, 30 € de charges sociales) ; 90 € n'est pas vérifiable ici (pied : 30 + 60 €).
     for (const v of [21000, 15000, 6000, 12000, 3000]) expect(pub.numbers).not.toContain(v);
-    // Sous le filtre B : provision et passage n.d. (B porte 210 € de provisions, 1 contrat) ; sous le filtre A, n.d. aussi.
+    // Sous le filtre B : sa ligne par service (masse 0 €, aucun contrat de masse : personne) n'est pas masquée, mais sa fin de mois
+    // l'est dans la provision par service : la provision du service est n.d. en bloc (garde de la provision, lien « Retirer le filtre
+    // Service »), sans tableau mensuel ; le passage (b9, 1 personne, 210 €) est masqué. Sous le filtre A, n.d. aussi (A masqué en
+    // second dans la provision par service).
     const fb = await model({ pay: pay(JOURNAL_SANS_BRUT), seuil: SEUIL(3), service: "B" });
+    const retirer = { href: croiseeHref(BASE, { chapitre: "paie-compta", annee: "2026", de: "01", a: "01" }), label: "Retirer le filtre Service" };
     expect(tile(fb, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(3) });
-    expect(raw(table(fb, ID.provisionMois), 0, "total")).toEqual({ nd: sousSeuil(3) });
+    expect(block(fb, "provision").nd).toEqual([{ reason: sousSeuil(3), action: retirer }]);
+    expect(fb.tables.some((x) => x.id === ID.provisionMois)).toBe(false);
     expect(raw(table(fb, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(3)}` });
     expect(published(fb).numbers).not.toContain(21000);
     expect(fb.limits).toContain(SERVICE_RETENU_LIMITE);
@@ -779,47 +768,54 @@ describe("filtre de service : chiffres du service soumis au même seuil (carte, 
     expect(raw(t, 8, "n")).toBe(160000);
     expect(raw(t, "foot", "n")).toBe(166000);
     // Provision 80 + 30 = 110 € : les lignes de dotation de ce journal ne portent aucun contrat → effectif non dénombré, non vérifiable
-    // quel que soit le seuil (valeur non nulle sans contrat rattaché) ; le passage, lui, est compté sur les contrats de brut (2 personnes).
-    expect(tile(m, "provision").value).toMatchObject({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
+    // quel que soit le seuil (valeur non nulle sans contrat rattaché) : la provision du service est n.d. en bloc (garde de la provision :
+    // une fin de mois non dénombrée), sans tableau mensuel ni graphique ; le passage, lui, est compté sur les contrats de brut
+    // (2 personnes) et reste chiffré.
     const href = croiseeHref(BASE, { chapitre: "paie-compta", annee: "2026", de: "01", a: "01" });
+    expect(tile(m, "provision").value).toMatchObject({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
+    expect(block(m, "provision").nd).toEqual([{ reason: SEUIL_NON_VERIFIABLE, action: { href, label: "Retirer le filtre Service" } }]);
+    expect(m.tables.some((x) => x.id === ID.provisionMois)).toBe(false);
+    expect(m.charts.some((x) => x.id === ID.provisionParts)).toBe(false);
     expect(block(m, "comptabilite").nd[0]).toEqual({ reason: NON_FILTRABLE_COMPTA, action: { href, label: "Retirer le filtre Service" } });
     expect(block(m, "dsn").nd[0].reason).toBe(NON_FILTRABLE_DSN);
     expect(m.tables.some((x) => x.id === ID.provisionServices)).toBe(false);
-    expect(block(m, "provision").nd).toEqual([]);
+    expect(m.limits).toContain(SERVICE_RETENU_LIMITE);
   });
 
-  it("service B (1 contrat), seuil 2 : carte, tableau mensuel, séries et passage n.d. ; N-1 (2 contrats) affiché ; aucune valeur de B publiée", async () => {
+  it("service B (1 contrat), seuil 2 : garde unique du filtre Service (sa ligne par service est masquée) : passage et provision n.d. en bloc, N-1 compris ; aucune valeur de B publiée", async () => {
     const m = await model({ pay: pay(JOURNAL_SEUIL), service: "B" });
     const why = sousSeuil(2);
-    // Provision : carte, tableau mensuel et séries n.d. pour janvier 2026 ; N-1 (fin janvier 2025, B = 2 contrats) : 65 €.
+    const retirer = { href: croiseeHref(BASE, { chapitre: "paie-compta", annee: "2026", de: "01", a: "01" }), label: "Retirer le filtre Service" };
+    // Même garde que la Masse salariale : B (b1, 1 personne) est masqué dans ses lignes par service de janvier 2026 → tout le service
+    // est n.d. avec la raison nue du seuil et le retrait du filtre, N-1 compris (sinon la fin janvier 2025 de B, 2 personnes, se lirait
+    // seule) : cartes, blocs, sans tableau ni graphique.
+    expect(block(m, "charges").nd).toEqual([{ reason: why, action: retirer }]);
+    expect(block(m, "provision").nd).toEqual([{ reason: why, action: retirer }]);
     const k = tile(m, "provision");
     expect(k.value).toMatchObject({ kind: "nd", reason: why });
     expect(k.sub).toBeUndefined();
-    expect(k.variations!.map((v) => v.text && sp(v.text))).toEqual(["65,00 €", null]);
-    const t = table(m, ID.provisionMois);
-    expect(raw(t, 0, "total")).toEqual({ nd: why });
-    expect(raw(t, 0, "conges")).toEqual({ nd: why });
-    expect(raw(t, 0, "charges")).toEqual({ nd: why });
-    expect(raw(t, 0, "total-n1")).toBe(6500);
-    expect(chart(m, ID.provisionParts).series.map((s) => [s.values, s.reasons])).toEqual([[[null], [why]], [[null], [why]]]);
-    expect(chart(m, ID.provisionN1).series.map((s) => s.values)).toEqual([[null], [6500]]);
-    // Passage de janvier 2026 n.d. (raison du mois), N-1 chiffré : salaires 1 400 € + cotisations 560 € + provisions 65 € = 2 025 €.
-    const c = table(m, ID.charges);
-    expect(raw(c, "foot", "n")).toEqual({ nd: `janv. 2026 : ${why}` });
-    expect(raw(c, "foot", "n1")).toBe(202500);
-    expect(tile(m, "charges").value).toMatchObject({ kind: "nd", reason: `janv. 2026 : ${why}` });
-    // Aucune valeur de B en janvier 2026 (provision 50, 40, 10 € ; salaires 800 € ; cotisations 320 € ; masse 1 120 € ; total 1 170 €).
+    expect(k.variations).toEqual([]);
+    expect(tile(m, "charges").value).toMatchObject({ kind: "nd", reason: why });
+    expect(tile(m, "charges").variations).toEqual([]);
+    for (const id of [ID.charges, ID.provisionMois, ID.provisionServices]) expect(m.tables.some((x) => x.id === id)).toBe(false);
+    for (const id of [ID.chargesNature, ID.provisionParts, ID.provisionN1]) expect(m.charts.some((x) => x.id === id)).toBe(false);
+    // Aucune valeur de B (provision 50, 40, 10 € ; salaires 800 € ; cotisations 320 € ; masse 1 120 € ; total 1 170 € ; N-1 65 €).
     const pub = published(m);
-    for (const v of [5000, 4000, 1000, 80000, 32000, 112000, 117000]) expect(pub.numbers).not.toContain(v);
-    for (const s of ["50,00 €", "1 120,00 €", "1 170,00 €", "800,00 €"]) expect(pub.texts.join(" | ")).not.toContain(s);
-    expect(m.tables.some((x) => x.id === ID.provisionServices)).toBe(false);
+    expect(pub.numbers).toEqual([]);
+    for (const s of ["50,00 €", "1 120,00 €", "1 170,00 €", "800,00 €", "65,00 €"]) expect(pub.texts.join(" | ")).not.toContain(s);
+    expect(m.limits).not.toContain(SERVICE_RETENU_LIMITE);
   });
 
-  it("service A (3 personnes) masqué en secondaire dans le tableau par service : masqué aussi sous le filtre (sinon B = total − A − Non ventilé)", async () => {
+  it("service A (3 personnes) masqué en second dans les lignes par service (B seul masqué se lirait par différence) : masqué aussi sous le filtre, en bloc", async () => {
     const m = await model({ pay: pay(JOURNAL_SEUIL), service: "A" });
+    // Lignes par service de janvier 2026 (masse) : B (1 personne) masqué ; « Non ventilé » (60 € de titres-restaurant, hors masse :
+    // 0 €, personne) n'apporte personne ; A, seul autre service, est masqué en second. Même raison que B, tout le service n.d.
     expect(tile(m, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(2) });
-    expect(raw(table(m, ID.provisionMois), 0, "total")).toEqual({ nd: sousSeuil(2) });
-    expect(raw(table(m, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(2)}` });
+    expect(tile(m, "charges").value).toMatchObject({ kind: "nd", reason: sousSeuil(2) });
+    expect(block(m, "charges").nd[0].reason).toBe(sousSeuil(2));
+    expect(block(m, "provision").nd[0].reason).toBe(sousSeuil(2));
+    expect(m.tables).toEqual([]);
+    expect(published(m).numbers).toEqual([]);
     // « Non ventilé » : provision à 0 € pour personne, affichée ; passage de 60 € sans contrat, non vérifiable.
     const nv = await model({ pay: pay(JOURNAL_SEUIL), service: null });
     expect(sp(tile(nv, "provision").value.text)).toBe("0,00 €");
@@ -841,31 +837,45 @@ describe("filtre de service : chiffres du service soumis au même seuil (carte, 
     expect(raw(u, "foot", "total")).toBe(37000);
   });
 
-  it("service C : provision chiffrée comme sa ligne (200 €) ; passage n.d., car « Non ventilé » (60 € sans contrat) doit être protégé", async () => {
+  it("service C (2 personnes) : masqué en second dans les lignes par service (B seul masqué ; C, 2 800 € de masse, plus petit que A, 4 200 €) : tout n.d., comme sa ligne du tableau Services", async () => {
     const m = await model({ pay: pay(JOURNAL_SEUIL_C), service: "C" });
-    // Provision fin janvier 2026 : C (2 contrats) affiché dans le tableau par service, donc sous le filtre : 150 + 50 = 200 €.
+    // Lignes par service de janvier 2026 (masse = brut + cotisations) : A 4 200 € (3 personnes), B 1 120 € (b1 : masqué), C 2 800 €
+    // (c1, c2), « Non ventilé » 0 € (titres-restaurant hors masse ; 0 €, personne). Masqués : {b1} = 1 < 2 → la plus petite valeur
+    // affichée qui ajoute des personnes, C, est masquée en second : {b1, c1, c2} = 3 ≥ 2. Même règle et mêmes cellules que le
+    // tableau Services de la Masse salariale : sous le filtre C, passage et provision sont n.d. en bloc, bien que la provision de C
+    // (200 €) soit affichée dans la provision par service.
+    expect(tile(m, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(2) });
+    expect(tile(m, "charges").value).toMatchObject({ kind: "nd", reason: sousSeuil(2) });
+    expect(block(m, "charges").nd[0].reason).toBe(sousSeuil(2));
+    expect(m.tables).toEqual([]);
+    expect(published(m).numbers).toEqual([]);
+    const all = table(await model({ pay: pay(JOURNAL_SEUIL_C) }), ID.provisionServices);
+    expect(raw(all, 2, "total")).toBe(20000);
+  });
+
+  it("service C affiché dès que B compte deux personnes (b1 et b2, 400 € chacun) : provision 200 € et passage 3 000 € ; « Non ventilé » (60 € sans contrat) est protégé par B, masqué en second dans le passage", async () => {
+    // B à deux personnes : aucune ligne par service masquée (A 3, B 2, C 2, « Non ventilé » 0 € personne) → C passe la garde unique.
+    // Provision par service, fin janvier 2026 : B (dotation de b1 seul : 1 personne) masqué, A (120 €, plus petit que C) masqué en
+    // second, C (c1, c2 : 200 €) affiché → provision de C chiffrée. Passage de janvier 2026 (contrats de toute ligne de charges de
+    // personnel) : « Non ventilé » (60 € sans contrat) non vérifiable → B (1 170 €, b1 + b2 = 2 personnes), plus petit que C (3 000 €)
+    // et A (4 320 €), masqué en second ; C reste chiffré : 2 000 + 800 + 200 = 3 000 €.
+    const lines = JOURNAL_SEUIL_C.lines.flatMap((l) => (l.key === "s7" ? [{ ...l, debitCents: 40000 }, { ...l, key: "s7b", debitCents: 40000, contractId: "contrat-fictif-b2" }] : [l]));
+    const m = await model({ pay: pay({ ...JOURNAL_SEUIL_C, lines }), service: "C" });
     expect(sp(tile(m, "provision").value.text)).toBe("200,00 €");
     expect(raw(table(m, ID.provisionMois), 0, "total")).toBe(20000);
-    // Passage de janvier 2026 (taille : contrats de toute ligne de charges de personnel) : A = 3 (4 320 €), B = 1 (1 170 €) masqué,
-    // C = 2 (3 000 €), « Non ventilé » = 0 contrat et 60 € → masqué. Masqués : {b1} = 1 < 2 → C, plus petit que A, masqué en
-    // secondaire : {b1, c1, c2} = 3 ≥ 2. Sans cela, B + « Non ventilé » (1 contrat) se lirait comme total − A − C.
-    expect(raw(table(m, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(2)}` });
+    expect(raw(table(m, ID.charges), "foot", "n")).toBe(300000);
     // N-1 (janvier 2025) : aucune ligne de C, 0 € lu, affiché.
     expect(raw(table(m, ID.charges), "foot", "n1")).toBe(0);
+    expect(m.limits).toContain(SERVICE_RETENU_LIMITE);
+    // Sous le filtre B : la ligne par service de B n'est pas masquée, mais sa provision (1 personne) l'est → provision n.d. en bloc,
+    // passage de janvier 2026 masqué (il contient la provision), N-1 (2 025 €) chiffré.
+    const b = await model({ pay: pay({ ...JOURNAL_SEUIL_C, lines }), service: "B" });
+    expect(block(b, "provision").nd[0].reason).toBe(sousSeuil(2));
+    expect(raw(table(b, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(2)}` });
+    expect(raw(table(b, ID.charges), "foot", "n1")).toBe(202500);
   });
 
-  it("service C, ligne de « Non ventilé » rattachée à un contrat sans service (n1) : masqués {b1, n1} = 2 ≥ 2, passage de C chiffré", async () => {
-    const lines = JOURNAL_SEUIL_C.lines.map((l) => (l.key === "s11" ? { ...l, contractId: "contrat-fictif-n1" } : l));
-    const m = await model({ pay: pay({ ...JOURNAL_SEUIL_C, lines }), service: "C" });
-    // C, 2026-01 : salaires 2 000 € + cotisations 800 € + provisions 200 € = 3 000 €.
-    expect(raw(table(m, ID.charges), "foot", "n")).toBe(300000);
-    // La même ligne rattachée à b1 (contrat déjà masqué dans B) n'ajoute aucun contrat : {b1} = 1 < 2, C reste masqué.
-    const same = JOURNAL_SEUIL_C.lines.map((l) => (l.key === "s11" ? { ...l, contractId: "contrat-fictif-b1" } : l));
-    const ms = await model({ pay: pay({ ...JOURNAL_SEUIL_C, lines: same }), service: "C" });
-    expect(raw(table(ms, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(2)}` });
-  });
-
-  it("période de deux mois : B masqué en janvier (1 contrat), affiché en février (2) ; le passage de la période est n.d.", async () => {
+  it("période de deux mois : B masqué en janvier (1 contrat) et affiché en février (2) : sous le filtre, toute la période est n.d. ; sans filtre, fin février reste chiffrée", async () => {
     // 2026-01 : A = 3 contrats (provision 120 €), B = 1 (50 €). 2026-02 : A = 3 (provision 32 + 32 + 31 = 95 € et 11 + 10 + 10 =
     // 31 €, soit 126 €), B = 2 (b1, b2 ; salaires 800 € + 600 €, cotisations 560 €, provision 2 × 30 € + 2 × 9 € = 78 €). Aucun
     // « Non ventilé ». N-1 non lu.
@@ -886,15 +896,16 @@ describe("filtre de service : chiffres du service soumis au même seuil (carte, 
     const journal: JournalInput = { lines: [...jan, ...feb], months: ["2026-01", "2026-02"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
     const per: Period = { months: ["2026-01", "2026-02"], prevMonths: ["2025-01", "2025-02"], from: "01", to: "02", period: "janvier → février 2026", prev: "janvier → février 2025" };
     const m = await model({ pay: pay(journal), service: "B", period: per });
-    const t = table(m, ID.provisionMois);
-    expect(raw(t, 0, "total")).toEqual({ nd: sousSeuil(2) });
-    expect(raw(t, 1, "total")).toBe(7800);
-    expect(raw(t, 1, "conges")).toBe(6000);
-    expect(raw(t, 1, "charges")).toBe(1800);
-    expect(chart(m, ID.provisionParts).series[0].values).toEqual([null, 6000]);
-    expect(sp(tile(m, "provision").value.text)).toBe("78,00 €");
-    // Le passage de janvier → février contient janvier : n.d. (sinon janvier se lirait comme « période − février »).
-    expect(raw(table(m, ID.charges), "foot", "n")).toEqual({ nd: `janv. 2026 : ${sousSeuil(2)}` });
+    // Garde unique sur la fenêtre janvier → février : le mois de janvier de B (1 personne) est masqué, donc sa fenêtre l'est (les mois
+    // somment vers la période : février se lirait comme « période − janvier ») → tout le service n.d. en bloc, février compris
+    // (78 €, 60 €, 18 € ne sont publiés nulle part).
+    expect(tile(m, "provision").value).toMatchObject({ kind: "nd", reason: sousSeuil(2) });
+    expect(tile(m, "charges").value).toMatchObject({ kind: "nd", reason: sousSeuil(2) });
+    expect(block(m, "provision").nd[0]).toMatchObject({ reason: sousSeuil(2), action: { label: "Retirer le filtre Service" } });
+    expect(m.tables).toEqual([]);
+    const pub = published(m);
+    expect(pub.numbers).toEqual([]);
+    for (const v of ["78,00 €", "60,00 €", "18,00 €"]) expect(pub.texts.join(" | ")).not.toContain(v);
     // Sans filtre, fin février : A (3) et B (2) affichés, 126 € et 78 €.
     const all = table(await model({ pay: pay(journal), period: per }), ID.provisionServices);
     expect([0, 1].map((r) => raw(all, r, "total"))).toEqual([12600, 7800]);
@@ -991,9 +1002,12 @@ describe("rendu du chapitre (écran = modèle)", () => {
     expect(nd).toContain('<abbr class="nd" title="janv. 2025 : mois hors de la lecture PayFit appliquée">n.d.</abbr>');
   });
 
-  it("filtre sur un service sous le seuil : la raison du seuil est écrite, en « Graphiques » comme en « Tableaux » quand le seuil manque", async () => {
+  it("filtre sur un service sous le seuil : blocs n.d. avec la raison du seuil et le retrait du filtre ; en « Graphiques » comme en « Tableaux » quand le seuil manque", async () => {
     const html = render(await model({ pay: pay(JOURNAL_SEUIL), service: "B" }), "tableau");
-    expect(html).toContain(`title="${sousSeuil(2)}">n.d.</abbr>`);
+    expect(html).toContain('data-testid="cx-paie-compta-charges-nd"');
+    expect(html).toContain('data-testid="cx-paie-compta-provision-nd"');
+    expect(html).toContain(sousSeuil(2));
+    expect(html).toContain("Retirer le filtre Service");
     expect(html).not.toContain("contrat-fictif");
     const noSeuil = await model({ pay: pay(JOURNAL_SEUIL), service: "B", seuil: { kind: "absent" } });
     for (const aff of ["graphique", "tableau"] as const) {

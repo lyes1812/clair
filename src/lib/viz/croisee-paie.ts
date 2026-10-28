@@ -4,14 +4,14 @@ import { amountGap, chargesOfWindow, type Amount, type ChargesPassage } from "@/
 import { journalReason } from "@/lib/croisee/format";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
 import { confidentialiteHref, confidentialiteReason, isHidden, maskGroups, maskReason as sharedMaskReason, personsOfContracts, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type ConfidentialiteSetting, type MaskInput, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
-import { confidentialiteOf as seuilOf, groupInput, type Confidentialite } from "@/lib/croisee/confidentialite";
+import { confidentialiteOf as seuilOf, groupInput, serviceGuardOnWindows, type Confidentialite, type ServiceGuard } from "@/lib/croisee/confidentialite";
 import { formatMonth } from "@/lib/dates";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { MASSE_TERMS as M } from "@/lib/glossary/masse";
 import { dsnBrutWindow, type DsnWindow } from "@/lib/payroll/dsn";
 import { monthPayroll, serviceOf, servicesOf, windowPayroll, withService, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
 import { classify, gridRubrics, RUBRICS, type RubricId } from "@/lib/payroll/grid";
-import { comptaGap, operatingRevenue, PROVISION_MARKER, provisionMonth, reconcile, type ProvisionMonth, type Reconciliation } from "@/lib/payroll/lot2";
+import { comptaGap, maskProvisionServices, maskProvisionStatus, operatingRevenue, provisionContracts, provisionGuard, provisionMonth, provisionServiceKey, reconcile, type ProvisionMonth, type Reconciliation } from "@/lib/payroll/lot2";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import { costVariation, plainVariation, type ChapterModel, type CroiseeCell, type CroiseeChart, type CroiseeRow, type CroiseeTable, type TileSpec } from "@/lib/viz/croisee";
 import { capital, COLORS, dsnPoint, euros, eurosSigned, monthLongLabel, monthsAxis, monthShortYear, ndGroups, ndLines, noPeriod, pluriel, provisionParts, provisionTotals, reasonText, reconMonthSeries, reconRubricChart } from "@/lib/viz/masse";
@@ -53,11 +53,13 @@ export type PaieData = {
   prevMonths: string[];
   labels: { period: string; prev: string }; // libellés de la période et de N-1 (« janvier → mars 2026 »), jamais l'année seule
   openMonths: string[]; // mois non clos du JOURNAL DE PAIE (période et N-1) : mention « (provisoire) »
-  links: { donnees: string; dsn: string; parametres: string };
+  links: { donnees: string; dsn: string; parametres: string; retirerFiltre: string };
   grid: Record<RubricId, string[]>;
-  // Service retenu dans les filtres (null : toute l'entreprise). Ses chiffres suivent le seuil de confidentialité ; seuilNd : seuil
-  // absent ou illisible, passage et provision du service sont alors n.d. (lien vers Paramètres).
-  service: { label: string; seuilNd: string | null } | null;
+  // Service retenu dans les filtres (null : toute l'entreprise). Ses chiffres suivent le seuil de confidentialité : guard, la garde
+  // unique du filtre Service (seuil absent ou illisible, service masqué dans les lignes par service, masquage secondaire compris) rend
+  // passage et provision du service n.d. ; provision, la garde de la provision (provisionGuard : une fin de mois du service masquée
+  // dans la provision par service) rend la provision du service n.d. Lien vers Paramètres (paramètre) ou retrait du filtre (seuil).
+  service: { label: string; guard: ServiceGuard | null; provision: ServiceGuard | null } | null;
   // Journal restreint au service retenu (comme l'onglet Paie & comptabilité), seuil déjà appliqué : passage et provision.
   cur: WindowIn;
   prev: WindowIn;
@@ -121,7 +123,7 @@ export const SEUIL_ABSENT = SEUIL_NON_DEFINI;
 export const PROVISION_SERVICES_LIMITE =
   "Provision par service : seuil de confidentialité compté à chaque fin de mois en personnes distinctes dont un contrat porte une ligne de dotation de la provision ; une provision non nulle sans contrat rattaché, ou dont les contrats ne sont pas reliés à une personne, n'est pas vérifiable ; masquage secondaire compris ; la ligne « Toute l'entreprise » reste complète.";
 export const SERVICE_RETENU_LIMITE =
-  "Service retenu : seuil de confidentialité compté chaque mois en personnes distinctes dont un contrat porte une ligne de charges de personnel (passage) ou de dotation de la provision (provision) ; une valeur non nulle sans contrat rattaché n'est pas vérifiable ; le passage, qui contient les provisions, est masqué quand la provision l'est ; masquage secondaire avec les autres services.";
+  "Service retenu : n.d. dès que sa ligne par service est masquée dans la Masse salariale (période, N-1 ou un de leurs mois, masquage secondaire compris) ; sa provision est n.d. dès qu'une de ses fins de mois l'est dans la provision par service ; le passage, compté chaque mois en personnes distinctes dont un contrat porte une ligne de charges de personnel, est masqué quand la provision l'est ; une valeur non nulle sans contrat rattaché n'est pas vérifiable.";
 // Raison d'une valeur masquée, la MÊME dans toute l'application pour le masquage principal et le masquage secondaire (module partagé).
 export const sousSeuil = (seuil: number): string => confidentialiteReason(seuil);
 
@@ -172,29 +174,22 @@ export function maskServices(groups: readonly MaskGroup[], seuil: number): MaskS
 
 // Contrats d'un service (input.serviceFilter ; toute l'entreprise sans filtre) qui portent, dans le mois, une ligne de la valeur
 // affichée. Provision : lignes de dotation « Mois courant » de la rubrique Provisions de congés payés, celles que provisionMonth
-// additionne. Passage : toute ligne de charges de personnel (rubrique de la grille ou compte 63/64 non classé), celles que
-// monthPayroll additionne. Une ligne sans contrat ne compte pas : un service qui n'a que de telles lignes est « sans contrat rattaché ».
-const nameKey = (s: string | null) => (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(); // comme lot2.ts
-function contractsOf(input: JournalInput, month: string, pick: (l: LedgerLine) => boolean): string[] {
+// additionne (provisionContracts de lot2.ts, la fonction de l'onglet Paie & comptabilité, ré-exportée). Passage : toute ligne de
+// charges de personnel (rubrique de la grille ou compte 63/64 non classé), celles que monthPayroll additionne. Une ligne sans contrat
+// ne compte pas : un service qui n'a que de telles lignes est « sans contrat rattaché ».
+export { provisionContracts };
+export function passageContracts(input: JournalInput, month: string): string[] {
+  const rubrics = gridRubrics(input.grid);
   const f = input.serviceFilter;
   const ids = new Set<string>();
   for (const l of input.lines) {
-    if (l.month !== month || !l.contractId || !pick(l)) continue;
+    if (l.month !== month || !l.contractId) continue;
+    const c = classify(l.accountId, rubrics);
+    if (!(c.rubric !== null || c.payroll)) continue;
     if (f && serviceOf(l, input.serviceAxis) !== f.value) continue;
     ids.add(l.contractId);
   }
   return [...ids].sort();
-}
-export function provisionContracts(input: JournalInput, month: string): string[] {
-  const rubrics = gridRubrics(input.grid);
-  return contractsOf(input, month, (l) => classify(l.accountId, rubrics).rubric?.id === "provisions-cp" && nameKey(l.accountName).includes(PROVISION_MARKER));
-}
-export function passageContracts(input: JournalInput, month: string): string[] {
-  const rubrics = gridRubrics(input.grid);
-  return contractsOf(input, month, (l) => {
-    const c = classify(l.accountId, rubrics);
-    return c.rubric !== null || c.payroll;
-  });
 }
 
 // Statut du passage d'un service retenu dans les filtres : le passage contient la rubrique Provisions de congés payés (dotations et
@@ -205,13 +200,9 @@ export function passageContracts(input: JournalInput, month: string): string[] {
 export const passageStatus = (passage: MaskStatus, provision: MaskStatus): MaskStatus =>
   passage === "shown" && (provision === "masked" || provision === "secondary") ? provision : passage;
 
-// Groupes du seuil pour un service et un mois (journal restreint au service) : provision de fin de mois, passage du mois. link : lien
-// contrat → personne du référentiel (absent : aucun contrat relié, le service n'est pas dénombré dès qu'il porte une valeur non nulle).
-export function provisionGroup(input: JournalInput, month: string, link: PersonLink = new Map()): MaskGroup {
-  const x = provisionMonth(input, month);
-  if (x.kind === "nd") return { group: null, value: null };
-  return { group: personsOfContracts(provisionContracts(input, month), link), value: x.total, nonZero: (x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0 };
-}
+// Groupe du seuil pour le passage d'un service et d'un mois (journal restreint au service). link : lien contrat → personne du
+// référentiel (absent : aucun contrat relié, le service n'est pas dénombré dès qu'il porte une valeur non nulle). La provision suit
+// provisionCell / maskProvisionStatus de lot2.ts (règle de valeur « total, à défaut la part connue »), jamais un groupe local.
 export function passageGroup(input: JournalInput, month: string, link: PersonLink = new Map()): MaskGroup {
   const r = monthPayroll(input, month);
   if (r.kind === "nd") return { group: null, value: null };
@@ -241,15 +232,6 @@ export function maskedWindow(w: WindowIn, statusAt: (month: string) => MaskStatu
     return { month: r.month, kind: "nd", open: r.open, nd: { reason: maskReason(s, seuil) } };
   });
   return masked ? { kind: "nd", nd: { reason: sousSeuil(seuil) }, months } : w;
-}
-
-// Seuil appliqué à un seul service, sans autre service pour un masquage secondaire (forme courte de maskServices + maskedProvision) ;
-// group : personnes distinctes dont un contrat porte une ligne de dotation de la provision du service, et contrats non reliés (null :
-// non dénombré).
-export function guardProvision(x: ProvisionMonth, group: PersonsOfContracts | null, seuil: number): { total: Amount; conges: Amount; charges: Amount } {
-  const nonZero = x.kind === "nd" || (x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0;
-  const y = maskedProvision(x, maskServices([{ group, value: x.kind === "nd" ? null : x.total, nonZero }], seuil)[0], seuil);
-  return provisionAmounts(y, y);
 }
 
 // Seuil de l'espace (module partagé) : la valeur, sinon n.d. avec la raison du paramètre (jamais de valeur par défaut).
@@ -326,15 +308,21 @@ export function buildPaieCompta(input: PaieInput): PaieModel {
   const charts: CroiseeChart[] = [];
   const blocks: PaieBlock[] = [];
   const limits: string[] = [];
-  // Service retenu sans seuil de confidentialité défini : passage et provision du service sont n.d., avec le lien vers Paramètres.
-  const serviceNd = d.service?.seuilNd ?? null;
+  // Service retenu gardé (seuil non défini, ou service masqué dans les lignes par service : garde unique du filtre Service) : passage
+  // et provision du service sont n.d., avec le lien vers Paramètres (paramètre) ou le retrait du filtre (seuil). Provision gardée seule
+  // (une fin de mois du service masquée dans la provision par service) : la provision du service est n.d.
   const toParams: Action = { href: d.links.parametres, label: "Paramètres" };
+  const guardAction = (g: ServiceGuard): Action => (g.cause === "parametre" ? toParams : { href: d.links.retirerFiltre, label: "Retirer le filtre Service" });
+  const serviceGuard = d.service?.guard ?? null;
+  const serviceNd = serviceGuard?.reason ?? null;
+  const provGuard = serviceGuard ?? d.service?.provision ?? null;
+  const provisionNd = provGuard?.reason ?? null;
 
   // --- Passage de la masse chargée aux charges de personnel (journal restreint au service retenu).
   const passN = passageOf(d.cur);
   const passP = passageOf(d.prev);
   const chargesBlock: PaieBlock = { id: "charges", title: "De la masse chargée aux charges de personnel", term: T.chargesPersonnel, graph: true, nd: [], notes: [], charts: [], tables: [] };
-  if (serviceNd) chargesBlock.nd.push({ reason: serviceNd, action: toParams });
+  if (serviceGuard) chargesBlock.nd.push({ reason: serviceGuard.reason, action: guardAction(serviceGuard) });
   else {
     const lineRows: CroiseeRow[] = [];
     let foot: CroiseeRow | undefined;
@@ -508,7 +496,7 @@ export function buildPaieCompta(input: PaieInput): PaieModel {
   const provBlock: PaieBlock = { id: "provision", title: "Provision de congés payés", term: M.provision, graph: true, nd: [], notes: [], charts: [], tables: [] };
   const parts = provisionParts(d.provCur);
   const totals = provisionTotals(d.provCur, d.provPrev, { cur: `Provision ${d.labels.period}`, prev: `Provision N-1 (${d.labels.prev})` });
-  if (serviceNd) provBlock.nd.push({ reason: serviceNd, action: toParams });
+  if (provGuard) provBlock.nd.push({ reason: provGuard.reason, action: guardAction(provGuard) });
   else {
     tables.push({
       id: ID.provisionMois,
@@ -625,10 +613,10 @@ export function buildPaieCompta(input: PaieInput): PaieModel {
     id: "provision",
     label: `Provision fin ${monthLongLabel(last)}`,
     term: M.provision,
-    sub: !serviceNd && (isNum(conges) || isNum(charges)) ? `congés payés ${part(conges)} + charges sociales ${part(charges)}` : undefined,
-    value: serviceNd ? ndTile(serviceNd) : value(provN, euros),
+    sub: !provisionNd && (isNum(conges) || isNum(charges)) ? `congés payés ${part(conges)} + charges sociales ${part(charges)}` : undefined,
+    value: provisionNd ? ndTile(provisionNd) : value(provN, euros),
     cost: true,
-    variations: serviceNd ? [] : [plainVariation(`Fin ${monthLongLabel(lastPrev)}`, isNum(provP) ? euros(provP) : null, ndOf(provP)), costVariation("Écart", isNum(provG) ? provG : null, signedOrNd(provG), isNum(provG) ? null : ndOf(provG))],
+    variations: provisionNd ? [] : [plainVariation(`Fin ${monthLongLabel(lastPrev)}`, isNum(provP) ? euros(provP) : null, ndOf(provP)), costVariation("Écart", isNum(provG) ? provG : null, signedOrNd(provG), isNum(provG) ? null : ndOf(provG))],
   });
   const ratioN = c.kind === "nd" ? ({ nd: c.reason } as const) : ratioOf(c.masse, c.produits);
   const ratioP = c.kind === "nd" ? null : ratioOf(windowAmount(c.massePrev, (w) => w.masse), c.produitsPrev);
@@ -661,7 +649,7 @@ function ratioCell(masse: Amount, produits: Amount): CroiseeCell {
 // --- Chargement : mêmes fonctions et mêmes entrées que l'onglet Paie & comptabilité de la Masse salariale -----------------------------
 
 export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInput> {
-  const links = { donnees: `/e/${ctx.slug}/donnees`, dsn: `/e/${ctx.slug}/donnees/dsn`, parametres: confidentialiteHref(ctx.slug) };
+  const links = { donnees: `/e/${ctx.slug}/donnees`, dsn: `/e/${ctx.slug}/donnees/dsn`, parametres: confidentialiteHref(ctx.slug), retirerFiltre: ctx.href({ service: null }) };
   const dataAction: Action = { href: links.donnees, label: ctx.canEdit ? "Choisir ou lire une source dans Données" : "Données" };
   const p = ctx.period;
   if (!p) return { nd: { reason: ctx.periodNd ?? "aucun mois disponible", action: dataAction }, data: null };
@@ -677,8 +665,9 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
   const openMonths = full.openMonths.filter((m) => scope.includes(m)).sort();
   const svc = ctx.service.value;
   const filtered = svc !== undefined;
-  const removeFilter: Action = { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };
-  const conf = confidentialiteOf(ctx.settings.confidentialite);
+  const removeFilter: Action = { href: links.retirerFiltre, label: "Retirer le filtre Service" };
+  const setting = ctx.settings.confidentialite;
+  const conf = confidentialiteOf(setting);
   // Lien contrat → personne (référentiel Collaborateurs) : les groupes du seuil sont comptés en personnes distinctes.
   const link = conf.kind === "set" ? await ctx.load.persons() : new Map<string, string>();
 
@@ -693,22 +682,27 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
     if (filtered && !list.includes(svc)) list.push(svc);
     return list.map((value) => ({ value, input: withService(full, value) }));
   })();
-  const masks = new Map<string, { provision: MaskStatus[]; passage: MaskStatus[] }>();
-  const masksAt = (m: string, seuil: number) => {
-    let s = masks.get(m);
-    if (!s) {
-      // Journal réduit aux lignes du mois (le moteur ne lit que celles-là pour ce mois : mêmes résultats, sans relire toute l'année
-      // pour chaque service).
+  // Statuts de la provision par service et par fin de mois (maskProvisionStatus de lot2.ts : la passe de l'onglet Paie & comptabilité,
+  // règle de valeur « total, à défaut la part connue », contrats portant une ligne de dotation, masquage secondaire par mois), sur la
+  // période et N-1, calculés une fois : lus par le tableau par service et par la vue filtrée (un service masqué dans l'un l'est dans
+  // l'autre). Mois absent : la provision est déjà n.d.
+  const seuil = conf.kind === "set" ? conf.value : null;
+  const provStatus = seuil === null ? {} : maskProvisionStatus({ inputs: groups, months: scope, link, seuil });
+  const provisionAt = (value: string | null, m: string): MaskStatus => provStatus[provisionServiceKey(value)]?.[m] ?? "nd";
+  // Passage vers les charges de personnel par service et par mois (contrats portant une ligne de charges de personnel), lu sous le
+  // filtre seulement, mois par mois, sur le journal réduit aux lignes du mois (mêmes résultats, sans relire toute l'année).
+  const passageMasks = new Map<string, MaskStatus[]>();
+  const passageAt = (m: string, s: number): MaskStatus[] => {
+    let x = passageMasks.get(m);
+    if (!x) {
       const month: JournalInput = { ...full, lines: full.lines.filter((l) => l.month === m) };
-      const inputs = groups.map((g) => withService(month, g.value));
-      s = { provision: maskServices(inputs.map((si) => provisionGroup(si, m, link)), seuil), passage: maskServices(inputs.map((si) => passageGroup(si, m, link)), seuil) };
-      masks.set(m, s);
+      x = maskServices(groups.map((g) => passageGroup(withService(month, g.value), m, link)), s);
+      passageMasks.set(m, x);
     }
-    return s;
+    return x;
   };
 
-  // Passage et provision : journal entier (toute l'entreprise, non soumis au seuil), ou journal du service retenu, seuil appliqué
-  // mois par mois ; sans seuil défini, les chiffres du service sont n.d. (lien vers Paramètres).
+  // Passage et provision : journal entier (toute l'entreprise, non soumis au seuil), ou journal du service retenu sous ses gardes.
   let service: PaieData["service"] = null;
   let cur: WindowIn;
   let prev: WindowIn;
@@ -722,43 +716,51 @@ export async function loadPaieComptaInput(ctx: CroiseeContext): Promise<PaieInpu
   } else {
     const gi = groups.findIndex((g) => g.value === svc);
     const input = groups[gi].input;
-    if (conf.kind === "nd") {
-      service = { label: ctx.service.label, seuilNd: conf.reason };
-      const ndWindow = (ms: string[]): WindowIn => ({ kind: "nd", nd: { reason: conf.reason }, months: ms.map((m): MonthIn => ({ month: m, kind: "nd", open: openMonths.includes(m), nd: { reason: conf.reason } })) });
-      const ndProvision = (m: string): ProvisionMonth => ({ month: m, kind: "nd", reason: conf.reason });
-      cur = ndWindow(months);
-      prev = ndWindow(prevMonths);
-      provCur = months.map(ndProvision);
-      provPrev = prevMonths.map(ndProvision);
+    const ndWindow = (ms: string[], reason: string): WindowIn => ({ kind: "nd", nd: { reason }, months: ms.map((m): MonthIn => ({ month: m, kind: "nd", open: openMonths.includes(m), nd: { reason } })) });
+    const ndProvision = (m: string, reason: string): ProvisionMonth => ({ month: m, kind: "nd", reason });
+    // Garde unique du filtre Service (la même que la Masse salariale, l'Écart budgétaire, l'Analyse des écarts et les autres chapitres) :
+    // seuil non défini, ou service masqué dans ses lignes par service sur la période ou N-1 (masquage secondaire compris) → passage et
+    // provision du service n.d. avec la raison nue du moteur.
+    const guard = serviceGuardOnWindows(full, [months, prevMonths], svc, link, setting);
+    if (guard || seuil === null) {
+      const g: ServiceGuard = guard ?? { cause: "parametre", reason: conf.kind === "nd" ? conf.reason : SEUIL_NON_VERIFIABLE };
+      service = { label: ctx.service.label, guard: g, provision: null };
+      cur = ndWindow(months, g.reason);
+      prev = ndWindow(prevMonths, g.reason);
+      provCur = months.map((m) => ndProvision(m, g.reason));
+      provPrev = prevMonths.map((m) => ndProvision(m, g.reason));
     } else {
-      const seuil = conf.value;
-      service = { label: ctx.service.label, seuilNd: null };
-      const passageAt = (m: string) => passageStatus(masksAt(m, seuil).passage[gi], masksAt(m, seuil).provision[gi]);
-      const provisionAt = (m: string) => masksAt(m, seuil).provision[gi];
-      cur = maskedWindow(windowPayroll(input, months), passageAt, seuil);
-      prev = maskedWindow(windowPayroll(input, prevMonths), passageAt, seuil);
-      provCur = months.map((m) => maskedProvision(provisionMonth(input, m), provisionAt(m), seuil));
-      provPrev = prevMonths.map((m) => maskedProvision(provisionMonth(input, m), provisionAt(m), seuil));
+      // Provision du service : la garde de la provision de l'onglet Paie & comptabilité (provisionGuard sur maskProvisionServices de
+      // lot2.ts : une fin de mois du service masquée dans la provision par service, période ou N-1) rend toute sa provision n.d. ;
+      // sinon chaque fin de mois garde son statut. Le passage, qui contient les provisions, est masqué quand la provision l'est.
+      const pg = provisionGuard(maskProvisionServices({ inputs: groups, months: scope, link, conf: setting }), svc, scope, setting);
+      service = { label: ctx.service.label, guard: null, provision: pg };
+      const passageStatusAt = (m: string) => passageStatus(passageAt(m, seuil)[gi], provisionAt(svc, m));
+      cur = maskedWindow(windowPayroll(input, months), passageStatusAt, seuil);
+      prev = maskedWindow(windowPayroll(input, prevMonths), passageStatusAt, seuil);
+      const prov = (m: string) => (pg ? ndProvision(m, pg.reason) : maskedProvision(provisionMonth(input, m), provisionAt(svc, m), seuil));
+      provCur = months.map(prov);
+      provPrev = prevMonths.map(prov);
     }
   }
 
-  // Provision par service (sans filtre de service) : services présents aux deux fins de mois, seuil et masquage secondaire appliqués.
+  // Provision par service (sans filtre de service) : services présents aux deux fins de mois, seuil et masquage secondaire appliqués
+  // (statuts de maskProvisionStatus : les mêmes cellules n.d. que l'onglet Paie & comptabilité et son export).
   let provServices: PaieData["provServices"];
   if (filtered) provServices = { kind: "hidden" };
   else if (!ctx.service.axis || !full.serviceAxis) provServices = { kind: "nd", reason: ctx.service.reason ?? "aucun axe de service retenu (Paramètres)" };
-  else if (conf.kind === "nd") provServices = { kind: "nd", reason: conf.reason, action: { href: links.parametres, label: "Paramètres" } };
+  else if (seuil === null) provServices = { kind: "nd", reason: conf.kind === "nd" ? conf.reason : SEUIL_NON_VERIFIABLE, action: { href: links.parametres, label: "Paramètres" } };
   else {
-    const seuil = conf.value;
+    const s = seuil;
     const shown = servicesOf(full, [last, lastPrev]);
     provServices =
       shown.length === 0
         ? { kind: "nd", reason: "aucune ligne de charges de personnel dans le journal pour ces fins de mois" }
         : {
             kind: "value",
-            rows: shown.map((s) => {
-              const gi = groups.findIndex((g) => g.value === s);
-              const si = groups[gi].input;
-              return { value: s, cur: maskedProvision(provisionMonth(si, last), masksAt(last, seuil).provision[gi], seuil), prev: maskedProvision(provisionMonth(si, lastPrev), masksAt(lastPrev, seuil).provision[gi], seuil) };
+            rows: shown.map((value) => {
+              const si = groups[groups.findIndex((g) => g.value === value)].input;
+              return { value, cur: maskedProvision(provisionMonth(si, last), provisionAt(value, last), s), prev: maskedProvision(provisionMonth(si, lastPrev), provisionAt(value, lastPrev), s) };
             }),
             total: { cur: provisionMonth(full, last), prev: provisionMonth(full, lastPrev) },
           };

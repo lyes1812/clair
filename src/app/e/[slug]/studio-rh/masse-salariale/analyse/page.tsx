@@ -9,13 +9,14 @@ import { confidentialiteHref, getConfidentialite } from "@/lib/confidentialite";
 import { confidentialiteOf, croiseeLink } from "@/lib/croisee/confidentialite";
 import { ECART_TERMS, STEP_TERMS } from "@/lib/glossary/ecart";
 import { costTone, trendClass } from "@/lib/trend";
-import { cascadeView, etpWaterfallOf, gapTone, masseWaterfall, pontWaterfall, serviceGuard, serviceSide, type SeuilNd, type WaterfallData } from "@/lib/viz/ecart";
+import { cascadeView, etpWaterfallOf, gapTone, guardNd, masseWaterfall, pontWaterfall, type SeuilNd, type WaterfallData } from "@/lib/viz/ecart";
 import { fmtFixed } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
+import { serviceLabel } from "@/lib/payroll/service-rows";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { ConfidentialiteLine } from "../components";
-import { loadVersions } from "../ecart-data";
+import { ecartServiceGuard, loadVersions } from "../ecart-data";
 import { GapPct, MsHeader, MsTabs, neg, PanelTitle, periodText, pctSign, PickerForm, scopeText, signOf, TBL, toneClass, TrendLegend } from "../EcartParts";
 import { peopleIndex } from "../people-index";
 import { LiveViewSwitch } from "../ecart/LiveRub";
@@ -73,21 +74,30 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
 
   // Seuil de confidentialité de l'espace (règle de toute l'application, sans valeur par défaut) et lien contrat → personne du
   // référentiel Collaborateurs. Sous un filtre de service, les chiffres du service (cascade, contributions de masse, pont) décrivent
-  // ses personnes sur chaque version : sous le seuil ou non dénombré, tout le bloc est n.d. Sans filtre, seuls les paliers de la
-  // cascade sont masqués ; les totaux et le pont de toute l'entreprise ne le sont jamais.
+  // le service retenu sur chaque version : la garde est la garde unique de l'application (ecartServiceGuard : lignes par service du
+  // journal masquées par le moteur, masquage secondaire compris, comme la Synthèse de la Masse salariale et l'Écart budgétaire ;
+  // composition projetée d'un scénario, embauches prévues exemptes) ; gardé, tout le bloc est n.d. Sans filtre, seuls les paliers de
+  // la cascade sont masqués ; les totaux et le pont de toute l'entreprise ne le sont jamais.
   const setting = await getConfidentialite(workspace.id);
   const conf = confidentialiteOf(setting);
   const kpiData = loaded.ctx.kpi.input?.data ?? null;
   const link = kpiData ? croiseeLink(kpiData) : new Map<string, string>();
-  const guard = a && b && loaded.filter ? serviceGuard([serviceSide(a, loaded.sources[0], monthsA, loaded.filter.value, link), serviceSide(b, loaded.sources[1], monthsB, loaded.filter.value, link)], conf) : null;
+  const guard = a && b ? guardNd(ecartServiceGuard(loaded, setting)) : null;
   const cv = cascade ? cascadeView(cascade, conf, link, guard) : null;
   const masseNd: SeuilNd | null = !masse ? null : (guard ?? (masse.kind === "nd" ? { reason: masse.reason, param: false } : null));
   const masseOk = masse && masse.kind === "value" && !masseNd ? masse : null;
   const pontNd: SeuilNd | null = !pont ? null : (guard ?? (pont.kind === "nd" ? { reason: pont.reason, param: false } : null));
   const pontOk = pont && pont.kind === "value" && !pontNd ? pont : null;
   const paramHref = confidentialiteHref(slug);
+  // Raison d'un n.d. : celle du moteur, nue, la même que celle de toute cellule masquée ; le mot « Paramètres » devient le lien quand
+  // le paramètre manque. Sous la garde du filtre Service, le titre du bloc nomme le service retenu (« service X retenu par le filtre »),
+  // comme l'Écart budgétaire et la Masse salariale : la mention n'entre jamais dans la raison.
   const ndText = (nd: SeuilNd) =>
     !nd.param ? nd.reason : nd.reason.endsWith(PARAM) ? <>{nd.reason.slice(0, -PARAM.length)} (<a href={paramHref}>Paramètres</a>)</> : <>{nd.reason} (<a href={paramHref}>Paramètres</a>)</>;
+  const guardTitle = guard && loaded.filter ? `service ${serviceLabel(loaded.filter.value)} retenu par le filtre : ` : "";
+  const blockNd = (nd: SeuilNd) => <>{guardTitle}{ndText(nd)}</>;
+  // Graphique n.d. sous la garde : le même titre devant la raison (le graphique écrit « n.d. — » puis la raison reçue).
+  const chartNd = (w: WaterfallData): WaterfallData => (guardTitle && w.kind === "nd" ? { kind: "nd", reason: `${guardTitle}${w.reason}` } : w);
 
   // Pourcentages d'écart repris des agrégats de l'écart budgétaire (mêmes valeurs que sur cette page) : par rubrique de masse,
   // total de la masse et ETP moyen. Une contribution d'ETP n'a pas de valeur de départ propre : pas de pourcentage.
@@ -95,8 +105,8 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
   const etpPct = pctOf("etp");
   const massePct = pctOf("masse");
 
-  const wfEtp = cv ? etpWaterfallOf(cv) : null;
-  const wfMasse: WaterfallData | null = !masse ? null : masseNd ? { kind: "nd", reason: masseNd.reason } : masseWaterfall(masse);
+  const wfEtp = cv ? chartNd(etpWaterfallOf(cv)) : null;
+  const wfMasse: WaterfallData | null = !masse ? null : masseNd ? chartNd({ kind: "nd", reason: masseNd.reason }) : masseWaterfall(masse);
   const wfPont = pontOk ? pontWaterfall(pontOk) : null;
   const items: Record<string, AnalyseItem> | null = wfEtp && wfMasse
     ? {
@@ -158,7 +168,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
             <PanelTitle title="Cascade d'ETP" slug={slug} term={ECART_TERMS.cascade} label="Cascade d'ETP" />
           </div>
           {cv.kind === "nd" ? (
-            <p className="nd" data-testid="analyse-etp-nd">n.d. — {ndText(cv)}</p>
+            <p className="nd" data-testid="analyse-etp-nd">n.d. — {blockNd(cv)}</p>
           ) : (
             <>
               <div className="table-wrap scroll">
@@ -205,7 +215,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
             <PanelTitle title="Masse salariale chargée" slug={slug} term={ECART_TERMS.contributions} label="Contributions de la masse salariale" />
           </div>
           {!masseOk ? (
-            <p className="nd" data-testid="analyse-masse-nd">n.d. — {masseNd ? ndText(masseNd) : ""}</p>
+            <p className="nd" data-testid="analyse-masse-nd">n.d. — {masseNd ? blockNd(masseNd) : ""}</p>
           ) : (
             <>
               <TrendLegend slug={slug} />
@@ -249,7 +259,7 @@ export default async function AnalysePage({ params, searchParams }: { params: Pr
             <PanelTitle title="Pont volume / coût moyen" slug={slug} term={ECART_TERMS.pont} label="Pont volume / coût moyen" />
           </div>
           {!pontOk ? (
-            <p className="nd" data-testid="analyse-pont-nd">n.d. — {pontNd ? ndText(pontNd) : ""}</p>
+            <p className="nd" data-testid="analyse-pont-nd">n.d. — {pontNd ? blockNd(pontNd) : ""}</p>
           ) : (
             <>
               {aff !== "graphique" && !legendInMasse && <TrendLegend slug={slug} />}

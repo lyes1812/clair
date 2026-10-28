@@ -1,4 +1,3 @@
-import type { CategoryMonth } from "@/lib/budget/categories";
 import type { Cell } from "@/lib/budget/versions";
 import { exactRatio, type ColumnKind, type ColumnSpec, type ExportCell, type SheetSpec } from "@/lib/export/xlsx";
 import type { Count, HeadcountResult } from "@/lib/rh/headcount";
@@ -8,7 +7,7 @@ import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import { showCount, showHeadcount } from "@/lib/rh/view";
 import { monthShortLabel } from "@/lib/viz/kpi";
-import { coverageShown, SUIVI_COLUMNS, suiviColumnOn, type SuiviColumn } from "../suivi-data";
+import { coverageShown, SUIVI_COLUMNS, suiviColumnOn, type CategoryMonthMasked, type SuiviColumn } from "../suivi-data";
 import type { KpiVue } from "../tabs";
 
 // Feuilles Excel de KPI RH, construites depuis les mêmes objets que l'écran (aucun recalcul, aucun accès base) : une valeur
@@ -152,8 +151,9 @@ export function suiviSheet({ dash, data, establishments, rawLimit, vue }: SuiviS
 
 // Tableau « Effectif et ETP par catégorie » (Suivi) : contrats et ETP de fin de mois de chaque catégorie, puis le total. Les filtres
 // Établissement et Nature s'appliquent comme à l'écran (mêmes mois, mêmes colonnes) : `scope` est la mention du périmètre de
-// l'écran (categoryScopeNote), reprise dans la note de la feuille.
-export function categoriesSheet(months: CategoryMonth[], keys: string[], labels: Record<string, string>, opts: { scope?: string | null } = {}): SheetSpec {
+// l'écran (categoryScopeNote), reprise dans la note de la feuille. Les mois reçus sont ceux de l'écran, déjà masqués par le seuil de
+// confidentialité (loadCategoryMonths) : une cellule masquée est n.d. (effectif et ETP) avec la même raison ; le total du mois reste.
+export function categoriesSheet(months: CategoryMonthMasked[], keys: string[], labels: Record<string, string>, opts: { scope?: string | null } = {}): SheetSpec {
   const label = (k: string) => labels[k] ?? k;
   // L'écran n'écrit que « ETP n.d. » : la raison propre à chaque contrat (quotité absente ou illisible, contrat non déclaré…)
   // est dans le détail de l'ETP fin de mois du tableau « Mois par mois ».
@@ -169,16 +169,23 @@ export function categoriesSheet(months: CategoryMonth[], keys: string[], labels:
   ];
   const rows = months.map((c): ExportCell[] => {
     if (c.kind === "nd") return [c.month, ...[...keys, "total"].flatMap(() => [{ nd: c.reason }, { nd: c.reason }]), ""];
-    const all = Object.values(c.byCategory);
     const cells = keys.flatMap((k): ExportCell[] => {
       const x = c.byCategory[k];
-      return x ? [x.headcount, x.etp4 === null ? ETP_ND : x.etp4] : ["", ""];
+      return !x ? ["", ""] : x.kind === "nd" ? [{ nd: x.reason }, { nd: x.reason }] : [x.headcount, x.etp4 === null ? ETP_ND : x.etp4];
     });
-    const total: ExportCell[] = [all.reduce((n, x) => n + x.headcount, 0), all.some((x) => x.etp4 === null) ? TOTAL_ND : all.reduce((n, x) => n + (x.etp4 ?? 0), 0)];
+    const total: ExportCell[] = [c.total.headcount, c.total.etp4 === null ? TOTAL_ND : c.total.etp4];
     return [c.month, ...cells, ...total, c.lowerBound ? `Effectifs : ${LOWER}` : ""];
   });
   const note = `Fin de mois ; catégorie sans contrat ce mois-là : cellule vide.${opts.scope ? ` ${opts.scope}` : ""}`;
   return { name: "Par catégorie", columns, rows, note };
+}
+
+// Garde du périmètre (filtre Établissement ou Nature sous le seuil de confidentialité, ou seuil non défini) : l'écran ne montre aucun
+// chiffre du périmètre ; la feuille porte les mêmes cellules n.d., avec la raison de la garde. Le libellé de ligne (première colonne), les
+// colonnes à conserver (la couverture du mois : un fait de la source, pas une personne) restent ; Observations est vidée.
+export function guardedSheet(sheet: SheetSpec, reason: string, keep: readonly string[] = ["coverage"]): SheetSpec {
+  const last = sheet.columns.length - 1;
+  return { ...sheet, rows: sheet.rows.map((row) => row.map((cell, j): ExportCell => (j === 0 ? cell : j === last ? "" : keep.includes(sheet.columns[j].key) ? cell : { nd: reason }))) };
 }
 
 // --- Effectifs mensuels ---------------------------------------------------------------------------------------------------------

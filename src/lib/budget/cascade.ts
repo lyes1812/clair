@@ -1,4 +1,5 @@
 import { personsOfContracts, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { isHireKey } from "@/lib/confidentialite/groups";
 import { aggregate, type PeopleCell, type Version } from "./versions";
 
 // Analyse des écarts d'ETP entre deux versions sur la même période (mois de même rang dans l'année de chaque version).
@@ -109,12 +110,20 @@ export function etpCascade(a: Version, b: Version, monthsA: string[], monthsB: s
   return { kind: "value", months: monthsA.length, start, end, steps, residual: end - start - steps.reduce((s, x) => s + x.etp4, 0) };
 }
 
-// Personnes distinctes décrites par chaque palier (unité du seuil de confidentialité) : les contrats du palier (clé de référentiel
-// d'un contrat, clé d'une embauche prévue) reliés à leur personne par le lien du référentiel Collaborateurs. Un contrat que le lien
-// ne relie pas (embauche prévue d'un scénario, contrat sans personne rattachée) est compté à part : il ne protège jamais. Un palier
-// vide ne décrit personne. Aucune clé de personne n'est interprétée ici : la fonction rend ce que le lien lui donne.
-export function cascadePersons(c: Pick<Extract<Cascade, { kind: "value" }>, "steps">, link: PersonLink): PersonsOfContracts[] {
-  return c.steps.map((s) => personsOfContracts(s.people.map((p) => p.key), link));
+// Personnes distinctes décrites par chaque palier (unité du seuil de confidentialité) : les contrats réels du palier (clé de
+// référentiel d'un contrat) reliés à leur personne par le lien du référentiel Collaborateurs ; un contrat réel que le lien ne relie
+// pas est compté à part (unlinked : il ne protège jamais). Les embauches prévues d'un scénario (clé « embauche:… » du moteur de
+// projection, isHireKey du module partagé) ne décrivent aucune personne réelle : comptées à part (hires), ni reliées ni non reliées.
+// Un palier porté seulement par des embauches prévues est exempt du masquage et n'apporte aucune personne protectrice ; un palier qui
+// les mêle à des contrats réels se juge sur ses seuls contrats réels (projectedCell du module partagé, appelé par maskCascade de
+// src/lib/viz/ecart.ts). Un palier vide ne décrit personne. Aucune clé de personne n'est interprétée ici : la fonction rend ce que le
+// lien lui donne.
+export type CascadeGroup = PersonsOfContracts & { hires: number };
+export function cascadePersons(c: Pick<Extract<Cascade, { kind: "value" }>, "steps">, link: PersonLink): CascadeGroup[] {
+  return c.steps.map((s) => {
+    const real = s.people.filter((p) => !isHireKey(p.key)).map((p) => p.key);
+    return { ...personsOfContracts(real, link), hires: s.people.length - real.length };
+  });
 }
 
 // Écart de masse salariale par rubrique entre deux versions : chaque rubrique est une contribution ; si une rubrique est n.d.

@@ -197,11 +197,12 @@ describe("n.d. d'un graphique entier", () => {
 });
 
 describe("effectif et ETP par catégorie", () => {
+  const value = (headcount: number, etp4: number | null) => ({ kind: "value" as const, headcount, etp4 });
   const months: CategoryMonthIn[] = [
-    { kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdi: { headcount: 5, etp4: 50000 }, cdd: { headcount: 1, etp4: null } } },
+    { kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdi: value(5, 50000), cdd: value(1, null) } },
     { kind: "nd", month: "2026-02", reason: "mois non lu" },
-    { kind: "value", month: "2026-03", lowerBound: true, byCategory: { cdi: { headcount: 4, etp4: 40000 } } },
-    { kind: "value", month: "2026-04", lowerBound: false, byCategory: { cdi: { headcount: 4, etp4: 40000 } } },
+    { kind: "value", month: "2026-03", lowerBound: true, byCategory: { cdi: value(4, 40000) } },
+    { kind: "value", month: "2026-04", lowerBound: false, byCategory: { cdi: value(4, 40000) } },
   ];
   const labels = { cdi: "CDI", cdd: "CDD", apprenti: "Apprenti" };
   it("ETP : catégorie absente d'un mois connu = 0 réel ; ETP n.d. d'une catégorie, mois n.d. et borne basse non tracés", () => {
@@ -218,6 +219,14 @@ describe("effectif et ETP par catégorie", () => {
   it("effectif : le nombre de contrats de la catégorie, même quand l'ETP est n.d.", () => {
     const [, cdd] = categorySeries(months, ["cdi", "cdd"], labels, "headcount");
     expect(cdd.values).toEqual([1, null, null, 0]);
+  });
+  it("cellule masquée par le seuil de confidentialité : non tracée (ETP et effectif), la raison dans l'infobulle, jamais 0", () => {
+    const masked: CategoryMonthIn[] = [{ kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdi: value(5, 50000), cdd: { kind: "nd", reason: "non affiché (seuil de confidentialité : 2 personnes)" } } }];
+    const [cdi, cdd] = categorySeries(masked, ["cdi", "cdd"], labels, "etp");
+    expect(cdi.values).toEqual([50000]);
+    expect(cdd.values).toEqual([null]);
+    expect(cdd.reasons?.[0]).toBe("non affiché (seuil de confidentialité : 2 personnes)");
+    expect(categorySeries(masked, ["cdd"], labels, "headcount")[0].values).toEqual([null]);
   });
   it("aucune catégorie lue : une série « Total » (raisons des mois n.d., 0 pour un mois connu sans contrat)", () => {
     const [t] = categorySeries([{ kind: "nd", month: "2026-01", reason: "mois non lu" }, { kind: "value", month: "2026-02", lowerBound: false, byCategory: {} }], [], labels, "etp");

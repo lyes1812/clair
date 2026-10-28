@@ -1,3 +1,5 @@
+import { groupInput } from "@/lib/confidentialite/groups";
+import { personsOfContracts, type PersonsOfContracts } from "@/lib/confidentialite/persons";
 import type { ContractDraft } from "@/lib/rh/referential/types";
 
 // Structure de l'effectif salarié (Masse salariale croisée, chapitre 02) : répartition des contrats comptés dans l'effectif de fin de
@@ -10,6 +12,8 @@ import type { ContractDraft } from "@/lib/rh/referential/types";
 // caractéristique étant affiché, les groupes masqués doivent compter ensemble au moins « seuil » personnes distinctes (masquage
 // secondaire, maskRelations), pour qu'aucune valeur masquée ne se retrouve par différence ; un groupe vide ne protège personne. Le
 // total n'est jamais modifié. Un groupe vide (aucune personne) reste à 0, sauf quand toute la caractéristique doit être masquée.
+// Un contrat sans personne rattachée est NON RELIÉ (règle de src/lib/confidentialite/persons.ts) : il n'est jamais compté comme une
+// personne distincte et ne protège jamais ; un groupe qui en compte sans atteindre le seuil en personnes reliées n'est pas dénombré.
 
 export type StructureField = "isFullTimeAtRead" | "modalityAtRead" | "executive";
 export type StructureContract = Pick<ContractDraft, "contractKey" | "personKey" | StructureField> & {
@@ -207,9 +211,22 @@ export const maskReason = (s: MaskStatus, seuil: number, unite: SeuilUnite = "pe
 
 // --- Effectif d'un groupe en personnes distinctes -----------------------------------------------------------------------------------
 
-// Personne d'un contrat : la clé de personne du référentiel RH ; à défaut, le contrat lui-même (un contrat sans personne rattachée
-// compte pour une personne, jamais fusionné avec un autre).
-export const personOf = (c: { contractKey: string; personKey: string | null }): string => c.personKey ?? `contrat:${c.contractKey}`;
+// Personne d'un contrat : la clé de personne du référentiel RH ; null pour un contrat sans personne rattachée, qui est NON RELIÉ
+// (jamais une personne distincte : il ne protège pas, voir maskSize du module partagé).
+export const personOf = (c: { contractKey: string; personKey: string | null }): string | null => c.personKey;
+
+// Groupes de contrats vus par leur personne : pour chaque groupe, ses personnes reliées distinctes (triées) et le nombre de ses
+// contrats non reliés (personsOfContracts du module partagé : un contrat présent deux fois compte une fois). contract : identifiant ou
+// jeton du contrat, propre à l'appelant ; person : jeton de sa personne, null quand le contrat n'est pas relié.
+export function groupsOfContracts(items: readonly { group: string; contract: string; person: string | null }[]): Record<string, PersonsOfContracts> {
+  const link = new Map<string, string>();
+  const byGroup = new Map<string, string[]>();
+  for (const x of items) {
+    if (x.person !== null) link.set(x.contract, x.person);
+    byGroup.set(x.group, [...(byGroup.get(x.group) ?? []), x.contract]);
+  }
+  return Object.fromEntries([...byGroup].map(([g, ids]) => [g, personsOfContracts(ids, link)]));
+}
 
 // Personnes de chaque groupe (jetons distincts, triés) : une personne qui a plusieurs contrats dans un même groupe y figure une fois.
 // Passées en members au masquage, elles font compter une fois une personne présente dans deux groupes masqués.
@@ -231,7 +248,9 @@ export function personsByGroup(members: readonly { group: string; person: string
 
 // --- Structure ---------------------------------------------------------------------------------------------------------------------
 
-const persons = (list: StructureContract[]): number => new Set(list.map(personOf)).size;
+// Groupe d'une caractéristique : ses contrats vus par leur personne (clé de personne du référentiel ; un contrat sans personne est non
+// relié). Les clés restent dans cette fonction : la structure ne rend que des nombres.
+const groupOf = (list: StructureContract[]): PersonsOfContracts => personsOfContracts(list.map((c) => c.contractKey), new Map(list.flatMap((c) => (c.personKey === null ? [] : [[c.contractKey, c.personKey] as const]))));
 
 export function effectifStructure(p: { contracts: StructureContract[]; confidentialite: Confidentialite }): Structure {
   if (p.confidentialite.kind === "nd") return { kind: "nd", reason: p.confidentialite.reason };
@@ -248,9 +267,11 @@ export function effectifStructure(p: { contracts: StructureContract[]; confident
     }
     const members = d.groups.map((g) => ({ key: g.key, label: g.label, list: all.filter((c) => g.test(c[d.field])) }));
     if (missing.length > 0) members.push({ key: "non-renseigne", label: d.missing, list: missing });
-    // Le total de la caractéristique (tous les contrats comptés) est affiché : masquage secondaire dans la caractéristique.
+    // Le total de la caractéristique (tous les contrats comptés) est affiché : masquage secondaire dans la caractéristique. Entrée de
+    // chaque groupe : celle du module partagé (groupInput : taille = personnes reliées, non dénombrée quand des contrats non reliés
+    // existent sous le seuil ; membres non transmis pour une cellule non dénombrée).
     const status = maskGroups(
-      members.map((m) => ({ size: persons(m.list), value: m.list.length, members: [...new Set(m.list.map(personOf))] })),
+      members.map((m) => groupInput(groupOf(m.list), seuil, m.list.length)),
       seuil,
       true,
     );

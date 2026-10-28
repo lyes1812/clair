@@ -1,8 +1,9 @@
-import { confidentialiteSettingReason, maskRelations, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type PersonLink } from "@/lib/confidentialite";
+import { confidentialiteSettingReason, maskRelations, personsOfContracts, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { groupInput } from "@/lib/confidentialite/groups";
 import { monthPayroll, serviceOf, windowPayroll, type JournalInput, type LedgerLine } from "./engine";
 import { monthBounds, monthRange } from "@/lib/connectors/months";
 import { classify, gridRubrics, type AccountGrid, type RubricId } from "./grid";
-import { hiddenReason, journalCell } from "./service-rows";
+import { hiddenReason, worstGuard, type ServiceGuard } from "./service-rows";
 
 // Lot 2 de la Masse salariale : fixe et variable par libellé de paie, provision de congés payés, rapprochement avec la
 // comptabilité. Calculs purs sur les lignes du journal de paie (et de la comptabilité), en centimes, débit − crédit.
@@ -105,9 +106,17 @@ export function provisionContracts(input: JournalInput, month: string): string[]
 }
 
 // --- Seuil de confidentialité : libellés de paie, familles de prime, provision par service (règle de src/lib/confidentialite).
-// Chaque montant d'une répartition décrit les personnes reliées aux contrats qui portent ses lignes ; une cellule de 1 à (seuil − 1)
-// personnes est n.d., avec masquage secondaire dans chaque ensemble dont la somme est publiée. Seuil absent ou illisible : toute la
-// répartition est n.d. avec la raison du paramètre. Les fonctions rendent, pour chaque cellule, la raison du n.d. ou null (affichée).
+// Chaque montant d'une répartition décrit les personnes reliées aux contrats qui portent ses lignes (groupes et entrée de masquage du
+// module partagé src/lib/confidentialite/groups.ts : groupInput, valeur absolue, membres non transmis pour une cellule n.d. ou non
+// dénombrée) ; une cellule de 1 à (seuil − 1) personnes est n.d., avec masquage secondaire dans chaque ensemble dont la somme est
+// publiée. Seuil absent ou illisible : toute la répartition est n.d. avec la raison du paramètre. Les fonctions rendent, pour chaque
+// cellule, la raison du n.d. ou null (affichée). Exportées pour l'onglet, son export et la Masse salariale croisée (04 et 07).
+
+// Cellule de masquage d'un montant porté par des contrats du journal (libellé, provision) : personnes reliées, valeur absolue.
+const cellOf = (contracts: Iterable<string>, value: number | null, link: PersonLink, seuil: number, nonZero?: boolean): MaskCell => {
+  const v = value === null ? null : Math.abs(value);
+  return groupInput(personsOfContracts(contracts, link), seuil, v, nonZero ?? (v !== null && v !== 0));
+};
 
 // Fixe & variable : brut par libellé (période N et N-1 ; sommes publiées : brut de la période, brut de N-1) et primes par famille et
 // par mois (sommes publiées : primes de chaque mois, primes de la période ; les mois d'une famille somment vers sa cellule de période,
@@ -134,11 +143,11 @@ export function maskLabels(p: { input: JournalInput; months: string[]; prevMonth
   const curContracts = labelContracts(input, months);
   const prevTotals = prevNd ? [] : labelTotals(input, prevMonths);
   const prevContracts = prevNd ? new Map<string, string[]>() : labelContracts(input, prevMonths);
-  const cur = keys.map((k) => add(journalCell(curContracts.get(k) ?? [], sum(curTotals, k), link, seuil)));
-  const prev = keys.map((k) => add(journalCell(prevContracts.get(k) ?? [], prevNd ? null : sum(prevTotals, k), link, seuil)));
+  const cur = keys.map((k) => add(cellOf(curContracts.get(k) ?? [], sum(curTotals, k), link, seuil)));
+  const prev = keys.map((k) => add(cellOf(prevContracts.get(k) ?? [], prevNd ? null : sum(prevTotals, k), link, seuil)));
   const monthTotals = months.map((m) => (monthPayroll(input, m).kind === "value" ? labelTotals(input, [m]) : null));
   const monthContracts = months.map((m) => labelContracts(input, [m]));
-  const fam = families.map((f) => months.map((_m, j) => add(journalCell(monthContracts[j].get(f) ?? [], monthTotals[j] === null ? null : sum(monthTotals[j], f), link, seuil))));
+  const fam = families.map((f) => months.map((_m, j) => add(cellOf(monthContracts[j].get(f) ?? [], monthTotals[j] === null ? null : sum(monthTotals[j], f), link, seuil))));
   // Les mois d'une famille somment vers sa cellule de période (masquable) : ces relations d'abord ; puis les colonnes à somme fixe.
   families.forEach((f, i) => relations.push({ cells: fam[i], total: cur[keys.indexOf(f)] }));
   relations.push({ cells: cur });
@@ -153,10 +162,29 @@ export function maskLabels(p: { input: JournalInput; months: string[]; prevMonth
 }
 
 // Provision de congés payés par service, à chaque fin de mois demandée (journal entier, un journal par service) : la somme des
-// services d'un mois est la provision de l'entreprise, publiée (tuile, tableau mensuel) ; masquage secondaire par mois. Une
-// provision n.d. (part sans dotation) garde sa raison ; la valeur de la cellule est le total, à défaut la part connue.
+// services d'un mois est la provision de l'entreprise, publiée (tuile, tableau mensuel) ; masquage secondaire par mois.
+// RÈGLE DE VALEUR (la même pour l'onglet Paie & comptabilité, son export et la croisée 07) : la valeur de la cellule est le TOTAL de la
+// provision (congés payés + charges sociales) ; quand le total est n.d. parce qu'une part manque, la PART CONNUE (congés payés, à
+// défaut charges sociales) est la valeur : elle est affichée dans la colonne de sa part, elle est donc masquable comme le total. Une
+// provision entièrement n.d. (mois n.d., aucune part) garde sa raison et n'est ni masquée ni protectrice. Le groupe compté est
+// l'ensemble des contrats qui portent une ligne de dotation « Mois courant » dans le mois ; nonZero : une part non nulle.
 export type ProvisionMask = Record<string, Record<string, string | null>>; // clé de service (« __nv__ » : non ventilé) → mois → raison ou null
+export type ProvisionStatus = Record<string, Record<string, MaskStatus>>; // même clé → mois → statut du moteur
 export const provisionServiceKey = (s: string | null): string => s ?? "__nv__";
+export const provisionValue = (x: ProvisionMonth): number | null => (x.kind === "nd" ? null : (x.total ?? x.conges ?? x.charges));
+export function provisionCell(input: JournalInput, month: string, link: PersonLink, seuil: number): MaskCell {
+  const x = provisionMonth(input, month);
+  const nonZero = x.kind === "value" && ((x.conges ?? 0) !== 0 || (x.charges ?? 0) !== 0);
+  return cellOf(provisionContracts(input, month), provisionValue(x), link, seuil, nonZero);
+}
+export function maskProvisionStatus(p: { inputs: { value: string | null; input: JournalInput }[]; months: string[]; link: PersonLink; seuil: number }): ProvisionStatus {
+  const { inputs, months, link, seuil } = p;
+  const cells: MaskCell[] = [];
+  const idx = inputs.map((s) => months.map((m) => cells.push(provisionCell(s.input, m, link, seuil)) - 1));
+  const relations: MaskRelation[] = months.map((_m, j) => ({ cells: idx.map((row) => row[j]) }));
+  const st = maskRelations(cells, relations, seuil);
+  return Object.fromEntries(inputs.map((s, i) => [provisionServiceKey(s.value), Object.fromEntries(months.map((m, j) => [m, st[idx[i][j]]]))]));
+}
 export function maskProvisionServices(p: { inputs: { value: string | null; input: JournalInput }[]; months: string[]; link: PersonLink; conf: ConfidentialiteSetting }): ProvisionMask {
   const { inputs, months, link } = p;
   if (p.conf.kind !== "set") {
@@ -164,17 +192,18 @@ export function maskProvisionServices(p: { inputs: { value: string | null; input
     return Object.fromEntries(inputs.map((s) => [provisionServiceKey(s.value), Object.fromEntries(months.map((m) => [m, reason]))]));
   }
   const seuil = p.conf.value;
-  const cells: MaskCell[] = [];
-  const idx = inputs.map((s) =>
-    months.map((m) => {
-      const x = provisionMonth(s.input, m);
-      const value = x.kind === "nd" ? null : (x.total ?? x.conges ?? x.charges);
-      return cells.push(journalCell(provisionContracts(s.input, m), value, link, seuil)) - 1;
-    }),
-  );
-  const relations: MaskRelation[] = months.map((_m, j) => ({ cells: idx.map((row) => row[j]) }));
-  const st = maskRelations(cells, relations, seuil);
-  return Object.fromEntries(inputs.map((s, i) => [provisionServiceKey(s.value), Object.fromEntries(months.map((m, j) => [m, hiddenReason(st[idx[i][j]], seuil)]))]));
+  const st = maskProvisionStatus({ inputs, months, link, seuil });
+  return Object.fromEntries(Object.entries(st).map(([k, byMonth]) => [k, Object.fromEntries(Object.entries(byMonth).map(([m, s]) => [m, hiddenReason(s, seuil)]))]));
+}
+
+// Sous le filtre Service, la provision du service retenu est n.d. dans son ensemble dès qu'une de ses fins de mois (période ou N-1)
+// est masquée dans la provision par service (masquage secondaire compris), ou que le seuil n'est pas défini. Raison nue du moteur,
+// comme serviceGuard ; la mention du service retenu va dans le titre du bloc n.d. null : affichée.
+export function provisionGuard(mask: ProvisionMask, value: string | null, months: readonly string[], conf: ConfidentialiteSetting): ServiceGuard | null {
+  const settingNd = confidentialiteSettingReason(conf);
+  if (settingNd !== null || conf.kind !== "set") return { cause: "parametre", reason: settingNd ?? SEUIL_NON_VERIFIABLE };
+  const byMonth = mask[provisionServiceKey(value)] ?? {};
+  return worstGuard(months.map((m): ServiceGuard | null => (byMonth[m] ? { cause: "seuil", reason: byMonth[m] } : null)), conf.value);
 }
 
 // --- Rapprochement avec la comptabilité (FEC ou API Pennylane) : mêmes rubriques (même grille), mêmes mois.

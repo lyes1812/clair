@@ -6,10 +6,10 @@ import { CATEGORY_LABELS } from "@/lib/budget/types";
 import { nd as ndCell, val } from "@/lib/budget/versions";
 import { contractEcheances, type EcheanceContract } from "@/lib/croisee/echeances";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
-import { confidentialiteHref, isHidden, maskGroups, maskReason, membersByGroup, personOf } from "@/lib/confidentialite";
-import { confidentialiteOf } from "@/lib/croisee/confidentialite";
-import { effectifStructure, type Confidentialite, type StructureContract } from "@/lib/croisee/structure";
-import { croiseeSettingReason, croiseeSettingsHref, settingValue, type CroiseeSetting, type CroiseeSettingKey, type CroiseeSettings, type CroiseeSettingValues, type SeuilEffectif } from "@/lib/croisee/settings-format";
+import { confidentialiteHref, isHidden, maskGroups, maskReason, type PersonsOfContracts } from "@/lib/confidentialite";
+import { confidentialiteOf, groupInput, NO_GROUP } from "@/lib/croisee/confidentialite";
+import { effectifStructure, groupsOfContracts, personOf, type Confidentialite, type StructureContract } from "@/lib/croisee/structure";
+import { croiseeSettingReason, croiseeSettingsHref, settingValue, seuilNote, type CroiseeSetting, type CroiseeSettingKey, type CroiseeSettings, type CroiseeSettingValues, type SeuilEffectif } from "@/lib/croisee/settings-format";
 import { formatDate, monthEnd, monthsBetween } from "@/lib/dates";
 import { contractNatureLabel, endReasonLabel } from "@/lib/dsn/labels";
 import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
@@ -41,8 +41,9 @@ import { averageTile, deltaView, etpTile, headcountTile, kpiRefusal, MONTH_NAMES
 // Confidentialité : aucun nom ni identifiant de personne, de contrat ou d'absence dans le modèle (raisons du moteur qui en citent
 // remplacées par une raison générique, journal agrégé par mois et par nature). Seuil de confidentialité (Paramètres) sur toute
 // répartition (service, catégorie, statut, nature, motif de sortie, structure) avec masquage secondaire, la taille d'un groupe étant
-// toujours un nombre de personnes distinctes (clé de personne du référentiel RH, à défaut le contrat) ; les totaux de toute
-// l'entreprise ne sont pas masqués.
+// toujours un nombre de personnes distinctes (clé de personne du référentiel RH) ; un contrat sans personne rattachée est NON RELIÉ :
+// jamais compté comme une personne, il ne protège pas, et un groupe qui en compte sous le seuil n'est pas dénombré (règle du module
+// partagé src/lib/confidentialite : personsOfContracts, groupInput) ; les totaux de toute l'entreprise ne sont pas masqués.
 
 // --- Entrée ------------------------------------------------------------------------------------------------------------------------
 
@@ -53,15 +54,15 @@ export type BlockNd = { label?: string; reason: string; action?: Action };
 type Compare<T> = { current: T; previous: T; delta: Delta };
 export type MovementIn = { kind: "exact" | "lower_bound"; value: number } | { kind: "nd"; nd: { reason: string } };
 // Mouvement compté dans le turnover, sans date exacte, sans service ni identifiant : mois, sens, nature, motif de sortie déclaré ;
-// person : jeton de la personne propre à la lecture (aucune clé de la source), pour compter des personnes distinctes.
-export type JournalEventIn = { month: string; kind: "entry" | "exit"; nature: string | null; endReason: string | null; person: string };
+// contract : jeton du contrat propre à la lecture ; person : jeton de sa personne (null : contrat non relié) ; aucune clé de la source.
+export type JournalEventIn = { month: string; kind: "entry" | "exit"; nature: string | null; endReason: string | null; contract: string; person: string | null };
 export type JournalMonthIn = { month: string; entries: CountIn; exits: CountIn };
 export type GridAxis = Extract<Axis, "service" | "categorie" | "statut">;
-// sizes : personnes de chaque groupe à la fin du mois (jetons de personne propres à la lecture, distincts : une personne par clé de
-// personne du référentiel RH, à défaut par contrat ; aucune clé de la source). Leur nombre est la taille passée au seuil de
+// sizes : groupe de chaque ligne à la fin du mois, en personnes reliées distinctes (jetons de personne propres à la lecture, aucune clé
+// de la source) et contrats non reliés (personsOfContracts du module partagé). Les personnes sont la taille passée au seuil de
 // confidentialité ; les jetons font compter une fois une personne présente dans deux groupes masqués. null : effectif non dénombré
 // (seuil non vérifiable).
-export type GroupSizes = { cur: Record<string, readonly string[]> | null; prev: Record<string, readonly string[]> | null };
+export type GroupSizes = { cur: Record<string, PersonsOfContracts> | null; prev: Record<string, PersonsOfContracts> | null };
 export type GridsIn = { axis: GridAxis; inscrit: { cur: Grid; prev: Grid }; etp: { cur: Grid; prev: Grid }; sizes: GroupSizes };
 // Raison du moteur qui cite des identifiants (texte exact) et son remplacement générique (mois et nombre seulement).
 export type ReasonSwap = { raw: string; text: string };
@@ -287,14 +288,15 @@ export function seuilAlerts(list: { id: string; label: string; avg: AverageIn }[
 
 // --- Répartitions masquées (seuil de confidentialité) -------------------------------------------------------------------------------
 
-// Contrat compté à une fin de mois, vu par sa personne : jeton de personne et identifiant du contrat dans la source.
-export type CountedContract = { id: string; person: string };
+// Contrat compté à une fin de mois, vu par sa personne : identifiant du contrat dans la source (il ne sort pas de la fonction) et
+// jeton de sa personne (null : contrat non relié).
+export type CountedContract = { id: string; person: string | null };
 
-// Personnes de chaque service à une fin de mois (jetons distincts) : contrats qui portent l'ETP de fin de mois, rangés par le service
-// de leurs lignes de paie du mois (règle de l'ETP par service), sans ligne : « Non ventilé » ; une personne qui a deux contrats dans un
-// même service y figure une fois.
-export function serviceSizes(contracts: readonly CountedContract[], serviceOf: (contractId: string) => string | null): Record<string, string[]> {
-  return membersByGroup(contracts.map((c) => ({ group: serviceOf(c.id) ?? NON_VENTILE, person: c.person })));
+// Groupe de chaque service à une fin de mois (personnes reliées distinctes et contrats non reliés, groupsOfContracts) : contrats qui
+// portent l'ETP de fin de mois, rangés par le service de leurs lignes de paie du mois (règle de l'ETP par service), sans ligne :
+// « Non ventilé » ; une personne qui a deux contrats dans un même service y figure une fois.
+export function serviceSizes(contracts: readonly CountedContract[], serviceOf: (contractId: string) => string | null): Record<string, PersonsOfContracts> {
+  return groupsOfContracts(contracts.map((c) => ({ group: serviceOf(c.id) ?? NON_VENTILE, contract: c.id, person: c.person })));
 }
 
 // Groupe d'un contrat sur l'axe catégorie ou statut : même règle que la grille des effectifs mensuels (budget/monthly.ts) —
@@ -313,23 +315,23 @@ type AxisRow = { group: string; cells: CroiseeCell[] }; // inscrits N, inscrits 
 // Inscrits et ETP de fin de mois d'un axe, N et N-1, avec le seuil de confidentialité : pour chaque fin de mois, un groupe de 1 à
 // (seuil − 1) personnes distinctes est masqué (inscrits et ETP) ; masquage secondaire dans la colonne dont le total est affiché. Le
 // total de l'entreprise n'est pas masqué. L'écart d'un groupe masqué est n.d. avec la même raison. Un groupe qui porte des inscrits
-// ou de l'ETP sans aucune personne dénombrée (rattachements divergents) n'est pas vérifiable : il n'est pas affiché.
+// ou de l'ETP sans aucune personne dénombrée (rattachements divergents, contrats non reliés sous le seuil) n'est pas vérifiable : il
+// n'est pas affiché (groupInput du module partagé).
 export function maskedAxis(g: GridsIn, groups: readonly string[], to: string, prevTo: string, seuil: number): { rows: AxisRow[]; foot: CroiseeCell[] } {
   const side = (which: "cur" | "prev", m: string) => {
     const ins = groups.map((grp) => gridCell(g.inscrit[which], grp, m));
     const etp = groups.map((grp) => gridCell(g.etp[which], grp, m));
     const sizes = g.sizes[which];
-    const members = (i: number): readonly string[] => sizes?.[groups[i]] ?? [];
-    const size = (i: number): number | null => {
-      if (!sizes) return null;
-      const n = members(i).length;
-      return n === 0 && [ins[i], etp[i]].some((c) => isNum(c) && c !== 0) ? null : n;
-    };
     const totIns = gridCell(g.inscrit[which], null, m);
     const totEtp = gridCell(g.etp[which], null, m);
-    // members : jetons des personnes du groupe ; une personne qui a deux contrats dans deux groupes masqués n'y compte qu'une fois.
+    // Valeur affichée (inscrits, à défaut ETP) ; une valeur non nulle sans personne dénombrée est non vérifiable ; members : jetons des
+    // personnes du groupe, une personne qui a deux contrats dans deux groupes masqués n'y compte qu'une fois.
     const status = maskGroups(
-      groups.map((_, i) => ({ size: size(i), value: isNum(ins[i]) ? (ins[i] as number) : isNum(etp[i]) ? (etp[i] as number) : null, members: members(i) })),
+      groups.map((_, i) => {
+        const value = isNum(ins[i]) ? (ins[i] as number) : isNum(etp[i]) ? (etp[i] as number) : null;
+        const nonZero = [ins[i], etp[i]].some((c) => isNum(c) && c !== 0);
+        return sizes ? groupInput(sizes[groups[i]] ?? NO_GROUP, seuil, value, nonZero) : { size: null, value };
+      }),
       seuil,
       isNum(totIns) || isNum(totEtp),
     );
@@ -343,52 +345,52 @@ export function maskedAxis(g: GridsIn, groups: readonly string[], to: string, pr
   return { rows, foot: [cur.totIns, prev.totIns, gapCell(cur.totIns, prev.totIns), cur.totEtp, prev.totEtp, gapCell(cur.totEtp, prev.totEtp)] };
 }
 
-// Effectif d'une nature dans un mois : contrats concernés (valeur affichée) et personnes distinctes (taille passée au seuil) ; members :
-// jetons de ces personnes, quand l'entrée les fournit (une personne présente dans deux natures masquées y compte alors une fois ;
-// sans eux, les tailles des natures masquées sont additionnées).
-export type NatureCount = { contracts: number; persons: number; members?: readonly string[] };
+// Effectif d'une nature dans un mois : contrats concernés (valeur affichée) et leur groupe en personnes reliées distinctes (jetons,
+// taille passée au seuil ; une personne présente dans deux natures masquées y compte une fois) et contrats non reliés.
+export type NatureCount = PersonsOfContracts & { contracts: number };
 
 // Cellules « dont <nature> » d'un total du mois : une cellule par nature comptée, le nombre de contrats, masquée quand elle concerne
-// de 1 à (seuil − 1) personnes distinctes (masquage secondaire dans le mois, dont le total est affiché). Total n.d. : la même
-// raison ; total en borne basse : la répartition n'est pas publiée.
+// de 1 à (seuil − 1) personnes distinctes, non vérifiable quand ses contrats non reliés laissent les personnes reliées sous le seuil
+// (masquage secondaire dans le mois, dont le total est affiché). Total n.d. : la même raison ; total en borne basse : la répartition
+// n'est pas publiée.
 export function natureCells(counts: Readonly<Record<string, NatureCount>>, natures: readonly string[], total: CountIn | MovementIn | number, seuil: number): CroiseeCell[] {
   if (typeof total !== "number" && total.kind === "nd") return natures.map(() => ({ nd: total.nd.reason }));
   if (typeof total !== "number" && total.kind === "lower_bound") return natures.map(() => ({ nd: REPARTITION_BORNE }));
-  const vals: NatureCount[] = natures.map((n) => counts[n] ?? { contracts: 0, persons: 0, members: [] });
+  const vals: NatureCount[] = natures.map((n) => counts[n] ?? { contracts: 0, ...NO_GROUP });
   const st = maskGroups(
-    vals.map((v) => ({ size: v.persons, value: v.contracts, ...(v.members ? { members: v.members } : {}) })),
+    vals.map((v) => groupInput(v, seuil, v.contracts)),
     seuil,
     true,
   );
   return vals.map((v, i) => (isHidden(st[i]) ? { nd: maskReason(st[i], seuil)! } : v.contracts));
 }
 
-// Mouvements comptés d'un mois par nature (agrégation du journal : aucune date exacte, aucun service) : contrats et personnes.
+// Mouvements comptés d'un mois par nature (agrégation du journal : aucune date exacte, aucun service) : contrats et leur groupe.
 export function countByNature(events: readonly JournalEventIn[], month: string, kind: "entry" | "exit"): Record<string, NatureCount> {
   const list = events.filter((e): e is JournalEventIn & { nature: string } => e.month === month && e.kind === kind && e.nature !== null);
-  const who = membersByGroup(list.map((e) => ({ group: e.nature, person: e.person })));
+  const groups = groupsOfContracts(list.map((e) => ({ group: e.nature, contract: e.contract, person: e.person })));
   const out: Record<string, NatureCount> = {};
-  for (const e of list) out[e.nature] = { contracts: (out[e.nature]?.contracts ?? 0) + 1, persons: who[e.nature].length, members: who[e.nature] };
+  for (const e of list) out[e.nature] = { contracts: (out[e.nature]?.contracts ?? 0) + 1, ...groups[e.nature] };
   return out;
 }
 
-// Récapitulatif des motifs de sortie (DSN) : sorties comptées par motif déclaré. Un motif qui concerne moins de personnes distinctes
-// que le seuil n'est pas nommé : il rejoint « Autres motifs (k motifs) », lui-même masqué s'il concerne moins de personnes que le seuil
-// (masquage secondaire : le total est affiché).
+// Récapitulatif des motifs de sortie (DSN) : sorties comptées par motif déclaré. Un motif qui concerne moins de personnes reliées
+// distinctes que le seuil n'est pas nommé : il rejoint « Autres motifs (k motifs) », lui-même masqué s'il concerne moins de personnes
+// que le seuil, ou non vérifiable (contrats non reliés) ; masquage secondaire : le total est affiché.
 export function exitMotifRows(events: readonly JournalEventIn[], seuil: number): { rows: { label: string; cell: CroiseeCell }[]; total: number } {
-  const exits = events.filter((e) => e.kind === "exit").map((e) => ({ code: e.endReason ?? "", person: e.person }));
+  const exits = events.filter((e) => e.kind === "exit").map((e) => ({ code: e.endReason ?? "", contract: e.contract, person: e.person }));
   const by = new Map<string, number>();
   for (const e of exits) by.set(e.code, (by.get(e.code) ?? 0) + 1);
-  const who = membersByGroup(exits.map((e) => ({ group: e.code, person: e.person })));
+  const who = groupsOfContracts(exits.map((e) => ({ group: e.code, ...e })));
   const label = (code: string) => (code === "" ? "Motif non déclaré" : endReasonLabel(code));
-  const big = [...by].filter(([code]) => who[code].length >= seuil).map(([code, n]) => ({ label: label(code), n, members: who[code] })).sort((a, b) => a.label.localeCompare(b.label, "fr"));
-  const small = [...by].filter(([code]) => who[code].length < seuil);
+  const big = [...by].filter(([code]) => who[code].persons.length >= seuil).map(([code, n]) => ({ label: label(code), n, group: who[code] })).sort((a, b) => a.label.localeCompare(b.label, "fr"));
+  const small = [...by].filter(([code]) => who[code].persons.length < seuil);
   const smallCodes = new Set(small.map(([code]) => code));
-  const others = { label: `Autres motifs (${plural(small.length, "motif", "motifs")})`, n: small.reduce((s, [, n]) => s + n, 0), members: [...new Set(exits.filter((e) => smallCodes.has(e.code)).map((e) => e.person))] };
+  const others = { label: `Autres motifs (${plural(small.length, "motif", "motifs")})`, n: small.reduce((s, [, n]) => s + n, 0), group: groupsOfContracts(exits.filter((e) => smallCodes.has(e.code)).map((e) => ({ group: "autres", ...e }))).autres ?? NO_GROUP };
   const groups = [...big, ...(small.length ? [others] : [])];
   // members : une personne sortie deux fois, sous deux motifs masqués, n'y compte qu'une fois.
   const st = maskGroups(
-    groups.map((x) => ({ size: x.members.length, value: x.n, members: x.members })),
+    groups.map((x) => groupInput(x.group, seuil, x.n)),
     seuil,
     true,
   );
@@ -396,10 +398,10 @@ export function exitMotifRows(events: readonly JournalEventIn[], seuil: number):
 }
 
 // Compte écrit hors d'un tableau (échéances « fin non datée », « sans date de début ») : le nombre de contrats, ou n.d. avec la raison
-// de confidentialité quand ils concernent de 1 à (seuil − 1) personnes distinctes (même règle que les cellules du tableau ; aucun
-// total publié ne les contient, pas de masquage secondaire).
-export function outsideCount(contracts: number, persons: number, seuil: number): CroiseeCell {
-  const [st] = maskGroups([{ size: persons, value: contracts }], seuil, false);
+// de confidentialité quand ils concernent de 1 à (seuil − 1) personnes distinctes, ou des contrats non reliés sous le seuil (même
+// règle que les cellules du tableau ; aucun total publié ne les contient, pas de masquage secondaire).
+export function outsideCount(contracts: number, group: PersonsOfContracts, seuil: number): CroiseeCell {
+  const [st] = maskGroups([groupInput(group, seuil, contracts)], seuil, false);
   return isHidden(st) ? { nd: maskReason(st, seuil)! } : contracts;
 }
 
@@ -695,7 +697,7 @@ function buildChapter(input: EffectifsInput, d: EffectifsData, p: NonNullable<Ef
         cells: [capital(monthLongLabel(m.month)), countCell(m.entries), ...dont(countByNature(j.events, m.month, "entry"), m.entries), countCell(m.exits), ...dont(countByNature(j.events, m.month, "exit"), m.exits)],
       })),
       foot: { cells: [`Total ${monthShortYear(j.from)} → ${monthShortYear(j.to)}`, countCell(j.total.entries), ...blanks, countCell(j.total.exits), ...blanks] },
-      notes: [`Seuil de confidentialité : ${plural(s, "personne", "personnes")}.`],
+      notes: [seuilNote(s)],
       terms: [T.journalMouvements, TERMS.mouvements, TERMS.turnover, "natures", T.confidentialite],
     });
     const jb = block({ id: "journal", title: jTitle, term: T.journalMouvements, tables: ["journal-mouvements"], link: jLink, prevu: jPrevu });
@@ -746,7 +748,7 @@ function buildChapter(input: EffectifsInput, d: EffectifsData, p: NonNullable<Ef
         notes: [
           ...(d.source === "payfit" ? [`Valeurs à la date de lecture, non historisées${d.referenceDate ? ` (lecture du ${formatDate(d.referenceDate)})` : ""}.`] : []),
           ...(d.population.lower ? ["Effectif de fin de mois en borne basse : au moins les contrats connus."] : []),
-          `Seuil de confidentialité : ${plural(st.seuil, "personne", "personnes")}.`,
+          seuilNote(st.seuil),
         ],
         terms: [T.structureEffectif, T.confidentialite, "quota-and-time"],
       });
@@ -767,17 +769,17 @@ function buildChapter(input: EffectifsInput, d: EffectifsData, p: NonNullable<Ef
     else {
       const s = seuil!;
       const split = d.natures.length > 1;
-      // Détail par nature : contrats affichés, personnes distinctes passées au seuil.
+      // Détail par nature : contrats affichés, groupe en personnes distinctes passé au seuil.
       const counts = (m: string, pick: "fins" | "entrees"): Record<string, NatureCount> =>
-        Object.fromEntries(ech.lines.filter((l) => l.month === m).map((l) => [l.nature, { contracts: l[pick], persons: pick === "fins" ? l.finsPersons : l.entreesPersons, members: pick === "fins" ? l.finsMembers : l.entreesMembers }]));
+        Object.fromEntries(ech.lines.filter((l) => l.month === m).map((l) => [l.nature, { contracts: l[pick], ...(pick === "fins" ? l.finsGroup : l.entreesGroup) }]));
       const sum = (m: string, pick: "fins" | "entrees") => ech.lines.filter((l) => l.month === m).reduce((t, l) => t + l[pick], 0);
       const dont = (m: string, pick: "fins" | "entrees") => (split ? natureCells(counts(m, pick), d.natures, sum(m, pick), s) : []);
       const blanks = split ? d.natures.map((): CroiseeCell => "") : [];
       // Une fin non renseignée peut tomber dans l'horizon : le total des fins est alors une borne basse.
       const finsTotal: CroiseeCell = ech.endUndated > 0 ? `≥ ${nf.format(ech.fins)}` : ech.fins;
       // Comptes hors du tableau : sous le seuil, le nombre n'est pas écrit (n.d. avec la raison) ; l'effet sur le total reste écrit.
-      const endUndated = outsideCount(ech.endUndated, ech.endUndatedPersons, s);
-      const undated = outsideCount(ech.undated, ech.undatedPersons, s);
+      const endUndated = outsideCount(ech.endUndated, ech.endUndatedGroup, s);
+      const undated = outsideCount(ech.undated, ech.undatedGroup, s);
       const endUndatedNote = isNum(endUndated)
         ? `Fin non datée : ${plural(endUndated, "contrat en cours ou à venir", "contrats en cours ou à venir")} sans date de fin renseignée, hors du tableau ; total des fins en borne basse.`
         : `Fin non datée : n.d. — ${ndOf(endUndated)?.nd} ; total des fins en borne basse.`;
@@ -803,7 +805,7 @@ function buildChapter(input: EffectifsInput, d: EffectifsData, p: NonNullable<Ef
           `Du ${formatDate(ech.from)} au ${formatDate(ech.to)}, à partir de la lecture du ${formatDate(d.referenceDate)}.`,
           ...(ech.endUndated > 0 ? [endUndatedNote] : []),
           ...(ech.undated > 0 ? [undatedNote] : []),
-          `Seuil de confidentialité : ${plural(s, "personne", "personnes")}.`,
+          seuilNote(s),
         ],
         terms: [T.echeancesContrat, "natures", T.confidentialite],
       });
@@ -935,13 +937,21 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
   const curMonths = monthsBetween(`${year}-01`, to);
   const annual = { prevYear: year - 1, prev: headcountAverage(input, civilWindow(year - 1)), curMonths, cur: headcountAverage(input, windowOf(curMonths)) };
 
-  // Jeton de personne propre à cette lecture (rang d'apparition) : il sert seulement à compter des personnes distinctes ; aucune clé
-  // de la source n'entre dans les mouvements ni dans les contrats du chapitre.
+  // Jetons propres à cette lecture (rang d'apparition) : jeton de personne (null pour un contrat sans personne rattachée : non relié)
+  // et jeton de contrat ; ils servent seulement à compter des personnes distinctes et des contrats non reliés ; aucune clé de la
+  // source n'entre dans les mouvements ni dans les contrats du chapitre.
   const tokens = new Map<string, string>();
-  const token = (c: { contractKey: string; personKey: string | null }): string => {
+  const token = (c: { contractKey: string; personKey: string | null }): string | null => {
     const k = personOf(c);
+    if (k === null) return null;
     let t = tokens.get(k);
     if (t === undefined) tokens.set(k, (t = `personne-${tokens.size + 1}`));
+    return t;
+  };
+  const ctokens = new Map<string, string>();
+  const ctoken = (c: { contractKey: string }): string => {
+    let t = ctokens.get(c.contractKey);
+    if (t === undefined) ctokens.set(c.contractKey, (t = `contrat-${ctokens.size + 1}`));
     return t;
   };
   const byKey = new Map(input.data.contracts.map((c) => [c.contractKey, c]));
@@ -959,7 +969,7 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
   const real: RealSource = { kpi: input, journal: pay.input, natures: categoryNatures, overrides, etpService: etpServiceCell };
   const grid = (measure: "inscrit" | "etp", axis: GridAxis, y: string) => monthlyGrid({ measure, axis, year: y, real, scenario: null });
   const serviceMap = pay.input && pay.service.axis ? buildContractServiceMap(pay.input.lines, pay.input.grid, pay.service.axis) : null;
-  const sizesAt = (m: string, axis: GridAxis): Record<string, string[]> | null => {
+  const sizesAt = (m: string, axis: GridAxis): Record<string, PersonsOfContracts> | null => {
     if (axis === "service") {
       if (!serviceMap) return null;
       const e = etpMonthEnd(input, m);
@@ -972,10 +982,10 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
     // Effectif en borne basse ou n.d. : la grille l'est aussi ; l'effectif du groupe n'est pas dénombré.
     const h = headcountAt(input.data, monthEnd(m), countedOpts(input));
     if (h.kind !== "exact") return null;
-    return membersByGroup(
+    return groupsOfContracts(
       h.contractKeys.flatMap((k) => {
         const c = byKey.get(k);
-        return c ? [{ group: axisGroup(c, axis, categoryNatures, overrides), person: token(c) }] : [];
+        return c ? [{ group: axisGroup(c, axis, categoryNatures, overrides), contract: ctoken(c), person: token(c) }] : [];
       }),
     );
   };
@@ -992,7 +1002,7 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
   for (const m of roll.months) {
     const mv = monthMovements(input, m);
     jMonths.push({ month: m, entries: mv.entries, exits: mv.exits });
-    for (const x of mv.events) if (x.why === "counted") events.push({ month: m, kind: x.row.event.kind, nature: x.row.event.nature, endReason: x.row.event.endReason, person: token(x.row.contract) });
+    for (const x of mv.events) if (x.why === "counted") events.push({ month: m, kind: x.row.event.kind, nature: x.row.event.nature, endReason: x.row.event.endReason, contract: ctoken(x.row.contract), person: token(x.row.contract) });
   }
   const jTotal = windowMovements(input, roll);
 
@@ -1038,7 +1048,7 @@ export async function loadEffectifsInput(ctx: CroiseeContext): Promise<Effectifs
     journal: { from: roll.from, to: roll.to, months: jMonths, total: jTotal, events },
     population,
     natures: countedOpts(input).natures,
-    contracts: input.data.contracts.map((c) => ({ person: token(c), startDate: c.startDate, endDate: c.endDate, nature: c.nature, endUnknown: c.endDate === null && c.fieldsNd.endDate !== undefined })),
+    contracts: input.data.contracts.map((c) => ({ contract: ctoken(c), person: token(c), startDate: c.startDate, endDate: c.endDate, nature: c.nature, endUnknown: c.endDate === null && c.fieldsNd.endDate !== undefined })),
     reasonSwaps,
   };
   return { ...base, nd: null, data };

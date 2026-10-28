@@ -82,7 +82,12 @@ const line = (type: string, chosen: boolean, half: number | null, reason?: strin
 const UNREAD = "absences non lues pour 2026-08 (mois lus : 2024-10 → 2026-07)";
 const W: Window = { mode: "civil", from: MONTHS[0], to: MONTHS[2], months: MONTHS, label: LABEL };
 const PW: Window = { mode: "civil", from: PREV[0], to: PREV[2], months: PREV, label: PREV_LABEL };
-const v = (half: number, persons: number): CongeCell => ({ kind: "exact", half, persons });
+// Cellules fictives : chaque cellule reçoit des jetons de personne qui lui sont propres (seq), pour que le masquage secondaire compte
+// autant de personnes distinctes que de personnes de la cellule ; aucun contrat non relié sauf mention.
+let seq = 1000;
+const who = (persons: number): number[] => Array.from({ length: persons }, () => seq++);
+const v = (half: number, persons: number): CongeCell => ({ kind: "exact", half, persons, unlinked: 0, who: who(persons) });
+const lb = (half: number, persons: number): CongeCell => ({ kind: "lower_bound", half, persons, unlinked: 0, who: who(persons) });
 const ndc = (reason: string): CongeCell => ({ kind: "nd", reason });
 const zero3 = [v(0, 0), v(0, 0), v(0, 0)];
 // Cas A : un seul motif retenu (test_sickness), exempté du seuil (sa ligne égale la tuile Absentéisme).
@@ -365,7 +370,7 @@ describe("buildAbsences : motifs, tous motifs, demi-journées prises (cas A : un
   });
 
   it("borne basse d'un motif : « ≥ x » dans le tableau, non tracée dans le graphique", () => {
-    const cc: CongesPris = { ...CONGES, lines: CONGES.lines.map((l) => (l.type === "test_sickness" ? { ...l, months: [v(6, 2), v(0, 0), { kind: "lower_bound", half: 9, persons: 2 }], total: { kind: "lower_bound", half: 15, persons: 3 } } : l)) };
+    const cc: CongesPris = { ...CONGES, lines: CONGES.lines.map((l) => (l.type === "test_sickness" ? { ...l, months: [v(6, 2), v(0, 0), lb(9, 2)], total: lb(15, 3) } : l)) };
     const n = buildAbsences(input({}, { conges: { current: cc, previous: CONGES_N1 } }));
     expect(texts(tableOf(n, TABLE_IDS.conges))[2]).toEqual(["test_sickness", "6", "0", "≥ 9", "≥ 15", "19", "n.d."]);
     const s = n.charts.find((x) => x.id === TABLE_IDS.conges)!.series[2];
@@ -577,19 +582,19 @@ describe("masquage : fonctions pures (cas écrits à la main, seuil 3)", () => {
 // « non vérifiable » (jamais « ≥ 0 », qui dirait qu'au moins une personne a une absence de ce motif ce mois-là), avec masquage
 // secondaire. Cas écrits à la main.
 describe("seuil de confidentialité : borne basse sans personne comptée (demi-journées seulement incertaines)", () => {
-  const lb0: CongeCell = { kind: "lower_bound", half: 0, persons: 0, who: [] };
+  const lb0: CongeCell = { kind: "lower_bound", half: 0, persons: 0, unlinked: 0, who: [] };
   const NV = { nd: SEUIL_NON_VERIFIABLE };
 
   it("masked : n.d. « non vérifiable », quel que soit le seuil ; une borne basse avec des personnes comptées garde la règle du seuil", () => {
     expect(masked(lb0, 3)).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
     expect(masked(lb0, 1)).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
-    expect(masked({ kind: "lower_bound", half: 4, persons: 1 }, 3)).toEqual({ kind: "nd", reason: SOUS_SEUIL(3) });
+    expect(masked(lb(4, 1), 3)).toEqual({ kind: "nd", reason: SOUS_SEUIL(3) });
   });
 
   it("aVenirMask : le mois en borne basse sans personne est non vérifiable ; l'autre mois de la ligne (total affiché) est masqué en second", () => {
     // Ligne : octobre ≥ 0 (aucune personne comptée), novembre 6 demi-journées (4 personnes) ; total ≥ 6 (4 personnes), affiché. Seuil 3 :
     // octobre seul masqué se lirait par différence (total − novembre) → novembre masqué en second (4 personnes ≥ 3).
-    expect(aVenirMask([{ months: [lb0, v(6, 4)], total: { kind: "lower_bound", half: 6, persons: 4 } }], 3)).toEqual({ months: [["unverifiable", "secondary"]], total: ["shown"] });
+    expect(aVenirMask([{ months: [lb0, v(6, 4)], total: lb(6, 4) }], 3)).toEqual({ months: [["unverifiable", "secondary"]], total: ["shown"] });
     // Ligne entièrement incertaine : mois et total non vérifiables.
     expect(aVenirMask([{ months: [lb0], total: lb0 }], 3)).toEqual({ months: [["unverifiable"]], total: ["unverifiable"] });
   });
@@ -710,9 +715,13 @@ describe("aides : seuil, écart, glossaire", () => {
   it("masked : de 1 à (seuil − 1) personnes ⇒ n.d. ; aucune personne ⇒ valeur gardée ; personnes inconnues ⇒ n.d.", () => {
     expect(masked(v(10, 2), 3)).toEqual({ kind: "nd", reason: SOUS_SEUIL(3) });
     expect(SOUS_SEUIL(3)).toBe(CONF);
-    expect(masked(v(10, 3), 3)).toEqual(v(10, 3));
-    expect(masked(v(0, 0), 3)).toEqual(v(0, 0));
-    expect(masked({ kind: "lower_bound", half: 4, persons: 1 }, 1)).toEqual({ kind: "lower_bound", half: 4, persons: 1 });
+    // Chaque appel de v() tire de nouveaux jetons de personne : la même valeur est construite une fois.
+    const three = v(10, 3);
+    expect(masked(three, 3)).toEqual(three);
+    const none = v(0, 0);
+    expect(masked(none, 3)).toEqual(none);
+    const one = lb(4, 1);
+    expect(masked(one, 1)).toEqual(one);
     expect(masked(ndc("raison du moteur"), 3)).toEqual(ndc("raison du moteur"));
     expect(masked(undefined, 3)).toEqual({ kind: "nd", reason: SEUIL_NON_VERIFIABLE });
   });
@@ -722,8 +731,8 @@ describe("aides : seuil, écart, glossaire", () => {
     expect(dayGapCell(v(4, 4), v(4, 4))).toBe(0);
     expect(dayGapCell(ndc("a"), v(4, 4))).toEqual({ nd: ECART_ND.valeur });
     expect(dayGapCell(v(4, 4), ndc("b"))).toEqual({ nd: ECART_ND.n1 });
-    expect(dayGapCell({ kind: "lower_bound", half: 4, persons: 4 }, v(4, 4))).toEqual({ nd: ECART_ND.borne });
-    expect(dayGapCell(v(4, 4), { kind: "lower_bound", half: 4, persons: 4 })).toEqual({ nd: ECART_ND.n1Borne });
+    expect(dayGapCell(lb(4, 4), v(4, 4))).toEqual({ nd: ECART_ND.borne });
+    expect(dayGapCell(v(4, 4), lb(4, 4))).toEqual({ nd: ECART_ND.n1Borne });
   });
   it("rateGap : écart en points calculé par le moteur entre deux taux exacts (0,25 point → 0,0025) ; n.d. sinon, raison courte", () => {
     // 3/600 − 1,5/600 : (0,5 % − 0,25 %) = 0,25 point.

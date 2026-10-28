@@ -44,7 +44,7 @@ import {
 } from "@/lib/viz/croisee";
 import { publicScenario, zoomReason } from "@/lib/viz/croisee-budget";
 import { continuitySwaps, seuilAlerts, type ReasonSwap } from "@/lib/viz/croisee-effectifs";
-import { buildServices, guardMonth, loadServicesInput, N1_NEGATIF, N1_NUL, serviceConfidentiality, SERVICES_IDS, type ServicesInput } from "@/lib/viz/croisee-masse";
+import { buildServices, loadServicesInput, N1_NEGATIF, N1_NUL, serviceGuardOnWindows, SERVICES_IDS, type ServicesInput } from "@/lib/viz/croisee-masse";
 import { masseWaterfall, type MasseRubric } from "@/lib/viz/ecart";
 import { etpProratedNotes, motifsRetenusLine, type EtpIn, type HeadcountIn, type RatioIn } from "@/lib/viz/kpi";
 import { brutParts, capital, COLORS, euros, eurosSigned, hasData, monthLongLabel, monthShortLabel, monthShortYear, ndGroups, ndLines, reasonLines, type MonthIn } from "@/lib/viz/masse";
@@ -1140,13 +1140,14 @@ export async function loadSyntheseInput(ctx: CroiseeContext): Promise<SyntheseIn
   }
 
   // --- Journal de paie (filtré par service quand un service est choisi). Sous le filtre Service, tous les montants du bloc (masse,
-  // composition, coût par ETP-mois, mois des séries et cascade) décrivent ce seul service : le seuil de confidentialité s'y applique,
-  // comme au chapitre 04, sur chaque mois affiché (période, N-1, douze mois glissants, années N et N-1), compté en personnes distinctes
-  // (serviceConfidentiality) ; sous le seuil ou non dénombré, tout le bloc est n.d. avec la raison et le lien « Retirer le filtre
-  // Service » ; sans seuil défini, avec le lien vers Paramètres › Confidentialité.
+  // composition, coût par ETP-mois, mois des séries et cascade) décrivent ce seul service : la garde unique du filtre Service
+  // (serviceGuardOnWindows : lignes par service du journal entier, masquées par le moteur unique, masquage secondaire compris) s'y
+  // applique sur chaque fenêtre affichée (période, N-1, douze mois glissants, années N et N-1) ; service masqué ou non dénombré, tout
+  // le bloc est n.d. avec la raison et le lien « Retirer le filtre Service » ; sans seuil défini, avec le lien vers Paramètres ›
+  // Confidentialité.
   const journal = pay.input;
   let payIn: SynthesePay;
-  const guard = journal && filtered ? serviceConfidentiality(confidentialiteOf(ctx.settings.confidentialite), [...new Set([...months, ...prevMonths, ...rolling, ...yearMonths(year), ...yearMonths(year - 1)])].map(guardMonth(withService(journal, svc ?? null), await ctx.load.persons()))) : null;
+  const guard = journal && filtered ? serviceGuardOnWindows(journal, [months, prevMonths, rolling, yearMonths(year), yearMonths(year - 1)], svc ?? null, await ctx.load.persons(), ctx.settings.confidentialite) : null;
   if (!journal) payIn = { kind: "nd", reason: journalReason(pay) ?? "journal de paie indisponible", action: dataAction };
   else if (guard) {
     const action = guard.cause === "parametre" ? { href: confidentialiteHref(slug), label: "Paramètres" } : { href: ctx.href({ service: null }), label: "Retirer le filtre Service" };

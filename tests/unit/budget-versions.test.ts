@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { project } from "@/lib/budget/engine";
+import { ecartServiceGuard } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
+import { hireKey, project } from "@/lib/budget/engine";
 import { flowsOf } from "@/lib/budget/flows";
-import { aggregate, budgetVersion, diff, monthsOfYear, nd, scenarioVersion, val } from "@/lib/budget/versions";
+import { aggregate, budgetVersion, diff, monthsOfYear, nd, scenarioVersion, val, type ServiceFilter, type Version } from "@/lib/budget/versions";
 import type { BaseContract, BaseSnapshot, Hypothesis } from "@/lib/budget/types";
+import type { ZoomSource } from "@/lib/budget/zoom";
+import { confidentialiteReason, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting } from "@/lib/confidentialite";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
-import type { JournalInput } from "@/lib/payroll/engine";
+import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 
 // Écart budgétaire : versions comparables, rubriques, agrégation et écart — cas écrits à la main.
 // A : salaire 3 000 €, charges 40 % (1 200 €), TECH, 1 ETP. B : 2 000 €, 45 % (900 €), SALES, 0,5 ETP.
@@ -116,5 +119,63 @@ describe("entrées et sorties d'un scénario", () => {
     expect(get("2026-10")).toMatchObject({ kind: "value", entrees: [], sorties: [] });
     expect(get("2026-11")).toMatchObject({ kind: "value", entrees: ["embauche:h1"], sorties: ["B"], start: ["A", "B"], end: ["A", "embauche:h1"] });
     for (const f of flows) if (f.kind === "value") expect(f.start.length + f.entrees.length - f.sorties.length).toBe(f.end.length);
+  });
+});
+
+// --- Garde du filtre Service de l'Écart budgétaire et de l'Analyse des écarts (ecartServiceGuard : la garde unique, appliquée aux
+// versions comparées). Cas écrits à la main sur la base fictive ci-dessus (A : TECH, B : SALES), un référentiel fictif qui relie A et B à
+// deux personnes, et un journal fictif de 2026 (janvier) pour les mois réels.
+describe("garde du filtre Service sur les versions comparées (seuil de confidentialité)", () => {
+  const set = (value: number): ConfidentialiteSetting => ({ kind: "set", value, updatedAt: null, updatedBy: null });
+  const data = { build: { source: "payfit" }, contracts: [{ contractKey: "A", externalId: "A", personKey: "PA" }, { contractKey: "B", externalId: "B", personKey: "PB" }] };
+  // Journal 2026 : janvier, A (TECH) salaire 3 000 € + cotisations 1 200 € ; B (SALES) 2 000 € + 900 €.
+  let n = 0;
+  const line = (month: string, accountId: string, debit: number, contractId: string, svc: string): LedgerLine => ({ key: `${month}#${n++}`, month, accountId, accountName: null, debitCents: debit, creditCents: null, contractId, analytic: [{ type: "Service", code: svc, value: svc }] });
+  const j26: JournalInput = { lines: [line("2026-01", "641100", 300000, "A", "TECH"), line("2026-01", "645100", 120000, "A", "TECH"), line("2026-01", "641100", 200000, "B", "SALES"), line("2026-01", "645100", 90000, "B", "SALES")], months: ["2026-01"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
+  const loadedOf = (versions: Version[], sources: ZoomSource[], filter: ServiceFilter, journal: JournalInput | null = j26, withRef = true) =>
+    ({ ctx: { input: journal, kpi: { input: withRef ? { data } : null } }, versions, sources, filter, months: (year: string) => monthsOfYear(year, "01", "12") }) as never;
+  const scenario = (hyps: Hypothesis[], filter: ServiceFilter, journal: JournalInput | null = j26) => {
+    const proj = project(base, "2026-10", "2026-12", hyps, conv);
+    return { v: scenarioVersion("s", "Révisé", "2026", base, proj, journal, null, filter), src: { kind: "scenario", base, proj, journal, filter } as ZoomSource };
+  };
+
+  it("sans filtre : rien à garder ; seuil absent : n.d. « non défini » avec le lien (cause paramètre)", () => {
+    const { v, src } = scenario([], null);
+    expect(ecartServiceGuard(loadedOf([v], [src], null), set(2))).toBeNull();
+    expect(ecartServiceGuard(loadedOf([v], [src], { value: "TECH" }), { kind: "absent" })).toEqual({ cause: "parametre", reason: SEUIL_NON_DEFINI });
+  });
+  it("scénario, filtre TECH : les mois projetés décrivent A seul (1 personne) ⇒ masqué au seuil 2, affiché au seuil 1", () => {
+    const { v, src } = scenario([], { value: "TECH" });
+    expect(v.months.get("2026-10")!.people).toEqual({ kind: "value", map: { A: 10000 } });
+    expect(ecartServiceGuard(loadedOf([v], [src], { value: "TECH" }), set(2))).toEqual({ cause: "seuil", reason: confidentialiteReason(2) });
+    expect(ecartServiceGuard(loadedOf([v], [src], { value: "TECH" }), set(1))).toBeNull();
+    // Sans référentiel : A n'est relié à personne, le service est non vérifiable quel que soit le seuil.
+    expect(ecartServiceGuard(loadedOf([v], [src], { value: "TECH" }, j26, false), set(1))).toEqual({ cause: "seuil", reason: SEUIL_NON_VERIFIABLE });
+  });
+  it("embauche prévue seule dans un service (OPS, de novembre) : exempte, le service est affiché même au seuil 5 ; mêlée à A dans TECH : jugée sur A (masqué au seuil 2)", () => {
+    const hyps: Hypothesis[] = [
+      { id: "h1", kind: "embauche", label: "Recrue OPS", service: "OPS", start: "2026-11-01", end: null, grossFullTimeCents: 250000, quotaBps: 10000, chargesBps: 4000, counted: true, category: "cdi", replaces: null },
+      { id: "h2", kind: "embauche", label: "Recrue TECH", service: "TECH", start: "2026-11-01", end: null, grossFullTimeCents: 250000, quotaBps: 10000, chargesBps: 4000, counted: true, category: "cdi", replaces: null },
+    ];
+    const ops = scenario(hyps, { value: "OPS" });
+    expect(ops.v.months.get("2026-11")!.people).toEqual({ kind: "value", map: { [hireKey("h1")]: 10000 } });
+    expect(ops.v.months.get("2026-11")!.masse).toEqual(val(350000)); // 2 500 + 40 % : la masse d'une embauche prévue reste lisible
+    expect(ecartServiceGuard(loadedOf([ops.v], [ops.src], { value: "OPS" }), set(5))).toBeNull();
+    const tech = scenario(hyps, { value: "TECH" });
+    expect(Object.keys(tech.v.months.get("2026-11")!.people.kind === "value" ? (tech.v.months.get("2026-11")!.people as { map: Record<string, number> }).map : {}).sort()).toEqual(["A", hireKey("h2")]);
+    expect(ecartServiceGuard(loadedOf([tech.v], [tech.src], { value: "TECH" }), set(2))).toEqual({ cause: "seuil", reason: confidentialiteReason(2) });
+    expect(ecartServiceGuard(loadedOf([tech.v], [tech.src], { value: "TECH" }), set(1))).toBeNull();
+  });
+  it("mois réels : les lignes par service du journal (TECH = A, SALES = B, une personne chacun) ⇒ masqués au seuil 2 ; budget saisi : rien à protéger", () => {
+    const { v, src } = scenario([], { value: "SALES" });
+    // Janvier 2026 est un mois réel figé du scénario : la garde passe par les lignes par service du journal entier.
+    expect(v.months.get("2026-01")!.layer).toBe("reel");
+    expect(ecartServiceGuard(loadedOf([v], [src], { value: "SALES" }), set(2))).toEqual({ cause: "seuil", reason: confidentialiteReason(2) });
+    const bv = budgetVersion("b", "Budget 2026", "2026", { "2026-01": 700000 });
+    expect(ecartServiceGuard(loadedOf([bv], [{ kind: "budget" }], { value: "SALES" }), set(2))).toBeNull();
+    // Journal absent : les mois réels ne décrivent personne (n.d. pour leur propre raison) ; seuls les mois projetés comptent.
+    const none = scenario([], { value: "SALES" }, null);
+    expect(ecartServiceGuard(loadedOf([none.v], [none.src], { value: "SALES" }, null), set(2))).toEqual({ cause: "seuil", reason: confidentialiteReason(2) });
+    expect(ecartServiceGuard(loadedOf([none.v], [none.src], { value: "SALES" }, null), set(1))).toBeNull();
   });
 });

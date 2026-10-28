@@ -4,6 +4,7 @@ import { CROISEE_TERMS as T } from "@/lib/glossary/croisee";
 import { maskNonRecurring, maskCohorts, partitionCohorts } from "@/lib/croisee/cohortes";
 import { KEY_FIGURES_TITLE, keyFiguresTable, ND_SHEET, REFERENCE_TITLE, WATCH_SHEET } from "@/lib/croisee/export";
 import { confidentialiteReason, maskGroups, personOf, SEUIL_NON_VERIFIABLE, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
+import { groupsOfContracts } from "@/lib/croisee/structure";
 import { personsByGroup } from "@/lib/croisee/structure";
 import { congesMask } from "@/lib/viz/croisee-absences";
 import { publicProjectionReasons } from "@/lib/viz/croisee-budget";
@@ -11,7 +12,9 @@ import { exitMotifRows } from "@/lib/viz/croisee-effectifs";
 import { N1_NEGATIF, N1_NUL } from "@/lib/viz/croisee-masse";
 import { maskServices, SEUIL_NON_VERIFIABLE as PAIE_NON_VERIFIABLE, sousSeuil } from "@/lib/viz/croisee-paie";
 
-const G = (persons: string[], unlinked = 0): PersonsOfContracts => ({ persons, unlinked });
+// Groupe en personnes reliées distinctes et contrats non reliés ; pour les éléments non récurrents (cohortes), un groupe relié sans
+// embauche prévisionnelle (hires 0).
+const G = (persons: string[], unlinked = 0): PersonsOfContracts & { hires: number } => ({ persons, unlinked, hires: 0 });
 const link = (o: Record<string, string>): PersonLink => new Map(Object.entries(o));
 
 // Règle 6 : les définitions de la Masse salariale croisée disent ce que le code fait. Chaque phrase vérifiée ici l'est sur la fonction
@@ -55,25 +58,23 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     expect(maskServices([{ group: G(["q1"]), value: 10_000 }, { group: G([], 1), value: 20_000 }, { group: G(["p2", "p3", "p4"]), value: 30_000 }], 2)).toEqual(["masked", "unverifiable", "secondary"]);
   });
 
-  it("Effectifs & mouvements : groupes comptés en personnes distinctes ; un contrat sans personne compte pour une personne", () => {
+  it("Effectifs & mouvements : groupes comptés en personnes distinctes ; un contrat sans personne est non relié (jamais une personne, il ne protège pas)", () => {
     const conf = def(T.confidentialite);
     expect(conf).toContain("une personne qui a deux contrats dans un même groupe y compte une fois");
     expect(def(T.repartitionEffectifs)).toContain("une personne qui a deux contrats simultanés dans le groupe y compte une fois");
-    // Personne « p1 » avec deux contrats dans le groupe A : 1 personne ; deux contrats sans personne : 2 personnes.
-    const m = [
-      { group: "A", person: personOf({ contractKey: "k1", personKey: "p1" }) },
-      { group: "A", person: personOf({ contractKey: "k2", personKey: "p1" }) },
-      { group: "B", person: personOf({ contractKey: "k3", personKey: null }) },
-      { group: "B", person: personOf({ contractKey: "k4", personKey: null }) },
-    ];
-    expect(personsByGroup(m)).toEqual({ A: 1, B: 2 });
+    // Personne « p1 » avec deux contrats dans le groupe A : 1 personne ; deux contrats sans personne dans B : 0 personne, 2 contrats non
+    // reliés (règle du module partagé : maskSize rend le groupe non dénombré sous le seuil).
+    const c = (group: string, contract: string, personKey: string | null) => ({ group, contract, person: personOf({ contractKey: contract, personKey }) });
+    const g = groupsOfContracts([c("A", "k1", "p1"), c("A", "k2", "p1"), c("B", "k3", null), c("B", "k4", null)]);
+    expect(g).toEqual({ A: { persons: ["p1"], unlinked: 0 }, B: { persons: [], unlinked: 2 } });
+    expect(personsByGroup(Object.entries(g).flatMap(([group, x]) => x.persons.map((person) => ({ group, person }))))).toEqual({ A: 1 });
   });
 
   it("motifs de sortie : un motif sous le seuil rejoint « Autres motifs (k motifs) », masqué avec masquage secondaire", () => {
     expect(def(T.journalMouvements)).toContain("« Autres motifs (k motifs) », lui-même masqué s'il concerne de 1 à (seuil − 1) personnes, avec masquage secondaire");
     // Seuil 2 : motif « X1 » pour 3 personnes, motif « X2 » pour 1 personne. X2 n'est pas nommé ; « Autres motifs (1 motif) » est masqué
     // et X1, seul autre groupe affiché, l'est au masquage secondaire ; le total (4) reste affiché.
-    const ev = (endReason: string, person: string) => ({ month: "2026-01", kind: "exit" as const, nature: "cdi", endReason, person });
+    const ev = (endReason: string, person: string) => ({ month: "2026-01", kind: "exit" as const, nature: "cdi", endReason, contract: `k-${person}`, person });
     const out = exitMotifRows([ev("X1", "p1"), ev("X1", "p2"), ev("X1", "p3"), ev("X2", "p4")], 2);
     expect(out.rows.map((r) => r.label)).toHaveLength(2);
     expect(out.rows[1].label).toBe("Autres motifs (1 motif)");
@@ -86,7 +87,7 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     expect(conf).toContain("la ligne du motif retenu quand c'est le seul motif retenu présent dans la lecture (elle égale alors la tuile Absentéisme)");
     expect(def(T.congesPris)).toContain("Un motif dont toutes les valeurs sont masquées garde sa ligne et son nom.");
     // Un motif retenu, 1 personne, 4 demi-journées en janvier ; seuil 3.
-    const cell = { kind: "exact" as const, half: 4, persons: 1 };
+    const cell = { kind: "exact" as const, half: 4, persons: 1, unlinked: 0, who: [0] };
     const grid = (exempt: number | null) => ({
       lines: [{ chosen: true, months: [cell], total: cell, prev: undefined }],
       exempt,
@@ -147,7 +148,9 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     expect(line).toBe("1 contrat sans base de projection (détail dans Hypothèses budgétaires)");
     expect(line).not.toContain("FICTIF");
     expect(d).toContain("« 1 contrat sans base de projection »");
-    expect(d).toContain("La carte « Atterrissage » de la Synthèse du Studio RH suit une autre règle");
+    // Règle unique (lot 12) : la carte de la Synthèse du Studio RH suit la même règle que la croisée (landing-compare.ts).
+    expect(d).toContain("La carte « Atterrissage » de la Synthèse du Studio RH suit la même règle");
+    for (const s of ["aucun scénario ne couvre", "mois comparés", "mois exclus nommés"]) expect(d).toContain(s);
   });
 
   it("écart au budget, services, période : libellés repris du code", () => {

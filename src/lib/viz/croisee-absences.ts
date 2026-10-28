@@ -186,7 +186,7 @@ export function dayGapCell(cur: CongeCell, prev: CongeCell): CroiseeCell {
 export function masked(c: CongeCell | undefined, seuil: number): CongeCell {
   if (!c) return { kind: "nd", reason: SEUIL_NON_VERIFIABLE };
   if (c.kind === "nd") return c;
-  const n = congeSize(c);
+  const n = congeSize(c, seuil);
   if (n === null) return { kind: "nd", reason: SEUIL_NON_VERIFIABLE };
   return n > 0 && n < seuil ? { kind: "nd", reason: SOUS_SEUIL(seuil) } : c;
 }
@@ -229,10 +229,15 @@ export function maskCells(cells: readonly MaskCell[], relations: readonly (reado
   );
 }
 
-// Taille d'une cellule : congeSize (une borne basse sans demi-journée comptée n'a pas d'effectif dénombré : non vérifiable, avec
-// masquage secondaire ; jamais « ≥ 0 » affiché).
-const maskCellOf = (c: CongeCell | undefined, exempt = false): MaskCell =>
-  !c ? { size: null, value: 0 } : c.kind === "nd" ? { size: null, value: null } : { size: congeSize(c), value: c.half, exempt, ...(c.who ? { members: c.who } : {}) };
+// Taille d'une cellule : congeSize (personnes reliées ; non dénombrée quand des contrats non reliés laissent les personnes reliées sous
+// le seuil, ou pour une borne basse sans demi-journée comptée : non vérifiable, avec masquage secondaire ; jamais « ≥ 0 » affiché).
+// members : les jetons des personnes, non transmis pour une cellule non dénombrée (elle n'apporte aucune personne comptée).
+const maskCellOf = (c: CongeCell | undefined, seuil: number, exempt = false): MaskCell => {
+  if (!c) return { size: null, value: 0 };
+  if (c.kind === "nd") return { size: null, value: null };
+  const size = congeSize(c, seuil);
+  return { size, value: c.half, exempt, members: size === null ? [] : c.who };
+};
 
 // Grille « pris par motif » : pour chaque motif, les mois de la période, le total de la période et celui de N-1 (ce sont aussi les
 // colonnes du tableau par motif). published : totaux affichés ailleurs dans le chapitre (tableau mensuel des motifs retenus, tuile
@@ -251,7 +256,7 @@ export function congesMask(g: CongesGrid, seuil: number): CongesGridMask {
   const at = (r: number, j: number) => r * width + j;
   const cells: MaskCell[] = g.lines.flatMap((l, r) => {
     const ex = g.exempt === r;
-    return [...l.months.map((c) => maskCellOf(c, ex)), maskCellOf(l.total, ex), maskCellOf(l.prev, ex)];
+    return [...l.months.map((c) => maskCellOf(c, seuil, ex)), maskCellOf(l.total, seuil, ex), maskCellOf(l.prev, seuil, ex)];
   });
   // Taux tous motifs (période, N-1) : deux cellules de plus, total des « autres motifs » (ou de tous les motifs).
   const allCurAt = cells.length;
@@ -286,7 +291,7 @@ export function congesMask(g: CongesGrid, seuil: number): CongesGridMask {
 export function aVenirMask(lines: readonly Pick<AVenirLine, "months" | "total">[], seuil: number): { months: MaskStatus[][]; total: MaskStatus[] } {
   const k = lines[0]?.months.length ?? 0;
   const at = (r: number, j: number) => r * (k + 1) + j;
-  const cells = lines.flatMap((l) => [...l.months.map((c) => maskCellOf(c)), maskCellOf(l.total)]);
+  const cells = lines.flatMap((l) => [...l.months.map((c) => maskCellOf(c, seuil)), maskCellOf(l.total, seuil)]);
   const st = maskCells(
     cells,
     lines.map((_, r) => ({ cells: Array.from({ length: k }, (_, j) => at(r, j)), total: at(r, k) })),

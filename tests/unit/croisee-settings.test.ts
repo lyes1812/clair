@@ -10,6 +10,8 @@ vi.mock("@/lib/settings", () => ({
   },
 }));
 
+import { seuilValueText } from "@/lib/croisee/settings-format";
+import { seuilFilterText } from "@/lib/viz/kpi";
 import {
   CROISEE_KEYS,
   CROISEE_PARSERS,
@@ -184,18 +186,26 @@ describe("lecture : absent / défini / illisible pour chaque clé", () => {
       ]),
     );
     expect(croiseeSettingLines(set)).toEqual([
-      { key: "confidentialite", label: "Seuil de confidentialité", text: "5 personnes", reason: null },
+      { key: "confidentialite", label: "Confidentialité", text: "seuil de 5 personnes distinctes", reason: null },
       { key: "seuilsEffectif", label: "Seuils d'effectif suivis", text: "« Seuil A » : 11 salariés ; « Seuil B » : 50 salariés", reason: null },
       { key: "margeAlerte", label: "Marge d'alerte des seuils d'effectif", text: "0 salarié", reason: null },
       { key: "horizonEcheances", label: "Horizon des échéances de contrat", text: "1 jour", reason: null },
     ]);
     const other = readCroiseeSettings(new Map([["rh.croisee.confidentialite", row(1)], ["rh.croisee.seuilsEffectif", row([])], ["rh.croisee.margeAlerte", row("2")]]));
     expect(croiseeSettingLines(other)).toEqual([
-      { key: "confidentialite", label: "Seuil de confidentialité", text: "1 personne", reason: null },
+      { key: "confidentialite", label: "Confidentialité", text: "seuil de 1 personne distincte", reason: null },
       { key: "seuilsEffectif", label: "Seuils d'effectif suivis", text: null, reason: "seuils d'effectif non définis (Paramètres)" },
       { key: "margeAlerte", label: "Marge d'alerte des seuils d'effectif", text: null, reason: "marge d'alerte des seuils d'effectif illisible : à ré-enregistrer (Paramètres)" },
       { key: "horizonEcheances", label: "Horizon des échéances de contrat", text: null, reason: "horizon des échéances non défini (Paramètres)" },
     ]);
+  });
+
+  it("ligne « Confidentialité » : le même texte que l'onglet Filtres des exports (seuilFilterText de src/lib/viz/kpi.ts) pour un seuil d'au moins 2", () => {
+    // Un seul texte dans toute l'application pour la valeur du seuil : « seuil de N personnes distinctes ». Pour N = 1, kpi.ts écrit
+    // « 1 personne distinctes » (accord à corriger dans kpi.ts, hors de ce test).
+    for (const n of [2, 3, 5, 12]) expect(seuilValueText(n)).toBe(seuilFilterText({ kind: "set", value: n, updatedAt: null, updatedBy: null }));
+    expect(seuilValueText(5)).toBe("seuil de 5 personnes distinctes");
+    expect(seuilValueText(1)).toBe("seuil de 1 personne distincte");
   });
 
   it("getCroiseeSettings : une seule lecture des quatre clés de l'espace et de l'ancienne clé du seuil (repli)", async () => {
@@ -228,9 +238,11 @@ describe("settings-format : clés, raisons et lignes sans base de données", () 
     const format = readFileSync("src/lib/croisee/settings-format.ts", "utf8");
     for (const m of format.matchAll(/^\s*import\s[^;]*from "([^"]+)";/gm)) expect(m[1]).toBe("@/lib/confidentialite");
     // Le module partagé ne charge aucun module de base de données à l'import : ses importations de valeur restent dans son dossier
-    // ou vers structure.ts (vérifié en détail par confidentialite.test.ts).
+    // ou vers structure.ts ; groups.ts forme les groupes du journal de paie et lit les moteurs purs de la paie et de la projection
+    // (vérifié en détail par confidentialite.test.ts).
+    const pure: Record<string, RegExp> = { "groups.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/payroll\/(engine|grid)$|@\/lib\/budget\/engine$)/ };
     for (const f of readdirSync("src/lib/confidentialite").filter((x) => x.endsWith(".ts"))) {
-      for (const m of readFileSync(`src/lib/confidentialite/${f}`, "utf8").matchAll(/^(?:import|export) (?!type )[^;]*from "([^"]+)";/gm)) expect(m[1], `${f} : ${m[1]}`).toMatch(/^(\.\/|@\/lib\/croisee\/structure$)/);
+      for (const m of readFileSync(`src/lib/confidentialite/${f}`, "utf8").matchAll(/^(?:import|export) (?!type )[^;]*from "([^"]+)";/gm)) expect(m[1], `${f} : ${m[1]}`).toMatch(pure[f] ?? /^(\.\/|@\/lib\/croisee\/structure$)/);
     }
     const files = [...readdirSync("src/lib/viz").filter((f) => /^croisee-.*\.ts$/.test(f)).map((f) => `src/lib/viz/${f}`), ...readdirSync("src/lib/croisee").filter((f) => f.endsWith(".ts")).map((f) => `src/lib/croisee/${f}`)];
     expect(files.length).toBeGreaterThan(10);

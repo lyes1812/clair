@@ -3,8 +3,12 @@ import { project } from "@/lib/budget/engine";
 import { getScenario, KIND_LABELS, listBudgets, listScenarios, type ScenarioFull } from "@/lib/budget/store";
 import { budgetVersion, ndVersion, nd, reelVersion, scenarioVersion, val, type ServiceFilter, type Version } from "@/lib/budget/versions";
 import type { ZoomSource } from "@/lib/budget/zoom";
+import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell } from "@/lib/confidentialite";
+import { projectedCell } from "@/lib/confidentialite/groups";
+import { croiseeLink } from "@/lib/croisee/confidentialite";
 import { servicesOf } from "@/lib/payroll/engine";
 import { loadPayrollContext, type PayrollContext } from "@/lib/payroll/context";
+import { serviceGuardOnWindows, worstGuard, type ServiceGuard } from "@/lib/payroll/service-rows";
 
 // Choix des versions comparées (Écart budgétaire, Analyse des écarts) : réel PayFit d'une année, scénario d'une année ou budget
 // saisi ; période en rangs de mois de l'année de chaque version ; filtre de service. Rien n'est enregistré : tout vient de
@@ -133,4 +137,44 @@ export async function loadVersions(slug: string, workspaceId: string, sp: Search
     months: (year) => monthRange(`${year}-${from}`, `${year}-${to}`),
     services: [...known].sort(), hasNv, filter, notices,
   };
+}
+
+// --- Garde du filtre Service : la garde unique de src/lib/payroll/service-rows.ts, appliquée aux versions comparées --------------------
+// Sous le filtre Service, l'Écart budgétaire et l'Analyse des écarts décrivent le service retenu sur chaque version. Ses mois réels
+// (version réelle : les mois de la période ; scénario : ses mois figés) passent par les lignes par service du journal entier, masquées
+// par le moteur unique (serviceGuardOnWindows : le service est n.d. dès que sa ligne l'est, masquage secondaire compris, comme la
+// Synthèse de la Masse salariale). Ses mois projetés (scénario) passent par la composition projetée du service : contrats réels
+// reliés par le référentiel Collaborateurs ; embauches prévues exemptes (projectedCell), masquage principal (aucune somme par service
+// n'est publiée). Un budget saisi est global : n.d. sous le filtre, rien à protéger. Seuil absent ou illisible : n.d. avec la raison
+// du paramètre (l'écran ajoute le lien vers Paramètres › Confidentialité). null : rien n'est masqué. Fonction pure.
+export function ecartServiceGuard(loaded: Pick<Loaded, "ctx" | "versions" | "sources" | "months" | "filter">, conf: ConfidentialiteSetting): ServiceGuard | null {
+  if (!loaded.filter) return null;
+  const settingNd = confidentialiteSettingReason(conf);
+  if (settingNd !== null || conf.kind !== "set") return { cause: "parametre", reason: settingNd ?? SEUIL_NON_VERIFIABLE };
+  const seuil = conf.value;
+  const value = loaded.filter.value;
+  const data = loaded.ctx.kpi.input?.data ?? null;
+  const link = data ? croiseeLink(data) : new Map<string, string>();
+  const windows: string[][] = [];
+  const projected: MaskCell[] = [];
+  loaded.versions.forEach((v, i) => {
+    const src = loaded.sources[i];
+    if (!src || src.kind === "budget") return;
+    const months = loaded.months(v.year);
+    windows.push(months.filter((m) => v.months.get(m)?.layer === "reel"));
+    if (src.kind !== "scenario") return;
+    for (const m of months) {
+      const f = v.months.get(m);
+      if (!f || f.layer === "reel") continue;
+      // Mois projeté : la masse affichée du service (null : déjà n.d.) et sa composition ; composition n.d. : effectif non dénombré.
+      const masse = f.masse.kind === "value" ? f.masse.v : null;
+      projected.push(f.people.kind === "value" ? projectedCell(Object.keys(f.people.map), link, seuil, masse) : { size: null, value: masse === null ? null : Math.abs(masse) });
+    }
+  });
+  const journal = loaded.ctx.input;
+  const real = journal ? serviceGuardOnWindows(journal, windows, value, link, conf) : null;
+  const st = maskGroups(projected, seuil, false);
+  const worst = st.find((x) => x === "masked") ?? st.find(isHidden);
+  const proj: ServiceGuard | null = worst === undefined ? null : { cause: "seuil", reason: maskReason(worst, seuil)! };
+  return worstGuard([real, proj], seuil);
 }

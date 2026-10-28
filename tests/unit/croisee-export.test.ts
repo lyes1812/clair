@@ -438,7 +438,7 @@ function filterCtx(o: Partial<FilterCtx> = {}): FilterCtx {
 // Réglages de la croisée tous absents (aucune valeur par défaut) : quatre lignes n.d. avec leur raison dans « Filtres ».
 const ABSENT_SETTINGS: FilterCtx["settings"] = { confidentialite: { kind: "absent" }, seuilsEffectif: { kind: "absent" }, margeAlerte: { kind: "absent" }, horizonEcheances: { kind: "absent" } };
 const SETTINGS_ND = [
-  { label: "Seuil de confidentialité", value: "n.d. — seuil de confidentialité non défini (Paramètres)" },
+  { label: "Confidentialité", value: "n.d. — seuil de confidentialité non défini (Paramètres)" },
   { label: "Seuils d'effectif suivis", value: "n.d. — seuils d'effectif non définis (Paramètres)" },
   { label: "Marge d'alerte des seuils d'effectif", value: "n.d. — marge d'alerte des seuils d'effectif non définie (Paramètres)" },
   { label: "Horizon des échéances de contrat", value: "n.d. — horizon des échéances non défini (Paramètres)" },
@@ -600,12 +600,12 @@ const SERVICES: ServicesInput = {
     axis: "Service",
     axisMissing: false,
     rows: [
-      { value: "Atelier", cur: win("2026-01", 200000, 20000, 100000, 2), prev: win("2025-01", 180000, 0, 70000, 2), evo: { kind: "value", deltaCents: 50000, ratio: { num: 50000, den: 250000 } }, groups: { cur: { persons: ["p1", "p2"], unlinked: 0, nonZero: true }, prev: { persons: ["p1", "p2"], unlinked: 0, nonZero: true } } },
-      { value: "=Bureau", cur: win("2026-01", 70000, 0, 30000, 1), prev: win("2025-01", 100000, 0, 50000, 1), evo: { kind: "value", deltaCents: -50000, ratio: { num: -50000, den: 150000 } }, groups: { cur: { persons: ["p3"], unlinked: 0, nonZero: true }, prev: { persons: ["p3"], unlinked: 0, nonZero: true } } },
+      { value: "Atelier", cur: win("2026-01", 200000, 20000, 100000, 2), prev: win("2025-01", 180000, 0, 70000, 2), evo: { kind: "value", deltaCents: 50000, ratio: { num: 50000, den: 250000 } } },
+      { value: "=Bureau", cur: win("2026-01", 70000, 0, 30000, 1), prev: win("2025-01", 100000, 0, 50000, 1), evo: { kind: "value", deltaCents: -50000, ratio: { num: -50000, den: 150000 } } },
     ],
     total: { cur: win("2026-01", 270000, 20000, 130000, 3), prev: win("2025-01", 280000, 0, 120000, 3), evo: { kind: "value", deltaCents: 0, ratio: { num: 0, den: 400000 } } },
     selected: null,
-    // Seuil 1 : aucun groupe dénombré n'est masqué (le classeur montre les cellules telles quelles).
+    // Lignes déjà passées par le seuil (serviceRowsIn) : rien n'est masqué au seuil 1, le classeur montre les cellules telles quelles.
     confidentialite: { kind: "set", value: 1 },
     links: { confidentialite: "/e/demo/parametres#confidentialite" },
   },
@@ -717,7 +717,7 @@ describe("route d'export de la Masse salariale croisée", () => {
       ...SETTINGS_ND.map((x) => [x.label, x.value]),
       ["Tri du tableau « Coût par service »", "Coût janvier 2026, ordre décroissant (par défaut)"],
       ["Limite de la lecture", "Coût / personne-mois : contrats rémunérés chaque mois ; ce n'est pas un coût par ETP."],
-      ["Limite de la lecture", "Seuil de confidentialité : 1 personne distincte par service, sur la période et sur N-1 ; masquage secondaire ; la ligne « Total » reste complète."],
+      ["Limite de la lecture", "Confidentialité : seuil de 1 personne distincte par service, sur la période, sur N-1 et sur chacun de leurs mois ; masquage secondaire ; mêmes cellules n.d. que le tableau Services de la Masse salariale ; la ligne « Total » reste complète."],
     ]);
     const sources = sheetRows(wb.getWorksheet("Sources")!, "Source", 4).map((r) => [r[0].value, r[1].value, r[2].value, r[3].value]);
     expect(sources).toEqual([["PayFit", "journal comptable de paie (masse, brut, cotisations, services) · aucune lecture appliquée", "n.d.", "Jamais synchronisée"]]);
@@ -1164,7 +1164,7 @@ describe("feuille « Filtres » : réglages de la croisée, valeur ou n.d. avec 
     };
     const f = croiseeFilters(filterCtx({ settings, openMonths: [], notices: [] }), { limits: [] }, ["journal"]);
     expect(f.slice(4)).toEqual([
-      { label: "Seuil de confidentialité", value: "3 personnes" },
+      { label: "Confidentialité", value: "seuil de 3 personnes distinctes" },
       { label: "Seuils d'effectif suivis", value: "« Seuil fictif » : 11 salariés" },
       { label: "Marge d'alerte des seuils d'effectif", value: "0 salarié" },
       { label: "Horizon des échéances de contrat", value: "n.d. — horizon des échéances illisible : à ré-enregistrer (Paramètres)" },

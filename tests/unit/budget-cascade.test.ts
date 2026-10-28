@@ -48,18 +48,26 @@ describe("cascade d'ETP entre 2025 et 2026 (12 mois)", () => {
     expect(s.steps.reduce((x, y) => x + y.etp4, 0)).toBe(s.end - s.start);
     expect(s.residual).toBe(0);
   });
-  it("personnes distinctes de chaque palier (seuil de confidentialité) : contrats reliés par le lien, un contrat non relié compté à part", () => {
+  it("personnes distinctes de chaque palier (seuil de confidentialité) : contrats reliés par le lien, un contrat non relié compté à part, une embauche prévue comptée à part", () => {
     if (c.kind !== "value") throw new Error(c.reason);
     // Lien contrat → personne : P1 et P6 sont deux contrats d'une même personne « a » ; P5 n'est relié à personne (il ne protège jamais).
     const link = new Map([["P1", "a"], ["P6", "a"], ["P2", "b"], ["P3", "c"], ["P4", "d"]]);
     expect(cascadePersons(c, link)).toEqual([
-      { persons: ["c"], unlinked: 0 }, // entrées nouvelles : P3
-      { persons: ["b"], unlinked: 0 }, // effet report : P2
-      { persons: ["d"], unlinked: 0 }, // sorties : P4
-      { persons: [], unlinked: 1 }, // effet déport : P5, non relié
-      { persons: ["a"], unlinked: 0 }, // changement d'ETP : P6 (même personne que P1)
+      { persons: ["c"], unlinked: 0, hires: 0 }, // entrées nouvelles : P3
+      { persons: ["b"], unlinked: 0, hires: 0 }, // effet report : P2
+      { persons: ["d"], unlinked: 0, hires: 0 }, // sorties : P4
+      { persons: [], unlinked: 1, hires: 0 }, // effet déport : P5, non relié
+      { persons: ["a"], unlinked: 0, hires: 0 }, // changement d'ETP : P6 (même personne que P1)
     ]);
-    expect(cascadePersons(c, new Map())).toEqual(Array(5).fill({ persons: [], unlinked: 1 })); // sans lien : rien n'est dénombré
+    expect(cascadePersons(c, new Map())).toEqual(Array(5).fill({ persons: [], unlinked: 1, hires: 0 })); // sans lien : rien n'est dénombré
+    // Une embauche prévue d'un scénario (clé « embauche:… » du moteur de projection) ne décrit personne de réel : ni reliée ni non reliée,
+    // comptée à part. Ici deux embauches à 0,5 d'octobre à décembre 2026 s'ajoutent à P3 dans les entrées nouvelles : +0,45 au lieu de +0,20.
+    const b2 = ver("2026", "2026", { P1: span("2026", 1, 12, 10000), P2: span("2026", 1, 12, 10000), P3: span("2026", 10, 12, 8000), P5: span("2026", 1, 8, 10000), P6: span("2026", 1, 12, 10000), "embauche:h1": span("2026", 10, 12, 5000), "embauche:h2": span("2026", 10, 12, 5000) });
+    const c2 = etpCascade(a, b2, monthsOfYear("2025", "01", "12"), monthsOfYear("2026", "01", "12"));
+    if (c2.kind !== "value") throw new Error(c2.reason);
+    expect(c2.steps[0].etp4).toBe(4500); // (24 000 + 15 000 + 15 000) ÷ 12 = 4 500
+    expect(cascadePersons(c2, link)[0]).toEqual({ persons: ["c"], unlinked: 0, hires: 2 });
+    expect(cascadePersons(c2, new Map())[0]).toEqual({ persons: [], unlinked: 1, hires: 2 }); // P3 non relié ; les embauches restent à part
   });
   it("un mois n.d. d'une version rend l'analyse n.d. (composition jamais supposée) ; périodes de longueur différente refusées", () => {
     const bad = ver("2026", "2026", { P1: span("2026", 1, 12, 10000) });

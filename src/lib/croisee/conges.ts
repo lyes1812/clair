@@ -1,10 +1,11 @@
+import { maskSize, personsOfContracts, type PersonsOfContracts } from "@/lib/confidentialite/persons";
 import { addMonths, monthEnd, monthStart, monthsBetween } from "@/lib/dates";
 import { monthRanges } from "@/lib/rh/headcount";
 import { absenteeism, absenteeismMonth } from "@/lib/rh/kpi/absence";
 import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
 import { absenceSlots } from "@/lib/rh/kpi/days";
 import { countedOpts } from "@/lib/rh/kpi/period";
-import type { AbsenceSlice, AbsenteeismMonth, Absenteeism, Kind, KpiInput, KpiNd, SlotKey, Window } from "@/lib/rh/kpi/types";
+import type { AbsenteeismMonth, Absenteeism, Kind, KpiInput, KpiNd, SlotKey, Window } from "@/lib/rh/kpi/types";
 import type { AbsenceRow } from "@/lib/rh/referential/types";
 
 // Congés et absences par motif (Masse salariale croisée, chapitre 03). Fonctions pures, sans base ni horloge.
@@ -22,30 +23,39 @@ import type { AbsenceRow } from "@/lib/rh/referential/types";
 //    absente. La page croisée n'affiche aucun identifiant : ces raisons sont remplacées par une raison qui garde le mois et le nombre
 //    d'absences en cause (le détail reste dans KPI RH).
 //
-// Personnes concernées : collaborateur du contrat (clé de personne), à défaut le contrat lui-même ; elles servent au seuil de
+// Personnes concernées : collaborateur du contrat (clé de personne) ; un contrat sans personne rattachée est non relié ; elles servent au seuil de
 // confidentialité de l'écran. Aucun nom, aucun identifiant n'est renvoyé : des nombres. who : jetons des personnes de la cellule
 // (numéro d'ordre de la personne parmi celles de l'entrée, clés triées), sans identifiant ; ils permettent au masquage de compter une
 // personne une seule fois d'une cellule masquée à l'autre (un mois et le suivant, deux motifs d'un même mois).
 
-export type CongeValue = { kind: Kind; half: number; persons: number; who?: readonly number[] };
+// persons : personnes reliées distinctes des contrats des demi-journées comptées ; unlinked : contrats distincts sans personne rattachée
+// qui en portent (NON RELIÉS : jamais comptés comme une personne, ils ne protègent pas) ; who : jetons des personnes reliées.
+export type CongeValue = { kind: Kind; half: number; persons: number; unlinked: number; who: readonly number[] };
 export type CongeCell = CongeValue | { kind: "nd"; reason: string };
 
-// Effectif d'une cellule pour le seuil de confidentialité : les personnes des demi-journées comptées. Une borne basse sans aucune
-// demi-journée comptée (seulement des demi-journées incertaines : statut non renseigné, moment de début ou de fin absent, jours hors
-// contrat) décrit au moins une absence sans personne dénombrée : son effectif n'est pas dénombré (null, seuil non vérifiable), jamais
-// « 0 personne ». Une borne basse avec des personnes comptées garde ce nombre (borne basse de l'effectif).
-export const congeSize = (c: CongeValue): number | null => (c.kind === "lower_bound" && c.persons === 0 ? null : c.persons);
+// Effectif d'une cellule pour le seuil de confidentialité : les personnes des demi-journées comptées, par la règle du module partagé
+// (maskSize : null, non dénombré, quand des contrats non reliés existent et que les personnes reliées sont sous le seuil). Une borne
+// basse sans aucune demi-journée comptée (seulement des demi-journées incertaines : statut non renseigné, moment de début ou de fin
+// absent, jours hors contrat) décrit au moins une absence sans personne dénombrée : son effectif n'est pas dénombré (null, seuil non
+// vérifiable), jamais « 0 personne ». Une borne basse avec des personnes comptées garde ce nombre (borne basse de l'effectif).
+export const congeSize = (c: CongeValue, seuil: number): number | null => (c.kind === "lower_bound" && c.persons === 0 ? null : maskSize({ persons: c.who.map(String), unlinked: c.unlinked }, seuil));
 export type CongeLine = { type: string; chosen: boolean; months: CongeCell[]; total: CongeCell };
 export type CongesPris = { window: Window; lines: CongeLine[]; emptyReason: string | null };
 
 const nf = new Intl.NumberFormat("fr-FR");
-const personOf = (x: { personKey: string | null; contractKey: string }) => x.personKey ?? `contrat:${x.contractKey}`;
-const personsOf = (slices: readonly AbsenceSlice[]): Set<string> => new Set(slices.filter((s) => s.half > 0).map(personOf));
+// Personnes et contrats non reliés des demi-journées comptées (personsOfContracts du module partagé : chaque contrat relié à sa
+// personne par la tranche elle-même, un contrat sans personne est non relié).
+const groupOf = (slices: readonly { contractKey: string; personKey: string | null; half: number }[]): PersonsOfContracts =>
+  personsOfContracts(
+    slices.filter((s) => s.half > 0).map((s) => s.contractKey),
+    new Map(slices.flatMap((s) => (s.personKey === null ? [] : [[s.contractKey, s.personKey] as const]))),
+  );
 
 // Jeton d'une personne : son rang parmi les personnes des contrats de l'entrée (clés triées), le même pour toutes les copies de
-// l'entrée (motifInput) et pour la période comme pour N-1 ; une personne absente des contrats reçoit le rang suivant.
+// l'entrée (motifInput) et pour la période comme pour N-1 ; une personne absente des contrats reçoit le rang suivant. Un contrat sans
+// personne n'a pas de jeton.
 export function personTokens(input: KpiInput): (person: string) => number {
-  const index = new Map([...new Set(input.data.contracts.map(personOf))].sort().map((k, i) => [k, i] as const));
+  const index = new Map([...new Set(input.data.contracts.flatMap((c) => (c.personKey === null ? [] : [c.personKey])))].sort().map((k, i) => [k, i] as const));
   return (person) => {
     let n = index.get(person);
     if (n === undefined) index.set(person, (n = index.size));
@@ -53,6 +63,8 @@ export function personTokens(input: KpiInput): (person: string) => number {
   };
 }
 const tokensOf = (persons: Iterable<string>, token: (person: string) => number): number[] => [...persons].map(token).sort((a, b) => a - b);
+// Cellule d'un groupe : nombre de personnes reliées, contrats non reliés, jetons des personnes.
+const cellOf = (kind: Kind, half: number, g: PersonsOfContracts, token: (person: string) => number): CongeValue => ({ kind, half, persons: g.persons.length, unlinked: g.unlinked, who: tokensOf(g.persons, token) });
 
 // --- Copies de l'entrée (les mêmes que celles de absenceByMotif) ------------------------------------------------------------------
 
@@ -138,17 +150,14 @@ export function publicWindow<T extends { kind: string; nd?: KpiNd | null }>(inpu
 
 function monthCell(copy: KpiInput, r: AbsenteeismMonth, token: (person: string) => number): CongeCell {
   if (r.kind === "nd") return { kind: "nd", reason: publicMonthReason(copy, r.month, r.nd) };
-  const persons = personsOf(r.slices);
-  return { kind: r.kind, half: r.ratio.num, persons: persons.size, who: tokensOf(persons, token) };
+  return cellOf(r.kind, r.ratio.num, groupOf(r.slices), token);
 }
 
 // Total de la fenêtre : celui du moteur (absenteeism : un mois sans contrat compté n'y apporte rien, tout autre mois n.d. rend la
-// fenêtre n.d.) ; personnes = réunion des personnes des mois comptés.
+// fenêtre n.d.) ; personnes = réunion des personnes des mois comptés (un contrat présent plusieurs mois compte une fois).
 function totalCell(copy: KpiInput, r: Absenteeism, token: (person: string) => number): CongeCell {
   if (r.kind === "nd") return { kind: "nd", reason: publicWindowReason(copy, r.nd) };
-  const persons = new Set<string>();
-  for (const m of r.months) if (m.kind !== "nd") for (const p of personsOf(m.slices)) persons.add(p);
-  return { kind: r.kind, half: r.ratio.num, persons: persons.size, who: tokensOf(persons, token) };
+  return cellOf(r.kind, r.ratio.num, groupOf(r.months.flatMap((m) => (m.kind === "nd" ? [] : m.slices))), token);
 }
 
 export function congesPris(input: KpiInput, w: Window): CongesPris {
@@ -200,8 +209,8 @@ export function congesAVenir(input: KpiInput, after: string): CongesAVenir {
   const inEst = (id: string | null) => !opts.establishments || (id !== null && opts.establishments.includes(id));
   const byExternal = new Map(input.data.contracts.map((c) => [c.externalId, c]));
 
-  // Créneaux comptés et incertains, par ligne (motif × statut), mois et contrat.
-  type Acc = { union: Map<string, Set<SlotKey>>; doubt: Map<string, Set<SlotKey>>; person: Map<string, string> };
+  // Créneaux comptés et incertains, par ligne (motif × statut), mois et contrat ; person : la personne de chaque contrat (null : non relié).
+  type Acc = { union: Map<string, Set<SlotKey>>; doubt: Map<string, Set<SlotKey>>; person: Map<string, string | null> };
   const acc = new Map<string, Acc>();
   const lineKey = (type: string, statut: AVenirStatut) => `${statut}|${type}`;
   const get = (k: string): Acc => {
@@ -242,7 +251,7 @@ export function congesAVenir(input: KpiInput, after: string): CongesAVenir {
       const k = `${m}|${c.contractKey}`;
       add(x.union, k, s.slots);
       add(x.doubt, k, s.uncertain);
-      x.person.set(c.contractKey, personOf(c));
+      x.person.set(c.contractKey, c.personKey);
     }
   }
 
@@ -251,7 +260,8 @@ export function congesAVenir(input: KpiInput, after: string): CongesAVenir {
     .sort((p, q) => p.type.localeCompare(q.type) || (p.statut === q.statut ? 0 : p.statut === "pose" ? -1 : 1))
     .map(({ k, statut, type }) => {
       const x = acc.get(k)!;
-      const all = new Set<string>();
+      // Contrats des demi-journées comptées de la ligne (tous mois), vus par leur personne (groupOf : un contrat sans personne est non relié).
+      const all: { contractKey: string; personKey: string | null; half: number }[] = [];
       let lower = false;
       let sum = 0;
       let nd: string | null = null;
@@ -262,11 +272,12 @@ export function congesAVenir(input: KpiInput, after: string): CongesAVenir {
         }
         let half = 0;
         let doubtful = 0;
-        const persons = new Set<string>();
+        const counted: typeof all = [];
         for (const [key, slots] of x.union) {
           if (!key.startsWith(`${m}|`)) continue;
           half += slots.size;
-          if (slots.size > 0) persons.add(x.person.get(key.slice(m.length + 1))!);
+          const contractKey = key.slice(m.length + 1);
+          counted.push({ contractKey, personKey: x.person.get(contractKey) ?? null, half: slots.size });
         }
         for (const [key, slots] of x.doubt) {
           if (!key.startsWith(`${m}|`)) continue;
@@ -275,10 +286,10 @@ export function congesAVenir(input: KpiInput, after: string): CongesAVenir {
         }
         sum += half;
         if (doubtful) lower = true;
-        for (const p of persons) all.add(p);
-        return { kind: doubtful ? "lower_bound" : "exact", half, persons: persons.size, who: tokensOf(persons, token) };
+        all.push(...counted);
+        return cellOf(doubtful ? "lower_bound" : "exact", half, groupOf(counted), token);
       });
-      const total: CongeCell = nd !== null ? { kind: "nd", reason: nd } : { kind: lower ? "lower_bound" : "exact", half: sum, persons: all.size, who: tokensOf(all, token) };
+      const total: CongeCell = nd !== null ? { kind: "nd", reason: nd } : cellOf(lower ? "lower_bound" : "exact", sum, groupOf(all), token);
       return { type, statut, months: cells, total };
     });
   return { kind: "value", after, months, lines, nonRattachees };

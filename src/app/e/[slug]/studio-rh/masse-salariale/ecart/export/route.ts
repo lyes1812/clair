@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { aggregate, diff, type Agg, type Diff } from "@/lib/budget/versions";
 import { HORS_SALARIE, zoomOf, ZOOM_RUBRICS, type ZoomRubric } from "@/lib/budget/zoom";
+import { getConfidentialite } from "@/lib/confidentialite";
 import { xlsxResponse } from "@/lib/export/response";
 import { safeText } from "@/lib/export/safe-text";
 import { loadSourceInputs, sourceRows, type SourceRequest } from "@/lib/export/sources";
@@ -9,17 +10,20 @@ import { ECART_TERMS } from "@/lib/glossary/ecart";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { formatEuros } from "@/lib/money";
 import { hasAtLeast } from "@/lib/roles";
+import { type ServiceGuard } from "@/lib/payroll/service-rows";
 import { periodText } from "@/lib/viz/ecart";
 import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
-import { loadVersions, type Loaded } from "../../ecart-data";
-import { ecartRows } from "../../ecart-rows";
+import { ecartServiceGuard, loadVersions, type Loaded } from "../../ecart-data";
+import { ecartRows, type EcartRow } from "../../ecart-rows";
 import { peopleIndex, type PersonAbsent, type PersonInfo } from "../../people-index";
 
 export const dynamic = "force-dynamic";
 
 // Export de l'écart budgétaire : le tableau affiché (agrégats), ou le détail par salarié d'une rubrique (nominatif :
 // administrateurs et éditeurs seulement, comme à l'écran). Mêmes versions, période et filtres que la page.
-// CSV par défaut ; Excel avec ?format=xlsx (filtres, sources et définitions dans des onglets).
+// CSV par défaut ; Excel avec ?format=xlsx (filtres, sources et définitions dans des onglets). Seuil de confidentialité : sous le
+// filtre Service, la même garde que l'écran (ecartServiceGuard) : service masqué ou seuil non défini, chaque cellule du tableau est
+// n.d. avec la raison, dans le CSV comme dans le classeur (onglet Filtres : « Service retenu »).
 const BOM = "﻿";
 const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
 // Libellé texte du CSV : jamais pris pour une formule à l'ouverture. Les cellules numériques (écarts, y compris négatifs) restent telles quelles.
@@ -48,11 +52,15 @@ const TABLE_DEFINITIONS = [ECART_TERMS.versions, ECART_TERMS.rangsDeMois, ECART_
 const ZOOM_DEFINITIONS = [ECART_TERMS.zoom, ECART_TERMS.versions, ECART_TERMS.rangsDeMois, ECART_TERMS.ecart, "lecture-nd"];
 
 const scopeLabel = (l: Loaded) => (l.filter ? `service ${l.filter.value ?? "non ventilé"}` : "tous les services");
-const commonFilters = (l: Loaded): FilterSpec[] => [
+const commonFilters = (l: Loaded, guard: ServiceGuard | null = null): FilterSpec[] => [
   ...l.versions.map((v, i) => ({ label: `Version ${i + 1}`, value: v.label })),
   { label: "Période", value: `${periodText(l.from, l.to)} (rangs de mois ${l.from} à ${l.to})` },
   { label: "Périmètre", value: scopeLabel(l) },
+  ...(guard ? [{ label: "Service retenu", value: `n.d. — ${guard.reason}` }] : []),
 ];
+// Lignes du tableau sous la garde du filtre Service : chaque valeur et chaque écart n.d. avec la raison du seuil, jamais un montant.
+const guardedRows = (rows: EcartRow[], guard: ServiceGuard | null): EcartRow[] =>
+  guard ? rows.map((r) => ({ ...r, aggs: r.aggs.map(() => ({ kind: "nd", reason: guard.reason })), gaps: r.gaps.map(() => ({ kind: "nd", reason: guard.reason })) })) : rows;
 const definitionsOf = (ids: string[]) => {
   const { definitions, unknown } = definitionsFor(ids);
   if (unknown.length) console.warn(`export de l'écart : identifiants de glossaire inconnus (${unknown.join(", ")})`);
@@ -68,8 +76,8 @@ async function sourcesOf(l: Loaded, workspaceId: string) {
   return sourceRows(inputs);
 }
 
-async function tableXlsx(workspace: WorkspaceAccess, loaded: Loaded, vue: "synthese" | "detail"): Promise<Response> {
-  const rows = ecartRows(loaded, vue);
+async function tableXlsx(workspace: WorkspaceAccess, loaded: Loaded, vue: "synthese" | "detail", guard: ServiceGuard | null): Promise<Response> {
+  const rows = guardedRows(ecartRows(loaded, vue), guard);
   const columns: ColumnSpec[] = [
     { header: "Rubrique", key: "rubrique", kind: "text", width: 54 },
     { header: "Unité", key: "unite", kind: "text", width: 10 },
@@ -88,7 +96,7 @@ async function tableXlsx(workspace: WorkspaceAccess, loaded: Loaded, vue: "synth
     title: "Écart budgétaire",
     workspaceName: workspace.name,
     generatedAt: new Date().toISOString(),
-    filters: [...commonFilters(loaded), { label: "Niveau de détail", value: vue === "detail" ? "Détail" : "Synthèse" }],
+    filters: [...commonFilters(loaded, guard), { label: "Niveau de détail", value: vue === "detail" ? "Détail" : "Synthèse" }],
     sheets: [
       {
         name: "Écart budgétaire",
@@ -196,8 +204,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     return new Response(BOM + lines.join("\n") + "\n", { headers: { ...headers, "content-disposition": `attachment; filename="ecart-detail-${rubric}.csv"` } });
   }
   const vue = sp.vue === "detail" ? "detail" : "synthese";
-  if (xlsx) return tableXlsx(workspace, loaded, vue);
-  const rows = ecartRows(loaded, vue);
+  const guard = ecartServiceGuard(loaded, await getConfidentialite(workspace.id));
+  if (xlsx) return tableXlsx(workspace, loaded, vue, guard);
+  const rows = guardedRows(ecartRows(loaded, vue), guard);
   const head = ["Rubrique", ...loaded.versions.flatMap((v, i) => (i === 0 ? [v.label] : [v.label, `Écart ${i + 1}−${i}`, `Écart ${i + 1}−${i} %`]))];
   const lines = [head.map(qt).join(";")];
   for (const r of rows) lines.push([qt(r.label), ...r.aggs.flatMap((a, i) => (i === 0 ? [cell(a, r.unit)] : [cell(a, r.unit), gapCell(r.gaps[i - 1], r.unit), pctCell(r.gaps[i - 1])])).map((x) => q(String(x)))].join(";"));

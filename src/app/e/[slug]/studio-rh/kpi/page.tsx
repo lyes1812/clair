@@ -6,7 +6,8 @@ import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { KPI_KEYS, kpiOriginText, type KpiSettingKey, type KpiSettings } from "@/lib/rh-kpi-settings";
 import { monthRanges, natureOfMonth } from "@/lib/rh/headcount";
-import { absenceByMotif } from "@/lib/rh/kpi/absence-motifs";
+import { confidentialiteHref } from "@/lib/confidentialite";
+import { absenceByMotif, absenceTypePersons } from "@/lib/rh/kpi/absence-motifs";
 import { KPI_DETAIL_IDS, kpiDetail } from "@/lib/rh/kpi/dashboard";
 import { ETP_PRORATED_LABEL, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
 import { fmtDelta, fmtEtp4, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
@@ -25,6 +26,7 @@ import {
   AverageDetail,
   averageShown,
   Cell,
+  ConfidentialiteNote,
   EtpEndDetail,
   EtpProratedDetail,
   etpProratedShown,
@@ -173,8 +175,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
     );
   }
 
-  // Paramètres GET : une valeur invalide est remplacée par le défaut, et l'écran le dit.
-  const { data, rawLimit, closed, last, years, vue, mode, fin, year, etab, nature, w, input, dash, notices } = suivi;
+  // Paramètres GET : une valeur invalide est remplacée par le défaut, et l'écran le dit. Le seuil de confidentialité de l'espace
+  // (lu par loadKpiSuivi, module partagé, sans valeur par défaut) est transmis à chaque répartition de l'écran ; la garde du périmètre
+  // (filtre Établissement ou Nature sous le seuil, ou seuil non défini) rend tout l'écran n.d.
+  const { data, rawLimit, closed, last, years, vue, mode, fin, year, etab, nature, w, input, dash, notices, confidentialite, guard } = suivi;
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
 
   // detail et mois : un détail de mois exige un mois valide de la fenêtre ou de son N-1 ; un détail de période n'en prend pas ;
@@ -206,15 +210,16 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
     }
   } else if (moisOk) ignore("mois", rawMois, "aucun détail demandé");
 
-  const query = (extra: Record<string, string>) => {
+  // withScope : false pour une adresse sans les filtres Établissement et Nature (action « Retirer les filtres » de la garde).
+  const query = (extra: Record<string, string>, withScope = true) => {
     const p = new URLSearchParams();
     if (vue !== "suivi") p.set("vue", vue);
     if (mode === "civil") {
       p.set("mode", "civil");
       p.set("annee", String(year));
     } else p.set("fin", fin);
-    if (etab) p.set("etab", etab);
-    if (nature) p.set("nature", nature);
+    if (withScope && etab) p.set("etab", etab);
+    if (withScope && nature) p.set("nature", nature);
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
     return `?${p.toString()}`;
   };
@@ -288,9 +293,12 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   const prCur = t.etpProrated.current;
 
   // Tableau par catégorie (Suivi) : même entrée filtrée que les tuiles (établissement, nature) ; la mention sous le tableau nomme
-  // le périmètre et les catégories hors de ce périmètre (sans colonne, jamais un zéro).
-  const cat = vue === "suivi" ? await loadCategoryMonths(input, w, ctx.collab.workspace.id) : null;
+  // le périmètre et les catégories hors de ce périmètre (sans colonne, jamais un zéro) ; cellules masquées par le seuil (moteur partagé).
+  const cat = vue === "suivi" && !guard ? await loadCategoryMonths(input, w, ctx.collab.workspace.id, confidentialite) : null;
   const catScope = cat ? categoryScopeNote(suivi, cat.hidden) : null;
+  // Périmètre retenu par les filtres, en clair (titre du bloc n.d. de la garde).
+  const etabLabel = etab ? (ctx.collab.establishments.find((e) => e.id === etab)?.label ?? etab) : null;
+  const scopeLabel = [etabLabel ? `établissement ${etabLabel}` : null, nature ? `nature ${contractNatureLabel(nature)}` : null].filter((x): x is string => x !== null).join(" · ");
   const tileOn = (id: string) => vue === "suivi" || (vue === "turnover" ? id === "turnover" || id === "headcount-avg" : id === "absenteeism");
   const colOn = (c: string) => suiviColumnOn(vue, c);
   // Page « Prévu » : aucun chiffre, donc ni limites de la lecture ni paramètres en vigueur à rappeler.
@@ -348,6 +356,18 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
         <p key={reason} className="notice" data-testid="coverage-notice">{monthRanges(months)} : {reason}</p>
       ))}
 
+      {guard ? (
+        /* Garde du périmètre : tous les chiffres de l'écran décriraient le périmètre retenu, sous le seuil (masquage secondaire compris)
+           ou sans seuil défini : aucun indicateur, tableau ni détail n'est affiché, la raison est dite, les filtres se retirent. */
+        <section className="placeholder" data-testid="kpi-scope-guard">
+          <h3>n.d. — {scopeLabel}</h3>
+          <p className="muted" data-testid="kpi-scope-guard-reason">{guard.reason}</p>
+          {guard.cause === "parametre" && <p className="muted"><a href={confidentialiteHref(slug)}>Définir le seuil de confidentialité dans Paramètres</a></p>}
+          <p className="muted"><a href={query({}, false)} data-testid="kpi-scope-guard-unfilter">Retirer les filtres Établissement et Nature</a></p>
+          <ConfidentialiteNote slug={slug} setting={confidentialite} testid="kpi-scope-guard-confidentialite" />
+        </section>
+      ) : (
+      <>
       <section className="panel">
         <PanelTitle slug={slug} term={KPI_TERMS.previousPeriod} label="Comparaison N-1 et écart">Indicateurs</PanelTitle>
         <dl className="facts kpi-tiles" data-testid="kpi-tiles">
@@ -460,7 +480,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             detail={detailHref("absenteeism", null)}
             detailN1={detailHref("absenteeism", null, true)}
           >
-            {input.absences.status === "read" && <AbsenceTypeNotes chosen={chosenTypes} other={otherTypes} missing={missingTypes} slug={slug} />}
+            {input.absences.status === "read" && <AbsenceTypeNotes chosen={chosenTypes} other={otherTypes} missing={missingTypes} slug={slug} mask={{ setting: confidentialite, sizes: absenceTypePersons(input) }} />}
           </KpiTile>
         </dl>
       </section>
@@ -553,9 +573,13 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
                     <>
                       {cat.keys.map((k) => {
                         const x = c.byCategory[k];
-                        return <td key={k} className="num" data-col={k}>{x ? `${c.lowerBound ? "≥ " : ""}${x.headcount} · ${x.etp4 === null ? "ETP n.d." : `${fmtEtp4(x.etp4)} ETP`}` : "—"}</td>;
+                        return (
+                          <td key={k} className="num" data-col={k} data-masque={x?.kind === "nd" ? "oui" : undefined}>
+                            {!x ? "—" : x.kind === "nd" ? <abbr className="nd" title={x.reason}>n.d.</abbr> : `${c.lowerBound ? "≥ " : ""}${x.headcount} · ${x.etp4 === null ? "ETP n.d." : `${fmtEtp4(x.etp4)} ETP`}`}
+                          </td>
+                        );
                       })}
-                      <td className="num" data-col="total">{c.lowerBound ? "≥ " : ""}{Object.values(c.byCategory).reduce((n, x) => n + x.headcount, 0)} · {Object.values(c.byCategory).some((x) => x.etp4 === null) ? "ETP n.d." : `${fmtEtp4(Object.values(c.byCategory).reduce((n, x) => n + (x.etp4 ?? 0), 0))} ETP`}</td>
+                      <td className="num" data-col="total">{c.lowerBound ? "≥ " : ""}{c.total.headcount} · {c.total.etp4 === null ? "ETP n.d." : `${fmtEtp4(c.total.etp4)} ETP`}</td>
                     </>
                   )}
                 </tr>
@@ -564,6 +588,8 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           </table>
         </div>
         {catScope && <p className="desc" data-testid="kpi-categories-scope">{catScope}</p>}
+        {cat.masked > 0 && <p className="desc" data-testid="kpi-categories-masked">{cat.masked} cellule{cat.masked > 1 ? "s" : ""} non affichée{cat.masked > 1 ? "s" : ""} (seuil de confidentialité : {cat.seuil.seuil} personne{cat.seuil.seuil !== null && cat.seuil.seuil > 1 ? "s" : ""}) ; le total du mois reste affiché.</p>}
+        <ConfidentialiteNote slug={slug} setting={confidentialite} testid="kpi-categories-confidentialite" />
         <p className="desc"><a href={`/e/${slug}/parametres#projection`}>Paramètres › Catégories de contrat</a></p>
       </section>
       )}
@@ -581,10 +607,12 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           {detail.id === "headcount" && <HeadcountDetail v={detail.value} maps={maps} slug={slug} month={detail.month} natureAt={natureAt} />}
           {(detail.id === "entries" || detail.id === "exits") && <MovementsDetail v={detail.value} kind={detail.id === "entries" ? "entry" : "exit"} maps={maps} slug={slug} />}
           {(detail.id === "theoretical" || detail.id === "absenteeism") && <AbsenceMonthDetail id={detail.id} v={detail.value} theoretical={detail.theoretical} maps={maps} slug={slug} />}
-          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} motifs={absenceByMotif(input, detail.window)} slug={slug} />}
+          {detail.id === "absenteeism-window" && <AbsenteeismWindowDetail v={detail.value} theoretical={detail.theoretical} detailHref={inDetail} motifs={absenceByMotif(input, detail.window)} slug={slug} confidentialite={confidentialite} />}
           {(detail.id === "etp-avg" || detail.id === "headcount-avg") && <AverageDetail v={detail.value} detailHref={inDetail} />}
           {detail.id === "turnover" && <TurnoverDetail v={detail.value} maps={maps} slug={slug} detailHref={inDetail} natureAt={natureAt} />}
         </section>
+      )}
+      </>
       )}
       </>
       )}

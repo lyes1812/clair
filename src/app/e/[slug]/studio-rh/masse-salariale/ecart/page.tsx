@@ -5,14 +5,16 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { Pager } from "@/components/Pager";
 import { formatEuros } from "@/lib/money";
 import { aggregate, diff, type RowKey, type Version } from "@/lib/budget/versions";
+import { confidentialiteHref, getConfidentialite } from "@/lib/confidentialite";
 import { zoomOf, ZOOM_RUBRICS, HORS_SALARIE, type ZoomRubric } from "@/lib/budget/zoom";
 import { ECART_TERMS } from "@/lib/glossary/ecart";
 import { costTone } from "@/lib/trend";
 import { ecartChartData, gapTone, RUBRIC_KEYS, rubricGroups } from "@/lib/viz/ecart";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
+import { serviceLabel } from "@/lib/payroll/service-rows";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
-import { loadVersions } from "../ecart-data";
+import { ecartServiceGuard, loadVersions } from "../ecart-data";
 import { ecartRows } from "../ecart-rows";
 import { eurosSigned, Gap, gapSign, gapText, GapPct, MsHeader, MsTabs, neg, PanelTitle, periodText, pctSign, PickerForm, scopeText, TBL, toneClass, TrendLegend, Val, VerBadge, VerPair, VersionChain } from "../EcartParts";
 import { peopleIndex } from "../people-index";
@@ -47,8 +49,12 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
   const vue = one(sp.vue) === "detail" ? "detail" : "synthese";
   const rub = RUBRIC_KEYS.includes(one(sp.rub) as RowKey) ? (one(sp.rub) as RowKey) : "masse";
   const aff: Affichage = AFFICHAGES.includes(one(sp.affichage) as Affichage) ? (one(sp.affichage) as Affichage) : "tout";
-  const showGraph = versions.length > 0 && aff !== "tableau";
-  const showTable = versions.length > 0 && aff !== "graphique";
+  // Seuil de confidentialité de l'espace (règle de toute l'application, sans valeur par défaut) : sous le filtre Service, la même
+  // garde que la Synthèse de la Masse salariale et l'Analyse des écarts. Service masqué ou seuil non défini : tableau et graphique
+  // n.d. avec la raison (les exports portent les mêmes n.d.) ; le détail par salarié reste réservé aux éditeurs, par rôle.
+  const guard = ecartServiceGuard(loaded, await getConfidentialite(workspace.id));
+  const showGraph = versions.length > 0 && aff !== "tableau" && !guard;
+  const showTable = versions.length > 0 && aff !== "graphique" && !guard;
   const rows = ecartRows(loaded, vue);
   const base = `/e/${slug}/studio-rh/masse-salariale/ecart`;
   const keep = new URLSearchParams();
@@ -161,6 +167,13 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
   const reasons = [...new Set(rows.flatMap((r) => [...r.aggs, ...r.gaps].flatMap((x) => (x.kind === "nd" ? [`${r.label} : ${x.reason}`] : []))))];
   const affHref = (key: Affichage) => q({ vue, rub, ...(key !== "tout" ? { affichage: key } : {}) });
   const chart = showGraph ? ecartChartData(versions, loaded.shorts, monthsOf) : null;
+  // Adresse de l'écran sans le filtre Service (action du bloc n.d.).
+  const unfilterHref = (() => {
+    const p = new URLSearchParams(keep);
+    p.delete("service");
+    for (const [k, v] of Object.entries(view)) p.set(k, v);
+    return `${base}?${p.toString()}`;
+  })();
 
   return (
     <MoneyText><>
@@ -186,6 +199,20 @@ export default async function EcartPage({ params, searchParams }: { params: Prom
           <p className="desc" data-testid="ecart-empty">Aucune version à comparer : lisez le journal de paie PayFit dans Données ou créez un scénario dans Hypothèses budgétaires.</p>
         )}
       </section>
+
+      {guard && loaded.filter && (
+        <section className="panel" data-testid="ecart-service-guard" id="tableau">
+          <div className="panel-head">
+            <PanelTitle title="Écart par rubrique" slug={slug} term={ECART_TERMS.ecart} label="Écart" />
+            <div className="panel-tools">
+              <ExportButtons href={`${base}/export`} params={exportQuery.toString()} label="Exporter le tableau" xlsxTestId="ecart-export-xlsx" csvTestId="ecart-export" />
+            </div>
+          </div>
+          <p className="nd" data-testid="ecart-guard">n.d. — service {serviceLabel(loaded.filter.value)} retenu par le filtre : {guard.reason}</p>
+          {guard.cause === "parametre" && <p className="nd" data-testid="ecart-guard-param"><a href={confidentialiteHref(slug)}>Définir le seuil de confidentialité (Paramètres)</a></p>}
+          <p className="tile-foot"><a href={unfilterHref}>Retirer le filtre Service</a></p>
+        </section>
+      )}
 
       {chart && (
         <section className="panel" data-testid="ecart-graph" id="graphique">

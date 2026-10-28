@@ -265,10 +265,13 @@ describe("module partagé : ré-exports et pureté à l'import", () => {
   it("aucune importation de valeur hors du dossier et de structure.ts : les chapitres et les exports peuvent l'importer sans base", () => {
     const dir = "src/lib/confidentialite";
     const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
-    expect(files.sort()).toEqual(["index.ts", "persons.ts", "setting.ts"]);
+    expect(files.sort()).toEqual(["groups.ts", "index.ts", "persons.ts", "setting.ts"]);
+    // groups.ts forme les groupes du journal de paie : il lit les moteurs purs de la paie (monthPayroll, grille de comptes) et la clé
+    // d'embauche du moteur de projection, tous sans base ; aucun autre module n'est admis.
+    const pure: Record<string, RegExp> = { "groups.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/payroll\/(engine|grid)$|@\/lib\/budget\/engine$)/ };
     for (const f of files) {
       const src = readFileSync(`${dir}/${f}`, "utf8");
-      for (const m of src.matchAll(/^(?:import|export) (?!type )[^;]*from "([^"]+)";/gm)) expect(m[1], `${f} : ${m[1]}`).toMatch(/^(\.\/|@\/lib\/croisee\/structure$)/);
+      for (const m of src.matchAll(/^(?:import|export) (?!type )[^;]*from "([^"]+)";/gm)) expect(m[1], `${f} : ${m[1]}`).toMatch(pure[f] ?? /^(\.\/|@\/lib\/croisee\/structure$)/);
     }
   });
 });

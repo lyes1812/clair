@@ -16,7 +16,7 @@ import type { Bridge } from "@/lib/budget/series";
 import { diff, nd, ROW_UNIT, val, type Agg, type Cell, type MonthFacts, type RowKey, type Version } from "@/lib/budget/versions";
 import { GLOSSARY, glossaryEntry } from "@/lib/glossary";
 import { ECART_TERMS, GLOSSARY_ECART, STEP_TERMS } from "@/lib/glossary/ecart";
-import { cascadeView, CHART_LABELS, COST_ROWS, ecartChartData, etpWaterfall, etpWaterfallOf, eurosSigned, gapTone, isCostRow, masseWaterfall, neg, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, waterfallAxisBadge, type MasseRubric } from "@/lib/viz/ecart";
+import { cascadeView, CHART_LABELS, COST_ROWS, ecartChartData, etpWaterfall, etpWaterfallOf, eurosSigned, gapTone, guardNd, isCostRow, masseWaterfall, neg, periodText, pontWaterfall, rubricGroups, RUBRIC_KEYS, waterfallAxisBadge, type MasseRubric } from "@/lib/viz/ecart";
 
 // Adaptateurs de l'écart budgétaire vers les graphiques : valeurs, raisons n.d., unités, styles de courbe, cascades.
 // Cas écrits à la main (mêmes chiffres que le cas de référence de l'écran : base 66 420,00 €, variante 69 970,00 €).
@@ -129,15 +129,29 @@ describe("cascades", () => {
     expect(etpWaterfall({ kind: "nd", reason: "Réel 2025, 2025-03 : composition absente" })).toEqual({ kind: "nd", reason: "Réel 2025, 2025-03 : composition absente" });
   });
   it("ETP après seuil de confidentialité : tracée seulement quand aucun palier n'est n.d. ; un palier masqué ou un seuil non défini donne la raison, jamais une barre reconstituée", () => {
-    const c: Cascade = { kind: "value", months: 3, start: 61000, end: 64300, residual: 0, steps: [step("entrees-new", 3300), step("entrees-report", 0), step("sorties", -1200), step("sorties-deport", 800), step("etp-change", 400)] };
-    // Seuil 1 : aucun palier dénombré n'est masqué ; paliers sans salarié (people vides) : aucune personne à protéger.
-    const shown = cascadeView(c, { kind: "set", value: 1 }, new Map(), null);
+    // Chaque palier non nul porte son contrat (comme toute cascade calculée : un palier non nul sans contrat serait non vérifiable, règle
+    // du moteur) ; le palier nul ne décrit personne. Lien contrat → personne : quatre personnes distinctes.
+    const stepOf = (id: StepId, etp4: number, keys: string[]) => ({ id, label: String(id), etp4, people: keys.map((key) => ({ key, etp4 })) });
+    const link = new Map([["C1", "a"], ["C2", "b"], ["C3", "c"], ["C4", "d"]]);
+    const c: Cascade = { kind: "value", months: 3, start: 61000, end: 64300, residual: 0, steps: [stepOf("entrees-new", 3300, ["C1"]), stepOf("entrees-report", 0, []), stepOf("sorties", -1200, ["C2"]), stepOf("sorties-deport", 800, ["C3"]), stepOf("etp-change", 400, ["C4"])] };
+    // Seuil 1 : aucun palier d'une personne n'est masqué (1 ≥ 1) ; le palier vide ne décrit personne.
+    const shown = cascadeView(c, { kind: "set", value: 1 }, link, null);
     expect(etpWaterfallOf(shown)).toEqual(etpWaterfall(c));
+    // Seuil 2 : chaque palier d'une personne est masqué ; la raison, jamais une barre.
+    expect(etpWaterfallOf(cascadeView(c, { kind: "set", value: 2 }, link, null))).toEqual({ kind: "nd", reason: "non affiché (seuil de confidentialité : 2 personnes)" });
     const absent = cascadeView(c, { kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" }, new Map(), null);
     expect(etpWaterfallOf(absent)).toEqual({ kind: "nd", reason: "seuil de confidentialité non défini (Paramètres)" });
     if (absent.kind !== "value") throw new Error("attendu : valeur");
     expect([absent.start, absent.end, absent.param]).toEqual([61000, 64300, true]); // totaux conservés, lien vers les Paramètres
     expect(etpWaterfallOf(cascadeView(c, { kind: "set", value: 1 }, new Map(), { reason: "non affiché (seuil de confidentialité : 2 personnes)", param: false }))).toEqual({ kind: "nd", reason: "non affiché (seuil de confidentialité : 2 personnes)" });
+  });
+  it("garde du filtre Service : la garde unique (ServiceGuard) devient le n.d. de l'écran (guardNd) et l'emporte sur la raison propre de la cascade", () => {
+    expect(guardNd(null)).toBeNull();
+    expect(guardNd({ cause: "seuil", reason: "non affiché (seuil de confidentialité : 2 personnes)" })).toEqual({ reason: "non affiché (seuil de confidentialité : 2 personnes)", param: false });
+    expect(guardNd({ cause: "parametre", reason: "seuil de confidentialité non défini (Paramètres)" })).toEqual({ reason: "seuil de confidentialité non défini (Paramètres)", param: true });
+    const own: Cascade = { kind: "nd", reason: "périodes de longueur différente ou vides" };
+    expect(cascadeView(own, { kind: "set", value: 1 }, new Map(), guardNd({ cause: "seuil", reason: "non affiché (seuil de confidentialité : 2 personnes)" }))).toEqual({ kind: "nd", reason: "non affiché (seuil de confidentialité : 2 personnes)", param: false });
+    expect(cascadeView(own, { kind: "set", value: 1 }, new Map(), null)).toEqual({ kind: "nd", reason: "périodes de longueur différente ou vides", param: false });
   });
 
   const rub = (key: string, label: string, delta: number | null, reason: string | null = null) => ({ key, label, delta, reason });

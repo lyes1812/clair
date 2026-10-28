@@ -69,12 +69,12 @@ const SERVICES: ServicesInput = {
     axis: "Service",
     axisMissing: false,
     rows: [
-      { value: "A", cur: win(2_000_000), prev: win(1_800_000), evo: evo(200_000, 1_800_000), href: "/x?service=A", groups: { cur: { persons: ["p1", "p2"], unlinked: 0, nonZero: true }, prev: { persons: ["p1", "p2"], unlinked: 0, nonZero: true } } },
-      { value: "B", cur: win(1_400_000), prev: win(1_300_000), evo: evo(100_000, 1_300_000), href: "/x?service=B", groups: { cur: { persons: ["p3"], unlinked: 0, nonZero: true }, prev: { persons: ["p3"], unlinked: 0, nonZero: true } } },
+      { value: "A", cur: win(2_000_000), prev: win(1_800_000), evo: evo(200_000, 1_800_000), href: "/x?service=A" },
+      { value: "B", cur: win(1_400_000), prev: win(1_300_000), evo: evo(100_000, 1_300_000), href: "/x?service=B" },
     ],
     total: { cur: win(3_400_000), prev: win(3_100_000), evo: evo(300_000, 3_100_000) },
     selected: null,
-    // Seuil 1 (cas de base) : aucun groupe dénombré n'est masqué ; le masquage des lignes par service est testé au chapitre 05.
+    // Lignes déjà passées par le seuil (serviceRowsIn, seuil 1 : rien n'est masqué) ; le masquage des lignes par service est testé au chapitre 05.
     confidentialite: { kind: "set", value: 1 },
     links: { confidentialite: "/e/demo/parametres#confidentialite" },
   },

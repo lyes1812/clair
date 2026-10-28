@@ -2,13 +2,13 @@ import { MoneyText } from "@/components/Money";
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
 import type { ChartSeries } from "@/components/charts/shared";
 import { GlossaryLink } from "@/components/GlossaryLink";
-import { confidentialiteHref, confidentialiteSettingReason, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
+import { confidentialiteHref, type ConfidentialiteSetting, type PersonLink } from "@/lib/confidentialite";
 import { formatMonth } from "@/lib/dates";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { servicesOf, shiftYear, windowPayroll, withService, type JournalInput } from "@/lib/payroll/engine";
 import { RUBRICS, type RubricId } from "@/lib/payroll/grid";
-import { comptaGap, labelTotals, maskLabels, maskProvisionServices, operatingRevenue, provisionMonth, provisionServiceKey, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
-import type { ServiceGuard } from "@/lib/payroll/service-rows";
+import { comptaGap, labelTotals, maskLabels, maskProvisionServices, operatingRevenue, provisionGuard, provisionMonth, provisionServiceKey, reconcile, type ComptaLine, type ProvisionMonth } from "@/lib/payroll/lot2";
+import { serviceLabel, type ServiceGuard } from "@/lib/payroll/service-rows";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import { brutParts, capital, euros, eurosSigned, familyColor, fixeVariableMonths, fixeVariableSeries, hasNd, monthsAxis, noPeriod, numTrend, pluriel, provisionParts, provisionTotals, reasonText, reconMonthSeries, reconRubricChart, trendOf, type PrimesMonth } from "@/lib/viz/masse";
 import { ChartGuard, ConfidentialiteLine, GraphFoot, NdKey, NdLines, NdState, PanelHead, ScrollTable, Tile, type Affichage } from "./components";
@@ -24,11 +24,13 @@ const ndReasons = (reasons: (string | null | undefined)[]) => {
   return list.length ? <NdLines lines={list} testid="nd-reasons" /> : null;
 };
 
-// Service retenu par le filtre et n.d. (seuil de confidentialité) : un seul état vide, avec l'action pour y remédier (retirer le filtre ;
-// définir le seuil dans les Paramètres quand il manque).
-function ServiceNd({ testid, slug, guard, unfilterHref }: { testid: string; slug?: string; guard: ServiceGuard; unfilterHref?: string }) {
+// Service retenu par le filtre et n.d. (seuil de confidentialité) : un seul état vide, dont le titre nomme le service retenu (la raison
+// reste celle du moteur, la même que pour toute cellule masquée), avec l'action pour y remédier (retirer le filtre ; définir le seuil
+// dans les Paramètres quand il manque). service : code du service retenu (null : non ventilé) ; undefined : non précisé.
+function ServiceNd({ testid, slug, guard, unfilterHref, service }: { testid: string; slug?: string; guard: ServiceGuard; unfilterHref?: string; service?: string | null }) {
+  const title = service === undefined ? "n.d. — service retenu par le filtre" : `n.d. — service ${serviceLabel(service)} retenu par le filtre`;
   return (
-    <NdState testid={testid} reason={capital(guard.reason)} action={unfilterHref ? { href: unfilterHref, label: "Retirer le filtre Service" } : undefined}>
+    <NdState testid={testid} title={title} reason={capital(guard.reason)} action={unfilterHref ? { href: unfilterHref, label: "Retirer le filtre Service" } : undefined}>
       {guard.cause === "parametre" && slug && <p className="ms-nd-reason"><a href={confidentialiteHref(slug)}>Définir le seuil de confidentialité dans Paramètres</a></p>}
     </NdState>
   );
@@ -42,7 +44,7 @@ const ndCell = (reason: string) => <abbr className="nd" title={reason}>n.d.</abb
 // Seuil de confidentialité : chaque libellé et chaque famille de prime (par mois et sur la période) décrit les personnes reliées
 // aux contrats de ses lignes (maskLabels) ; sous le filtre Service, un service masqué (guard) rend tout l'onglet n.d.
 export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout", tableHref = "", link = NO_LINK, confidentialite = ABSENT, guard = null, unfilterHref }: { slug?: string; input: JournalInput; months: string[]; prevMonths: string[]; aff?: Affichage; tableHref?: string; link?: PersonLink; confidentialite?: ConfidentialiteSetting; guard?: ServiceGuard | null; unfilterHref?: string }) {
-  if (guard) return <MoneyText><ServiceNd testid="fv-nd" slug={slug} guard={guard} unfilterHref={unfilterHref} /></MoneyText>;
+  if (guard) return <MoneyText><ServiceNd testid="fv-nd" slug={slug} guard={guard} unfilterHref={unfilterHref} service={input.serviceFilter?.value} /></MoneyText>;
   const cur = windowPayroll(input, months);
   const prev = windowPayroll(input, prevMonths);
   const showGraph = aff !== "tableau";
@@ -322,8 +324,10 @@ export function FixeVariableView({ slug, input, months, prevMonths, aff = "tout"
 
 // --- Onglet « Paie & comptabilité » : provision de congés payés et rapprochement avec la comptabilité.
 // Seuil de confidentialité : la provision par service (journal entier) et, sous le filtre Service, la provision du service retenu,
-// comptées chaque fin de mois en personnes reliées aux contrats qui portent une ligne de dotation (maskProvisionServices) ; un
-// service masqué un mois de la période ou de N-1 rend toute la provision du service n.d. sous le filtre.
+// comptées chaque fin de mois en personnes reliées aux contrats qui portent une ligne de dotation (maskProvisionServices, règle de
+// valeur « total, à défaut la part connue »). Sous le filtre, la provision du service est n.d. dès que le service est masqué dans le
+// tableau Services de l'écran (guard : la garde unique de la Masse salariale) ou qu'une de ses fins de mois (période ou N-1) est
+// masquée dans la provision par service (provisionGuard).
 export function PaieComptaView(props: {
   slug: string;
   input: JournalInput;
@@ -337,8 +341,9 @@ export function PaieComptaView(props: {
   unfilterHref?: string; // adresse de l'écran sans le filtre Service
   link?: PersonLink;
   confidentialite?: ConfidentialiteSetting;
+  guard?: ServiceGuard | null; // service retenu masqué dans le tableau Services de l'écran, ou seuil non défini (page)
 }) {
-  const { slug, input, fullInput, months, serviceFiltered, serviceValue, compta, aff = "tout", tableHref = "", unfilterHref, link = NO_LINK, confidentialite = ABSENT } = props;
+  const { slug, input, fullInput, months, serviceFiltered, serviceValue, compta, aff = "tout", tableHref = "", unfilterHref, link = NO_LINK, confidentialite = ABSENT, guard = null } = props;
   const showGraph = aff !== "tableau";
   const showTable = aff !== "graphique";
   const last = months.at(-1)!;
@@ -370,13 +375,7 @@ export function PaieComptaView(props: {
   const svcInputs = fullInput.serviceAxis ? servicesOf(fullInput, allMonths).map((s) => ({ value: s, input: withService(fullInput, s) })) : [];
   const provMask = maskProvisionServices({ inputs: svcInputs, months: allMonths, link, conf: confidentialite });
   const provNd = (s: string | null, m: string): string | null => provMask[provisionServiceKey(s)]?.[m] ?? null;
-  const provGuard: ServiceGuard | null = (() => {
-    if (!serviceFiltered) return null;
-    const settingNd = confidentialiteSettingReason(confidentialite);
-    if (settingNd) return { cause: "parametre", reason: settingNd };
-    const hit = serviceValue === undefined ? null : (allMonths.map((m) => provNd(serviceValue, m)).find((r) => r !== null) ?? null);
-    return hit ? { cause: "seuil", reason: `${hit} — service retenu par le filtre` } : null;
-  })();
+  const provGuard: ServiceGuard | null = !serviceFiltered ? null : (guard ?? provisionGuard(provMask, serviceValue ?? null, allMonths, confidentialite));
   const recon = serviceFiltered ? null : compta.source ? reconcile(fullInput, compta.lines, compta.months, months, compta.nd) : null;
   const masse = windowPayroll(fullInput, months);
   const gap = compta.source ? comptaGap(compta.months, compta.nd, months) : null;
@@ -418,7 +417,7 @@ export function PaieComptaView(props: {
     <MoneyText><>
       <section className="panel" data-testid="pc-provision">
         <PanelHead title="Que doit l'entreprise en congés payés ?" slug={slug} term={MASSE_TERMS.provision} />
-        {provGuard && <ServiceNd testid="pc-provision-nd" slug={slug} guard={provGuard} unfilterHref={unfilterHref} />}
+        {provGuard && <ServiceNd testid="pc-provision-nd" slug={slug} guard={provGuard} unfilterHref={unfilterHref} service={serviceValue} />}
         {!provGuard && (() => {
           const tile = (
             <dl className="facts ms-tiles single">

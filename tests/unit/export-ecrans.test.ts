@@ -22,6 +22,7 @@ import type { BaseContract, BaseSnapshot, Hypothesis } from "@/lib/budget/types"
 import { formatMonth } from "@/lib/dates";
 import { XLSX_MIME } from "@/lib/export/response";
 import { buildWorkbook, EMPTY_CELL_NOTE, type ExportCell } from "@/lib/export/xlsx";
+import type { ConfidentialiteSetting } from "@/lib/confidentialite";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import type { HeadcountResult } from "@/lib/rh/headcount";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
@@ -85,6 +86,7 @@ const rowValues = (ws: ExcelJS.Worksheet, r: number, n: number) => Array.from({ 
 const ROUTES = {
   kpi: () => import("@/app/e/[slug]/studio-rh/kpi/export/route"),
   "masse-salariale": () => import("@/app/e/[slug]/studio-rh/masse-salariale/export/route"),
+  "masse-salariale/ecart": () => import("@/app/e/[slug]/studio-rh/masse-salariale/ecart/export/route"),
   hypotheses: () => import("@/app/e/[slug]/studio-rh/hypotheses/export/route"),
 };
 const call = async (path: keyof typeof ROUTES, query: string) => {
@@ -103,9 +105,12 @@ const kpiCtx = {
   input: { ...kpiInput(dsn, DSN_ABSENCES), openMonths: [] },
   readTypes: [],
 } as unknown as KpiContext;
+// Seuil de confidentialité de 1 personne pour les lectures pures du Suivi : aucun groupe dénombré masqué, aucune garde (masquage et
+// garde vérifiés dans kpi-confidentialite.test.ts et kpi-categories.test.ts).
+const SEUIL_1: ConfidentialiteSetting = { kind: "set", value: 1, updatedAt: null, updatedBy: null };
 
 describe("KPI RH › Suivi : la feuille « Mois par mois » reprend les lignes et les n.d. de l'écran", () => {
-  const s = kpiSuiviOf(kpiCtx, {});
+  const s = kpiSuiviOf(kpiCtx, {}, SEUIL_1);
   if (s.kind !== "ready") throw new Error("contexte fictif incomplet");
   const sheet = suiviSheet({ dash: s.dash, data: s.data, rawLimit: null, vue: "suivi" });
   const cols = suiviColumns("suivi");
@@ -211,11 +216,13 @@ describe("KPI RH › Suivi : la feuille « Mois par mois » reprend les lignes e
     expect(suiviSheet({ dash: s.dash, data: s.data, rawLimit: null, vue: "turnover" }).columns.map((c) => c.header)).toEqual(["Mois", "Couverture", "Effectif fin de mois (personnes)", "Entrées", "Sorties", "Observations"]);
   });
 
-  it("par catégorie : mois n.d. → n.d. dans chaque colonne ; catégorie absente du mois → cellule vide (sans objet), jamais 0", () => {
+  it("par catégorie : mois n.d. → n.d. dans chaque colonne ; catégorie absente du mois → cellule vide (sans objet), jamais 0 ; cellule masquée → n.d. avec sa raison, total conservé", () => {
+    // Les mois reçus sont ceux de l'écran (loadCategoryMonths) : cellules déjà masquées par le seuil, total calculé avant masquage.
     const sh = categoriesSheet(
       [
-        { kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdi: { headcount: 3, etp4: 25_000 }, cdd: { headcount: 1, etp4: null } }, qualifiers: [] },
+        { kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdi: { kind: "value", headcount: 3, etp4: 25_000 }, cdd: { kind: "value", headcount: 1, etp4: null } }, total: { headcount: 4, etp4: null } },
         { kind: "nd", month: "2026-02", reason: "raison fictive" },
+        { kind: "value", month: "2026-03", lowerBound: false, byCategory: { cdi: { kind: "nd", reason: "non affiché (seuil de confidentialité : 2 personnes)" }, cdd: { kind: "nd", reason: "non affiché (seuil de confidentialité : 2 personnes)" } }, total: { headcount: 4, etp4: 35_000 } },
       ],
       ["cdi", "cdd", "stagiaire"],
       { cdi: "CDI", cdd: "CDD", stagiaire: "Stagiaire" },
@@ -226,12 +233,14 @@ describe("KPI RH › Suivi : la feuille « Mois par mois » reprend les lignes e
     const total = "ETP fin de mois n.d. pour au moins un contrat du mois (raison : détail de l'ETP fin de mois)";
     expect(sh.rows[0]).toEqual(["2026-01", 3, 25_000, 1, { nd: cat }, "", "", 4, { nd: total }, ""]);
     expect(sh.rows[1].slice(1, -1).every((c) => isNd(c))).toBe(true);
+    const masked = { nd: "non affiché (seuil de confidentialité : 2 personnes)" };
+    expect(sh.rows[2]).toEqual(["2026-03", masked, masked, masked, masked, "", "", 4, 35_000, ""]);
     expect(sh.note).toBe("Fin de mois ; catégorie sans contrat ce mois-là : cellule vide.");
   });
 
   it("par catégorie avec un filtre Établissement ou Nature : la note reprend la mention du périmètre de l'écran (les filtres s'appliquent)", () => {
     const scope = "Filtres appliqués : nature CDD (02). Mêmes contrats que les indicateurs ; hors de ce périmètre, sans colonne : CDI.";
-    const sh = categoriesSheet([{ kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdd: { headcount: 1, etp4: 5_000 } }, qualifiers: [] }], ["cdd"], { cdd: "CDD" }, { scope });
+    const sh = categoriesSheet([{ kind: "value", month: "2026-01", lowerBound: false, byCategory: { cdd: { kind: "value", headcount: 1, etp4: 5_000 } }, total: { headcount: 1, etp4: 5_000 } }], ["cdd"], { cdd: "CDD" }, { scope });
     expect(sh.note).toBe(`Fin de mois ; catégorie sans contrat ce mois-là : cellule vide. ${scope}`);
     expect(sh.note).not.toContain("ne s'appliquent pas"); // la note contraire du lot 11 a disparu
     expect(sh.rows).toEqual([["2026-01", 1, 5_000, 1, 5_000, ""]]);
@@ -273,8 +282,8 @@ describe("route d'export de KPI RH (Excel)", () => {
     expect(filtres.getCell("A6").value).toBe("Période");
     expect(String(filtres.getCell("B6").value)).toContain("12 mois glissants");
     expect(wb.getWorksheet("Sources")!.getCell("A5").value).toBe("Fichiers DSN");
-    // Toutes les définitions citées existent au glossaire (aucune ignorée).
-    expect(wb.getWorksheet("Définitions")!.rowCount).toBe(4 + 10);
+    // Toutes les définitions citées existent au glossaire (aucune ignorée) ; l'entrée « Seuil de confidentialité » est jointe (lot 12).
+    expect(wb.getWorksheet("Définitions")!.rowCount).toBe(4 + 11);
   });
 
   it("paramètres de l'adresse repris (vue, mode) ; format inconnu refusé ; entrée sans tableau : 404", async () => {
@@ -328,7 +337,7 @@ describe("route d'export de KPI RH (Excel)", () => {
     expect(monthly.getCell("D5").value).toBe("ETP fin de mois");
     for (let r = 6; r <= 17; r++) expect(cdd.getCell(r, 5).value, String(r)).toBe(monthly.getCell(r, 4).value);
     // Tuile « ETP contractuel fin de mois » filtrée (même entrée que la page) : 0,50 ETP = 5 000 dix-millièmes.
-    const page = kpiSuiviOf(mocks.kpiCtx.value as KpiContext, { fin: "2025-12", nature: "02" });
+    const page = kpiSuiviOf(mocks.kpiCtx.value as KpiContext, { fin: "2025-12", nature: "02" }, SEUIL_1);
     expect(page.kind === "ready" && page.dash.tiles.etpEnd.current).toMatchObject({ kind: "exact", etp4: 5000 });
     const cdi = (await wbOf("nature=01&")).getWorksheet("Par catégorie")!;
     expect(rowValues(cdi, 17, 5)).toEqual(["2025-12", 6, 5.1, 6, 5.1]);
@@ -342,7 +351,7 @@ describe("route d'export de KPI RH (Excel)", () => {
   it("paramètre répété dans l'adresse : la première valeur est retenue, comme la page", async () => {
     const wb = await load(await call("kpi", "mode=civil&annee=2024&annee=2025&format=xlsx"));
     expect(wb.getWorksheet("Mois par mois")!.getCell("A6").value).toBe("2024-01");
-    const page = kpiSuiviOf(kpiCtx, { mode: "civil", annee: ["2024", "2025"] });
+    const page = kpiSuiviOf(kpiCtx, { mode: "civil", annee: ["2024", "2025"] }, SEUIL_1);
     expect(page.kind === "ready" && page.w.months[0]).toBe("2024-01");
   });
 
@@ -369,6 +378,8 @@ lines.push(line("2025-01", "641100", 250000, "C1", "A"), line("2025-01", "645100
 const journal: JournalInput = { lines, months: ["2025-01", "2025-02", "2026-01", "2026-02"], openMonths: [], grid: DEFAULT_PREFIXES, serviceAxis: "Service" };
 const payCtx = {
   // Référentiel fictif : C1 et C2 sont les contrats de deux personnes distinctes (le seuil de confidentialité compte des personnes).
+  // Ce double de KpiInput est partiel (data.contracts seulement) : il ne sert qu'au lien contrat → personne de la Masse salariale et de
+  // l'Écart budgétaire sous un filtre de service ; les tests des Hypothèses ont leur propre contexte (hypCtx, référentiel absent).
   kpi: { collab: { workspace: { id: "w1" } }, input: { data: { build: { source: "payfit" }, contracts: [{ contractKey: "payfit:C1", externalId: "C1", personKey: "P1" }, { contractKey: "payfit:C2", externalId: "C2", personKey: "P2" }] } } },
   source: "payfit",
   grid: { grid: DEFAULT_PREFIXES, origin: "default", updatedAt: null },
@@ -464,9 +475,9 @@ describe("Masse salariale › Synthèse : export Excel", () => {
     const f = await load(await call("masse-salariale", "annee=2026&de=01&a=02&service=A&format=xlsx"));
     const ws = f.getWorksheet("Mois par mois")!;
     expect(ws.getCell("B6").value).toBe("n.d.");
-    expect(noteOf(ws.getCell("B6"))).toBe(`${reason} — service retenu par le filtre`);
+    expect(noteOf(ws.getCell("B6"))).toBe(reason); // raison nue du moteur, la même qu'à l'écran et dans toute cellule masquée
     expect([ws.getCell("H6").value, ws.getCell("J6").value, ws.getCell("B8").value]).toEqual(["n.d.", "n.d.", "n.d."]);
-    expect(filterOf(f, "Service retenu")).toBe(`n.d. — ${reason} — service retenu par le filtre`);
+    expect(filterOf(f, "Service retenu")).toBe(`n.d. — ${reason}`); // la mention du service retenu est le libellé de la ligne
     // Seuil non défini : lignes par service n.d. avec la raison du paramètre, total conservé.
     mocks.conf.value = { kind: "absent" };
     const nd = await load(await call("masse-salariale", "annee=2026&de=01&a=02&format=xlsx"));
@@ -480,6 +491,79 @@ describe("Masse salariale › Synthèse : export Excel", () => {
     expect((await call("masse-salariale", "format=xlsx")).status).toBe(422);
     mocks.payCtx.value = payCtx;
     expect((await call("masse-salariale", "vue=fixe-variable&format=xlsx")).status).toBe(404);
+  });
+});
+
+// --- Écart budgétaire : garde du filtre Service (même garde que la Synthèse de la Masse salariale et l'Analyse des écarts) ------
+// Journal fictif ci-dessus : service A = C1 (une personne), service B = C2 (une personne) ; réel 2025 et réel 2026, janvier.
+describe("Écart budgétaire : exports et écran sous le filtre Service (seuil de confidentialité)", () => {
+  const query = (extra = "") => `v1=reel:2025&v2=reel:2026&de=01&a=01&service=A${extra}`;
+  const filterOf = (w: ExcelJS.Workbook, label: string) => {
+    const ws = w.getWorksheet("Filtres")!;
+    for (let r = 1; r <= 20; r++) if (ws.getCell(r, 1).value === label) return String(ws.getCell(r, 2).value);
+    return null;
+  };
+  beforeEach(() => {
+    mocks.payCtx.value = payCtx;
+    mocks.role.value = "reader";
+    mocks.budgets.value = [];
+    mocks.conf.value = { kind: "set", value: 1, updatedAt: null, updatedBy: null };
+  });
+
+  it("seuil 1 : service A affiché ; CSV et classeur portent la masse du service (janvier 2025 : 3 750,00 € ; janvier 2026 : 5 000,00 €)", async () => {
+    // A, janvier 2026 : 3 000 + 500 + 1 500 = 5 000,00 € ; janvier 2025 : 2 500 + 1 250 = 3 750,00 € ; écart +1 250,00 €.
+    const csv = await call("masse-salariale/ecart", query());
+    expect(csv.status).toBe(200);
+    expect(await csv.text()).toContain('"Masse salariale chargée";"3750,00";"5000,00";"1250,00";"33,33"');
+    const wb = await load(await call("masse-salariale/ecart", query("&format=xlsx")));
+    const ws = wb.getWorksheet("Écart budgétaire")!;
+    const masse = Array.from({ length: 15 }, (_, i) => i + 6).find((r) => ws.getCell(r, 1).value === "Masse salariale chargée")!;
+    expect([ws.getCell(masse, 3).value, ws.getCell(masse, 4).value, ws.getCell(masse, 5).value]).toEqual([3750, 5000, 1250]);
+    expect(filterOf(wb, "Service retenu")).toBeNull();
+  });
+
+  it("seuil 2 : A (une personne) masqué ⇒ chaque cellule du CSV et du classeur est n.d. avec la raison du seuil ; onglet Filtres « Service retenu » ; sans filtre, rien n'est masqué", async () => {
+    mocks.conf.value = { kind: "set", value: 2, updatedAt: null, updatedBy: null };
+    const reason = "non affiché (seuil de confidentialité : 2 personnes)";
+    const body = await (await call("masse-salariale/ecart", query("&vue=detail"))).text();
+    expect(body).toContain(`"Masse salariale chargée";"n.d. (${reason})";"n.d. (${reason})";"n.d. (${reason})";""`);
+    expect(body).not.toMatch(/"\d+,\d\d"/); // aucun montant ni écart
+    const wb = await load(await call("masse-salariale/ecart", query("&format=xlsx")));
+    const ws = wb.getWorksheet("Écart budgétaire")!;
+    for (let r = 6; r <= 12; r++) {
+      for (const c of [3, 4, 5, 6]) {
+        expect(ws.getCell(r, c).value, `ligne ${r}, colonne ${c}`).toBe("n.d.");
+        expect(noteOf(ws.getCell(r, c)), `ligne ${r}, colonne ${c}`).toBe(reason);
+      }
+    }
+    expect(filterOf(wb, "Service retenu")).toBe(`n.d. — ${reason}`);
+    expect(filterOf(wb, "Périmètre")).toBe("service A");
+    // Écran : tableau et graphique remplacés par le bloc n.d. qui nomme le service, lien « Retirer le filtre Service » ; exports toujours proposés.
+    const { default: Page } = await import("@/app/e/[slug]/studio-rh/masse-salariale/ecart/page");
+    const html = renderToStaticMarkup(await Page({ params: Promise.resolve({ slug: "demo" }), searchParams: Promise.resolve({ v1: "reel:2025", v2: "reel:2026", de: "01", a: "01", service: "A" }) }));
+    expect(html).toContain('data-testid="ecart-service-guard"');
+    expect(html).toContain(`n.d. — service A retenu par le filtre : ${reason}`);
+    expect(html).not.toContain('data-testid="ecart-table"');
+    expect(html).not.toContain('data-testid="ecart-graph"');
+    expect(html).not.toContain('data-testid="ecart-guard-param"');
+    expect(html).toContain("Retirer le filtre Service");
+    expect(html).toContain('data-testid="ecart-export"');
+    expect(html).not.toContain("data-money-cents");
+    for (const bad of ["NaN", "undefined", "[object"]) expect(html).not.toContain(bad);
+    // Service B (une personne aussi) : masqué ; les deux services forment ensemble 2 personnes ≥ 2.
+    expect(await (await call("masse-salariale/ecart", "v1=reel:2025&v2=reel:2026&de=01&a=01&service=B")).text()).toContain(`n.d. (${reason})`);
+  });
+
+  it("seuil absent : n.d. « non défini (Paramètres) » dans les fichiers, lien vers Paramètres › Confidentialité à l'écran", async () => {
+    mocks.conf.value = { kind: "absent" };
+    const reason = "seuil de confidentialité non défini (Paramètres)";
+    expect(await (await call("masse-salariale/ecart", query())).text()).toContain(`"n.d. (${reason})"`);
+    const wb = await load(await call("masse-salariale/ecart", query("&format=xlsx")));
+    expect(noteOf(wb.getWorksheet("Écart budgétaire")!.getCell(6, 3))).toBe(reason);
+    const { default: Page } = await import("@/app/e/[slug]/studio-rh/masse-salariale/ecart/page");
+    const html = renderToStaticMarkup(await Page({ params: Promise.resolve({ slug: "demo" }), searchParams: Promise.resolve({ v1: "reel:2025", v2: "reel:2026", de: "01", a: "01", service: "A" }) }));
+    expect(html).toContain('data-testid="ecart-guard-param"');
+    expect(html).toContain('href="/e/demo/parametres#confidentialite"');
   });
 });
 
@@ -507,6 +591,8 @@ const gridHyps: Hypothesis[] = [
   { id: "h4", kind: "constante", label: "Plafond fictif", unit: "eur", values: { "2026-10": 150000 }, source: "Source fictive" },
 ];
 const months = ["2026-10", "2026-11", "2026-12"];
+// Contexte de paie des Hypothèses : référentiel Collaborateurs absent (kpi.input null), jamais un KpiInput partiel.
+const hypCtx = { ...payCtx, kpi: { collab: { workspace: { id: "w1" } }, input: null } };
 
 describe("Hypothèses budgétaires : feuilles de la projection et des grilles", () => {
   it("Projection « Mois par mois » : mêmes lignes que l'écran (réel janvier à septembre, projeté octobre à décembre)", () => {
@@ -569,6 +655,7 @@ describe("Hypothèses budgétaires : CSV des grilles conservé, Excel ajouté av
 
 describe("route d'export des Hypothèses budgétaires", () => {
   beforeEach(() => {
+    mocks.payCtx.value = hypCtx;
     mocks.role.value = "editor";
     mocks.getScenario.mockReset().mockResolvedValue({ scenario: sc, base, baseHash: "h", hypotheses: gridHyps });
     mocks.budgets.value = [];
@@ -624,7 +711,6 @@ describe("route d'export des Hypothèses budgétaires", () => {
     const b27 = { id: "b2700000-0000-0000-0000-000000000000", name: "Budget fictif 2027", year: "2027", amounts: { "2027-01": 700000 } };
     mocks.getScenario.mockResolvedValue({ scenario: sc2, base, baseHash: "h", hypotheses: [] });
     mocks.budgets.value = [b26, b27];
-    mocks.payCtx.value = payCtx;
     const proj = project(base, sc2.firstMonth, sc2.lastMonth, [], sc2.conventions);
     const sp = { scenario: sc2.id, vue: "resultat", sous: "comparaison", annee: "2027", cmp: `budget:${b26.id}` };
     const c = await loadComparison("demo", "w1", sc2, base, proj, sp);

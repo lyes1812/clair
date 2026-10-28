@@ -53,17 +53,23 @@ export function croiseeSettingReason(key: CroiseeSettingKey, s: CroiseeSetting<u
 // Lignes du bloc « Sources et hypothèses de travail » (et de la feuille « Filtres » des exports) : chaque paramètre, sa valeur écrite
 // ou n.d. avec la raison (jamais de défaut).
 export const CROISEE_SETTING_LABELS: Record<CroiseeSettingKey, string> = {
-  confidentialite: "Seuil de confidentialité",
+  confidentialite: "Confidentialité",
   seuilsEffectif: "Seuils d'effectif suivis",
   margeAlerte: "Marge d'alerte des seuils d'effectif",
   horizonEcheances: "Horizon des échéances de contrat",
 };
 const count = new Intl.NumberFormat("fr-FR");
 const many = (n: number, one: string, more: string) => `${count.format(n)} ${n > 1 ? more : one}`;
+// Valeur du seuil, en clair : « seuil de 5 personnes distinctes ». La même ligne « Confidentialité » que l'onglet Filtres des exports
+// KPI RH et Masse salariale (seuilFilterText de src/lib/viz/kpi.ts : ce module ne peut l'importer, il n'importe que le module partagé ;
+// l'égalité des deux textes est vérifiée par un test). Les raisons d'un seuil absent ou illisible sont celles du module partagé.
+export const seuilValueText = (seuil: number): string => `seuil de ${many(seuil, "personne distincte", "personnes distinctes")}`;
+// Note d'un tableau ou limite de la lecture : « Confidentialité : seuil de 5 personnes distinctes. »
+export const seuilNote = (seuil: number): string => `Confidentialité : ${seuilValueText(seuil)}.`;
 export type CroiseeSettingLine = { key: CroiseeSettingKey; label: string; text: string | null; reason: string | null };
 export function croiseeSettingLines(settings: CroiseeSettings): CroiseeSettingLine[] {
   const text: { [K in CroiseeSettingKey]: (v: CroiseeSettingValues[K]) => string } = {
-    confidentialite: (v) => many(v, "personne", "personnes"),
+    confidentialite: seuilValueText,
     seuilsEffectif: (v) => v.map((x) => `« ${x.libelle} » : ${many(x.valeur, "salarié", "salariés")}`).join(" ; "),
     margeAlerte: (v) => many(v, "salarié", "salariés"),
     horizonEcheances: (v) => many(v, "jour", "jours"),

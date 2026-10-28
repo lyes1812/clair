@@ -30,7 +30,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/workspace", () => ({
   requireWorkspace: async (slug: string) => ({ session: {}, workspace: { id: "w1", name: "Espace fictif", slug, role: mocks.role.value } }),
 }));
-vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/ecart-data", () => ({ loadVersions: async () => mocks.loaded.value }));
+// Garde du filtre Service (lot 12) : sans filtre, la vraie fonction renvoie null ; le seuil de l'espace est un double (aucune base).
+vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/ecart-data", () => ({ loadVersions: async () => mocks.loaded.value, ecartServiceGuard: (loaded: { filter: unknown }) => (loaded.filter ? { cause: "seuil", reason: "garde non simulée" } : null) }));
+vi.mock("@/lib/confidentialite", () => ({ getConfidentialite: async () => ({ kind: "set", value: 1, updatedAt: null, updatedBy: null }) }));
 vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/people-index", () => ({ peopleIndex: () => mocks.people.value }));
 vi.mock("@/lib/budget/zoom", async (orig) => ({ ...(await orig<typeof import("@/lib/budget/zoom")>()), zoomOf: (...args: unknown[]) => mocks.zoomOf(...args) }));
 // Le vrai « sync » n'est jamais chargé (il tirerait la base, donc DATABASE_URL) : le fichier se lance sans variable d'environnement.
