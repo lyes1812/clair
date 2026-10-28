@@ -3,6 +3,7 @@ import { landing, project } from "@/lib/budget/engine";
 import { retraite, sensitivities, type ActualNonRecurringInput } from "@/lib/budget/lot3";
 import type { BaseSnapshot, Hypothesis, Projection } from "@/lib/budget/types";
 import type { ActualEvent } from "@/lib/payroll/non-recurring";
+import { estimateActualOverlap } from "@/lib/payroll/actual-overlap";
 
 const SYNC = "00000000-0000-4000-8000-000000000001";
 const OTHER_SYNC = "00000000-0000-4000-8000-000000000002";
@@ -25,6 +26,20 @@ const events = () => [event(), event(2, { kind: "tuilage", month: "2026-06", cha
 const projection = (snapshot: BaseSnapshot, hyps: Hypothesis[] = []) => project(snapshot, "2026-10", "2026-12", hyps, conv);
 
 describe("Atterrissage retraité — événements du réel rattachés à la base figée", () => {
+  it("retire une estimation une seule fois et conserve sa qualification sans toucher au brut", () => {
+    const calc = estimateActualOverlap({ month: "2026-06", syncId: SYNC,
+      incoming: { contractKey: "entrant-fictif", syncId: SYNC, startDate: "2026-06-11", endDate: null },
+      outgoing: { contractKey: "sortant-fictif", syncId: SYNC, startDate: "2020-01-01", endDate: "2026-06-20" },
+      payroll: { syncId: SYNC, month: "2026-06", contractKey: "entrant-fictif", chargedCents: 4_000, lineKeys: ["LIGNE_FICTIVE_PRIVEE"] } });
+    if (calc.kind !== "value") throw new Error("Fixture refusée");
+    const calculated = event(1, { month: "2026-06", kind: "tuilage", chargedCents: calc.amountCents, contractKeys: ["entrant-fictif", "sortant-fictif"], calculation: calc.calculation });
+    const snapshot = base(), proj = projection(snapshot), gross = landing(snapshot, proj, "2026");
+    const result = retraite(snapshot, proj, [], "2026", actual([calculated]));
+    expect(result).toMatchObject({ kind: "value", atterrissage: 120_000, realised: 2_000, total: 2_000, retraite: 118_000, qualification: expect.stringContaining("estimation calendaire"), rows: [{ label: "Tuilages réalisés — estimation calendaire", realised: 2_000, projected: 0 }] });
+    expect(landing(snapshot, proj, "2026")).toEqual(gross);
+    expect(JSON.stringify(result)).not.toMatch(/LIGNE_FICTIVE_PRIVEE|entrant-fictif|sortant-fictif/);
+    expect(retraite(snapshot, proj, [], "2026", actual([calculated, { ...calculated, id: id(2) }]))).toMatchObject({ kind: "nd", reason: expect.stringContaining("doublon") });
+  });
   it("retire la RC passée et les deux tuilages une fois, sans les ajouter au brut ni à la projection", () => {
     const snapshot = base(), proj = projection(snapshot), input = actual(events());
     const before = JSON.stringify([snapshot, proj, input]);

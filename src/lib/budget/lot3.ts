@@ -12,7 +12,7 @@ type Hire = Extract<Hypothesis, { kind: "embauche" }>;
 // par les hypothèses : coûts de sortie, éléments ponctuels marqués, tuilages = coût de l'entrant pendant le recouvrement).
 export type NonRecurringRow = { label: string; realised: number; projected: number };
 export type Retraite =
-  | { kind: "value"; year: string; atterrissage: number; rows: NonRecurringRow[]; realised: number; projected: number; total: number; retraite: number }
+  | { kind: "value"; year: string; atterrissage: number; rows: NonRecurringRow[]; realised: number; projected: number; total: number; retraite: number; qualification?: string }
   | { kind: "nd"; year: string; reason: string };
 export type ActualNonRecurringInput = { kind: "value"; events: ActualEvent[] } | { kind: "nd"; reason: string };
 const EMPTY_ACTUAL: ActualNonRecurringInput = { kind: "value", events: [] };
@@ -61,7 +61,7 @@ export function retraite(base: BaseSnapshot, proj: Projection, hyps: Hypothesis[
     rows.set(label, r);
   };
   for (const h of hyps) if (h.kind === "realise" && h.month.startsWith(year) && h.month <= base.refMonth) add(h.category, "realised", h.costCents);
-  for (const event of selected) add(ACTUAL_LABELS[event.kind], "realised", event.chargedCents!);
+  for (const event of selected) add(`${ACTUAL_LABELS[event.kind]}${event.calculation ? " — estimation calendaire" : ""}`, "realised", event.chargedCents!);
   for (const m of proj.months) {
     if (!m.month.startsWith(year) || m.kind !== "value") continue;
     for (const c of m.contributions) {
@@ -74,7 +74,8 @@ export function retraite(base: BaseSnapshot, proj: Projection, hyps: Hypothesis[
   const realised = list.reduce((sum, row) => sum + row.realised, 0n), projected = list.reduce((sum, row) => sum + row.projected, 0n);
   const total = realised + projected, adjusted = exactLanding - total;
   if ([realised, projected, total, adjusted, ...list.flatMap((row) => [row.realised, row.projected])].some((value) => safeCents(value) === null)) return unavailable("Total des éléments non récurrents ou atterrissage retraité hors des centimes entiers sûrs.");
-  return { kind: "value", year, atterrissage: land.total, rows: list.map((row) => ({ label: row.label, realised: Number(row.realised), projected: Number(row.projected) })), realised: Number(realised), projected: Number(projected), total: Number(total), retraite: Number(adjusted) };
+  return { kind: "value", year, atterrissage: land.total, rows: list.map((row) => ({ label: row.label, realised: Number(row.realised), projected: Number(row.projected) })), realised: Number(realised), projected: Number(projected), total: Number(total), retraite: Number(adjusted),
+    ...(selected.some((event) => event.calculation) ? { qualification: "Le retraité inclut une estimation calendaire de tuilage : coût de l’entrant attribué aux jours de chevauchement, primes et régularisations non ventilées par jour. L’atterrissage brut reste inchangé." } : {}) };
 }
 
 // --- Mesures de management : pour chaque départ, effet sur l'année du premier mois projeté, en comparant la projection

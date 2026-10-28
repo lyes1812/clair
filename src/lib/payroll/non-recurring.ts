@@ -2,11 +2,13 @@ import { z } from "zod";
 import { isMonth } from "@/lib/connectors/months";
 import { serviceOf, windowPayroll, type JournalInput } from "./engine";
 import { classify, gridRubrics } from "./grid";
+import { actualOverlapCalculationSchema, estimateActualOverlap, type ActualOverlapCalculation } from "./actual-overlap";
 
 export type ActualEvent = {
   id: string; syncId: string; month: string;
   kind: "licenciement" | "rupture-conventionnelle" | "tuilage" | "autre";
   chargedCents: number | null; contractKeys: string[]; note: string;
+  calculation?: ActualOverlapCalculation;
 };
 const actualEvent = z.object({
   id: z.string().uuid(), syncId: z.string().uuid(), month: z.string().refine(isMonth),
@@ -14,9 +16,18 @@ const actualEvent = z.object({
   chargedCents: z.number().int().safe().min(0).max(100_000_000_000_000).nullable(),
   contractKeys: z.array(z.string().min(1).max(300).refine((key) => key === key.trim() && key.trim().length > 0)).max(2),
   note: z.string().max(300),
+  calculation: actualOverlapCalculationSchema.optional(),
 }).strict().superRefine((event, ctx) => {
   if (event.kind === "tuilage" ? event.contractKeys.length !== 2 || new Set(event.contractKeys).size !== 2 : event.contractKeys.length > 1) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Un tuilage exige deux contrats distincts ; les autres événements acceptent zéro ou un contrat." });
+  }
+  if (event.calculation) {
+    const c = event.calculation;
+    const result = estimateActualOverlap({ month: event.month, syncId: event.syncId, incoming: c.incoming, outgoing: c.outgoing, payroll: c.source });
+    if (event.kind !== "tuilage" || event.contractKeys[0] !== c.incoming.contractKey || event.contractKeys[1] !== c.outgoing.contractKey
+      || result.kind !== "value" || result.amountCents !== event.chargedCents || result.method !== c.method
+      || result.days?.incomingPresence !== c.days.incomingPresence || result.days?.overlap !== c.days.overlap
+      || result.interval?.from !== c.interval?.from || result.interval?.to !== c.interval?.to) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Estimation calendaire incohérente avec ses contrats, sa paie source ou son montant." });
   }
 });
 

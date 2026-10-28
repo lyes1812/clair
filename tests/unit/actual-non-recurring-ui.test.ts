@@ -5,6 +5,7 @@ import { ActualNonRecurring } from "@/app/e/[slug]/studio-rh/masse-salariale/Act
 import type { JournalInput } from "@/lib/payroll/engine";
 import type { ActualEvent } from "@/lib/payroll/non-recurring";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
+import { estimateActualOverlap } from "@/lib/payroll/actual-overlap";
 
 type Props = Parameters<typeof ActualNonRecurring>[0];
 const SYNC = "11111111-1111-4111-8111-111111111111";
@@ -93,10 +94,10 @@ describe("éléments non récurrents du réel — interface et données fictives
     for (const kind of ["licenciement", "rupture-conventionnelle", "tuilage", "autre"]) expect(select(create, "kind")).toContain(`value="${kind}"`);
     for (const month of ["2026-01", "2026-02"]) expect(select(create, "month")).toContain(`value="${month}"`);
     for (const name of ["contract1", "contract2"]) expect(select(create, name)).toContain('value="" selected=""');
-    expect(create).toContain("Contrat concerné / binôme A");
-    expect(create).toContain("Second contrat du tuilage");
-    expect(create).not.toContain("Contrat concerné / sortant");
-    expect(create).not.toContain("Contrat entrant");
+    expect(create).toContain("Contrat concerné / entrant du tuilage");
+    expect(create).toContain("Sortant du tuilage");
+    expect(select(create, "valuation")).toContain('<option value="manual" selected="">');
+    expect(select(create, "valuation")).toContain('value="calendar"');
     expect(input(create, "chargedEuros")).toContain('value=""');
     expect(input(create, "chargedEuros")).not.toContain('required');
     expect(create).toContain("Coût chargé isolé (€)");
@@ -120,5 +121,26 @@ describe("éléments non récurrents du réel — interface et données fictives
     expect(select(tuilage, "contract1")).toContain('<option value="sortant" selected="">');
     expect(select(tuilage, "contract2")).toContain('<option value="contrat-absent-fictif" selected="">Contrat indisponible');
     expect(value).not.toContain("Supprimer l’identification");
+    expect(input(lic, "confirmReplace")).toContain('type="checkbox"');
+    expect(lic).toContain("remplace le montant fourni");
+  });
+
+  it("garde l’estimation calendaire visible aux lecteurs sans sa provenance individuelle, et les rôles explicites en édition", () => {
+    const result = estimateActualOverlap({ month: "2026-02", syncId: SYNC,
+      incoming: { contractKey: "entrant", syncId: SYNC, startDate: "2026-02-11", endDate: null },
+      outgoing: { contractKey: "sortant", syncId: SYNC, startDate: "2020-01-01", endDate: "2026-02-19" },
+      payroll: { syncId: SYNC, month: "2026-02", contractKey: "entrant", chargedCents: 140_000, lineKeys: ["SOURCE_LIGNE_FICTIVE_PRIVEE"] } });
+    if (result.kind !== "value") throw new Error("Fixture refusée");
+    const calculated: ActualEvent = { ...events()[1], contractKeys: ["entrant", "sortant"], chargedCents: result.amountCents, calculation: result.calculation };
+    const reader = html({ events: [calculated] });
+    expect(reader).toContain('data-testid="actual-overlap-qualification"'); expect(reader).toContain("ventilation journalière est calculée, pas observée");
+    expect(reader).not.toMatch(/SOURCE_LIGNE_FICTIVE_PRIVEE|NOM_ENTRANT_FICTIF|SOURCE_BINOME_PERSONNELLE_FICTIVE/);
+    const editor = html({ events: [calculated], editable: true, save });
+    expect(editor).toContain("9/18 jours"); expect(editor).toContain("2026-02-11 → 2026-02-19");
+    const edit = form(editor, `actual-non-recurring-${TUILAGE}`);
+    expect(select(edit, "valuation")).toContain('<option value="calendar" selected="">');
+    expect(select(edit, "contract1")).toContain('<option value="entrant" selected="">');
+    expect(select(edit, "contract2")).toContain('<option value="sortant" selected="">');
+    expect(edit).toContain("le serveur recalcule depuis la paie");
   });
 });

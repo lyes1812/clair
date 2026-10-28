@@ -3,6 +3,7 @@ import type { ActualEvent } from "@/lib/payroll/non-recurring";
 const mocks = vi.hoisted(() => ({ scope: vi.fn(), execute: vi.fn(), selected: [] as unknown[][], writes: [] as unknown[], order: [] as string[] }));
 vi.mock("@/db/workspace-scope", () => ({ withWorkspace: mocks.scope }));
 import { ACTUAL_NON_RECURRING_KEY, actualEventVersion, listActualEvents, saveActualEvent } from "@/lib/payroll/non-recurring-store";
+import { estimateActualOverlap } from "@/lib/payroll/actual-overlap";
 const event: ActualEvent = { id: "11111111-1111-4111-8111-111111111111", syncId: "22222222-2222-4222-8222-222222222222", month: "2026-06", kind: "tuilage", chargedCents: null, contractKeys: ["fictif-a", "fictif-b"], note: "SOURCE_PRIVEE_FICTIVE" };
 beforeEach(() => {
   vi.resetAllMocks(); mocks.selected = [[{ id: event.syncId }], []]; mocks.writes = []; mocks.order = [];
@@ -53,5 +54,19 @@ describe("Déclarations du réel : stockage isolé et journal minimal", () => {
   it("un payload illisible interdit le retraitement partiel", async () => {
     mocks.selected = [[{ value: { ...event, chargedCents: -1 } }]];
     await expect(listActualEvents("espace-fictif")).rejects.toThrow("illisible");
+  });
+  it("conserve la provenance calculée après stockage/relecture et l’inclut dans la version optimiste", async () => {
+    const result = estimateActualOverlap({ month: event.month, syncId: event.syncId,
+      incoming: { contractKey: "fictif-a", syncId: event.syncId, startDate: "2026-06-11", endDate: null },
+      outgoing: { contractKey: "fictif-b", syncId: event.syncId, startDate: "2020-01-01", endDate: "2026-06-20" },
+      payroll: { syncId: event.syncId, month: event.month, contractKey: "fictif-a", chargedCents: 10_000, lineKeys: ["LIGNE_SOURCE_FICTIVE_PRIVEE"] } });
+    if (result.kind !== "value") throw new Error("Fixture refusée");
+    const calculated = { ...event, chargedCents: result.amountCents, calculation: result.calculation };
+    await saveActualEvent("espace-fictif", "acteur-fictif", calculated, null);
+    expect(mocks.writes[0]).toMatchObject({ value: calculated });
+    expect(JSON.stringify(mocks.writes[1])).not.toContain("LIGNE_SOURCE_FICTIVE_PRIVEE");
+    mocks.selected = [[{ value: calculated }]];
+    expect(await listActualEvents("espace-fictif")).toEqual([calculated]);
+    expect(actualEventVersion(calculated)).not.toBe(actualEventVersion({ ...calculated, calculation: undefined }));
   });
 });

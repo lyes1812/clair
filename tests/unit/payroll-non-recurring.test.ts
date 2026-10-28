@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildActualNonRecurring, parseActualEvent, type ActualEvent } from "@/lib/payroll/non-recurring";
 import { windowPayroll, type JournalInput, type LedgerLine } from "@/lib/payroll/engine";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
+import { estimateActualOverlap } from "@/lib/payroll/actual-overlap";
 
 const SYNC = "00000000-0000-4000-8000-000000000001";
 const OLD_SYNC = "00000000-0000-4000-8000-000000000002";
@@ -45,6 +46,21 @@ describe("saisie stricte d’un élément non récurrent réalisé", () => {
     expect(parseActualEvent(event({ kind: "tuilage", contractKeys: ["fictif-a", "fictif-b", "fictif-c"] }))).toBeNull();
     expect(parseActualEvent(event({ contractKeys: ["fictif-a", "fictif-b"] }))).toBeNull();
     expect(parseActualEvent(event({ contractKeys: ["fictif-a"] }))).not.toBeNull();
+  });
+
+  it("conserve une estimation vérifiable et refuse un montant, rôle ou prorata falsifié", () => {
+    const result = estimateActualOverlap({ month: "2026-09", syncId: SYNC,
+      incoming: { contractKey: "entrant-fictif", syncId: SYNC, startDate: "2026-09-11", endDate: null },
+      outgoing: { contractKey: "sortant-fictif", syncId: SYNC, startDate: "2020-01-01", endDate: "2026-09-20" },
+      payroll: { contractKey: "entrant-fictif", syncId: SYNC, month: "2026-09", chargedCents: 10_000, lineKeys: ["paie-fictive"] } });
+    if (result.kind !== "value") throw new Error("Fixture de calcul refusée");
+    const calculated = event({ kind: "tuilage", contractKeys: ["entrant-fictif", "sortant-fictif"], chargedCents: 5_000, calculation: result.calculation });
+    expect(parseActualEvent(calculated)).toEqual(calculated);
+    expect(parseActualEvent({ ...calculated, chargedCents: 5_001 })).toBeNull();
+    expect(parseActualEvent({ ...calculated, contractKeys: ["sortant-fictif", "entrant-fictif"] })).toBeNull();
+    expect(parseActualEvent({ ...calculated, calculation: { ...result.calculation, days: { incomingPresence: 30, overlap: 10 } } })).toBeNull();
+    expect(parseActualEvent({ ...calculated, calculation: { ...result.calculation, source: { ...result.calculation.source, syncId: OLD_SYNC } } })).toBeNull();
+    expect(buildActualNonRecurring(journal(), [calculated], ["2026-09"], SYNC)).toMatchObject({ raw: 180_000, nonRecurring: 5_000, adjusted: 175_000 });
   });
 });
 

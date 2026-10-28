@@ -106,6 +106,7 @@ export function LandingView({
       </div>
       <section className="panel" data-testid="atr-retraite">
         <PanelTitle title={`Atterrissage ${year} retraité`} desc={<>Hors éléments non récurrents · <MoneyUnitLabel /></>} slug={slug} term={HYP_TERMS.retraite} />
+        {retraite.kind === "value" && retraite.qualification ? <p className="notice" data-testid="atr-overlap-qualification">{retraite.qualification}</p> : null}
         <dl className="facts hr-tiles">
           <div className="hr-tile" data-testid="atr-tile-landing">
             <TileTitle title={`Atterrissage ${year}`} sub="coût employeur · réel + projeté" slug={slug} term={HYP_TERMS.atterrissage} />
