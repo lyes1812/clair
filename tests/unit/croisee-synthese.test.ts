@@ -771,6 +771,22 @@ describe("SyntheseView : rendu du modèle selon l'affichage", () => {
     expect(t).toContain('data-testid="cx-table-synthese-montants"');
     expect(t).toContain('data-testid="cx-table-synthese-rh"');
   });
+  it("les longues raisons n.d. restent dans les chiffres clés repliés, sans encombrer les six cartes", () => {
+    const model = { ...m, tileNd: ["Masse salariale chargée N-1 : RAISON_FICTIVE_MASSE_N1", "Absentéisme N-1 : RAISON_FICTIVE_ABSENCES_N1"] };
+    const out = renderToStaticMarkup(h(SyntheseView, { model, slug: "demo", affichage: "tout" }));
+    const cards = out.match(/<section class="cx-syn-cards"[\s\S]*?<\/section>/)?.[0] ?? "";
+    expect(cards).not.toContain('data-testid="cx-synthese-cartes-nd"');
+    expect(cards).not.toContain("RAISON_FICTIVE");
+    const details = out.match(/<details class="cx-fold" id="cx-synthese-chiffres"[\s\S]*?<\/details>/)?.[0] ?? "";
+    expect(details).toContain('data-testid="cx-synthese-cartes-nd"');
+    expect(details).toContain("RAISON_FICTIVE_MASSE_N1");
+    expect(details).toContain("RAISON_FICTIVE_ABSENCES_N1");
+    expect(details).not.toMatch(/^<details[^>]*\sopen(?:=|>)/);
+    expect(cards).toContain('<abbr class="nd" title="historique insuffisant">n.d.</abbr>');
+    const graph = renderToStaticMarkup(h(SyntheseView, { model, slug: "demo", affichage: "graphique" }));
+    expect(graph).not.toContain('data-testid="cx-synthese-cartes-nd"');
+    expect(graph).toContain('href="/x?affichage=tableau#cx-synthese-graphique"');
+  });
   it("impression d'une page : « + 2 autres repères » quand des repères sont regroupés ; la feuille masque le repère suivant le plafond", () => {
     const out = sp(renderToStaticMarkup(h(SyntheseView, { model: { ...m, print: { max: PRINT_REPERES_MAX, folded: 2 } }, slug: "demo", affichage: "tout" })));
     expect(out).toContain('data-testid="cx-synthese-print-more"');
