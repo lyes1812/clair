@@ -978,12 +978,14 @@ describe("loadBudgetInput — lectures du contexte et fonctions existantes", () 
     const syncId = "11111111-1111-4111-8111-111111111111";
     const event: ActualEvent = { id: "22222222-2222-4222-8222-222222222222", syncId, month: "2026-01", kind: "rupture-conventionnelle", chargedCents: 25000, contractKeys: ["payfit:prive-fictif"], note: "JUSTIFICATIF_FICTIF_PRIVE" };
     actualStore.list.mockResolvedValueOnce([event]);
-    const input = await loadBudgetInput(fakeCtx(undefined, null, { base: { ...baseSnap, syncId }, seuil: 1 }));
+    // Le contrat déclaré est relié à sa personne par le référentiel (lot 12 : seuil compté en personnes distinctes).
+    const link: PersonLink = new Map([...LINK, ["payfit:prive-fictif", "personne-privee"]]);
+    const input = await loadBudgetInput(fakeCtx(undefined, null, { base: { ...baseSnap, syncId }, seuil: 1, link }));
     if (input.kind !== "value" || input.scenario.kind !== "value") throw new Error("scénario attendu");
     expect(actualStore.list).toHaveBeenCalledExactlyOnceWith("espace-fictif");
     expect(input.scenario.landing).toMatchObject({ kind: "value", total: 5488000 });
     expect(input.scenario.retraite).toMatchObject({ kind: "value", atterrissage: 5488000, realised: 25000, projected: 0, total: 25000, retraite: 5463000, rows: [] });
-    expect(input.scenario.contributors).toEqual({ realised: 1, projected: 0 });
+    expect(input.scenario.contributors).toEqual({ realised: { persons: ["personne-privee"], unlinked: 0, hires: 0 }, projected: { persons: [], unlinked: 0, hires: 0 } });
     const model = buildBudget(input);
     const exact = table(model, BUDGET_TABLE_IDS.atterrissage);
     expect(exact.rows.map((row) => row.cells)).toContainEqual(["Éléments non récurrents déjà comptabilisés", -25000]);
