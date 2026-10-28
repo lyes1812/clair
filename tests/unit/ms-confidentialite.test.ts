@@ -127,10 +127,11 @@ describe("socle commun : groupes du journal et entrée de masquage (groups.ts)",
     expect(croisee.masseContracts).toBe(masseContracts);
     expect(croisee.groupInput).toBe(groupInput);
   });
-  it("embauches prévisionnelles (décision du lot 12) : une cellule portée seulement par des embauches est exempte ; mêlée à des contrats réels, elle se juge sur eux", () => {
+  it("embauches prévisionnelles (décision du lot 12) : une cellule portée seulement par des embauches est de taille 0 (jamais exempte) ; mêlée à des contrats réels, elle se juge sur eux", () => {
     expect(isHireKey(hireKey("h1"))).toBe(true);
     expect(isHireKey("payfit:C1")).toBe(false);
-    expect(projectedCell([hireKey("h1"), hireKey("h2")], link, 5, 420000)).toEqual({ size: 0, value: 420000, members: [], exempt: true });
+    // Taille 0, sans membre : affichée au premier tour, ne protège jamais, masquée avec toute la relation (pas de MaskCell.exempt).
+    expect(projectedCell([hireKey("h1"), hireKey("h2")], link, 5, 420000)).toEqual({ size: 0, value: 420000, members: [] });
     expect(projectedCell(["C1", hireKey("h1")], link, 3, -420000)).toEqual({ size: 1, value: 420000, members: ["P1"] }); // masquée : 1 personne réelle
     expect(projectedCell(["C9", hireKey("h1")], link, 3, 100)).toEqual({ size: null, value: 100, members: [] }); // contrat réel non relié : non vérifiable
     expect(projectedCell([], link, 3, 0)).toEqual({ size: 0, value: 0, members: [] }); // personne : rien à protéger
@@ -175,21 +176,27 @@ describe("lignes par service après seuil (cas de référence écrit à la main)
     expect(m[0].prev).toMatchObject({ kind: "nd", nd: { reason: expect.stringContaining("hors de la lecture") } });
     expect(m[0].hidden).toBe(false);
   });
-  it("un mois sous le seuil : B compte 3 personnes sur la période (affichée) mais 1 en janvier ; les mois sont masqués, colonne et ligne comprises", () => {
+  it("un mois sous le seuil : B compte 3 personnes sur la période mais 1 en janvier ; janvier est masqué dans sa colonne, la période (somme de mois) l'est avec lui", () => {
     // A : 3 personnes × 3 000 = 9 000 € chaque mois. B : janvier C4 (4 500 €) ; février C4 + C12 + C13 (4 500 + 1 500 + 1 500 = 7 500 €) → 12 000 €.
     const lines = [...MONTHS.flatMap((m) => ["C1", "C2", "C3"].flatMap((c) => paid(m, c, "A", 200000))), ...paid("2026-01", "C4", "B", 300000), ...paid("2026-02", "C4", "B", 300000), ...paid("2026-02", "C12", "B", 100000), ...paid("2026-02", "C13", "B", 100000)];
     const m = maskServiceRows(serviceRows(journalOf(lines, MONTHS), MONTHS, PREV), link, set(3));
     const b = m.find((r) => r.value === "B")!;
     const a = m.find((r) => r.value === "A")!;
-    expect(b.cur.kind === "value" && b.cur.masse).toBe(1200000);
-    expect(a.cur.kind === "value" && a.cur.masse).toBe(1800000);
-    // Janvier de B (1 personne) masqué ; le total de la ligne B étant affiché, février (3 personnes) l'est aussi ; dans la colonne de
-    // janvier, A est masqué à son tour (ensemble 4 personnes), puis février de A pour sa propre ligne.
-    expect(b.cur.months.map((x) => x.kind)).toEqual(["nd", "nd"]);
-    expect(a.cur.months.map((x) => x.kind)).toEqual(["nd", "nd"]);
+    // Statut canonique (lot 12 révisé) : un mois ne se juge que sur sa colonne. Janvier : B (1 personne) masqué, A (3 personnes) masqué
+    // à son tour (ensemble 4 ≥ 3) ; février : A et B comptent 3 personnes chacun, affichés (9 000 € et 7 500 €). La période n'ajoute
+    // aucune relation : elle est n.d. dès qu'un de ses mois est masqué (A et B), avec la raison du seuil. Avant, la relation « mois →
+    // période » masquait aussi février et laissait la période de B affichée : la même cellule changeait alors de statut selon la
+    // période choisie (relecture du lot 12), ce qui la rendait lisible par différence sur un autre écran.
+    expect(b.cur.months.map((x) => (x.kind === "value" ? x.masse : x.nd.reason))).toEqual([R3, 750000]);
+    expect(a.cur.months.map((x) => (x.kind === "value" ? x.masse : x.nd.reason))).toEqual([R3, 900000]);
+    expect(b.cur).toMatchObject({ kind: "nd", nd: { reason: R3 } });
+    expect(a.cur).toMatchObject({ kind: "nd", nd: { reason: R3 } });
     expect(b.hidden).toBe(true);
     expect(a.hidden).toBe(true);
     expect(a.reason).toBe(R3);
+    // Même statut des mois quelle que soit la fenêtre : la période réduite à février publie A et B, comme la colonne de février ci-dessus.
+    const feb = maskServiceRows(serviceRows(journalOf(lines, MONTHS), ["2026-02"], ["2025-02"]), link, set(3));
+    expect(feb.map((r) => [r.value, r.cur.kind === "value" ? r.cur.masse : null])).toEqual([["A", 900000], ["B", 750000]]);
   });
   it("effectif non dénombré : contrat non relié sous le seuil, ou montant sans contrat (« Non ventilé »), même avec un seuil de 1", () => {
     // D : C9 (non relié) + C10 (P8) 1 500 € chacun ; Non ventilé : une taxe de 100,00 € sans contrat ni service ; A : 3 personnes.

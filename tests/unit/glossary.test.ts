@@ -200,7 +200,11 @@ describe("Glossaire : Seuil de confidentialité (règle de l'application)", () =
     expect(d).toContain("Une seule exception : la ligne du motif retenu quand c'est le seul motif retenu présent dans la lecture");
     expect(d).toContain("Les exports Excel et CSV des tableaux concernés portent exactement les mêmes cellules n.d. que l'écran, avec la même raison");
     expect(d).toContain("« Retirer le filtre Service »");
-    expect(d).toContain("Collaborateurs, détail par salarié de l'Écart budgétaire et de l'Analyse des écarts, saisie des Hypothèses budgétaires");
+    // Écrans nominatifs : ouverts à tous les rôles (constat de relecture), seuls les détails par salarié de l'Écart et de l'Analyse et le
+    // détail des éléments non récurrents du réel sont réservés aux éditeurs.
+    expect(d).toContain("ouverts à tous les rôles de l'espace (Collaborateurs, détails par contrat des indicateurs de KPI RH, saisie des Hypothèses budgétaires, mesures du Studio Restructuring)");
+    expect(d).toContain("le détail par salarié de l'Écart budgétaire et de l'Analyse des écarts et le détail des éléments non récurrents du réel sont réservés aux éditeurs");
+    expect(d).toContain("les éléments non récurrents du réel par nature et par mois");
   });
 
   it("les entrées d'écran renvoient à l'entrée générale (« Voir aussi ») sans la recopier ; la croisée ne garde que ses groupes", () => {

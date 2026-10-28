@@ -550,29 +550,49 @@ describe("masquage : fonctions pures (cas écrits à la main, seuil 3)", () => {
   it("aVenirMask : un mois masqué dans une ligne dont le total est affiché ⇒ le plus petit autre mois l'est aussi", () => {
     expect(aVenirMask([{ months: [v(2, 1), v(6, 4)], total: v(8, 4) }], 3)).toEqual({ months: [["masked", "secondary"]], total: ["shown"] });
   });
+  // Lot 12 (relecture) : la grille porte deux fenêtres (période et N-1), chacune avec ses mois et son total, masquées chacune par la
+  // fonction partagée motifWindowMask (celle du détail de KPI RH) ; le motif exempt est déduit des lignes (seul motif retenu).
+  const NOTHING = { months: [false], tile: false, all: false };
   it("congesMask : sans total publié pour un mois, la colonne de ce mois n'est pas une relation", () => {
     const g = {
-      lines: [
-        { chosen: true, months: [v(4, 1)], total: v(4, 1), prev: v(0, 0) },
-        { chosen: true, months: [v(9, 3)], total: v(9, 3), prev: v(0, 0) },
-      ],
-      exempt: null,
-      published: { months: [false], retainedCur: false, allCur: false, retainedPrev: false, allPrev: false },
+      current: {
+        lines: [
+          { chosen: true, months: [v(4, 1)], total: v(4, 1) },
+          { chosen: true, months: [v(9, 3)], total: v(9, 3) },
+        ],
+        published: NOTHING,
+      },
+      previous: {
+        lines: [
+          { chosen: true, months: [v(0, 0)], total: v(0, 0) },
+          { chosen: true, months: [v(0, 0)], total: v(0, 0) },
+        ],
+        published: NOTHING,
+      },
     };
     expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
     // Avec la tuile publiée : la période de l'autre motif retenu est masquée en second (et, par sa ligne, son mois).
-    expect(congesMask({ ...g, published: { ...g.published, retainedCur: true } }, 3)).toEqual({ months: [["masked"], ["secondary"]], cur: ["masked", "secondary"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
+    expect(congesMask({ ...g, current: { ...g.current, published: { ...NOTHING, tile: true } } }, 3)).toEqual({ months: [["masked"], ["secondary"]], cur: ["masked", "secondary"], prev: ["shown", "shown"], allCur: "nd", allPrev: "nd" });
   });
   it("congesMask : un seul motif non retenu sous le seuil ⇒ le taux tous motifs est masqué (période), N-1 reste", () => {
     // Motif retenu exempté (seul retenu : égal à la tuile) ; motif non retenu de 2 personnes (seuil 3) : la relation des autres motifs
     // (tous motifs − tuile) n'a aucune autre cellule → son total, le taux tous motifs de la période, est masqué. N-1 : 0 personne.
+    const all = { months: [true], tile: true, all: true };
     const g = {
-      lines: [
-        { chosen: false, months: [v(14, 2)], total: v(14, 2), prev: v(0, 0) },
-        { chosen: true, months: [v(15, 3)], total: v(15, 3), prev: v(19, 2) },
-      ],
-      exempt: 1,
-      published: { months: [true], retainedCur: true, allCur: true, retainedPrev: true, allPrev: true },
+      current: {
+        lines: [
+          { chosen: false, months: [v(14, 2)], total: v(14, 2) },
+          { chosen: true, months: [v(15, 3)], total: v(15, 3) },
+        ],
+        published: all,
+      },
+      previous: {
+        lines: [
+          { chosen: false, months: [v(0, 0)], total: v(0, 0) },
+          { chosen: true, months: [v(19, 2)], total: v(19, 2) },
+        ],
+        published: all,
+      },
     };
     expect(congesMask(g, 3)).toEqual({ months: [["masked"], ["shown"]], cur: ["masked", "shown"], prev: ["shown", "shown"], allCur: "secondary", allPrev: "shown" });
   });
@@ -603,15 +623,26 @@ describe("seuil de confidentialité : borne basse sans personne comptée (demi-j
     // Seuil 3. Ligne 0 (non retenue) : juillet ≥ 0 (aucune personne), août 0 ; période ≥ 0 ; N-1 0. Ligne 1 (non retenue) : juillet 20
     // (4 personnes), août 7 (4) ; période 27 (4) ; N-1 30 (4). Ligne 2 : seul motif retenu, exempté. Taux tous motifs publié.
     // Période, autres motifs (total : tous motifs − tuile) : ligne 0 non vérifiable, seule masquée → ligne 1 (4 personnes) masquée en
-    // second. Ligne 1 : total masqué, ses deux mois affichés le redonneraient → le plus petit, août (7), masqué.
+    // second. Ligne 1 : total masqué, ses deux mois affichés le redonneraient → le plus petit, août (7), masqué. N-1 (ses propres mois) :
+    // ligne 1 à 4 personnes chaque mois, rien n'est masqué.
+    const all = { months: [true, true], tile: true, all: true };
     const g = {
-      lines: [
-        { chosen: false, months: [lb0, v(0, 0)], total: lb0, prev: v(0, 0) },
-        { chosen: false, months: [v(20, 4), v(7, 4)], total: v(27, 4), prev: v(30, 4) },
-        { chosen: true, months: [v(0, 0), v(4, 1)], total: v(4, 1), prev: v(2, 1) },
-      ],
-      exempt: 2,
-      published: { months: [true, true], retainedCur: true, allCur: true, retainedPrev: true, allPrev: true },
+      current: {
+        lines: [
+          { chosen: false, months: [lb0, v(0, 0)], total: lb0 },
+          { chosen: false, months: [v(20, 4), v(7, 4)], total: v(27, 4) },
+          { chosen: true, months: [v(0, 0), v(4, 1)], total: v(4, 1) },
+        ],
+        published: all,
+      },
+      previous: {
+        lines: [
+          { chosen: false, months: [v(0, 0), v(0, 0)], total: v(0, 0) },
+          { chosen: false, months: [v(15, 4), v(15, 4)], total: v(30, 4) },
+          { chosen: true, months: [v(0, 0), v(2, 1)], total: v(2, 1) },
+        ],
+        published: all,
+      },
     };
     expect(congesMask(g, 3)).toEqual({
       months: [

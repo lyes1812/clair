@@ -34,7 +34,8 @@ export type MissingCode =
   | "no-person"
   | "no-contract"
   | "disappeared"
-  | "not-extracted";
+  | "not-extracted"
+  | "confidentialite"; // valeur non affichée par le seuil de confidentialité de l'espace (affichage d'un périmètre filtré, jamais la source)
 
 export type FieldNd = { code: MissingCode; reason: string };
 export type Traced = { fieldsNd: Record<string, FieldNd>; provenance: Record<string, Provenance> };

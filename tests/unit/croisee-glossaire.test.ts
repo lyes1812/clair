@@ -86,16 +86,16 @@ describe("glossaire de la Masse salariale croisée ↔ code", () => {
     const conf = def(T.confidentialite);
     expect(conf).toContain("la ligne du motif retenu quand c'est le seul motif retenu présent dans la lecture (elle égale alors la tuile Absentéisme)");
     expect(def(T.congesPris)).toContain("Un motif dont toutes les valeurs sont masquées garde sa ligne et son nom.");
-    // Un motif retenu, 1 personne, 4 demi-journées en janvier ; seuil 3.
+    // Un motif, 1 personne, 4 demi-journées en janvier ; seuil 3. Retenu (seul retenu de la lecture) : exempt ; non retenu : masqué.
+    // L'exemption est déduite des lignes par la fonction partagée (motifWindowMask), la même pour KPI RH et la croisée.
     const cell = { kind: "exact" as const, half: 4, persons: 1, unlinked: 0, who: [0] };
-    const grid = (exempt: number | null) => ({
-      lines: [{ chosen: true, months: [cell], total: cell, prev: undefined }],
-      exempt,
-      published: { months: [true], retainedCur: true, allCur: true, retainedPrev: false, allPrev: false },
+    const grid = (chosen: boolean) => ({
+      current: { lines: [{ chosen, months: [cell], total: cell }], published: { months: [true], tile: true, all: true } },
+      previous: { lines: [{ chosen, months: [], total: undefined }], published: { months: [], tile: false, all: false } },
     });
-    const free = congesMask(grid(0), 3);
+    const free = congesMask(grid(true), 3);
     expect([free.months[0][0], free.cur[0]]).toEqual(["shown", "shown"]);
-    const hidden = congesMask(grid(null), 3);
+    const hidden = congesMask(grid(false), 3);
     expect([hidden.months[0][0], hidden.cur[0]]).toEqual(["masked", "masked"]);
   });
 

@@ -12,7 +12,7 @@ const users = {
 };
 const MENU = ["Données", "Collaborateurs", "KPI RH", "Masse salariale", "Hypothèses budgétaires", "Reporting social"];
 // Le titre « Studio RH » est le lien vers la synthèse du Studio RH ; les cinq sous-modules restent exactement ceux de MENU.
-const MENU_LINKS = ["Données", "Studio RH", ...MENU.slice(1), "Studio Finance"];
+const MENU_LINKS = ["Données", "Studio RH", ...MENU.slice(1), "Studio Finance", "Studio Restructuring"];
 
 let slug = "";
 let totpSecret = "";

@@ -19,7 +19,7 @@ const events = (): ActualEvent[] => [
   { id: LIC, syncId: SYNC, month: "2026-01", kind: "licenciement", chargedCents: 12345, contractKeys: ["sortant"], note: "SOURCE_INDIVIDUELLE_LIC_FICTIVE" },
   { id: TUILAGE, syncId: SYNC, month: "2026-02", kind: "tuilage", chargedCents: 23456, contractKeys: ["sortant", "entrant"], note: "SOURCE_BINOME_PERSONNELLE_FICTIVE" },
 ];
-const props = (patch: Partial<Props> = {}): Props => ({ slug: "espace-fictif", input: journal(), events: events(), months: ["2026-01", "2026-02"], syncId: SYNC, contracts: [{ key: "sortant", label: "NOM_SORTANT_FICTIF" }, { key: "entrant", label: "NOM_ENTRANT_FICTIF" }], editable: false, ...patch });
+const props = (patch: Partial<Props> = {}): Props => ({ slug: "espace-fictif", input: journal(), events: events(), months: ["2026-01", "2026-02"], syncId: SYNC, contracts: [{ key: "sortant", label: "NOM_SORTANT_FICTIF" }, { key: "entrant", label: "NOM_ENTRANT_FICTIF" }], editable: false, confidentialite: { kind: "set", value: 1, updatedAt: null, updatedBy: null }, link: new Map([["sortant", "personne-fictive-1"], ["entrant", "personne-fictive-2"]]), guard: null, ...patch });
 const html = (patch: Partial<Props> = {}) => renderToStaticMarkup(createElement(ActualNonRecurring, props(patch)));
 const form = (value: string, id: string) => value.match(new RegExp(`<form[^>]*data-testid="${id}"[\\s\\S]*?<\\/form>`))?.[0] ?? "";
 const select = (value: string, name: string) => value.match(new RegExp(`<select[^>]*name="${name}"[\\s\\S]*?<\\/select>`))?.[0] ?? "";

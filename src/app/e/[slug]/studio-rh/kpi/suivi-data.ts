@@ -2,6 +2,7 @@ import { categoryMonth, categoryOfContract, getCategoryNatures, getContractCateg
 import { CATEGORY_IDS, CATEGORY_LABELS } from "@/lib/budget/types";
 import { confidentialiteSettingReason, getConfidentialite, isHidden, linkFromReferential, maskGroups, maskReason, personsOfContracts, SEUIL_NON_DEFINI, type ConfidentialiteSetting, type MaskInput, type PersonLink, type PersonsOfContracts } from "@/lib/confidentialite";
 import { groupInput, NO_GROUP } from "@/lib/croisee/confidentialite";
+import { columnStatus, stockColumn, stockGroups, type StockGroup } from "@/lib/confidentialite/columns";
 import { formatDate, monthEnd } from "@/lib/dates";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { coverageAt, gateAt, headcountAt } from "@/lib/rh/headcount";
@@ -14,6 +15,7 @@ import type { PayfitHistoryLimit } from "@/lib/rh/raw-history";
 import type { RhBuildData } from "@/lib/rh/referential/types";
 import type { Shown } from "@/lib/rh/view";
 import { seuilOf, type CategoryCellIn, type SeuilRead } from "@/lib/viz/kpi";
+import { flowGuard, maskFlows, type FlowGuard } from "./flow-guard";
 import { resolveKpiVue, type KpiVue } from "./tabs";
 
 // Chargement commun de KPI RH (page et export) : contexte, mois clos, paramètres d'adresse (mode, fin, année, établissement,
@@ -64,6 +66,9 @@ type Ready = {
   notices: string[]; // paramètres écartés, avec leur raison (la page y ajoute ceux du détail)
   confidentialite: ConfidentialiteSetting; // seuil de l'espace, transmis aux répartitions de l'écran et de l'export
   guard: ScopeGuard | null; // périmètre retenu par un filtre (établissement, nature) sous le seuil ou seuil non défini : tout l'écran n.d.
+  // Garde des flux du périmètre (flow-guard.ts) : entrées et sorties d'un mois masquées par la répartition par nature ou par
+  // établissement ; dash les porte déjà (n.d. avec la raison du seuil). null : aucun filtre, ou périmètre entièrement gardé.
+  flows: FlowGuard | null;
 };
 export type KpiSuivi =
   | { kind: "no-input"; ctx: KpiContext }
@@ -106,8 +111,12 @@ export function kpiSuiviOf(ctx: KpiContext, sp: Search, confidentialite: Confide
   const w: Window = mode === "civil" ? civilWindow(year) : rollingWindow(fin);
   const input: KpiInput = { ...c.input, scope: { establishments: etab ? [etab] : undefined, nature: nature || undefined } };
   // Garde du périmètre : les mois de la période et de N-1 (tuiles, colonnes N-1 du tableau).
-  const guard = scopeGuard({ input, months: [...w.months, ...previousWindow(w).months], establishments: ctx.collab.establishments.map((e) => e.id), natures: ctx.collab.natures.codes, confidentialite });
-  return { kind: "ready", ctx: c, data, open, rawLimit, closed, last, years, vue, mode, fin, year, etab, nature, w, input, dash: kpiDashboard(input, w), notices, confidentialite, guard };
+  const guardMonths = [...w.months, ...previousWindow(w).months];
+  const establishments = ctx.collab.establishments.map((e) => e.id);
+  const guard = scopeGuard({ input, months: guardMonths, establishments, natures: ctx.collab.natures.codes, confidentialite });
+  // Flux du périmètre (entrées, sorties) : même partition et mêmes statuts que la croisée 02 ; seulement quand le périmètre est affiché.
+  const flows = !guard && confidentialite.kind === "set" ? flowGuard({ base: c.input, scope: input.scope, months: guardMonths, establishments, natures: ctx.collab.natures.codes, seuil: confidentialite.value }) : null;
+  return { kind: "ready", ctx: c, data, open, rawLimit, closed, last, years, vue, mode, fin, year, etab, nature, w, input, dash: maskFlows(kpiDashboard(input, w), flows), notices, confidentialite, guard, flows };
 }
 
 export async function loadKpiSuivi(slug: string, sp: Search): Promise<KpiSuivi> {
@@ -124,7 +133,8 @@ export async function loadKpiSuivi(slug: string, sp: Search): Promise<KpiSuivi> 
 // même filtre (les autres natures comptées, les autres établissements, le reste sans établissement) forment les autres cellules, et le
 // moteur partagé masque le périmètre quand il protégerait seul une valeur masquée (sinon le filtre révélerait par différence ce que le
 // masquage cache). Rien n'est recalculé : les groupes sont ceux de l'effectif de fin de mois (headcountAt, mêmes contrats que les
-// indicateurs), en personnes reliées par le référentiel. null : aucun filtre, ou périmètre affiché.
+// indicateurs), en personnes reliées par le référentiel. null : aucun filtre, ou périmètre affiché. Les flux du périmètre (entrées et
+// sorties de chaque mois) ont leur propre garde, mois par mois, avec la partition de la croisée 02 : flow-guard.ts.
 export type ScopeGuard = { cause: "parametre" | "seuil"; reason: string };
 type ScopeGroup = { contracts: string[]; persons: PersonsOfContracts };
 export function scopeGuard(p: { input: KpiInput; months: string[]; establishments: string[]; natures: string[]; confidentialite: ConfidentialiteSetting }): ScopeGuard | null {
@@ -186,34 +196,38 @@ export type CategoryMonths = { months: CategoryMonthMasked[]; keys: string[]; hi
 export const CATEGORY_TABLE_LABELS: Record<string, string> = { ...CATEGORY_LABELS, nc: "Non classé" };
 const categoryKeys = (months: CategoryMonth[]) => [...CATEGORY_IDS, "nc"].filter((k) => months.some((c) => c.kind === "value" && c.byCategory[k]));
 
-// Personnes distinctes de chaque catégorie un mois donné : les contrats que categoryMonth compte (contributions et contrats sans quotité
-// de l'ETP de fin de mois), rangés par la même règle de catégorie, reliés à leur personne par le référentiel ; mois n.d. : aucun groupe.
-function categoryPersons(kpi: KpiInput, month: string, natures: CategoryNatures, overrides: ContractCategories, link: PersonLink): Record<string, PersonsOfContracts> {
+// Groupes de chaque catégorie un mois donné (libellé de la catégorie, comme la grille des Effectifs mensuels et la croisée 02) : les
+// contrats que categoryMonth compte (contributions et contrats sans quotité de l'ETP de fin de mois), rangés par la même règle de
+// catégorie, reliés à leur personne par le référentiel, et leur nombre (stockGroups) ; mois n.d. : aucun groupe.
+const categoryLabel = (k: string): string => CATEGORY_TABLE_LABELS[k] ?? k;
+function categoryPersons(kpi: KpiInput, month: string, natures: CategoryNatures, overrides: ContractCategories, link: PersonLink): Record<string, StockGroup> {
   const e = etpMonthEnd(kpi, month);
   if (e.kind === "nd") return {};
   const byKey = new Map(kpi.data.contracts.map((c) => [c.contractKey, c]));
-  const ids = new Map<string, Set<string>>();
-  for (const x of [...e.contributions, ...e.missing]) {
-    const c = byKey.get(x.contractKey);
-    const k = (c ? categoryOfContract(c.externalId, c.nature, natures, overrides) : null) ?? "nc";
-    let s = ids.get(k);
-    if (!s) ids.set(k, (s = new Set()));
-    s.add(x.externalId);
-  }
-  return Object.fromEntries([...ids].map(([k, s]) => [k, personsOfContracts(s, link)]));
+  return stockGroups(
+    [...e.contributions, ...e.missing].map((x) => {
+      const c = byKey.get(x.contractKey);
+      const k = (c ? categoryOfContract(c.externalId, c.nature, natures, overrides) : null) ?? "nc";
+      return { group: categoryLabel(k), contract: x.externalId, person: link.get(x.externalId) ?? null };
+    }),
+  );
 }
 
 // Mois après seuil : total (effectif, ETP n.d. dès qu'une catégorie l'est) calculé avant masquage et jamais modifié ; chaque colonne du
-// tableau est une cellule (valeur : l'effectif affiché ; une catégorie sans contrat ce mois-là : 0, ne désigne personne), masquage
-// principal et secondaire du moteur partagé avec la même raison ; seuil absent ou illisible : chaque cellule n.d. avec la raison.
-function maskCategoryMonth(c: CategoryMonth, keys: string[], groups: Record<string, PersonsOfContracts>, read: SeuilRead): { month: CategoryMonthMasked; masked: number } {
+// tableau est une cellule dont le statut est celui de la passe partagée des stocks de fin de mois (stockColumn : mêmes groupes, même
+// valeur d'ordre, l'effectif, même départage que KPI RH › Effectifs mensuels et la croisée 02 ; le couple effectif et ETP est masqué
+// ensemble ; une catégorie sans contrat ce mois-là : 0, ne désigne personne) ; seuil absent ou illisible : chaque cellule n.d. avec la
+// raison.
+function maskCategoryMonth(c: CategoryMonth, keys: string[], groups: Record<string, StockGroup>, read: SeuilRead): { month: CategoryMonthMasked; masked: number } {
   if (c.kind === "nd") return { month: c, masked: 0 };
   const all = Object.values(c.byCategory);
   const total = { headcount: all.reduce((n, x) => n + x.headcount, 0), etp4: all.some((x) => x.etp4 === null) ? null : all.reduce((n, x) => n + (x.etp4 ?? 0), 0) };
   const base = { kind: "value" as const, month: c.month, lowerBound: c.lowerBound, total };
   if (read.seuil === null) return { month: { ...base, byCategory: Object.fromEntries(keys.map((k) => [k, { kind: "nd", reason: read.reason }])) }, masked: 0 };
   const seuil = read.seuil;
-  const st = maskGroups(keys.map((k) => groupInput(groups[k] ?? NO_GROUP, seuil, c.byCategory[k]?.headcount ?? 0)), seuil, true);
+  const headcount = (k: string) => c.byCategory[k]?.headcount ?? 0;
+  const col = stockColumn(groups, seuil, keys.filter((k) => headcount(k) !== 0).map(categoryLabel));
+  const st = keys.map((k) => columnStatus(col, categoryLabel(k), headcount(k)));
   const byCategory: Record<string, CategoryCellIn> = {};
   let masked = 0;
   keys.forEach((k, i) => {

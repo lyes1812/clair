@@ -317,7 +317,9 @@ export default async function CroiseePage({ params, searchParams }: { params: Pr
             </>
           )}
         </p>
-        <MsHeader title={ITEM.label} />
+        <div className="cx-ms-head">
+          <MsHeader title={ITEM.label} />
+        </div>
         <MsTabs slug={slug} current="croisee" />
         <div className="cx-bar">
           <ChapterMenu items={menu} current={chapter.id} total={CHAPTER_TOTAL} />

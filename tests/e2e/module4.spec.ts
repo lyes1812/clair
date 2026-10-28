@@ -135,7 +135,7 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   expect(await txt(lbl("Primes sur objectif"))).toBe("5 619,00 €");
   expect(await txt(lbl("Primes de vacances"))).toBe("936,50 €");
   expect(await txt(page.getByTestId("fv-labels-total").locator("td[data-col='n']"))).toBe("160 770,00 €");
-  await expect(page.getByTestId("fv-non-recurrents")).toContainText("non distingués par le journal PayFit");
+  await expect(page.getByTestId("fv-non-recurrents")).toContainText("Éléments non récurrents du réel");
   await page.screenshot({ path: `${CAPTURES}/4-05-fixe-variable.png`, fullPage: true });
 
   // Paie & comptabilité : provision CP fin septembre 2026 = 10 % + 4 % du brut de septembre ; sans comptabilité, n.d.

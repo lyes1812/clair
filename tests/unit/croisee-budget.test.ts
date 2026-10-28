@@ -565,10 +565,19 @@ describe("buildBudget — seuil de confidentialité des éléments non récurren
       ["Déjà comptabilisés", null, ND2],
       ["Prévus", null, ND2],
     ]);
-    // Prévus portés seulement par des embauches prévues : exempts du masquage (affichés), ils ne protègent pas « Déjà comptabilisés ».
+    // Prévus portés seulement par des embauches prévues : cellule de taille 0 (projectedGroupCell), qui ne protège jamais « Déjà
+    // comptabilisés » (1 personne < 2). Cas « impossible » : la somme « Non récurrents retirés » étant publiée, laisser « Prévus »
+    // affiché redonnerait « Déjà comptabilisés » par différence ; la relation entière est donc n.d. (avant le lot 12 révisé, les
+    // embauches étaient exemptes et « Prévus » restait affiché : c'est la fuite relevée par la relecture).
     const hires = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 }, scenario: scenarioOf({ contributors: { realised: G(["q1"]), projected: G([], 0, 2) } }) }));
     expect(lines(hires).slice(1)).toEqual([
       ["Déjà comptabilisés", null, ND2],
+      ["Prévus", null, ND2],
+    ]);
+    // Déjà comptabilisés suffisamment nombreux : les embauches seules restent affichées.
+    const hiresOk = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 }, scenario: scenarioOf({ contributors: { realised: G(["q1", "q2"]), projected: G([], 0, 2) } }) }));
+    expect(lines(hiresOk).slice(1)).toEqual([
+      ["Déjà comptabilisés", "800,00 €", null],
       ["Prévus", "1 500,00 €", null],
     ]);
     const ok = buildBudget(budgetInput({ confidentialite: { kind: "set", value: 2 }, scenario: scenarioOf({ contributors: { realised: G(["q1", "q2"]), projected: G(["p1", "p2"], 0, 1) } }) }));

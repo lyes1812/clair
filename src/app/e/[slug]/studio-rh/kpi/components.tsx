@@ -35,6 +35,7 @@ import { ABSENCE_MOMENT_LABELS, ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { ContractDraft, PersonDraft } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, fmtInt, fmtNumber, showCount, showHeadcount, timeUnitLabel, type Shown } from "@/lib/rh/view";
 import { CONFIDENTIALITE_TERM, confidentialiteHref, isHidden, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type PersonsOfContracts } from "@/lib/confidentialite";
+import type { MotifWindow } from "@/lib/croisee/conges";
 import { absenceTypeLabel, absenteeismSeries, categorySeries, comparedRate, etpSeries, headcountSeries, maskMotifRows, monthAxis, motifMask, motifRows, movementSeries, ndSummary, readingQualifiers, seuilOf, seuilText, typeCountMask, zeroRateNote, type CategoryMonthIn } from "@/lib/viz/kpi";
 import { BuildInfo, contractHref, FlagTags, Nature, PayfitHistoryNotice, PersonCell, Prov } from "../collaborateurs/components";
 
@@ -843,14 +844,16 @@ export function AbsenceMonthDetail({ id, v, theoretical, maps, slug }: { id: "th
 
 // Absentéisme par motif (période) : TOUS les motifs présents dans la lecture, retenus ou non, puis, à part, le taux tous motifs.
 // Un motif n.d. garde sa raison (jamais 0) ; le taux tous motifs est nommé comme tel et n'est jamais présenté comme la tuile.
-// Seuil de confidentialité (paramètre de l'espace, module partagé, même règle que la croisée 03) : une ligne qui concerne de 1 à
-// (seuil − 1) personnes distinctes est n.d. (exception : le seul motif retenu présent dans la lecture, qui égale la tuile) ; masquage
-// secondaire entre motifs retenus (tuile publiée : tileShown) et autres motifs ; le taux tous motifs, indicateur de l'entreprise,
-// n'est masqué que lorsqu'il donnerait une ligne masquée par différence. Paramètre absent, illisible ou non transmis : lignes n.d.
-// avec la raison et le lien vers Paramètres ; le taux tous motifs reste affiché.
-export function AbsenceMotifsDetail({ motifs, slug, confidentialite, tileShown = true }: { motifs: AbsenceMotifs; slug: string; confidentialite?: ConfidentialiteSetting; tileShown?: boolean }) {
+// Seuil de confidentialité (paramètre de l'espace, module partagé) : statuts de motifWindowMask, la fonction de la croisée 03, sur les
+// cellules de la fenêtre lues par la page dans le moteur (cells = motifWindow : chaque motif, ses mois et son total ; absentéisme de
+// chaque mois, tuile et taux tous motifs publiés ou non) ; une même ligne a donc le même statut ici et dans la croisée. Une ligne qui
+// concerne de 1 à (seuil − 1) personnes distinctes est n.d. (exception : le seul motif retenu présent dans la lecture, qui égale la
+// tuile) ; masquage secondaire ; le taux tous motifs, indicateur de l'entreprise, n'est masqué que lorsqu'il donnerait une ligne masquée
+// par différence. Paramètre absent, illisible ou non transmis : lignes n.d. avec la raison et le lien vers Paramètres ; le taux tous
+// motifs reste affiché.
+export function AbsenceMotifsDetail({ motifs, cells, slug, confidentialite }: { motifs: AbsenceMotifs; cells: MotifWindow; slug: string; confidentialite?: ConfidentialiteSetting }) {
   const read = seuilOf(confidentialite);
-  const mask = read.seuil === null || motifs.lines.length === 0 ? null : motifMask(motifs.lines, { tile: tileShown, all: motifs.all.kind !== "nd" }, read.seuil);
+  const mask = read.seuil === null || motifs.lines.length === 0 ? null : motifMask(cells, read.seuil);
   const rows = maskMotifRows(motifRows(motifs.lines), mask, read.seuil, read.reason);
   const allReason = mask && read.seuil !== null && isHidden(mask.all) ? maskReason(mask.all, read.seuil) : null;
   const all = motifs.all;
@@ -925,9 +928,9 @@ export function AbsenceMotifsDetail({ motifs, slug, confidentialite, tileShown =
   );
 }
 
-// confidentialite : seuil de l'espace (getConfidentialite), transmis par la page au détail par motif ; la tuile de la période (v) est
-// publiée dès qu'elle n'est pas n.d.
-export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, slug, confidentialite }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; slug?: string; confidentialite?: ConfidentialiteSetting }) {
+// confidentialite : seuil de l'espace (getConfidentialite), transmis par la page au détail par motif ; cells : cellules de la fenêtre
+// (motifWindow, lues dans le moteur par la page : motifs × mois et total, absentéisme des mois, tuile et taux tous motifs publiés).
+export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, cells, slug, confidentialite }: { v: Absenteeism; theoretical: TheoreticalWindow; detailHref: (id: string, month: string) => string; motifs?: AbsenceMotifs; cells?: MotifWindow; slug?: string; confidentialite?: ConfidentialiteSetting }) {
   // Une ligne par mois : jours théoriques (toujours calculés s'ils le peuvent) et absences (n.d. avec la raison de la période
   // quand l'absentéisme s'arrête avant le calcul mensuel : arrêts DSN non extraits, types non choisis, absences non lues).
   const abs = new Map(v.months.map((m) => [m.month, m]));
@@ -974,7 +977,7 @@ export function AbsenteeismWindowDetail({ v, theoretical, detailHref, motifs, sl
           {v.qualifiers.length > 0 && <> — {v.qualifiers.join(" · ")}</>}
         </Total>
       )}
-      {motifs && slug && <AbsenceMotifsDetail motifs={motifs} slug={slug} confidentialite={confidentialite} tileShown={v.kind !== "nd"} />}
+      {motifs && cells && slug && <AbsenceMotifsDetail motifs={motifs} cells={cells} slug={slug} confidentialite={confidentialite} />}
     </>
   );
 }

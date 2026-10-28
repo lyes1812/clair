@@ -37,8 +37,9 @@ export function croiseeLink(data: Pick<RhBuildData, "contracts">): PersonLink {
 export const NO_GROUP: PersonsOfContracts = { persons: [], unlinked: 0 };
 
 // Les groupes du journal de paie (masseContracts, masseGroup), l'entrée de masquage d'un groupe (groupInput) et la cellule d'une
-// composition projetée (projectedCell : embauches prévues exemptes) sont ceux du module partagé src/lib/confidentialite/groups.ts : une
-// seule convention pour la Masse salariale, la croisée, l'Écart budgétaire et l'Analyse des écarts. Ré-exportés ici pour les chapitres.
+// composition projetée (projectedCell : embauches prévues de taille 0, jamais protectrices) sont ceux du module partagé
+// src/lib/confidentialite/groups.ts : une seule convention pour la Masse salariale, la croisée, l'Écart budgétaire et l'Analyse des
+// écarts. Ré-exportés ici pour les chapitres.
 export { groupCell, groupInput, isHireKey, masseContracts, masseGroup, masseWindow, projectedCell, type JournalGroup, type MasseMonthGroup, type MasseWindowGroups } from "@/lib/confidentialite/groups";
 
 // La garde du filtre Service est celle de src/lib/payroll/service-rows.ts (serviceGuardOnWindows : lignes par service du journal

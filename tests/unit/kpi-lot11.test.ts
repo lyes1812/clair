@@ -10,6 +10,7 @@ import { GLOSSARY_KPI, KPI_TERMS } from "@/lib/glossary/kpi";
 import { ABSENCE_ALL_MOTIFS_LABEL } from "@/lib/rh/kpi/absence-motifs";
 import { ETP_PRORATED_LABEL, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
 import type { ConfidentialiteSetting } from "@/lib/confidentialite";
+import type { CongeCell, MotifWindow } from "@/lib/croisee/conges";
 import type { AbsenceMotifs, EtpProrated } from "@/lib/rh/kpi/types";
 import { etpProratedNotes, motifRows, motifsRetenusLine, readingQualifiers, type MotifLineIn } from "@/lib/viz/kpi";
 
@@ -237,7 +238,19 @@ describe("détail de l'absentéisme : tableau par motif et taux tous motifs, à 
   const v = { kind: "exact", ratio: { num: 10, den: 120 }, months: [], qualifiers: [] } as never;
   const theoretical = { kind: "exact", half: 120, months: [], contributions: [] } as never;
   // Seuil de 1 personne : le tableau est celui du lot 11 (le masquage est testé dans kpi-confidentialite.test.ts).
-  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") => render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m, slug: slug ?? undefined, confidentialite: SEUIL_1 }));
+  // Cellules de la fenêtre (lot 12, relecture : transmises par la page, motifWindow) : fenêtre d'un mois, la cellule de chaque ligne vaut
+  // pour son mois et son total ; personnes en jetons communs aux lignes.
+  const cellsOf = (m: AbsenceMotifs): MotifWindow => {
+    const ids = [...new Set(m.lines.flatMap((l) => l.persons ?? []))].sort();
+    return {
+      lines: m.lines.map((l) => {
+        const c: CongeCell = l.kind === "nd" ? { kind: "nd", reason: l.nd.reason } : { kind: l.kind, half: l.half, persons: l.persons?.length ?? 0, unlinked: l.unlinked ?? 0, who: (l.persons ?? []).map((p) => ids.indexOf(p)) };
+        return { chosen: l.chosen, months: [c], total: c };
+      }),
+      published: { months: [true], tile: true, all: m.all.kind !== "nd" },
+    };
+  };
+  const detail = (m?: AbsenceMotifs, slug: string | null = "demo") => render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs: m, cells: m && cellsOf(m), slug: slug ?? undefined, confidentialite: SEUIL_1 }));
 
   it("tous les motifs présents : libellé et code, nombres d'absences, retenu oui / non, demi-journées, taux", () => {
     const html = detail(motifs);

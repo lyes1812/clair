@@ -155,14 +155,17 @@ describe("paliers après seuil (maskCascade) : masquage principal et secondaire,
     expect(maskCascade(h, LINK, 3).status).toEqual(["masked", "shown", "masked", "shown", "masked"]);
     expect(maskCascade(h, LINK, 4).status).toEqual(["masked", "secondary", "masked", "secondary", "masked"]);
   });
-  it("embauche exempte et sortie d'une personne (seuil 2) : la sortie est masquée, les paliers vides le sont pour elle (ensemble impossible), l'embauche reste affichée et n'apporte personne", () => {
+  it("embauche seule et sortie d'une personne (seuil 2) : la sortie est masquée et rien ne peut la protéger (ensemble impossible) : toute la cascade est n.d., le palier de l'embauche compris", () => {
     // A : 50 000 ; H2 : (120 000 + 10 000) ÷ 3 = 43 333,33 → 43 333. Entrées +3 333 (embauche), sorties −10 000 (C2), résiduel nul.
     const c = value(etpCascade(A, H2, MA, MB));
     expect([c.start, c.end, c.residual]).toEqual([50000, 43333, 0]);
     expect(c.steps.map((s) => s.etp4)).toEqual([3333, 0, -10000, 0, 0]);
     const m = maskCascade(c, LINK, 2);
-    expect(m.status).toEqual(["shown", "secondary", "masked", "secondary", "secondary"]);
-    expect(m.reasons).toEqual([null, R(2), R(2), R(2), R(2)]);
+    // L'embauche prévue (taille 0, projectedGroupCell) n'apporte personne et n'est plus exempte : l'écart total étant publié, la
+    // laisser affichée redonnerait la somme des paliers masqués (écart total − 0,3333 = −1,0000, la seule sortie de C2). Toute la
+    // relation est donc n.d. (cas « impossible » du moteur, règle 3 du lot 12). Avant : [shown, secondary, masked, secondary, secondary].
+    expect(m.status).toEqual(["secondary", "secondary", "masked", "secondary", "secondary"]);
+    expect(m.reasons).toEqual([R(2), R(2), R(2), R(2), R(2)]);
     expect(m.chart).toBe(R(2));
   });
   it("une personne présente dans deux paliers masqués n'y compte qu'une fois", () => {

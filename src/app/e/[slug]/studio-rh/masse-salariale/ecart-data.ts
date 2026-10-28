@@ -3,12 +3,15 @@ import { project } from "@/lib/budget/engine";
 import { getScenario, KIND_LABELS, listBudgets, listScenarios, type ScenarioFull } from "@/lib/budget/store";
 import { budgetVersion, ndVersion, nd, reelVersion, scenarioVersion, val, type ServiceFilter, type Version } from "@/lib/budget/versions";
 import type { ZoomSource } from "@/lib/budget/zoom";
-import { confidentialiteSettingReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell } from "@/lib/confidentialite";
-import { projectedCell } from "@/lib/confidentialite/groups";
+import { flowsOf, type MonthFlow } from "@/lib/budget/flows";
+import type { ProjectedMonth } from "@/lib/budget/types";
+import { confidentialiteReason, confidentialiteSettingReason, isHidden, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { columnStatus, maskColumn, stockColumn } from "@/lib/confidentialite/columns";
+import { projectedCell, projectedGroup } from "@/lib/confidentialite/groups";
 import { croiseeLink } from "@/lib/croisee/confidentialite";
 import { servicesOf } from "@/lib/payroll/engine";
 import { loadPayrollContext, type PayrollContext } from "@/lib/payroll/context";
-import { serviceGuardOnWindows, worstGuard, type ServiceGuard } from "@/lib/payroll/service-rows";
+import { serviceGuardOnWindows, serviceLabel, worstGuard, type ServiceGuard } from "@/lib/payroll/service-rows";
 
 // Choix des versions comparées (Écart budgétaire, Analyse des écarts) : réel PayFit d'une année, scénario d'une année ou budget
 // saisi ; période en rangs de mois de l'année de chaque version ; filtre de service. Rien n'est enregistré : tout vient de
@@ -142,11 +145,56 @@ export async function loadVersions(slug: string, workspaceId: string, sp: Search
 // --- Garde du filtre Service : la garde unique de src/lib/payroll/service-rows.ts, appliquée aux versions comparées --------------------
 // Sous le filtre Service, l'Écart budgétaire et l'Analyse des écarts décrivent le service retenu sur chaque version. Ses mois réels
 // (version réelle : les mois de la période ; scénario : ses mois figés) passent par les lignes par service du journal entier, masquées
-// par le moteur unique (serviceGuardOnWindows : le service est n.d. dès que sa ligne l'est, masquage secondaire compris, comme la
-// Synthèse de la Masse salariale). Ses mois projetés (scénario) passent par la composition projetée du service : contrats réels
-// reliés par le référentiel Collaborateurs ; embauches prévues exemptes (projectedCell), masquage principal (aucune somme par service
-// n'est publiée). Un budget saisi est global : n.d. sous le filtre, rien à protéger. Seuil absent ou illisible : n.d. avec la raison
-// du paramètre (l'écran ajoute le lien vers Paramètres › Confidentialité). null : rien n'est masqué. Fonction pure.
+// par le moteur unique (serviceGuardOnWindows, masquage secondaire compris, comme la Synthèse de la Masse salariale). Ses mois projetés
+// (scénario) passent par les colonnes du mois projeté (maskProjectedServices) : le service est n.d. dès qu'une de ses cellules y est
+// masquée, principal ou secondaire. Un budget saisi est global : n.d. sous le filtre, rien à protéger. Seuil absent ou illisible : n.d.
+// avec la raison du paramètre (l'écran ajoute le lien vers Paramètres › Confidentialité). null : rien n'est masqué. Fonction pure.
+
+// Mois projeté d'un scénario. Sans filtre, l'écran publie les totaux du scénario pour ce mois (masse, effectif et ETP de fin de mois,
+// entrées) ; sous le filtre Service, il publie ceux du service retenu. Chaque grandeur est donc une répartition par service dont le
+// total est publié : une colonne par grandeur, masquée par le moteur unique avec son total fixe, masquage secondaire compris, dans
+// l'ordre canonique des services (maskColumn, stockColumn de src/lib/confidentialite/columns.ts : les mêmes statuts que tout autre
+// écran qui publie la même colonne). Cellules de chaque service du mois (projectedCell : contrats réels reliés à leur personne par le
+// référentiel ; une embauche prévue ne décrit personne et ne protège jamais ; valeur absolue, qui ne sert qu'à l'ordre du masquage) :
+// - masse (et ses rubriques) : contrats et embauches qui portent une contribution du service (service de la contribution) ;
+// - effectif et ETP : salariés et embauches comptés présents en fin de mois dans le service (stockColumn, valeur = l'effectif) ;
+// - entrées : entrants du mois dans le service, valeur = leur nombre (colonne absente quand les mouvements du mois sont n.d.).
+// Rend, pour chaque service présent ce mois-là (null : non ventilé), son statut dans chaque colonne, dans cet ordre. Le statut d'un
+// mois ne dépend que de ses colonnes, jamais d'une fenêtre. Fonction pure.
+export function maskProjectedServices(pm: Extract<ProjectedMonth, { kind: "value" }>, flow: MonthFlow | undefined, link: PersonLink, seuil: number): Map<string | null, MaskStatus[]> {
+  type Group = { masse: number; contributors: Set<string>; present: string[]; entrants: string[] };
+  const groups = new Map<string | null, Group>();
+  const at = (service: string | null): Group => {
+    let g = groups.get(service);
+    if (!g) groups.set(service, (g = { masse: 0, contributors: new Set(), present: [], entrants: [] }));
+    return g;
+  };
+  for (const c of pm.contributions) {
+    const g = at(c.service);
+    g.masse += c.cost;
+    if (c.contractKey !== null) g.contributors.add(c.contractKey);
+  }
+  const people = pm.people ?? {};
+  for (const [key, p] of Object.entries(people)) at(p.service).present.push(key);
+  const entrants = flow?.kind === "value" ? flow.entrees : null;
+  if (entrants) for (const key of entrants) if (people[key]) at(people[key].service).entrants.push(key);
+  const list = [...groups];
+  const masse = maskColumn(list.map(([service, g]) => ({ key: service, label: serviceLabel(service), cell: projectedCell(g.contributors, link, seuil, g.masse) })), seuil, true);
+  const stock = stockColumn(
+    Object.fromEntries(list.filter(([, g]) => g.present.length > 0).map(([service, g]) => {
+      const pg = projectedGroup(g.present, link);
+      return [serviceLabel(service), { ...pg, contracts: g.present.length - pg.hires }];
+    })),
+    seuil,
+  );
+  const entrees = entrants ? maskColumn(list.map(([service, g]) => ({ key: service, label: serviceLabel(service), cell: projectedCell(g.entrants, link, seuil, g.entrants.length) })), seuil, true) : null;
+  return new Map(list.map(([service, g]) => [service, [
+    columnStatus(masse, service, g.masse),
+    columnStatus(stock, serviceLabel(service), g.present.length),
+    ...(entrees ? [columnStatus(entrees, service, g.entrants.length)] : []),
+  ]]));
+}
+
 export function ecartServiceGuard(loaded: Pick<Loaded, "ctx" | "versions" | "sources" | "months" | "filter">, conf: ConfidentialiteSetting): ServiceGuard | null {
   if (!loaded.filter) return null;
   const settingNd = confidentialiteSettingReason(conf);
@@ -156,25 +204,26 @@ export function ecartServiceGuard(loaded: Pick<Loaded, "ctx" | "versions" | "sou
   const data = loaded.ctx.kpi.input?.data ?? null;
   const link = data ? croiseeLink(data) : new Map<string, string>();
   const windows: string[][] = [];
-  const projected: MaskCell[] = [];
+  const projected: MaskStatus[] = [];
   loaded.versions.forEach((v, i) => {
     const src = loaded.sources[i];
     if (!src || src.kind === "budget") return;
     const months = loaded.months(v.year);
     windows.push(months.filter((m) => v.months.get(m)?.layer === "reel"));
-    if (src.kind !== "scenario") return;
+    if (src.kind !== "scenario" || src.proj.kind !== "value") return;
+    const flows = new Map(flowsOf(src.base, src.proj).map((f) => [f.month, f]));
     for (const m of months) {
-      const f = v.months.get(m);
-      if (!f || f.layer === "reel") continue;
-      // Mois projeté : la masse affichée du service (null : déjà n.d.) et sa composition ; composition n.d. : effectif non dénombré.
-      const masse = f.masse.kind === "value" ? f.masse.v : null;
-      projected.push(f.people.kind === "value" ? projectedCell(Object.keys(f.people.map), link, seuil, masse) : { size: null, value: masse === null ? null : Math.abs(masse) });
+      // Mois projeté par le scénario lui-même (un mois projeté par le scénario parent n'est pas filtrable : n.d. sous le filtre).
+      if (v.months.get(m)?.layer !== "projete") continue;
+      const pm = src.proj.months.find((x) => x.month === m);
+      if (!pm || pm.kind !== "value") continue; // mois n.d. : aucun total publié, rien à protéger
+      projected.push(...(maskProjectedServices(pm, flows.get(m), link, seuil).get(value) ?? []));
     }
   });
   const journal = loaded.ctx.input;
   const real = journal ? serviceGuardOnWindows(journal, windows, value, link, conf) : null;
-  const st = maskGroups(projected, seuil, false);
-  const worst = st.find((x) => x === "masked") ?? st.find(isHidden);
-  const proj: ServiceGuard | null = worst === undefined ? null : { cause: "seuil", reason: maskReason(worst, seuil)! };
+  const proj: ServiceGuard | null = projected.some((s) => s === "masked" || s === "secondary")
+    ? { cause: "seuil", reason: confidentialiteReason(seuil) }
+    : projected.some(isHidden) ? { cause: "seuil", reason: SEUIL_NON_VERIFIABLE } : null;
   return worstGuard([real, proj], seuil);
 }

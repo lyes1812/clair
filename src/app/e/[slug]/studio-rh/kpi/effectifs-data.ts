@@ -14,27 +14,30 @@ import { loadPayrollContext } from "@/lib/payroll/context";
 import { serviceOf, type JournalInput } from "@/lib/payroll/engine";
 import { classify, gridRubrics } from "@/lib/payroll/grid";
 import { buildContractServiceMap } from "@/lib/payroll/service-map";
+import { serviceLabel, serviceMonthMask } from "@/lib/payroll/service-rows";
 import { headcountAt } from "@/lib/rh/headcount";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { countedOpts, selectableYears } from "@/lib/rh/kpi/period";
 import { monthMovements } from "@/lib/rh/kpi/turnover";
 import type { KpiInput } from "@/lib/rh/kpi/types";
 import type { ContractDraft } from "@/lib/rh/referential/types";
-import { gridMask, maskedCount, maskedGrid, monthShortLabel, repartition, repartitionMasked, seuilOf, type GridMask, type GridRead, type GridSizes, type MaskedRepartition } from "@/lib/viz/kpi";
+import { gridMask, maskedCount, maskedGrid, monthShortLabel, repartition, repartitionMasked, seuilOf, type GridCanonical, type GridMask, type GridRead, type GridSizes, type MaskedRepartition } from "@/lib/viz/kpi";
 
 // Chargement commun des Effectifs mensuels (écran et export) : rubrique, axe, version (réel PayFit ou scénario) et année lus dans
 // l'adresse ; une valeur inconnue prend le défaut de l'écran. La grille vient de monthlyGrid, sans autre calcul.
 //
 // Seuil de confidentialité (paramètre de l'espace, module partagé src/lib/confidentialite, sans valeur par défaut) : chaque cellule
 // (groupe × mois) d'une répartition est comptée en PERSONNES DISTINCTES — les contrats qui portent la valeur affichée, reliés à leur
-// personne par le référentiel Collaborateurs — et masquée par le moteur partagé en une seule passe pour la grille et la répartition
-// (gridMask : pour un flux, les mois de chaque groupe protègent son cumul ; puis masquage secondaire dans chaque colonne de mois, dont
-// le total est publié, et dans la colonne des cumuls). Le total du mois n'est jamais masqué. `grid` est la grille APRÈS masquage
-// (écran, graphiques et export lisent les mêmes cellules) ; `raw` la grille du calcul et `mask` les statuts, qui servent à la
-// répartition par groupe (repartitionMasked : anneau, tableau et feuille « Répartition » lisent les mêmes statuts).
-// Embauches prévisionnelles d'un scénario (décision de l'intégrateur, à soumettre à Lyes) : elles ne décrivent aucune personne réelle ;
-// une cellule portée seulement par des embauches prévues est exempte du masquage (affichée) et n'apporte aucune personne protectrice ;
-// une cellule qui mêle embauches et contrats réels se juge sur ses contrats réels.
+// personne par le référentiel Collaborateurs — et reçoit un statut CANONIQUE, le même sur tous les écrans qui publient la même cellule
+// (gridMask : le statut d'un mois ne dépend que de sa colonne, dont le total est publié ; stocks par la passe partagée avec le Suivi et
+// la croisée 02 ; masse × service des mois réels par la colonne de la Masse salariale ; le cumul d'un flux se déduit de ses mois). Le
+// total du mois n'est jamais masqué. `grid` est la grille APRÈS masquage (écran, graphiques et export lisent les mêmes cellules) ;
+// `raw` la grille du calcul et `mask` les statuts, qui servent à la répartition par groupe (repartitionMasked : anneau, tableau et
+// feuille « Répartition » lisent les mêmes statuts).
+// Embauches prévisionnelles d'un scénario (décision du lot 12, à confirmer par Lyes) : elles ne décrivent aucune personne réelle ; une
+// cellule portée seulement par des embauches prévues est affichée, ne protège jamais et n'est masquée qu'avec toute sa colonne quand
+// celle-ci ne peut pas être protégée (projectedGroupCell) ; une cellule qui mêle embauches et contrats réels se juge sur ses contrats
+// réels.
 export type EffectifsSearch = { mesure: string; axe: string; version: string; annee: string };
 export type EffectifsData = {
   measure: Measure;
@@ -134,7 +137,7 @@ function realMembers(src: { kpi: KpiInput | null; journal: JournalInput | null; 
 
 // Contrats et embauches qui portent la valeur de chaque groupe d'un mois projeté : mêmes règles de groupe que la grille
 // (budget/monthly.ts, mois projetés) ; une embauche prévisionnelle (clé « embauche:<id> ») est comptée à part : elle ne décrit personne,
-// ne protège jamais, et une cellule qu'elle porte seule est exempte du masquage (voir gridMask).
+// ne protège jamais, et une cellule qu'elle porte seule n'est masquée qu'avec toute sa colonne (voir gridMask).
 function scenarioMembers(src: ScenarioSource, m: string, measure: Measure, axis: Axis): Members | null {
   const { base, hyps, proj } = src;
   if (proj.kind === "error" || axis === "etablissement") return null;
@@ -211,15 +214,24 @@ export async function loadEffectifs(slug: string, workspaceId: string, kpi: KpiI
     }
     return members.get(m)!;
   };
+  // contracts : nombre de contrats du groupe (l'effectif d'un stock, valeur d'ordre de son masquage, comme le Suivi et la croisée 02).
   const sizes: GridSizes = (group, m) => {
     const mem = membersOf(m);
     if (!mem) return null;
     const g = mem.get(group);
-    return g ? { ...personsOfContracts(g.contracts, link), hires: g.hires.size } : { persons: [], unlinked: 0, hires: 0 };
+    return g ? { ...personsOfContracts(g.contracts, link), hires: g.hires.size, contracts: g.contracts.size } : { persons: [], unlinked: 0, hires: 0, contracts: 0 };
   };
   const stock = measure === "etp" || measure === "inscrit";
   const read = seuilOf(confidentialite);
-  const mask = raw.kind === "value" && read.seuil !== null ? gridMask(raw, sizes, read.seuil, stock) : null;
+  // Masse × service, mois réels : la masse d'un service pour un mois est aussi publiée par la Masse salariale (Synthèse, export,
+  // croisée 01 et 05) et sous le filtre Service ; son statut est celui de la colonne canonique du mois (serviceMonthMask : mêmes
+  // groupes, même valeur, même ordre), jamais une colonne recalculée ici. Les mois projetés d'un scénario gardent la colonne du mois.
+  const seuil = read.seuil;
+  const canonical: GridCanonical | undefined =
+    raw.kind === "value" && seuil !== null && measure === "masse" && axis === "service" && journal?.serviceAxis
+      ? (m) => (raw.layers.get(m) === "reel" ? new Map([...serviceMonthMask(journal, m, link, seuil)].map(([v, st]) => [serviceLabel(v), st])) : null)
+      : undefined;
+  const mask = raw.kind === "value" && seuil !== null ? gridMask(raw, sizes, seuil, stock, canonical) : null;
   const grid: Grid = raw.kind === "value" ? maskedGrid(raw, mask, read.seuil, read.reason) : raw;
   return { measure, axis, mdef, versions, version, versionLabel: versions.find((v) => v.value === version)!.label, full, years, year, grid, raw, unit: mdef.unit, stock, confidentialite, seuil: read.seuil, seuilReason: read.reason, sizes, mask, masked: maskedCount(mask) };
 }

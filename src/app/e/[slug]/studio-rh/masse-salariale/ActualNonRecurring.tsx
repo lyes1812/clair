@@ -2,11 +2,14 @@ import { Money, MoneyUnitLabel } from "@/components/Money";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import type { JournalInput } from "@/lib/payroll/engine";
 import { buildActualNonRecurring, type ActualEvent } from "@/lib/payroll/non-recurring";
+import type { ConfidentialiteSetting, PersonLink } from "@/lib/confidentialite";
 import { formatMonth } from "@/lib/dates";
+import { maskNonRecurring } from "@/lib/payroll/non-recurring-mask";
+import type { ServiceGuard } from "@/lib/payroll/service-rows";
 import { ActionForm } from "../hypotheses/ActionForm";
 import type { FormState } from "../hypotheses/actions";
 import { decText, Field, Text } from "../hypotheses/shared";
-import { PanelHead, ReadDetails, ScrollTable, Tile } from "./components";
+import { ConfidentialiteLine, PanelHead, ReadDetails, ScrollTable, Tile } from "./components";
 
 type Save = (previous: FormState, form: FormData) => Promise<FormState>;
 type Props = {
@@ -18,6 +21,11 @@ type Props = {
   contracts: { key: string; label: string }[];
   editable: boolean;
   save?: Save;
+  // Seuil de confidentialité : les natures sont des groupes de personnes (contrats déclarés reliés par le référentiel, link) ; garde du
+  // filtre Service (guard) : la masse réelle du service retenu est n.d. comme le reste de l'écran.
+  confidentialite: ConfidentialiteSetting;
+  link: PersonLink;
+  guard: ServiceGuard | null;
 };
 const CATEGORIES = [
   { kind: "licenciement", label: "Licenciements" },
@@ -62,8 +70,10 @@ function categorySummary(rows: ReturnType<typeof buildActualNonRecurring>["rows"
 }
 
 export function ActualNonRecurring(p: Props) {
-  const model = buildActualNonRecurring(p.input, p.events, p.months, p.syncId);
+  const built = buildActualNonRecurring(p.input, p.events, p.months, p.syncId);
+  const model = p.guard ? { ...built, raw: null, adjusted: null, reasons: [p.guard.reason, ...built.reasons] } : built;
   const reason = model.reasons.join(" · ");
+  const mask = maskNonRecurring(model.rows, p.months, p.link, p.confidentialite);
   const save = p.editable && p.save && p.syncId && p.input && p.months.length ? p.save : null;
   const contractLabel = (keys: string[]) => keys.length ? keys.map((key) => p.contracts.find((contract) => contract.key === key)?.label ?? "Contrat indisponible dans le référentiel courant").join(" · ") : "Non rattaché à un contrat";
   return <section className="panel" data-testid="actual-non-recurring">
@@ -77,8 +87,11 @@ export function ActualNonRecurring(p: Props) {
     {model.reasons.length ? <ul className="ms-nd-reasons" data-testid="actual-non-recurring-reasons">{model.reasons.map((line) => <li key={line}>{line}</li>)}</ul> : null}
     <ScrollTable label="Éléments non récurrents du réel par nature"><table className="data-table sticky sticky-first" data-testid="actual-non-recurring-categories"><thead><tr><th scope="col">Nature</th><th scope="col" className="num">Éléments identifiés</th><th scope="col" className="num">Coût chargé déclaré</th></tr></thead><tbody>{CATEGORIES.map((category) => {
       const summary = categorySummary(model.rows, category.kind);
+      const hidden = mask[category.kind].reason;
+      if (hidden) return <tr key={category.kind}><th scope="row">{category.label}</th><td className="num"><span className="nd" title={hidden}>n.d.</span></td><td className="num"><span className="nd" title={hidden}>n.d.</span><p className="tile-foot">{hidden}</p></td></tr>;
       return <tr key={category.kind}><th scope="row">{category.label}</th><td className="num">{summary.count || "Aucun élément identifié"}</td><td className="num">{summary.count ? shown(summary.amount, summary.reason) : "—"}{summary.reason ? <p className="tile-foot">{summary.reason}</p> : null}</td></tr>;
     })}</tbody></table></ScrollTable>
+    <ConfidentialiteLine slug={p.slug} setting={p.confidentialite} testid="actual-non-recurring-confidentialite" />
     {p.editable && model.rows.length ? <>
       <ScrollTable label="Identifications du réel et sources renseignées"><table className="data-table sticky sticky-first" data-testid="actual-non-recurring-details"><thead><tr><th scope="col">Mois</th><th scope="col">Nature</th><th scope="col">Contrat / binôme</th><th scope="col" className="num">Coût chargé isolé</th><th scope="col">Source / justificatif</th></tr></thead><tbody>{model.rows.map((row) => <tr key={row.event.id}><th scope="row">{formatMonth(row.event.month)}</th><td>{KINDS[row.event.kind]}</td><td className="wrap">{contractLabel(row.event.contractKeys)}</td><td className="num">{shown(row.amount, row.reason)}{row.reason ? <p className="tile-foot">{row.reason}</p> : null}</td><td className="wrap">{row.event.note || <span className="nd">Source non renseignée</span>}</td></tr>)}</tbody></table></ScrollTable>
       {save ? model.rows.map((row) => <details className="ms-read-details" key={row.event.id}><summary>Modifier l’identification : {KINDS[row.event.kind]} · {formatMonth(row.event.month)}</summary><div className="ms-read-body"><EventForm p={{ ...p, save }} event={row.event} /></div></details>) : null}

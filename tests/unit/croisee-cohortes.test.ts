@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Contribution, ContributionKind, Hypothesis, ProjectedMonth, Projection } from "@/lib/budget/types";
 import type { PersonLink } from "@/lib/confidentialite";
+import { projectedGroupCell } from "@/lib/confidentialite/groups";
 import { linkedGroupCell, maskCohorts, maskNonRecurring, nonRecurringContributors, partitionCohorts, type CohortPartition, type LinkedGroup } from "@/lib/croisee/cohortes";
 import type { ActualEvent } from "@/lib/payroll/non-recurring";
 
@@ -297,16 +298,23 @@ describe("maskNonRecurring — seuil de confidentialité sur les deux totaux (le
     expect(maskNonRecurring({ realised: G(["q1", "q2"]), projected: G(P(2), 1) }, amounts, 3)).toEqual({ realised: "masked", projected: "unverifiable" });
   });
 
-  it("embauches prévisionnelles (décision du lot 12) : un total porté seulement par des embauches est exempt (affiché) et ne protège pas ; mêlé à des contrats réels, il se juge sur ceux-ci", () => {
-    // Prévus : 2 embauches prévues seulement → exempt, affiché, même au seuil 5 ; déjà comptabilisés : 1 personne → masqué, et aucune
-    // autre cellule ne peut le protéger (l'exempte n'apporte personne) : il reste seul masqué.
-    expect(maskNonRecurring({ realised: G(["q1"]), projected: G([], 0, 2) }, amounts, 2)).toEqual({ realised: "masked", projected: "shown" });
+  it("embauches prévisionnelles (décision du lot 12) : un total porté seulement par des embauches est affiché, ne protège jamais, et n'est masqué qu'avec toute la relation ; mêlé à des contrats réels, il se juge sur ceux-ci", () => {
+    // Prévus : 2 embauches prévues seulement (taille 0) ; déjà comptabilisés : 1 personne → masqué. Aucune cellule ne peut le protéger
+    // (les embauches n'apportent personne) : cas « impossible », la somme « Non récurrents retirés » étant publiée, toute la relation
+    // est n.d. (sinon « retirés − prévus » redonnerait les réalisés : fuite relevée par la relecture du lot 12 quand les embauches
+    // étaient exemptes et restaient affichées).
+    expect(maskNonRecurring({ realised: G(["q1"]), projected: G([], 0, 2) }, amounts, 2)).toEqual({ realised: "masked", projected: "secondary" });
+    // Cas de la relecture : réalisés portés par une hypothèse non reliée (non vérifiable), prévus par deux embauches : tout n.d.
+    expect(maskNonRecurring({ realised: G([], 1), projected: G([], 0, 2) }, amounts, 5)).toEqual({ realised: "unverifiable", projected: "secondary" });
+    // Réalisés affichés (5 personnes ≥ 5) : les embauches seules restent affichées, même au seuil 5.
     expect(maskNonRecurring({ realised: G(P(5, "q")), projected: G([], 0, 2) }, amounts, 5)).toEqual({ realised: "shown", projected: "shown" });
     // Prévus : 1 personne reliée + 1 embauche : jugé sur la personne (1 < 2) → masqué ; 2 reliées + 1 embauche → affiché.
     expect(maskNonRecurring({ realised: G(P(3, "q")), projected: G(["p1"], 0, 1) }, amounts, 2)).toEqual({ realised: "secondary", projected: "masked" });
     expect(maskNonRecurring({ realised: G(P(3, "q")), projected: G(P(2), 0, 1) }, amounts, 2)).toEqual({ realised: "shown", projected: "shown" });
-    // Cellule du module : exempte (taille 0, sans membre), ou l'entrée du module partagé sur les contrats réels (valeur absolue).
-    expect(linkedGroupCell(G([], 0, 2), 2, -300)).toEqual({ size: 0, value: 300, members: [], exempt: true });
+    // Cellule du module : celle du module partagé (projectedGroupCell) ; embauches seules : taille 0, sans membre, JAMAIS exempte ;
+    // sinon l'entrée du module partagé sur les contrats réels (valeur absolue).
+    expect(linkedGroupCell(G([], 0, 2), 2, -300)).toEqual({ size: 0, value: 300, members: [] });
+    expect(linkedGroupCell(G([], 0, 2), 2, -300)).toEqual(projectedGroupCell(G([], 0, 2), 2, -300));
     expect(linkedGroupCell(G(["p1"], 0, 1), 2, 300)).toEqual({ size: 1, value: 300, members: ["p1"] });
     expect(linkedGroupCell(G(["p1"], 1, 1), 2, 300)).toEqual({ size: null, value: 300, members: [] });
     expect(linkedGroupCell(G([], 0, 0), 2, 300)).toEqual({ size: null, value: 300, members: [] });
@@ -317,11 +325,10 @@ describe("maskNonRecurring — seuil de confidentialité sur les deux totaux (le
     if (p.kind !== "value") throw new Error(p.reason);
     expect(p.onlyCur).toEqual({ count: 1, prev: 0, cur: 50_000, delta: 50_000, persons: [], unlinked: 0, hires: 1 });
     expect(p.total).toEqual({ count: 2, prev: 100_000, cur: 150_000, delta: 50_000, persons: ["p-A"], unlinked: 0, hires: 1 });
-    // Seuil 2 : « seulement N » (embauche seule) exempt, affichée ; « les deux » (p-A, 1 personne) masqué. L'exempte n'apporte
-    // personne : aucune colonne ne peut atteindre le seuil, le moteur masque alors toute la relation, soit la seule autre ligne non
-    // exempte, « seulement N-1 » (ligne vide : 0 contrat, 0 €), en second. Limite de la décision sur les embauches, signalée à Lyes :
-    // « les deux » se lit par différence du total publié et de la ligne exempte.
-    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "secondary", onlyCur: "shown", both: "masked", outside: "shown" });
+    // Seuil 2 : « les deux » (p-A, 1 personne) masqué ; « seulement N » (embauche seule) : taille 0, n'apporte personne. Aucune
+    // colonne ne peut atteindre le seuil : le moteur masque toute la relation, la ligne des embauches comprise (elle n'est plus
+    // exempte : sinon « les deux » se lirait par différence du total publié et de la ligne des embauches, limite levée au lot 12).
+    expect(maskCohorts(p, 2)).toEqual({ onlyPrev: "secondary", onlyCur: "secondary", both: "masked", outside: "shown" });
   });
 
   it("contributeurs non dénombrés (contribution sans contrat ni hypothèse) : total non vérifiable, l'autre masqué en second", () => {

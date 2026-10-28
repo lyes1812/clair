@@ -6,6 +6,7 @@ import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { confidentialiteHref, getConfidentialite } from "@/lib/confidentialite";
+import { declaredLink } from "@/lib/payroll/non-recurring-mask";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatMonth } from "@/lib/dates";
@@ -107,6 +108,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const actualVersions = Object.fromEntries(actualEvents.map((event) => [event.id, actualEventVersion(event)]));
   const people = new Map(ctx.kpi.collab.data?.persons.map((person) => [person.personKey, person]));
   const actualContracts = editable ? (ctx.kpi.collab.data?.contracts ?? []).map((contract) => ({ key: contract.contractKey, label: `${personLabel(contract.personKey ? people.get(contract.personKey) : null) ?? "Contrat sans nom"} · ${contract.startDate ?? "début n.d."}` })) : [];
+  // Personnes des contrats déclarés sur les éléments non récurrents (seuil de confidentialité du tableau par nature).
+  const declared = declaredLink(ctx.kpi.collab.data?.contracts ?? []);
   const ignore = (k: string, v: string, why: string) => notices.push(`paramètre ignoré : ${k}=${v} (${why})`);
   const showGraph = aff !== "tableau";
   const showTable = aff !== "graphique";
@@ -258,7 +261,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         </div>
       </div>
 
-      {vue !== "paie-compta" && <ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} />}
+      {vue !== "paie-compta" && <ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} confidentialite={confidentialite} link={declared} guard={guard} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} />}
 
       {vue === "fixe-variable" && <FixeVariableView slug={slug} input={input} months={months} prevMonths={prevMonths} aff={aff} tableHref={tableHref} link={link} confidentialite={confidentialite} guard={guard} unfilterHref={href({ svc: "" })} />}
       {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} serviceValue={serviceValue} compta={await ctx.compta()} aff={aff} tableHref={tableHref} unfilterHref={href({ svc: "" })} link={link} confidentialite={confidentialite} guard={guard} />}

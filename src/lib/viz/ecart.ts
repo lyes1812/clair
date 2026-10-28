@@ -150,8 +150,9 @@ export const eurosSigned = (cents: number) => `${cents > 0 ? "+" : ""}${neg(form
 // (principal et secondaire) est celui du module partagé (maskGroups / maskReason) ; les cellules sont celles de projectedCell : rien
 // n'est recodé ici, les fonctions ci-dessous rangent les raisons. Un contrat réel non relié (contrat sans personne rattachée) ne
 // protège jamais ; une embauche prévue d'un scénario ne décrit personne de réel : un palier porté seulement par des embauches prévues
-// est exempt du masquage (affiché) et n'apporte aucune personne protectrice, un palier qui les mêle à des contrats réels se juge sur
-// ses contrats réels. Les totaux (départ, arrivée, écart total, résiduel ; pont de toute l'entreprise) ne sont jamais masqués.
+// est affiché, n'apporte aucune personne protectrice et n'est masqué qu'avec tous les paliers quand la cascade ne peut pas être
+// protégée (sinon l'écart total moins les embauches redonnerait la somme masquée) ; un palier qui les mêle à des contrats réels se juge
+// sur ses contrats réels. Les totaux (départ, arrivée, écart total, résiduel ; pont de toute l'entreprise) ne sont jamais masqués.
 
 export type { Confidentialite } from "@/lib/croisee/confidentialite";
 

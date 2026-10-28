@@ -12,7 +12,8 @@ import { ABSENCE_ALL_MOTIFS_LABEL, absenceByMotif, absenceTypePersons } from "@/
 import { monthWindow } from "@/lib/rh/kpi/period";
 import type { AbsenceMotifs, KpiInput } from "@/lib/rh/kpi/types";
 import type { KpiContext } from "@/lib/rh/kpi-context";
-import { gridMask, maskedCount, maskedGrid, maskMotifRows, motifMask, motifRows, repartitionMasked, seuilFilterText, seuilOf, seuilText, typeCountMask, type GridIn, type GridSizes, type MotifMaskLine } from "@/lib/viz/kpi";
+import { gridMask, maskedCount, maskedGrid, maskMotifRows, motifMask, motifRows, repartitionMasked, seuilFilterText, seuilOf, seuilText, typeCountMask, type GridIn, type GridSizes } from "@/lib/viz/kpi";
+import type { CongeCell, MotifWindow, MotifWindowLine } from "@/lib/croisee/conges";
 import { absence, DSN_ABSENCES, kpiInput, readAbsences } from "./helpers/kpi";
 import { payfitHistoryLimit, rawPayfitHistory } from "@/lib/rh/raw-history";
 import { dsnFixtureBuild, payfitEdgeBuild } from "./helpers/rh";
@@ -131,40 +132,48 @@ describe("moteur : personnes distinctes par motif (avril 2026)", async () => {
 });
 
 // --- Masquage du tableau par motif (cas écrits à la main) -----------------------------------------------------------------------
-const line = (chosen: boolean, half: number | null, who: { persons: string[]; unlinked: number } | null, kind: "exact" | "lower_bound" | "nd" = half === null ? "nd" : "exact"): MotifMaskLine =>
-  kind === "nd" ? { chosen, kind: "nd", half: null } : { chosen, kind, half: half!, ...(who ?? {}) };
+// Lot 12 (relecture) : motifMask lit la colonne de la fenêtre de motifWindowMask, la fonction partagée avec la croisée 03 ; ses cellules
+// sont celles de la fenêtre (motifs × mois, et total). Ces cas portent sur la colonne de la fenêtre seule : fenêtre d'un mois dont
+// l'absentéisme n'est pas publié (aucune relation de colonne de mois), chaque ligne portant la même cellule pour son mois et son total.
+// Jeton de personne : le numéro de « pN ».
+const tok = (p: string) => Number(p.replace(/\D/g, ""));
+const line = (chosen: boolean, half: number | null, who: { persons: string[]; unlinked: number } | null, kind: "exact" | "lower_bound" | "nd" = half === null ? "nd" : "exact"): MotifWindowLine => {
+  const c: CongeCell = kind === "nd" ? { kind: "nd", reason: "n.d. (test)" } : { kind, half: half!, persons: who?.persons.length ?? 0, unlinked: who?.unlinked ?? 0, who: (who?.persons ?? []).map(tok) };
+  return { chosen, months: [c], total: c };
+};
+const win1 = (lines: MotifWindowLine[], published: { tile: boolean; all: boolean }): MotifWindow => ({ lines, published: { months: [false], ...published } });
 const PUB = { tile: true, all: true };
 
 describe("tableau par motif : masquage principal, exception du motif retenu unique, masquage secondaire, taux tous motifs", () => {
   it("seuil 3 : un autre motif de 2 personnes est masqué ; le taux tous motifs étant publié, l'autre motif affiché le plus petit (4 personnes) l'est aussi ; le motif retenu unique n'est jamais masqué", () => {
-    const m = motifMask([line(true, 10, P("p1", "p2", "p3")), line(false, 18, P("p1", "p2")), line(false, 30, P("p4", "p5", "p6", "p7"))], PUB, 3);
+    const m = motifMask(win1([line(true, 10, P("p1", "p2", "p3")), line(false, 18, P("p1", "p2")), line(false, 30, P("p4", "p5", "p6", "p7"))], PUB), 3);
     expect(m.exempt).toBe(0);
     expect(m.lines).toEqual(["shown", "masked", "secondary"]);
     expect(m.all).toBe("shown");
   });
   it("seuil 3 : un seul autre motif, sous le seuil : rien ne peut le protéger, le taux tous motifs est masqué (secondaire)", () => {
-    const m = motifMask([line(true, 10, P("p1", "p2", "p3")), line(false, 4, P("p1"))], PUB, 3);
+    const m = motifMask(win1([line(true, 10, P("p1", "p2", "p3")), line(false, 4, P("p1"))], PUB), 3);
     expect(m.lines).toEqual(["shown", "masked"]);
     expect(m.all).toBe("secondary");
   });
   it("seuil 3 : deux motifs retenus (la tuile est leur somme publiée) : celui d'une personne est masqué, l'autre le protège (secondaire) ; le taux tous motifs reste", () => {
-    const m = motifMask([line(true, 10, P("p1", "p2", "p3")), line(true, 2, P("p4"))], PUB, 3);
+    const m = motifMask(win1([line(true, 10, P("p1", "p2", "p3")), line(true, 2, P("p4"))], PUB), 3);
     expect(m.exempt).toBeNull();
     expect(m.lines).toEqual(["secondary", "masked"]);
     expect(m.all).toBe("shown");
   });
   it("le motif retenu unique (égal à la tuile) n'est pas masqué même sous le seuil ; tuile et taux non publiés : masquage principal seul", () => {
-    expect(motifMask([line(true, 2, P("p1")), line(false, 4, P("p2", "p3", "p4"))], PUB, 3).lines).toEqual(["shown", "shown"]);
-    const m = motifMask([line(false, 2, P("p1")), line(false, 4, P("p2", "p3", "p4"))], { tile: false, all: false }, 3);
+    expect(motifMask(win1([line(true, 2, P("p1")), line(false, 4, P("p2", "p3", "p4"))], PUB), 3).lines).toEqual(["shown", "shown"]);
+    const m = motifMask(win1([line(false, 2, P("p1")), line(false, 4, P("p2", "p3", "p4"))], { tile: false, all: false }), 3);
     expect(m.lines).toEqual(["masked", "shown"]);
     expect(m.all).toBe("nd");
   });
   it("contrat non relié : il ne protège jamais (non vérifiable sous le seuil, affiché dès que les personnes reliées suffisent) ; borne basse sans personne comptée : non vérifiable ; ligne vide : affichée ; ligne n.d. : n.d.", () => {
-    const m = motifMask([line(true, 10, P("p1", "p2", "p3")), line(false, 4, { persons: ["p1"], unlinked: 1 }), line(false, 6, { persons: ["p4", "p5", "p6"], unlinked: 2 }), line(false, 0, P(), "lower_bound"), line(false, 0, P()), line(false, null, null)], { tile: true, all: false }, 3);
+    const m = motifMask(win1([line(true, 10, P("p1", "p2", "p3")), line(false, 4, { persons: ["p1"], unlinked: 1 }), line(false, 6, { persons: ["p4", "p5", "p6"], unlinked: 2 }), line(false, 0, P(), "lower_bound"), line(false, 0, P()), line(false, null, null)], { tile: true, all: false }), 3);
     expect(m.lines).toEqual(["shown", "unverifiable", "shown", "unverifiable", "shown", "nd"]);
   });
   it("une valeur sans aucune personne (lignes sans personnes transmises) est non vérifiable, jamais affichée", () => {
-    expect(motifMask([line(true, 10, P("p1")), line(false, 8, null)], PUB, 1).lines).toEqual(["shown", "unverifiable"]);
+    expect(motifMask(win1([line(true, 10, P("p1")), line(false, 8, null)], PUB), 1).lines).toEqual(["shown", "unverifiable"]);
   });
   it("lignes après masquage : motif et « retenu » conservés, les quatre nombres n.d. avec la raison du seuil ; paramètre absent : toutes les lignes n.d. avec sa raison", () => {
     const rows = motifRows([
@@ -190,6 +199,19 @@ describe("tableau par motif : masquage principal, exception du motif retenu uniq
 });
 
 // --- Écran : détail par motif, motifs de la lecture, ligne Confidentialité ------------------------------------------------------
+// Cellules de la fenêtre (motifWindow) d'un détail écrit à la main : fenêtre d'un mois, chaque ligne du moteur donne la cellule de son
+// mois et de son total (personnes : jetons communs à toutes les lignes) ; absentéisme du mois et tuile publiés, taux tous motifs publié
+// quand il n'est pas n.d. Lot 12 (relecture) : le détail reçoit ces cellules de la page, comme la croisée 03.
+const cellsOf = (m: AbsenceMotifs): MotifWindow => {
+  const ids = [...new Set(m.lines.flatMap((l) => l.persons ?? []))].sort();
+  return {
+    lines: m.lines.map((l) => {
+      const c: CongeCell = l.kind === "nd" ? { kind: "nd", reason: l.nd.reason } : { kind: l.kind, half: l.half, persons: l.persons?.length ?? 0, unlinked: l.unlinked ?? 0, who: (l.persons ?? []).map((p) => ids.indexOf(p)) };
+      return { chosen: l.chosen, months: [c], total: c };
+    }),
+    published: { months: [true], tile: true, all: m.all.kind !== "nd" },
+  };
+};
 describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
   const win = { from: "2026-04", to: "2026-04", label: "avril 2026", months: ["2026-04"] };
   // Maladie (retenue, 2 personnes) ; congés (non retenu, 1 personne : masqué) ; le taux tous motifs, seul à pouvoir révéler les congés
@@ -205,7 +227,7 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
     emptyReason: null,
   };
   it("seuil 2 : la ligne des congés est n.d. (quatre nombres, motif et « retenu » conservés), la maladie reste ; le taux tous motifs est n.d. avec la même raison ; ligne Confidentialité", () => {
-    const html = render(h(AbsenceMotifsDetail, { motifs, slug: "demo", confidentialite: set(2) }));
+    const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: set(2) }));
     const leave = rowOf("test_paid_leave").exec(html)![0];
     expect(leave).toContain('data-masque="oui"');
     expect(text(leave)).toBe(`test_paid_leave n.d. — ${R2} non n.d. — ${R2}`);
@@ -220,14 +242,14 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
     expect(note).not.toContain("parametres#confidentialite");
   });
   it("seuil 1 : rien n'est masqué (deux lignes, taux tous motifs 18,33 %)", () => {
-    const html = render(h(AbsenceMotifsDetail, { motifs, slug: "demo", confidentialite: set(1) }));
+    const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: set(1) }));
     expect(html).not.toContain("data-masque");
     expect(text(html)).toContain("18 (9 j) 15,00 %");
     expect(text(html)).toContain("22 demi-journées = 11 j ÷ 60 j = 18,33 %");
   });
   it("seuil absent ou non transmis : chaque ligne n.d. « non défini » avec le lien vers Paramètres › Confidentialité ; le taux tous motifs (entreprise entière) reste affiché", () => {
     for (const conf of [ABSENT, undefined]) {
-      const html = render(h(AbsenceMotifsDetail, { motifs, slug: "demo", confidentialite: conf }));
+      const html = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: conf }));
       expect(html.match(/data-masque="oui"/g)).toHaveLength(2);
       expect(html.match(/href="\/e\/demo\/parametres#confidentialite"/g)!.length).toBeGreaterThanOrEqual(3);
       expect(text(html)).toContain(`n.d. — ${SEUIL_NON_DEFINI} ( Paramètres )`);
@@ -235,17 +257,17 @@ describe("détail de l'absentéisme : tableau par motif sous le seuil", () => {
       expect(text(html)).toContain("Confidentialité : seuil non défini ( Paramètres )");
       expect(text(html)).not.toMatch(/(^|[^\d])8,33 %|15,00 %/);
     }
-    const bad = render(h(AbsenceMotifsDetail, { motifs, slug: "demo", confidentialite: INVALID }));
+    const bad = render(h(AbsenceMotifsDetail, { motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: INVALID }));
     expect(text(bad)).toContain(`n.d. — ${SEUIL_ILLISIBLE}`);
   });
   it("le détail de la période transmet le seuil et l'état de la tuile au tableau par motif", () => {
     const v = { kind: "exact", ratio: { num: 10, den: 120 }, months: [], qualifiers: [] } as never;
     const theoretical = { kind: "exact", half: 120, months: [], contributions: [] } as never;
-    const html = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, slug: "demo", confidentialite: set(2) }));
+    const html = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, cells: cellsOf(motifs), slug: "demo", confidentialite: set(2) }));
     expect(html.match(/data-masque="oui"/g)).toHaveLength(1);
     expect(text(html)).toContain("Confidentialité : seuil de 2 personnes");
     // Sans seuil transmis par la page : non défini (jamais une valeur de repli).
-    const none = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, slug: "demo" }));
+    const none = render(h(AbsenteeismWindowDetail, { v, theoretical, detailHref: () => "?", motifs, cells: cellsOf(motifs), slug: "demo" }));
     expect(text(none)).toContain(SEUIL_NON_DEFINI);
   });
   it("motifs de la lecture (tuile) : un nombre sous le seuil est n.d. avec la raison, les autres restent ; ligne Confidentialité dans la tuile (HTML valide : aucun paragraphe dans un span)", () => {
@@ -386,16 +408,17 @@ describe("effectifs mensuels : masquage par colonne (total du mois publié), une
     expect(g.cell("A", "2026-03")).toEqual({ kind: "nd", reason: "mois non lu" });
     expect(g.total("2026-02")).toEqual({ kind: "value", v: 5 });
   });
-  it("répartition : un stock se lit au dernier mois connu (février : rien de masqué) ; un flux cumule janvier et février : B (1 personne) masqué, D (2 personnes, cumul 4) le protège dans la colonne des cumuls ; total conservé", () => {
+  it("répartition : un stock se lit au dernier mois connu (février : rien de masqué) ; un flux cumule janvier et février : le cumul de B et de D, masqués en janvier, est n.d. ; total conservé", () => {
     const stock = repartitionMasked(grid, true, { seuil: 2, mask: gridMask(grid, sizes, 2, true) });
     expect(stock.used).toEqual(["2026-02"]);
     expect(stock.items).toEqual([{ group: "A", v: 3, reason: null }, { group: "B", v: 0, reason: null }, { group: "D", v: 2, reason: null }]);
-    // Flux : cellules jan A 3 / B 1 (masqué) / D 2, fév A 3 / B 0 / D 2, cumuls A 6 (3 personnes), B 1 (1 personne : masqué), D 4 (2).
-    // Colonne de janvier : D (plus petit affiché) protège B ; colonne des cumuls : D (4 < 6) protège B. Statuts lus par la répartition.
+    // Flux : cellules jan A 3 / B 1 (masqué) / D 2, fév A 3 / B 0 / D 2. Colonne de janvier : D (plus petit affiché) protège B.
+    // Statut canonique (lot 12 révisé) : le cumul n'a pas de relation propre, il se déduit de ses mois (n.d. dès qu'un mois est masqué,
+    // raison du seuil) : B et D sont n.d., A (aucun mois masqué) est affiché. Avant, une colonne des cumuls donnait « masked » à B.
     const mask = gridMask(grid, sizes, 2, false);
     expect(mask.months.get("2026-01")).toEqual(["shown", "masked", "secondary"]);
     expect(mask.months.get("2026-02")).toEqual(["shown", "shown", "shown"]);
-    expect(mask.share).toEqual(["shown", "masked", "secondary"]);
+    expect(mask.share).toEqual(["shown", "secondary", "secondary"]);
     const flux = repartitionMasked(grid, false, { seuil: 2, mask });
     expect(flux.items).toEqual([{ group: "A", v: 6, reason: null }, { group: "B", v: null, reason: R2 }, { group: "D", v: null, reason: R2 }]);
     expect(flux.total).toBe(11);
@@ -405,11 +428,12 @@ describe("effectifs mensuels : masquage par colonne (total du mois publié), une
     expect(nd.items[0].reason).toBe(SEUIL_NON_DEFINI);
     expect(nd.total).toBe(11);
   });
-  it("flux, cas de la relecture (G = 1 / 5 / 5 personnes, seuil 5) : la relation « mois du groupe → son cumul » masque février à son tour ; janvier ne se lit plus par différence avec le cumul", () => {
+  it("flux, cas de la relecture (G = 1 / 5 / 5 personnes, seuil 5) : janvier masqué dans sa seule colonne ; les cumuls qui le contiennent sont n.d. ; janvier ne se lit pas par différence", () => {
     // G : janvier p1 (1), février p1…p5 (5), mars p1…p5 (5) → cumul 11 (5 personnes) ; H : p6…p10 chaque mois (5) → cumul 15.
-    // Relation G (mois → cumul 11, affiché) : janvier masqué (1 < 5) ; l'ensemble masqué doit compter 5 personnes et deux cellules :
-    // février (plus petit mois affiché qui apporte des personnes) est masqué à son tour ; mars reste. Colonnes (totaux publiés) : H de
-    // janvier et de février protègent G. Cumuls : G 11 et H 15 affichés — janvier = 11 − mars − février, février étant masqué.
+    // Statut canonique (lot 12 révisé) : un mois ne se juge que sur sa colonne. Janvier : G (1 < 5) masqué, H masqué à son tour (le
+    // total du mois étant publié). Février et mars : 5 personnes chacun, affichés. Le cumul n'ajoute aucune relation : G et H ont un
+    // mois masqué, leurs cumuls sont n.d. Janvier de G : seul « G + H de janvier » (le total du mois) est publié. Avant, la relation
+    // « mois → cumul » masquait aussi février, qui changeait alors de statut selon la fenêtre (fuite entre écrans de la relecture).
     const who: Record<string, Record<string, string[]>> = {
       G: { "2026-01": ["p1"], "2026-02": ["p1", "p2", "p3", "p4", "p5"], "2026-03": ["p1", "p2", "p3", "p4", "p5"] },
       H: { "2026-01": ["p6", "p7", "p8", "p9", "p10"], "2026-02": ["p6", "p7", "p8", "p9", "p10"], "2026-03": ["p6", "p7", "p8", "p9", "p10"] },
@@ -422,15 +446,16 @@ describe("effectifs mensuels : masquage par colonne (total du mois publié), une
     };
     const mask = gridMask(g, (grp, m) => ({ persons: who[grp][m], unlinked: 0 }), 5, false);
     expect(mask.months.get("2026-01")).toEqual(["masked", "secondary"]);
-    expect(mask.months.get("2026-02")).toEqual(["secondary", "secondary"]);
+    expect(mask.months.get("2026-02")).toEqual(["shown", "shown"]);
     expect(mask.months.get("2026-03")).toEqual(["shown", "shown"]);
-    expect(mask.share).toEqual(["shown", "shown"]);
-    const flux = repartitionMasked(g, false, { seuil: 5, mask });
-    expect(flux.items).toEqual([{ group: "G", v: 11, reason: null }, { group: "H", v: 15, reason: null }]);
-    expect(flux.total).toBe(26);
-    expect(maskedCount(mask)).toBe(4);
+    expect(mask.share).toEqual(["secondary", "secondary"]);
     const R5 = confidentialiteReason(5);
-    expect(maskedGrid(g, mask, 5, null).cell("G", "2026-02")).toEqual({ kind: "nd", reason: R5 });
+    const flux = repartitionMasked(g, false, { seuil: 5, mask });
+    expect(flux.items).toEqual([{ group: "G", v: null, reason: R5 }, { group: "H", v: null, reason: R5 }]);
+    expect(flux.total).toBe(26);
+    expect(maskedCount(mask)).toBe(2);
+    expect(maskedGrid(g, mask, 5, null).cell("G", "2026-02")).toEqual({ kind: "value", v: 5 });
+    expect(maskedGrid(g, mask, 5, null).cell("G", "2026-01")).toEqual({ kind: "nd", reason: R5 });
   });
   it("flux : le cumul est masqué quand ses mois ne peuvent pas être protégés (janvier non vérifiable, février sous le seuil, mars vide) ; anneau, tableau et feuille lisent le même statut", () => {
     // G : janvier p1, p2, p3 + un contrat non relié (4 contrats : non vérifiable, aucune personne comptée), février p4, p5 (2 : masqué),
@@ -457,11 +482,11 @@ describe("effectifs mensuels : masquage par colonne (total du mois publié), une
     expect(flux.total).toBe(21);
     expect(effectifsShareSheet(flux, "nombre", "cumul").rows[0]).toEqual(["G", { nd: R5 }, { nd: R5 }, ""]);
   });
-  it("embauches prévisionnelles (décision à soumettre à Lyes) : une cellule portée seulement par des embauches est exempte (affichée) et ne protège personne ; mêlée à des contrats réels, elle se juge sur eux", () => {
+  it("embauches prévisionnelles (décision à soumettre à Lyes) : une cellule portée seulement par des embauches est affichée et ne protège personne ; mêlée à des contrats réels, elle se juge sur eux", () => {
     // Seuil 5, flux (entrées). Groupes : « Embauche prévisionnelle » (janvier : 2 embauches, février : 1 embauche + le contrat réel de
     // p1), CDD (janvier : p2, 1 personne), CDI (p3…p7, 5 personnes chaque mois).
-    // Janvier : CDD masqué ; l'embauche (exempte) n'apporte personne : CDI (5) protège CDD. Février : la cellule mêlée se juge sur p1
-    // (1 < 5) : masquée ; CDI protège. Cumul des embauches : p1 + 3 embauches → 1 personne : masqué ; CDI le protège (cumuls publiés).
+    // Janvier : CDD masqué ; l'embauche (taille 0) n'apporte personne : CDI (5) protège CDD. Février : la cellule mêlée se juge sur p1
+    // (1 < 5) : masquée ; CDI protège. Cumuls déduits des mois (aucune relation propre) : chaque groupe a un mois masqué, n.d.
     const who: Record<string, Record<string, { persons: string[]; unlinked: number; hires: number }>> = {
       "Embauche prévisionnelle": { "2026-01": { persons: [], unlinked: 0, hires: 2 }, "2026-02": { persons: ["p1"], unlinked: 0, hires: 1 } },
       CDD: { "2026-01": { persons: ["p2"], unlinked: 0, hires: 0 }, "2026-02": { persons: [], unlinked: 0, hires: 0 } },
@@ -477,15 +502,31 @@ describe("effectifs mensuels : masquage par colonne (total du mois publié), une
     const mask = gridMask(g, (grp, m) => who[grp][m], 5, false);
     expect(mask.months.get("2026-01")).toEqual(["shown", "masked", "secondary"]);
     expect(mask.months.get("2026-02")).toEqual(["masked", "shown", "secondary"]);
-    expect(mask.share).toEqual(["masked", "masked", "secondary"]);
+    expect(mask.share).toEqual(["secondary", "secondary", "secondary"]);
     const R5 = confidentialiteReason(5);
     const masked = maskedGrid(g, mask, 5, null);
     expect(masked.cell("Embauche prévisionnelle", "2026-01")).toEqual({ kind: "value", v: 2 });
     expect(masked.cell("Embauche prévisionnelle", "2026-02")).toEqual({ kind: "nd", reason: R5 });
-    // Un groupe d'embauches seules sur tous les mois : exempt partout, cumul compris.
+    // Un groupe d'embauches seules sur tous les mois : affiché partout (rien d'autre n'est masqué en février), cumul compris.
     const only = gridMask(g, (grp, m) => (grp === "Embauche prévisionnelle" ? { persons: [], unlinked: 0, hires: 2 } : who[grp][m]), 5, false);
     expect(only.months.get("2026-02")![0]).toBe("shown");
+    expect(only.months.get("2026-01")![0]).toBe("shown");
     expect(only.share![0]).toBe("shown");
+  });
+  it("embauches prévisionnelles, cas « impossible » (relecture du lot 12, seuil 5) : mois projeté, Cadres = 1 salarié réel (1,00 ETP), Non-cadres = 2 embauches seules (2,00 ETP), total 3,00 publié : toute la colonne est n.d.", () => {
+    // Avant, les embauches étaient exemptes : Non-cadres restait affiché et Cadres se lisait par différence (3,00 − 2,00 = 1,00).
+    // Désormais la cellule des embauches (taille 0) ne protège pas et, rien ne pouvant protéger Cadres, elle est masquée avec lui.
+    const M = "2026-09";
+    const vals: Record<string, number> = { Cadres: 10_000, "Non-cadres": 20_000 };
+    const g: GridIn = { months: [M], groups: ["Cadres", "Non-cadres"], cell: (grp) => ({ kind: "value", v: vals[grp] }), total: () => ({ kind: "value", v: 30_000 }) };
+    const sz: GridSizes = (grp) => (grp === "Cadres" ? { persons: ["p1"], unlinked: 0, hires: 0, contracts: 1 } : { persons: [], unlinked: 0, hires: 2, contracts: 0 });
+    for (const stockMeasure of [true, false]) {
+      const mask = gridMask(g, sz, 5, stockMeasure);
+      expect(mask.months.get(M), `stock ${stockMeasure}`).toEqual(["masked", "secondary"]);
+      const out = maskedGrid(g, mask, 5, null);
+      expect(out.cell("Non-cadres", M)).toEqual({ kind: "nd", reason: confidentialiteReason(5) });
+      expect(out.total(M)).toEqual({ kind: "value", v: 30_000 }); // le total publié reste
+    }
   });
   it("feuilles Excel : mêmes cellules n.d. que l'écran, raison en commentaire ; répartition masquée n.d. (valeur et part)", () => {
     const g = maskedGrid(grid, gridMask(grid, sizes, 2, true), 2, null);
@@ -528,7 +569,8 @@ describe("effectifs mensuels par axe (référentiel fictif) : seuil de l'espace 
     expect(e.grid.cell("CDI", "2025-12")).toEqual({ kind: "nd", reason: R2 });
     expect(e.grid.total("2025-12")).toEqual({ kind: "value", v: 7 });
     expect(e.masked).toBe(24); // douze mois de 2025 : CDD présent chaque mois, les deux lignes masquées
-    expect(e.sizes("CDD", "2025-12")).toEqual({ persons: [dsn.contracts.find((c) => c.nature === "02")!.personKey], unlinked: 0, hires: 0 });
+    // contracts : l'effectif du groupe (nombre de contrats), valeur d'ordre du masquage d'un stock (stockColumn, partagée avec le Suivi).
+    expect(e.sizes("CDD", "2025-12")).toEqual({ persons: [dsn.contracts.find((c) => c.nature === "02")!.personKey], unlinked: 0, hires: 0, contracts: 1 });
     expect(e.sizes("CDI", "2025-12")!.persons).toHaveLength(6);
     const y26 = await loadEffectifs("demo", "w1", input, { ...search, annee: "2026" });
     if (y26.grid.kind !== "value") throw new Error("grille 2026 attendue");

@@ -178,7 +178,9 @@
   .cx-foot { break-inside: avoid; }
   /* « Synthèse en PDF · 1 page » (bouton du seul chapitre Synthèse) : n'imprime que l'élément de classe .cx-syn, que le chapitre 01
      pose sur son bloc de synthèse (six cartes, graphique principal, points à surveiller) ; tout le reste du corps du chapitre, ses
-     blocs repliables, les blocs communs et le pied de page sont masqués. Le bloc est agrandi de 10 % et tient sur une page. */
-  body[data-print="synthese"] .cx-chapter-body > :not(.cx-syn), body[data-print="synthese"] .cx-syn .cx-fold, body[data-print="synthese"] .cx-common, body[data-print="synthese"] .cx-foot { display: none !important; }
-  body[data-print="synthese"] .cx-syn { zoom: 1.1; break-inside: avoid; break-after: avoid; }
+     blocs repliables, les blocs communs, le pied de page et l'en-tête « Studio RH · Masse salariale » (la ligne d'impression nomme déjà
+     l'écran, le chapitre et les filtres) sont masqués. Le bloc garde sa taille : agrandi, il passait sur une seconde page (PDF réel du
+     lot 12 mesuré : 2 pages). */
+  body[data-print="synthese"] .cx-chapter-body > :not(.cx-syn), body[data-print="synthese"] .cx-syn .cx-fold, body[data-print="synthese"] .cx-common, body[data-print="synthese"] .cx-foot, body[data-print="synthese"] .cx-ms-head { display: none !important; }
+  body[data-print="synthese"] .cx-syn { break-inside: avoid; break-after: avoid; }
 }

@@ -252,6 +252,9 @@ test("KPI RH : PayFit puis DSN, paramètres, détail, rôles", async ({ page, br
   await expect(page.getByTestId("kpi-categories-scope")).toContainText("Filtres appliqués : nature CDD (02)");
   await expect(page.getByTestId("kpi-categories-scope")).toContainText("sans colonne : CDI");
   await expect(page.getByTestId("kpi-categories-table").locator("tr[data-month='2025-12'] td[data-col='total']")).toHaveText("1 · 0,50 ETP");
+  // Retour à la lecture de septembre 2026 pour la suite du parcours.
+  await page.goto(`${kpi}?detail=etp-end&mois=2026-09#kpi-detail`);
+  await page.waitForLoadState("networkidle");
 
   // Détail N-1 de l'effectif moyen : retrace le 6,50 de la tuile (78/12).
   await page.getByTestId("kpi-tile-headcount-avg-detail-n1").click();

@@ -408,9 +408,10 @@ describe("Où sont les effectifs ? seuil de confidentialité, masquage secondair
       { id: "d", person: "q3" },
       { id: "e", person: "q4" },
     ];
-    expect(serviceSizes(list, (id) => svc[id] ?? null)).toEqual({ Atelier: G(["q1"]), "Non ventilé": G(["q2", "q4"]), Bureau: G(["q3"]) });
-    // Contrat f sans personne rattachée (Bureau) : non relié, jamais une personne de plus.
-    expect(serviceSizes([...list, { id: "f", person: null }], (id) => (id === "f" ? "Bureau" : (svc[id] ?? null)))).toEqual({ Atelier: G(["q1"]), "Non ventilé": G(["q2", "q4"]), Bureau: G(["q3"], 1) });
+    // contracts : nombre de contrats du groupe (l'effectif), valeur d'ordre du masquage partagée avec KPI RH et le Suivi (stockGroups).
+    expect(serviceSizes(list, (id) => svc[id] ?? null)).toEqual({ Atelier: { ...G(["q1"]), contracts: 2 }, "Non ventilé": { ...G(["q2", "q4"]), contracts: 2 }, Bureau: { ...G(["q3"]), contracts: 1 } });
+    // Contrat f sans personne rattachée (Bureau) : non relié, jamais une personne de plus ; il compte dans l'effectif du groupe.
+    expect(serviceSizes([...list, { id: "f", person: null }], (id) => (id === "f" ? "Bureau" : (svc[id] ?? null)))).toEqual({ Atelier: { ...G(["q1"]), contracts: 2 }, "Non ventilé": { ...G(["q2", "q4"]), contracts: 2 }, Bureau: { ...G(["q3"], 1), contracts: 2 } });
   });
 
   it("maskedAxis : une personne avec deux contrats simultanés reste un groupe d'une personne ; groupe sans personne dénombrée non vérifiable", () => {

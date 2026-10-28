@@ -1,6 +1,8 @@
-import { confidentialiteReason, confidentialiteSettingReason, isHidden, maskRelations, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskCell, type MaskRelation, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { confidentialiteReason, confidentialiteSettingReason, isHidden, maskGroups, maskReason, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskStatus, type PersonLink } from "@/lib/confidentialite";
+import { maskColumn, windowStatus } from "@/lib/confidentialite/columns";
 import { groupCell, masseWindow } from "@/lib/confidentialite/groups";
-import { evolution, servicesOf, windowPayroll, withService, type Evolution, type JournalInput, type MonthPayroll, type PayrollWindow } from "./engine";
+import { evolution, monthPayroll, serviceOf, servicesOf, windowPayroll, withService, type Evolution, type JournalInput, type LedgerLine, type MonthPayroll, type PayrollWindow } from "./engine";
+import { classify, gridRubrics } from "./grid";
 
 // Lignes par service de la masse salariale : une seule règle pour l'écran Masse salariale (tableau « Services » et son export
 // Excel, via syntheseOf) et pour la Masse salariale croisée (chapitres 01 et 05). Toujours calculées sur tout le journal : la somme
@@ -35,35 +37,67 @@ export function serviceRows(journal: JournalInput, months: string[], prevMonths:
 // Raison d'un masquage (principal et secondaire : la même) ou d'un effectif non dénombré ; null si la cellule est affichée.
 export const hiddenReason = (s: MaskStatus, seuil: number): string | null => (isHidden(s) ? maskReason(s, seuil) : null);
 
-// Statuts du seuil pour des fenêtres de mois par service, par le moteur unique. Cellules : la masse de chaque fenêtre de chaque
-// service, et la masse de chacun de ses mois (groupes de masseWindow : contrats qui portent une ligne de masse, reliés à leur
-// personne ; valeur n.d. quand la fenêtre ou le mois l'est). Relations, dans l'ordre : les mois d'une fenêtre d'un service somment
-// vers sa fenêtre (total masquable) ; puis, pour chaque fenêtre, la colonne des services (total de l'entreprise, jamais masqué) ;
-// puis, pour chaque rang de mois de chaque fenêtre, la colonne des services (total du mois, jamais masqué). Les fenêtres sont
-// indépendantes entre elles : les masquer ensemble ou une à une donne le même résultat.
+// --- Statut canonique d'un mois d'un service (une seule règle pour tous les écrans qui publient la masse d'un service) ---------------
+// La masse d'un service pour un mois est publiée par la Masse salariale (Synthèse, export, croisée 01 et 05), par KPI RH › Effectifs
+// mensuels (mesure masse, axe service) et, sous le filtre Service, par l'Écart budgétaire, l'Analyse des écarts et les chapitres de la
+// croisée. Son statut se calcule SEULEMENT sur sa colonne de mois : tous les services qui portent une ligne de masse (rubrique de rôle
+// brut ou cotisations) ce mois-là dans le journal complet ; cellule de chaque service : groupe de masseWindow (contrats qui portent une
+// ligne de masse, reliés à leur personne), valeur |masse du moteur de paie| (monthPayroll du journal restreint au service) ; relation :
+// la colonne avec le total de l'entreprise du mois (fixe) quand il est publié ; ordre canonique des services (maskColumn : par libellé,
+// « Non ventilé » en dernier). Le statut ne dépend donc ni de l'écran, ni de la fenêtre choisie, ni de l'ordre d'affichage. Un service
+// sans ligne de masse ce mois-là vaut 0 (affiché, il ne désigne personne) ; un mois n.d. garde sa raison.
+const monthJournal = (journal: JournalInput, month: string): JournalInput => ({ ...journal, serviceFilter: undefined, lines: journal.lines.filter((l) => l.month === month) });
+// Mémo par lecture (mêmes lignes, même lien) : la même colonne sert à toutes les fenêtres et à tous les écrans d'une requête.
+const columnMemo = new WeakMap<readonly LedgerLine[], WeakMap<PersonLink, Map<string, Map<string | null, MaskStatus>>>>();
+export function serviceMonthMask(journal: JournalInput, month: string, link: PersonLink, seuil: number): Map<string | null, MaskStatus> {
+  let byLink = columnMemo.get(journal.lines);
+  if (!byLink) columnMemo.set(journal.lines, (byLink = new WeakMap()));
+  let byKey = byLink.get(link);
+  if (!byKey) byLink.set(link, (byKey = new Map()));
+  const key = JSON.stringify([month, seuil, journal.serviceAxis ?? null, journal.months.includes(month), journal.grid]);
+  const hit = byKey.get(key);
+  if (hit) return hit;
+  const col = computeServiceMonthMask(journal, month, link, seuil);
+  byKey.set(key, col);
+  return col;
+}
+function computeServiceMonthMask(journal: JournalInput, month: string, link: PersonLink, seuil: number): Map<string | null, MaskStatus> {
+  const full = monthJournal(journal, month); // mêmes lignes du mois : monthPayroll et masseContracts n'en lisent pas d'autres
+  const rubrics = gridRubrics(full.grid);
+  const services = new Set<string | null>();
+  for (const l of full.lines) {
+    const role = classify(l.accountId, rubrics).rubric?.role;
+    if (role === "brut" || role === "cotisations") services.add(serviceOf(l, full.serviceAxis));
+  }
+  const entries = [...services].map((v) => {
+    const si = withService(full, v);
+    const mp = monthPayroll(si, month);
+    return { key: v, label: serviceLabel(v), cell: groupCell(masseWindow(si, [month], link).months[0], seuil, mp.kind === "value" ? mp.masse : null) };
+  });
+  return maskColumn(entries, seuil, monthPayroll(full, month).kind === "value");
+}
+
+// Statuts du seuil pour des fenêtres de mois par service. Chaque mois reçoit son statut canonique (serviceMonthMask, colonne du mois
+// dans le journal complet : input est le journal restreint au service, withService) ; une fenêtre n'ajoute AUCUNE relation : son
+// statut se déduit de ses mois (windowStatus : n.d. avec sa propre raison si sa valeur l'est ; sinon n.d. dès qu'un mois est masqué,
+// non vérifiable si seuls des mois non vérifiables le sont, affichée sinon). Les fenêtres et les services sont indépendants entre eux.
 export type WindowStatus = { window: MaskStatus; months: MaskStatus[] };
 export function maskServiceWindows(services: readonly { input: JournalInput; windows: readonly PayrollWindow[] }[], link: PersonLink, seuil: number): WindowStatus[][] {
-  const cells: MaskCell[] = [];
-  const relations: MaskRelation[] = [];
-  const add = (c: MaskCell) => cells.push(c) - 1;
-  const idx = services.map((s) =>
+  const monthStatus = (input: JournalInput, m: MonthPayroll): MaskStatus => {
+    if (m.kind !== "value") return "nd";
+    const f = input.serviceFilter;
+    if (!f) return "shown"; // journal entier : total de l'entreprise, jamais masqué
+    const st = serviceMonthMask(input, m.month, link, seuil).get(f.value);
+    if (st !== undefined) return st;
+    // Service sans ligne de masse ce mois-là (hors de la colonne) : masquage principal seul de sa propre cellule (0 : affiché).
+    return maskGroups([groupCell(masseWindow(input, [m.month], link).months[0], seuil, m.masse)], seuil, false)[0];
+  };
+  return services.map((s) =>
     s.windows.map((w) => {
-      const g = masseWindow(s.input, w.months.map((m) => m.month), link);
-      const cell = add(groupCell(g.window, seuil, w.kind === "value" ? w.masse : null));
-      const months = w.months.map((m, j) => add(groupCell(g.months[j], seuil, m.kind === "value" ? m.masse : null)));
-      return { cell, months };
+      const months = w.months.map((m) => monthStatus(s.input, m));
+      return { window: windowStatus(months, w.kind !== "value"), months };
     }),
   );
-  for (const s of idx) for (const w of s) relations.push({ cells: w.months, total: w.cell });
-  const windowCount = Math.max(0, ...idx.map((s) => s.length));
-  for (let j = 0; j < windowCount; j++) {
-    const column = idx.flatMap((s) => (s[j] === undefined ? [] : [s[j]]));
-    relations.push({ cells: column.map((w) => w.cell) });
-    const monthCount = Math.max(0, ...column.map((w) => w.months.length));
-    for (let k = 0; k < monthCount; k++) relations.push({ cells: column.flatMap((w) => (w.months[k] === undefined ? [] : [w.months[k]])) });
-  }
-  const st = maskRelations(cells, relations, seuil);
-  return idx.map((s) => s.map((w) => ({ window: st[w.cell], months: w.months.map((c) => st[c]) })));
 }
 
 // Mois et fenêtre après seuil : la forme du moteur (MonthPayroll, PayrollWindow) ou un n.d. qui porte seulement sa raison. Une

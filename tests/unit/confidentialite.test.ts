@@ -265,7 +265,9 @@ describe("module partagé : ré-exports et pureté à l'import", () => {
   it("aucune importation de valeur hors du dossier et de structure.ts : les chapitres et les exports peuvent l'importer sans base", () => {
     const dir = "src/lib/confidentialite";
     const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
-    expect(files.sort()).toEqual(["groups.ts", "index.ts", "persons.ts", "setting.ts"]);
+    // columns.ts : colonne canonique d'une répartition (ordre des groupes, stocks de fin de mois, fenêtres) ; flows.ts : partitions des
+    // entrées et sorties d'un mois. Tous deux purs (moteur de structure.ts et groupes de groups.ts seulement).
+    expect(files.sort()).toEqual(["columns.ts", "flows.ts", "groups.ts", "index.ts", "persons.ts", "setting.ts"]);
     // groups.ts forme les groupes du journal de paie : il lit les moteurs purs de la paie (monthPayroll, grille de comptes) et la clé
     // d'embauche du moteur de projection, tous sans base ; aucun autre module n'est admis.
     const pure: Record<string, RegExp> = { "groups.ts": /^(\.\/|@\/lib\/croisee\/structure$|@\/lib\/payroll\/(engine|grid)$|@\/lib\/budget\/engine$)/ };

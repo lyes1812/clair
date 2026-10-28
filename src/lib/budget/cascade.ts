@@ -114,9 +114,9 @@ export function etpCascade(a: Version, b: Version, monthsA: string[], monthsB: s
 // référentiel d'un contrat) reliés à leur personne par le lien du référentiel Collaborateurs ; un contrat réel que le lien ne relie
 // pas est compté à part (unlinked : il ne protège jamais). Les embauches prévues d'un scénario (clé « embauche:… » du moteur de
 // projection, isHireKey du module partagé) ne décrivent aucune personne réelle : comptées à part (hires), ni reliées ni non reliées.
-// Un palier porté seulement par des embauches prévues est exempt du masquage et n'apporte aucune personne protectrice ; un palier qui
-// les mêle à des contrats réels se juge sur ses seuls contrats réels (projectedCell du module partagé, appelé par maskCascade de
-// src/lib/viz/ecart.ts). Un palier vide ne décrit personne. Aucune clé de personne n'est interprétée ici : la fonction rend ce que le
+// Un palier porté seulement par des embauches prévues est affiché, n'apporte aucune personne protectrice et n'est masqué qu'avec toute
+// la cascade quand elle ne peut pas être protégée ; un palier qui les mêle à des contrats réels se juge sur ses seuls contrats réels
+// (projectedCell du module partagé, appelé par maskCascade de src/lib/viz/ecart.ts). Un palier vide ne décrit personne. Aucune clé de personne n'est interprétée ici : la fonction rend ce que le
 // lien lui donne.
 export type CascadeGroup = PersonsOfContracts & { hires: number };
 export function cascadePersons(c: Pick<Extract<Cascade, { kind: "value" }>, "steps">, link: PersonLink): CascadeGroup[] {

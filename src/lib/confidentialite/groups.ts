@@ -94,20 +94,35 @@ export function groupCell(g: JournalGroup | null, seuil: number, value: number |
 }
 
 // --- Embauches prévisionnelles d'un scénario (décision du lot 12, à confirmer par Lyes) ---------------------------------------------
-// Une embauche prévue (clé « embauche:… », hireKey du moteur de projection) ne décrit aucune personne réelle : une cellule ou un
-// palier porté seulement par des embauches prévues est EXEMPT du masquage (affiché, MaskCell.exempt) et n'apporte aucune personne
-// protectrice ; une cellule qui mêle embauches et contrats réels se juge sur ses seuls contrats réels (reliés par le référentiel ;
-// un contrat réel non relié ne protège jamais). Aucune clé de personne n'est interprétée ici.
+// Une embauche prévue (clé « embauche:… », hireKey du moteur de projection) ne décrit aucune personne réelle. Une cellule ou un palier
+// porté seulement par des embauches prévues est une cellule de TAILLE 0 dont la valeur est connue ({ size: 0, value, members: [] },
+// jamais MaskCell.exempt) : affichée au premier tour (elle ne désigne personne), elle ne protège jamais une autre cellule (elle
+// n'apporte aucune personne au masquage secondaire) et elle n'est masquée que lorsque toute la relation doit l'être (cas « impossible »
+// du moteur : sinon « total − embauches » redonnerait la somme masquée, qui ne décrit que des personnes réelles sous le seuil). Une
+// cellule qui mêle embauches et contrats réels se juge sur ses seuls contrats réels (reliés par le référentiel ; un contrat réel non
+// relié ne protège jamais). UNE SEULE fonction pour toute l'application (projectedGroupCell) : Écart budgétaire, Analyse des écarts et
+// croisée 08 (projectedCell), KPI RH › Effectifs mensuels (gridMask), croisée 06 (linkedGroupCell). Aucune clé de personne n'est
+// interprétée ici.
 const HIRE_PREFIX = hireKey("");
 export const isHireKey = (key: string): boolean => key.startsWith(HIRE_PREFIX);
-export function projectedCell(keys: Iterable<string>, link: PersonLink, seuil: number, value: number | null): MaskCell {
+// Groupe vu par ses contrats réels (personnes reliées, contrats non reliés) et ses embauches prévues (hires).
+export type ProjectedGroup = PersonsOfContracts & { hires?: number };
+export function projectedGroup(keys: Iterable<string>, link: PersonLink): PersonsOfContracts & { hires: number } {
   const real: string[] = [];
   let hires = 0;
   for (const k of keys) {
     if (isHireKey(k)) hires += 1;
     else real.push(k);
   }
+  return { ...personsOfContracts(real, link), hires };
+}
+// Cellule de masquage d'un tel groupe (valeur absolue : elle ne sert qu'à l'ordre du masquage secondaire) : embauches seules → taille 0
+// (affichée, ne protège jamais, masquée avec toute la relation) ; sinon groupInput sur ses contrats réels. nonZero : comme groupInput.
+export function projectedGroupCell(g: ProjectedGroup, seuil: number, value: number | null, nonZero?: boolean): MaskCell {
   const v = value === null ? null : Math.abs(value);
-  if (real.length === 0 && hires > 0) return { size: 0, value: v, members: [], exempt: true };
-  return groupInput(personsOfContracts(real, link), seuil, v);
+  if ((g.hires ?? 0) > 0 && g.persons.length === 0 && g.unlinked === 0) return { size: 0, value: v, members: [] };
+  return groupInput(g, seuil, v, nonZero);
+}
+export function projectedCell(keys: Iterable<string>, link: PersonLink, seuil: number, value: number | null): MaskCell {
+  return projectedGroupCell(projectedGroup(keys, link), seuil, value);
 }

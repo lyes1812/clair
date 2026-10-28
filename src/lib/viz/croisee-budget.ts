@@ -919,8 +919,8 @@ export function buildEffets(input: EffetsInput): EffetsModel {
     const seuil = conf.value;
     // Taille d'un palier : les personnes de ses contrats réels (reliés par le lien) ; members : leurs jetons, pour qu'une personne
     // présente dans deux paliers masqués (effet report et changement d'ETP, par exemple) n'y compte qu'une fois ; un contrat non relié
-    // ne protège pas (palier non dénombré sous le seuil) ; un palier porté seulement par des embauches prévues d'un scénario est exempt
-    // (projectedCell du module partagé, comme l'Analyse des écarts).
+    // ne protège pas (palier non dénombré sous le seuil) ; un palier porté seulement par des embauches prévues d'un scénario ne protège
+    // jamais et n'est masqué qu'avec toute la cascade (projectedCell du module partagé, comme l'Analyse des écarts).
     const status = maskGroups(
       cascade.steps.map((s) => projectedCell(s.people.map((p) => p.key), input.link, seuil, s.etp4)),
       seuil,

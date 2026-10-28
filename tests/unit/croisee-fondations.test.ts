@@ -882,9 +882,12 @@ describe("page Masse salariale croisée", () => {
     expect(nd).not.toContain("mois non clos");
   });
 
-  it("impression de la synthèse : la classe .cx-syn est documentée et agrandie dans croisee.css ; menus lisibles (11 px) et onglets non rognés", () => {
+  it("impression de la synthèse : la classe .cx-syn est documentée, l'en-tête de l'écran masqué et le bloc à sa taille (une page mesurée) dans croisee.css ; menus lisibles (11 px) et onglets non rognés", () => {
     const css = readFileSync("src/styles/croisee.css", "utf8");
-    expect(css).toMatch(/body\[data-print="synthese"\] \.cx-syn \{[^}]*zoom: 1\.1/);
+    // PDF réel du lot 12 : agrandi de 10 % sous l'en-tête de l'écran, le bloc passait sur une seconde page ; il garde sa taille et
+    // l'en-tête « Studio RH · Masse salariale » est masqué (la ligne d'impression nomme l'écran).
+    expect(css).not.toMatch(/body\[data-print="synthese"\] \.cx-syn \{[^}]*zoom/);
+    expect(css).toContain('body[data-print="synthese"] .cx-ms-head');
     expect(css).toMatch(/body\[data-print="synthese"\][^{]*\.cx-common/);
     expect(css).toMatch(/\.cx-menu-name \.soon \{[^}]*font-size: 11px/);
     expect(css).toMatch(/\.cx-tabs \.tabs \{[^}]*padding-block: 4px/);

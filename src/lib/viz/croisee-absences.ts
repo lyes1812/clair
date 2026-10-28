@@ -2,10 +2,13 @@ import type { CroiseeContext } from "@/app/e/[slug]/studio-rh/masse-salariale/cr
 import type { ChartSeries } from "@/components/charts/shared";
 import {
   allMotifsInput,
+  congeMaskCell,
   congesAVenir,
   congeSize,
   congesPris,
   motifInput,
+  motifWindowMask,
+  motifWindowOf,
   publicMonth,
   publicWindow,
   publicWindowReason,
@@ -14,6 +17,7 @@ import {
   type CongeCell,
   type CongesAVenir,
   type CongesPris,
+  type MotifWindow,
 } from "@/lib/croisee/conges";
 import { memoPublicModel as memoByContext } from "@/lib/croisee/public";
 import { confidentialiteHref, confidentialiteReason, isHidden, maskReason, maskRelations, SEUIL_NON_VERIFIABLE as GROUPE_NON_DENOMBRE, type MaskCell as SharedMaskCell, type MaskRelation, type MaskStatus } from "@/lib/confidentialite";
@@ -51,7 +55,9 @@ import { deltaView, kpiRefusal, nd as ndTile, rateTile, windowOf, type TileValue
 // tuile) : l'ensemble masqué de chaque relation compte au moins « seuil » personnes distinctes, aucune valeur masquée ne se retrouve
 // par différence. Quand les autres motifs ne peuvent pas se protéger entre eux (un seul motif non retenu sous le seuil, par exemple),
 // la ligne « tous motifs » de la période (ou de N-1) est masquée, avec la même raison. Les cartes et le tableau mensuel (entreprise
-// entière, mêmes valeurs que KPI RH) ne sont pas masqués.
+// entière, mêmes valeurs que KPI RH) ne sont pas masqués. Le statut d'une cellule par motif (mois et total d'une fenêtre) est celui de
+// motifWindowMask (src/lib/croisee/conges.ts), la fonction que KPI RH appelle pour le détail de l'absentéisme : la période et N-1 sont
+// chacune une fenêtre avec ses propres mois, et une même cellule a le même statut sur les deux écrans.
 //
 // Aucun identifiant : les raisons du moteur qui nomment une absence ou un contrat sont remplacées à la lecture (conges.ts), et un
 // dernier filtre (publicText) passe sur tout le modèle.
@@ -231,60 +237,24 @@ export function maskCells(cells: readonly MaskCell[], relations: readonly (reado
 
 // Taille d'une cellule : congeSize (personnes reliées ; non dénombrée quand des contrats non reliés laissent les personnes reliées sous
 // le seuil, ou pour une borne basse sans demi-journée comptée : non vérifiable, avec masquage secondaire ; jamais « ≥ 0 » affiché).
-// members : les jetons des personnes, non transmis pour une cellule non dénombrée (elle n'apporte aucune personne comptée).
-const maskCellOf = (c: CongeCell | undefined, seuil: number, exempt = false): MaskCell => {
-  if (!c) return { size: null, value: 0 };
-  if (c.kind === "nd") return { size: null, value: null };
-  const size = congeSize(c, seuil);
-  return { size, value: c.half, exempt, members: size === null ? [] : c.who };
-};
+// members : les jetons des personnes, non transmis pour une cellule non dénombrée (elle n'apporte aucune personne comptée). Fonction
+// partagée congeMaskCell (src/lib/croisee/conges.ts), la même que celle de la colonne d'une fenêtre par motif.
+const maskCellOf = congeMaskCell;
 
-// Grille « pris par motif » : pour chaque motif, les mois de la période, le total de la période et celui de N-1 (ce sont aussi les
-// colonnes du tableau par motif). published : totaux affichés ailleurs dans le chapitre (tableau mensuel des motifs retenus, tuile
-// Absentéisme de la période et de N-1, taux tous motifs).
-export type CongesGrid = {
-  lines: { chosen: boolean; months: CongeCell[]; total: CongeCell; prev: CongeCell | undefined }[];
-  exempt: number | null; // ligne du seul motif retenu présent dans la lecture
-  published: { months: boolean[]; retainedCur: boolean; allCur: boolean; retainedPrev: boolean; allPrev: boolean };
-};
+// Grille « pris par motif » de la période et de N-1 : pour chaque fenêtre, chaque motif, ses mois et son total (colonnes du tableau par
+// motif et des demi-journées prises). Le statut de chaque cellule est celui de motifWindowMask (src/lib/croisee/conges.ts), la fonction
+// que KPI RH appelle sur la fenêtre de son détail : mêmes cellules (mois et total de la fenêtre), mêmes relations (mois d'un motif →
+// son total ; motifs retenus d'un mois → absentéisme du mois ; motifs retenus de la fenêtre → tuile ; autres motifs → taux tous motifs
+// − tuile), même départage des égalités. La colonne N-1 est donc celle de la fenêtre N-1 avec ses propres mois, qu'elle soit lue ici ou
+// dans le détail N-1 de KPI RH.
+export type CongesGrid = { current: MotifWindow; previous: MotifWindow };
 // allCur, allPrev : statut du taux tous motifs de la période et de N-1 (« secondary » : masqué pour protéger un autre motif).
 export type CongesGridMask = { months: MaskStatus[][]; cur: MaskStatus[]; prev: MaskStatus[]; allCur: MaskStatus; allPrev: MaskStatus };
 
 export function congesMask(g: CongesGrid, seuil: number): CongesGridMask {
-  const k = g.published.months.length;
-  const width = k + 2;
-  const at = (r: number, j: number) => r * width + j;
-  const cells: MaskCell[] = g.lines.flatMap((l, r) => {
-    const ex = g.exempt === r;
-    return [...l.months.map((c) => maskCellOf(c, seuil, ex)), maskCellOf(l.total, seuil, ex), maskCellOf(l.prev, seuil, ex)];
-  });
-  // Taux tous motifs (période, N-1) : deux cellules de plus, total des « autres motifs » (ou de tous les motifs).
-  const allCurAt = cells.length;
-  const allPrevAt = allCurAt + 1;
-  cells.push({ size: null, value: g.published.allCur ? 0 : null, onlyAsTotal: true }, { size: null, value: g.published.allPrev ? 0 : null, onlyAsTotal: true });
-  const all = g.lines.map((_, r) => r);
-  const retained = all.filter((r) => g.lines[r].chosen);
-  const others = all.filter((r) => !g.lines[r].chosen);
-  // Une ligne : ses mois ont pour somme le total de la période de la ligne (cellule masquable).
-  const rel: MaskRelation[] = all.map((r) => ({ cells: Array.from({ length: k }, (_, j) => at(r, j)), total: at(r, k) }));
-  g.published.months.forEach((ok, j) => {
-    if (ok) rel.push({ cells: retained.map((r) => at(r, j)) });
-  });
-  const column = (j: number, retainedShown: boolean, allShown: boolean, allAt: number) => {
-    if (retainedShown && allShown) rel.push({ cells: retained.map((r) => at(r, j)) }, { cells: others.map((r) => at(r, j)), total: allAt });
-    else if (allShown) rel.push({ cells: all.map((r) => at(r, j)), total: allAt });
-    else if (retainedShown) rel.push({ cells: retained.map((r) => at(r, j)) });
-  };
-  column(k, g.published.retainedCur, g.published.allCur, allCurAt);
-  column(k + 1, g.published.retainedPrev, g.published.allPrev, allPrevAt);
-  const st = maskCells(cells, rel, seuil);
-  return {
-    months: all.map((r) => Array.from({ length: k }, (_, j) => st[at(r, j)])),
-    cur: all.map((r) => st[at(r, k)]),
-    prev: all.map((r) => st[at(r, k + 1)]),
-    allCur: st[allCurAt],
-    allPrev: st[allPrevAt],
-  };
+  const cur = motifWindowMask(g.current, seuil);
+  const prev = motifWindowMask(g.previous, seuil);
+  return { months: cur.months, cur: cur.total, prev: prev.total, allCur: cur.all, allPrev: prev.all };
 }
 
 // Absences posées à venir : chaque ligne (motif × statut) et son total forment une relation ; aucun total de colonne n'est affiché.
@@ -454,19 +424,23 @@ function buildChapter(input: AbsencesInput): AbsencesModel {
   // demi-journées prises : une valeur masquée l'est partout.
   const grid = (() => {
     if (seuil === null || cc.lines.length === 0) return null;
-    const chosen = cc.lines.flatMap((l, i) => (l.chosen ? [i] : []));
-    const rowOf = new Map(d.rows.map((x) => [x.month, x]));
+    // Ce que l'application publie de chaque fenêtre (mêmes résultats du moteur que KPI RH, motifWindow) : absentéisme de chaque mois
+    // (tableau mensuel, colonnes N et N-1), tuile Absentéisme de la fenêtre, taux tous motifs de la fenêtre.
+    const rowOf = new Map(d.rows.map((x) => [x.month, x.absenteeism]));
+    const prevRowOf = new Map(d.rows.map((x) => [x.previous.month, x.previous.absenteeism]));
+    const prevLines = new Map(d.conges.previous.lines.map((l) => [l.type, l]));
     const prevOf = new Map(d.conges.previous.lines.map((l) => [l.type, l.total]));
     const mask = congesMask(
       {
-        lines: cc.lines.map((l) => ({ chosen: l.chosen, months: l.months, total: l.total, prev: prevOf.get(l.type) })),
-        exempt: chosen.length === 1 ? chosen[0] : null,
-        published: {
-          months: months.map((m) => (rowOf.get(m)?.absenteeism.kind ?? "nd") !== "nd"),
-          retainedCur: cur.kind !== "nd",
-          allCur: mc.all.kind !== "nd",
-          retainedPrev: prev.kind !== "nd",
-          allPrev: mp.all.kind !== "nd",
+        current: motifWindowOf(cc, { months: months.map((m) => (rowOf.get(m)?.kind ?? "nd") !== "nd"), tile: cur.kind !== "nd", all: mc.all.kind !== "nd" }),
+        // N-1 : les lignes de la période (mêmes motifs de la lecture), avec leurs mois et leur total N-1 ; un motif sans ligne N-1 n'est
+        // pas dénombré.
+        previous: {
+          lines: cc.lines.map((l) => {
+            const p = prevLines.get(l.type);
+            return { chosen: l.chosen, months: prevMonths.map((_, j) => p?.months[j]), total: p?.total };
+          }),
+          published: { months: prevMonths.map((m) => (prevRowOf.get(m)?.kind ?? "nd") !== "nd"), tile: prev.kind !== "nd", all: mp.all.kind !== "nd" },
         },
       },
       seuil,

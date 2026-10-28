@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ecartServiceGuard } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
+import { ecartServiceGuard, maskProjectedServices } from "@/app/e/[slug]/studio-rh/masse-salariale/ecart-data";
 import { hireKey, project } from "@/lib/budget/engine";
 import { flowsOf } from "@/lib/budget/flows";
 import { aggregate, budgetVersion, diff, monthsOfYear, nd, scenarioVersion, val, type ServiceFilter, type Version } from "@/lib/budget/versions";
 import type { BaseContract, BaseSnapshot, Hypothesis } from "@/lib/budget/types";
 import type { ZoomSource } from "@/lib/budget/zoom";
-import { confidentialiteReason, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting } from "@/lib/confidentialite";
+import { confidentialiteReason, SEUIL_NON_DEFINI, SEUIL_NON_VERIFIABLE, type ConfidentialiteSetting, type MaskStatus } from "@/lib/confidentialite";
+import { croiseeLink } from "@/lib/croisee/confidentialite";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 
@@ -152,7 +153,11 @@ describe("garde du filtre Service sur les versions comparées (seuil de confiden
     // Sans référentiel : A n'est relié à personne, le service est non vérifiable quel que soit le seuil.
     expect(ecartServiceGuard(loadedOf([v], [src], { value: "TECH" }, j26, false), set(1))).toEqual({ cause: "seuil", reason: SEUIL_NON_VERIFIABLE });
   });
-  it("embauche prévue seule dans un service (OPS, de novembre) : exempte, le service est affiché même au seuil 5 ; mêlée à A dans TECH : jugée sur A (masqué au seuil 2)", () => {
+  // Revue du lot 12 : ce cas affichait OPS au seuil 5 (embauche exempte, masquage principal seul). Les mois projetés sont désormais
+  // masqués colonne par colonne avec le total du scénario, publié sans filtre : en novembre, TECH (A) et SALES (B) ne décrivent que
+  // 2 personnes, la colonne ne peut pas être protégée et toute la répartition est n.d., OPS compris (sinon TECH + SALES = total − OPS).
+  // Au seuil 2, TECH et SALES se protègent l'un l'autre : OPS, porté par la seule embauche, est affiché sans protéger personne.
+  it("embauche prévue seule dans un service (OPS, de novembre) : affichée au seuil 2 sans protéger personne, n.d. au seuil 5 (colonne impossible à protéger) ; mêlée à A dans TECH : jugée sur A (masqué au seuil 2)", () => {
     const hyps: Hypothesis[] = [
       { id: "h1", kind: "embauche", label: "Recrue OPS", service: "OPS", start: "2026-11-01", end: null, grossFullTimeCents: 250000, quotaBps: 10000, chargesBps: 4000, counted: true, category: "cdi", replaces: null },
       { id: "h2", kind: "embauche", label: "Recrue TECH", service: "TECH", start: "2026-11-01", end: null, grossFullTimeCents: 250000, quotaBps: 10000, chargesBps: 4000, counted: true, category: "cdi", replaces: null },
@@ -160,7 +165,8 @@ describe("garde du filtre Service sur les versions comparées (seuil de confiden
     const ops = scenario(hyps, { value: "OPS" });
     expect(ops.v.months.get("2026-11")!.people).toEqual({ kind: "value", map: { [hireKey("h1")]: 10000 } });
     expect(ops.v.months.get("2026-11")!.masse).toEqual(val(350000)); // 2 500 + 40 % : la masse d'une embauche prévue reste lisible
-    expect(ecartServiceGuard(loadedOf([ops.v], [ops.src], { value: "OPS" }), set(5))).toBeNull();
+    expect(ecartServiceGuard(loadedOf([ops.v], [ops.src], { value: "OPS" }), set(2))).toBeNull();
+    expect(ecartServiceGuard(loadedOf([ops.v], [ops.src], { value: "OPS" }), set(5))).toEqual({ cause: "seuil", reason: confidentialiteReason(5) });
     const tech = scenario(hyps, { value: "TECH" });
     expect(Object.keys(tech.v.months.get("2026-11")!.people.kind === "value" ? (tech.v.months.get("2026-11")!.people as { map: Record<string, number> }).map : {}).sort()).toEqual(["A", hireKey("h2")]);
     expect(ecartServiceGuard(loadedOf([tech.v], [tech.src], { value: "TECH" }), set(2))).toEqual({ cause: "seuil", reason: confidentialiteReason(2) });
@@ -177,5 +183,89 @@ describe("garde du filtre Service sur les versions comparées (seuil de confiden
     const none = scenario([], { value: "SALES" }, null);
     expect(ecartServiceGuard(loadedOf([none.v], [none.src], { value: "SALES" }, null), set(2))).toEqual({ cause: "seuil", reason: confidentialiteReason(2) });
     expect(ecartServiceGuard(loadedOf([none.v], [none.src], { value: "SALES" }, null), set(1))).toBeNull();
+  });
+});
+
+// --- Mois projetés d'un scénario sous le filtre Service (revue du lot 12) : chaque mois projeté est une colonne par grandeur (masse,
+// effectif et ETP, entrées) dont le total est publié par l'Écart budgétaire sans filtre ; le moteur unique y applique le masquage
+// secondaire (maskProjectedServices), et la garde rend n.d. le service retenu dès qu'une de ses cellules est masquée. Scénario 2027
+// entièrement projeté (mois de référence décembre 2026), salaires sans charges (taux observé 0 %) : coût du mois = salaire. Chaque
+// contrat est relié à une personne distincte par un référentiel fictif.
+describe("garde du filtre Service : mois projetés d'un scénario, masquage secondaire dans chaque colonne de mois", () => {
+  const set = (value: number): ConfidentialiteSetting => ({ kind: "set", value, updatedAt: null, updatedBy: null });
+  const R5 = { cause: "seuil", reason: confidentialiteReason(5) };
+  const staff = (svc: string, n: number, salary: number): BaseContract[] =>
+    Array.from({ length: n }, (_, i) => contract(`${svc}-${i + 1}`, { service: svc, base: { salaryCents: salary, refBrutCents: salary, refCotisationsCents: 0 } }));
+  const hire = (id: string, service: string, gross: number): Hypothesis => ({ id, kind: "embauche", label: `Recrue ${service}`, service, start: "2027-01-01", end: null, grossFullTimeCents: gross, quotaBps: 10000, chargesBps: 0, counted: true, category: "cdi", replaces: null });
+  const run = (contracts: BaseContract[], hyps: Hypothesis[] = []) => {
+    const b: BaseSnapshot = { currency: "EUR", refMonth: "2026-12", syncId: "s", readAt: "2027-01-05", contracts, refMasse: 0, refBaseCost: 0, etpNote: null, actuals: [] };
+    const proj = project(b, "2027-01", "2027-12", hyps, conv);
+    const data = { build: { source: "payfit" }, contracts: contracts.map((c) => ({ contractKey: c.contractKey, externalId: c.externalId, personKey: `P-${c.contractKey}` })) };
+    const version = (filter: ServiceFilter) => scenarioVersion("scenario:s27:2027", "Révisé 2027", "2027", b, proj, null, null, filter);
+    const guard = (service: string, seuil: number) =>
+      ecartServiceGuard({ ctx: { input: null, kpi: { input: { data } } }, versions: [version({ value: service })], sources: [{ kind: "scenario", base: b, proj, journal: null, filter: { value: service } }], filter: { value: service }, months: (y: string) => monthsOfYear(y, "01", "12") } as never, set(seuil));
+    // Statut de chaque service dans les colonnes d'un mois (masse, effectif, entrées).
+    const column = (month: string, seuil: number): Record<string, MaskStatus[]> => {
+      const i = proj.kind === "value" ? proj.months.findIndex((x) => x.month === month) : -1;
+      const pm = proj.kind === "value" ? proj.months[i] : undefined;
+      if (!pm || pm.kind !== "value") throw new Error("projection n.d.");
+      return Object.fromEntries([...maskProjectedServices(pm, flowsOf(b, proj)[i], croiseeLink(data as never), seuil)].map(([k, st]) => [k ?? "Non ventilé", st]));
+    };
+    const january = (seuil: number) => column("2027-01", seuil);
+    return { version, guard, column, january };
+  };
+
+  it("cas de la revue (seuil 5) : S1 = 1 salarié à 4 000 €, S2 = 6 salariés à 18 000 € ; total 22 000 € publié sans filtre ⇒ S1 masqué, S2 masqué en secondaire, aucune reconstitution", () => {
+    const s = run([...staff("S1", 1, 400000), ...staff("S2", 6, 300000)]);
+    // Ce que l'écran publierait : 22 000 € sans filtre, 18 000 € sous S2, donc S1 = 22 000 − 18 000 = 4 000 € sans la garde.
+    expect(s.version(null).months.get("2027-01")!.masse).toEqual(val(2200000));
+    expect(s.version({ value: "S2" }).months.get("2027-01")!.masse).toEqual(val(1800000));
+    expect(s.version({ value: "S1" }).months.get("2027-01")!.masse).toEqual(val(400000));
+    // Janvier : masse S1 (1 personne) masquée, S2 (6) masqué pour la protéger ; même chose pour l'effectif ; aucune entrée.
+    expect(s.january(5)).toEqual({ S1: ["masked", "masked", "shown"], S2: ["secondary", "secondary", "shown"] });
+    expect(s.guard("S1", 5)).toEqual(R5);
+    expect(s.guard("S2", 5)).toEqual(R5);
+    // Seuil 1 : rien n'est masqué.
+    expect(s.guard("S1", 1)).toBeNull();
+    expect(s.guard("S2", 1)).toBeNull();
+  });
+
+  it("S1 = 1 personne (4 000 €), S2 = 6 (18 000 €), S3 = 8 (20 000 €), seuil 5 : S1 masqué, S2 (la plus petite cellule) masqué en secondaire, S3 affiché", () => {
+    const s = run([...staff("S1", 1, 400000), ...staff("S2", 6, 300000), ...staff("S3", 8, 250000)]);
+    // 1 + 6 = 7 personnes masquées ≥ 5 : S3 reste affiché ; total 42 000 € − S3 20 000 € = 22 000 €, somme de 7 personnes.
+    expect(s.january(5)).toEqual({ S1: ["masked", "masked", "shown"], S2: ["secondary", "secondary", "shown"], S3: ["shown", "shown", "shown"] });
+    expect(s.guard("S1", 5)).toEqual(R5);
+    expect(s.guard("S2", 5)).toEqual(R5);
+    expect(s.guard("S3", 5)).toBeNull();
+  });
+
+  it("deux colonnes, deux secondaires : S3 à 8 × 2 000 € (16 000 €) est la plus petite masse, S2 (6 personnes) le plus petit effectif ⇒ les deux sont n.d. sous leur filtre", () => {
+    const s = run([...staff("S1", 1, 400000), ...staff("S2", 6, 300000), ...staff("S3", 8, 200000)]);
+    expect(s.january(5)).toEqual({ S1: ["masked", "masked", "shown"], S2: ["shown", "secondary", "shown"], S3: ["secondary", "shown", "shown"] });
+    expect(s.guard("S2", 5)).toEqual(R5);
+    expect(s.guard("S3", 5)).toEqual(R5);
+  });
+
+  it("embauche prévue seule dans OPS (2 500 €, dès janvier) : affichée, jamais protectrice — S1 est protégé par S2 (18 000 €), pas par OPS, pourtant plus petite", () => {
+    const s = run([...staff("S1", 1, 400000), ...staff("S2", 6, 300000)], [hire("h1", "OPS", 250000)]);
+    expect(s.version({ value: "OPS" }).months.get("2027-01")!.masse).toEqual(val(250000));
+    // Entrées de janvier : la seule embauche (OPS), qui ne décrit personne : rien à masquer dans cette colonne.
+    expect(s.january(5)).toEqual({ S1: ["masked", "masked", "shown"], S2: ["secondary", "secondary", "shown"], OPS: ["shown", "shown", "shown"] });
+    expect(s.guard("OPS", 5)).toBeNull();
+    expect(s.guard("S1", 5)).toEqual(R5);
+    expect(s.guard("S2", 5)).toEqual(R5);
+  });
+
+  it("entrée réelle dans un mois projeté (contrat connu qui commence en mars dans S2) : sa cellule d'entrées décrit 1 personne ⇒ S2 n.d. sous son filtre ; S3, sans entrée (0, ne désigne personne), reste affiché", () => {
+    const late = contract("S2-7", { service: "S2", startDate: "2027-03-01", base: { salaryCents: 300000, refBrutCents: 300000, refCotisationsCents: 0 } });
+    const s = run([...staff("S2", 6, 300000), late, ...staff("S3", 8, 250000)]);
+    // Janvier : S2 (6 personnes) et S3 (8) affichés dans les trois colonnes ; aucune entrée.
+    expect(s.january(5)).toEqual({ S2: ["shown", "shown", "shown"], S3: ["shown", "shown", "shown"] });
+    // Mars : masse et effectif de S2 (7 personnes) affichés, mais 1 entrée réelle. La colonne des entrées ne peut pas être protégée
+    // (S3 n'a aucune entrée : une cellule vide reste hors de la relation, règle canonique de maskColumn).
+    expect(s.version({ value: "S2" }).months.get("2027-03")!.entrees).toEqual(val(1));
+    expect(s.column("2027-03", 5)).toEqual({ S2: ["shown", "shown", "masked"], S3: ["shown", "shown", "shown"] });
+    expect(s.guard("S2", 5)).toEqual(R5);
+    expect(s.guard("S3", 5)).toBeNull();
   });
 });
