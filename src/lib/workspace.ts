@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { member, organization } from "@/db/schema";
 import { hasAtLeast, isRole, type Role } from "./roles";
 import { requireUser } from "./session";
+import { requiresMfaSetup } from "./mfa-policy";
 
 export type WorkspaceAccess = { id: string; name: string; slug: string; role: Role };
 
@@ -36,7 +37,7 @@ export async function requireWorkspace(slug: string, minRole: Role = "reader") {
   const session = await requireUser(`/e/${slug}`);
   const access = await findAccess(session.user.id, slug);
   if (!access || !hasAtLeast(access.role, minRole)) notFound();
-  if (access.role === "admin" && !session.user.twoFactorEnabled) {
+  if (access.role === "admin" && requiresMfaSetup(session.user)) {
     redirect(`/securite?retour=${encodeURIComponent(`/e/${slug}`)}`);
   }
   return { session, workspace: access };

@@ -1,12 +1,14 @@
 import { TopBar } from "@/components/TopBar";
 import { requireUser, safeReturnPath } from "@/lib/session";
 import { TotpSetup } from "./TotpSetup";
+import { temporaryTestMfaExemption } from "@/lib/mfa-policy";
 
 export default async function SecuritePage({ searchParams }: { searchParams: Promise<{ retour?: string }> }) {
   const { retour } = await searchParams;
   const session = await requireUser("/securite");
   const returnTo = safeReturnPath(retour);
   const enabled = Boolean(session.user.twoFactorEnabled);
+  const exemption = temporaryTestMfaExemption(session.user);
   return (
     <>
       <TopBar email={session.user.email} />
@@ -28,7 +30,15 @@ export default async function SecuritePage({ searchParams }: { searchParams: Pro
             </>
           ) : (
             <>
-              {retour && (
+              {exemption ? (
+                <div className="form">
+                  <p className="notice" data-testid="totp-test-exemption">
+                    La double authentification est temporairement facultative pour votre compte sur Clair TEST,
+                    jusqu’au {exemption.toLocaleString("fr-FR", { timeZone: "Europe/Paris" })}.
+                  </p>
+                  <a className="btn primary" href={returnTo}>Continuer vers mon espace</a>
+                </div>
+              ) : retour && (
                 <p className="notice">
                   Vous administrez un espace : la double authentification est obligatoire avant d'y accéder.
                 </p>

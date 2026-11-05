@@ -8,6 +8,7 @@ import * as schema from "@/db/schema";
 import { ac, orgRoles } from "@/lib/roles";
 import { recordEvent } from "@/lib/events";
 import { signupAllowed } from "@/lib/signup";
+import { requiresMfaSetup } from "@/lib/mfa-policy";
 
 const ADMIN_PATHS = new Set([
   "/organization/update",
@@ -47,7 +48,7 @@ export const auth = betterAuth({
       }
       if (!ADMIN_PATHS.has(ctx.path)) return;
       const session = ctx.context.session;
-      if (session && !session.user.twoFactorEnabled) {
+      if (session && requiresMfaSetup(session.user)) {
         throw new APIError("FORBIDDEN", { message: "Activez la double authentification (TOTP) pour administrer un espace." });
       }
     }),
