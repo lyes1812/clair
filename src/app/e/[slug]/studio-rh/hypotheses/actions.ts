@@ -26,11 +26,11 @@ const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const page = (slug: string) => `/e/${slug}/studio-rh/hypotheses`;
 const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 const isUuid = (v: string) => z.string().uuid().safeParse(v).success;
-// Seules les erreurs métier sont affichées telles quelles ; les autres sont journalisées côté serveur.
+// Seules les erreurs métier sont affichées telles quelles ; les journaux restent limités au statut, sans donnée de saisie.
 const fail = (e: unknown): FormState => {
   if (e instanceof BudgetError) return { error: e.message };
   if (e instanceof z.ZodError) return { error: `Saisie hors des bornes autorisées (${[...new Set(e.issues.map((i) => i.path.join(".")))].join(", ") || "valeur"}).` };
-  console.error("Hypothèses budgétaires : écriture en erreur", e);
+  console.error("Hypothèses budgétaires : écriture en erreur");
   return { error: "Enregistrement impossible." };
 };
 
@@ -246,12 +246,17 @@ export async function addHypothesisAction(slug: string, scenarioId: string, kind
   }
   try {
     await addHypotheses(workspace.id, session.user.id, scenarioId, list, "all");
-    for (const h of list) await recordEvent(workspace.id, session.user.id, "budget.hypothesis_added", { scenarioId, hypothesisId: h.id, kind: h.kind });
   } catch (e) {
     return fail(e);
   }
+  // L'écriture métier a réussi : un défaut du journal ne doit pas inviter à créer les mêmes postes une seconde fois.
+  let journalOk = true;
+  for (const h of list) {
+    try { await recordEvent(workspace.id, session.user.id, "budget.hypothesis_added", { scenarioId, hypothesisId: h.id, kind: h.kind }); }
+    catch { journalOk = false; }
+  }
   revalidatePath(page(slug));
-  return { ok: list.length === 1 ? `Hypothèse « ${list[0].label} » enregistrée.` : `${list.length} hypothèses enregistrées : « ${list[0].label} » à « ${list[list.length - 1].label} ».` };
+  return { ok: list.length === 1 ? `Hypothèse « ${list[0].label} » enregistrée.` : `${list.length} hypothèses enregistrées : « ${list[0].label} » à « ${list[list.length - 1].label} ».`, ...(!journalOk ? { details: ["La saisie est enregistrée ; son entrée dans le journal d’administration n’a pas pu être confirmée. Ne la saisis pas une seconde fois."] } : {}) };
 }
 
 // --- Saisie en masse (une ligne par salarié ; les lignes vides sont ignorées). Tout ou rien : une ligne refusée par le

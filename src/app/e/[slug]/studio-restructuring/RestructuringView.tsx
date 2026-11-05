@@ -1,5 +1,6 @@
 import "@/styles/masse-salariale.css";
 import "@/styles/restructuring.css";
+import "@/styles/hypotheses-saisie.css";
 import { Money, MoneyText, MoneyUnitLabel } from "@/components/Money";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { FamilyTabs } from "@/components/FamilyTabs";
@@ -8,12 +9,14 @@ import { BarChart, LineChart, type ChartSeries } from "@/components/charts";
 import { formatDate, formatMonth } from "@/lib/dates";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import type { Amount, Hypothesis } from "@/lib/budget/types";
+import { hireProfiles } from "@/lib/budget/bulk";
 import type { RestructuringContext } from "@/lib/restructuring/context";
 import { nonRecurringBreakdown, type Metric } from "@/lib/restructuring/model";
 import { RESTRUCTURING_VIEWS as VIEWS } from "@/lib/restructuring/views";
 import { ChartGuard, PanelHead, ReadDetails, Tile } from "../studio-rh/masse-salariale/components";
 import { detailOf, KIND, pct } from "../studio-rh/hypotheses/shared";
 import { ExitCostForm, type ExitCostAction } from "./ExitCostForm";
+import { HireForm } from "../studio-rh/hypotheses/HireForm";
 
 const QUESTIONS = {
   overview: "Quelles économies le projet apporte-t-il, et quand absorbe-t-il ses coûts ?",
@@ -21,7 +24,7 @@ const QUESTIONS = {
   monthly: "Comment les coûts, les économies et les ETP évoluent-ils chaque mois ?",
 };
 type Scenario = NonNullable<RestructuringContext["proposal"]>;
-type Props = RestructuringContext & { saveExit?: ExitCostAction };
+type Props = RestructuringContext & { saveExit?: ExitCostAction; addHire?: Parameters<typeof HireForm>[0]["action"] };
 const statusLabel = (status: string) => status === "fige" ? "Figé" : status === "brouillon" ? "Brouillon" : status;
 const missingReason = (metric: Metric) => metric.reason ?? "Valeur non disponible dans les scénarios comparés.";
 
@@ -133,9 +136,14 @@ function Measures({ p }: { p: Props }) {
   if (!proposal) return <p className="notice">Choisis le scénario du projet pour lire ses mesures.</p>;
   if (!p.canEdit) return <section className="panel restructuring-section" data-testid="restructuring-measures-readonly"><PanelHead title="Mesures du projet" /><p>{proposal.hypotheses.length} hypothèse{proposal.hypotheses.length === 1 ? "" : "s"} dans le projet. Ton rôle donne accès à la synthèse agrégée ; les détails individuels des mesures ne sont pas affichés.</p></section>;
   const editable = proposal.status === "brouillon" && p.saveExit;
+  const addHire = proposal.status === "brouillon" ? p.addHire : undefined;
   const departures = proposal.hypotheses.filter((hypothesis): hypothesis is Extract<Hypothesis, { kind: "depart" }> => hypothesis.kind === "depart");
+  const hires = proposal.hypotheses.filter((hypothesis): hypothesis is Extract<Hypothesis, { kind: "embauche" }> => hypothesis.kind === "embauche");
+  const services = [...new Set([...proposal.base.contracts.map((contract) => contract.service), ...hires.map((hire) => hire.service)].filter((service): service is string => service !== null))].sort();
   return <>
     {editable ? <section className="panel restructuring-section"><PanelHead title="Ajouter un licenciement ou une rupture conventionnelle" desc="Un départ daté et son coût fourni, sans estimation automatique" /><ExitCostForm proposal={proposal} action={editable} /></section> : null}
+    {addHire ? <section className="panel restructuring-section" data-testid="restructuring-hire"><PanelHead title="Embauches et remplacements du projet" desc="Postes futurs du scénario choisi, distincts des collaborateurs réels" /><p className="desc">Pour un remplacement, choisis le départ concerné et les dates payées. Le moteur calcule le tuilage éventuel ; son coût est déjà inclus dans le projet et n’est pas ajouté une seconde fois.</p><details><summary className="hs-disclose">Saisir une embauche ou un remplacement</summary><datalist id="hyp-services">{services.map((service) => <option key={service} value={service} />)}</datalist><HireForm action={addHire} profiles={hireProfiles(proposal.base, hires)} deps={departures.map((departure) => ({ id: departure.id, label: departure.label }))} /></details></section> : null}
+    {proposal.status === "fige" ? <p className="notice" data-testid="restructuring-hire-frozen">Ce projet est figé et reste en lecture seule. Pour saisir une embauche ou un remplacement, <a href={hypothesesHref(p.slug, proposal, "postes")}>duplique-le dans Hypothèses</a>, puis choisis la copie comme projet.</p> : null}
     <section className="panel restructuring-section"><PanelHead title="Hypothèses du projet" desc={`${proposal.hypotheses.length} mesure${proposal.hypotheses.length === 1 ? "" : "s"} · montants saisis, sans estimation d’indemnité`} tools={<a className="btn" href={hypothesesHref(p.slug, proposal, "postes")}>{proposal.status === "brouillon" ? "Modifier dans Hypothèses" : "Ouvrir ou dupliquer dans Hypothèses"}</a>} />
     {proposal.hypotheses.length ? <div className="table-wrap scroll restructuring-scroll" tabIndex={0} role="region" aria-label="Mesures saisies dans le scénario du projet"><table className="data-table sticky sticky-first restructuring-measures" data-testid="restructuring-measures-table"><thead><tr><th scope="col">Type</th><th scope="col">Mesure</th><th scope="col">Dates</th><th scope="col">Coûts et paramètres saisis</th></tr></thead><tbody>{proposal.hypotheses.map((h) => <tr key={h.id}><th scope="row">{h.kind === "embauche" && h.replaces ? "Remplacement" : KIND[h.kind]}</th><td>{h.label}</td><td>{datesOf(h)}</td><td><MeasureValue h={h} proposal={proposal} /></td></tr>)}</tbody></table></div> : <p className="desc">Aucune hypothèse dans ce projet. Prépare les mesures dans les Hypothèses budgétaires.</p>}
     {editable && departures.length ? <div className="restructuring-exit-editors" data-testid="restructuring-exit-editors">{departures.map((departure) => <details className="restructuring-exit-editor" key={departure.id}><summary>Modifier le départ : {departure.label}</summary><ExitCostForm proposal={proposal} action={editable} departure={departure} /></details>)}</div> : null}

@@ -1,6 +1,7 @@
 import { loadRestructuringContext } from "@/lib/restructuring/context";
 import { RestructuringView } from "./RestructuringView";
 import { saveExitAction } from "./actions";
+import { addRestructuringHireAction } from "./hire-actions";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 
 export const dynamic = "force-dynamic";
@@ -13,5 +14,6 @@ export default async function RestructuringPage({ params, searchParams }: {
   const context = await loadRestructuringContext(slug, query);
   const versions = Object.fromEntries(context.proposal?.hypotheses.filter((h) => h.kind === "depart").map((h) => [h.id, sha256(canonicalJson(h))]) ?? []);
   const saveExit = context.canEdit && context.proposal?.status === "brouillon" ? saveExitAction.bind(null, slug, context.proposal.id, versions) : undefined;
-  return <RestructuringView {...context} saveExit={saveExit} />;
+  const addHire = context.canEdit && context.proposal?.status === "brouillon" ? addRestructuringHireAction.bind(null, slug, context.proposal.id) : undefined;
+  return <RestructuringView {...context} saveExit={saveExit} addHire={addHire} />;
 }
