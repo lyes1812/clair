@@ -14,6 +14,8 @@ import { formatDate, monthEnd } from "@/lib/dates";
 import { menuFamilies } from "@/lib/menu";
 import { costPerEtp, evolution, monthPayroll, windowPayroll } from "@/lib/payroll/engine";
 import { loadPayrollContext } from "@/lib/payroll/context";
+import { ActualEventError, listActualEvents } from "@/lib/payroll/non-recurring-store";
+import { buildActualNonRecurringChart } from "@/lib/viz/actual-non-recurring";
 import { headcountAt } from "@/lib/rh/headcount";
 import { absenteeism } from "@/lib/rh/kpi/absence";
 import { etpAverage } from "@/lib/rh/kpi/average";
@@ -428,6 +430,25 @@ export default async function SynthesePage({ params, searchParams }: { params: P
   const masseTitle = `Masse chargée par mois, ${year} face à ${prevYear} (N-1)`;
   const masseNames = { cur: `Masse chargée ${year}`, prev: `Masse chargée ${prevYear} (N-1)` };
   const masseS = pay ? masseSeries(pay.cur.months, pay.prev.months, masseNames) : [];
+  let nonRecurring = null as ReturnType<typeof buildActualNonRecurringChart> | null;
+  let nonRecurringError: string | null = null;
+  if (journal && ctx.read) {
+    try {
+      nonRecurring = buildActualNonRecurringChart(journal, await listActualEvents(ws.id), months, ctx.read.syncId);
+    } catch (error) {
+      if (!(error instanceof ActualEventError)) throw error;
+      nonRecurringError = error.message;
+    }
+  }
+  const nonRecurringName = `Dont non récurrents identifiés ${year}`;
+  const nonRecurringSeries = nonRecurring && nonRecurring.count > 0 ? [{
+    key: "non-recurring", name: nonRecurringName, color: "var(--chart-3)",
+    values: nonRecurring.points.map((point) => point.amount),
+    reasons: nonRecurring.points.map((point) => point.reason),
+  }] : [];
+  // « Dont » : une part du réel déjà affiché, jamais une somme ajoutée aux deux années.
+  const masseDisplaySeries = [...masseS, ...nonRecurringSeries];
+  const nonRecurringCell = (amount: number | null, reason: string | null): Cell => amount === null ? nd(reason ?? "Montant non renseigné.") : { text: euros(amount), kind: "value", reason: null };
   const etpTitle = `ETP de fin de mois, ${year} face à ${prevYear} (N-1)`;
   const etpNames = { cur: `ETP fin de mois ${year}`, prev: `ETP fin de mois ${prevYear} (N-1)` };
   const etpS = etpPoints ? etpMonthlySeries(etpPoints.cur, etpPoints.prev, etpNames) : [];
@@ -518,16 +539,26 @@ export default async function SynthesePage({ params, searchParams }: { params: P
           <div className="sy-chart" data-testid="sy-chart-masse-bloc">
             {pay && hasData(masseS) ? (
               <>
-                <BarChart testid="sy-chart-masse" label={`Masse salariale chargée par mois, ${year} et ${prevYear}, montants monétaires`} title={masseTitle} categories={axis.categories} categoryTitles={axis.titles} series={masseS} unit="eur" mode="grouped" />
+                <BarChart testid="sy-chart-masse" label={`Masse salariale chargée par mois, ${year} et ${prevYear}, montants monétaires`} title={masseTitle} categories={axis.categories} categoryTitles={axis.titles} series={masseDisplaySeries} unit="eur" mode="grouped" />
                 {hasNd(masseS) && <p className="chart-legend sy-nd-key"><span className="legend-btn static"><i className="swatch hatch" aria-hidden="true" />n.d. (raison au survol)</span><GlossaryLink slug={slug} term={T.hachure} /></p>}
                 <NdLines lines={ndReasonLines([months, prevMonths], masseS)} testid="sy-chart-masse-nd" />
                 <ExactTable
                   testid="sy-table-masse"
                   caption={`${masseTitle}, montants monétaires`}
                   months={months}
-                  columns={[{ name: masseNames.cur, cells: masseCells(pay.cur.months) }, { name: masseNames.prev, cells: masseCells(pay.prev.months) }]}
-                  foot={{ label: "Période", cells: [pay.cur, pay.prev].map((w): Cell => (w.kind === "nd" ? nd(w.nd.reason) : { text: euros(w.masse), kind: "value", reason: null })) }}
+                  columns={[{ name: masseNames.cur, cells: masseCells(pay.cur.months) }, { name: masseNames.prev, cells: masseCells(pay.prev.months) }, ...(nonRecurringSeries.length && nonRecurring ? [{ name: nonRecurringName, cells: nonRecurring.points.map((point) => nonRecurringCell(point.amount, point.reason)) }] : [])]}
+                  foot={{ label: "Période", cells: [...[pay.cur, pay.prev].map((w): Cell => (w.kind === "nd" ? nd(w.nd.reason) : { text: euros(w.masse), kind: "value", reason: null })), ...(nonRecurringSeries.length && nonRecurring ? [nonRecurringCell(nonRecurring.total, nonRecurring.reasons.join(" · "))] : [])] }}
                 />
+                {nonRecurring && nonRecurring.count > 0 && <div data-testid="sy-non-recurring">
+                  <h3 className="sy-sub">Éléments non récurrents identifiés</h3>
+                  <p className="tile-foot">{nonRecurring.qualification}</p>
+                  <div className="table-wrap scroll"><table className="data-table sticky sy-table" data-testid="sy-non-recurring-table">
+                    <thead><tr><th scope="col">Mois</th><th scope="col">Nature</th><th scope="col" className="num">Coût chargé déjà inclus</th></tr></thead>
+                    <tbody>{nonRecurring.rows.map((row) => <tr key={`${row.month}-${row.kind}`}><th scope="row">{monthLongLabel(row.month)}</th><td>{row.label}{row.estimatedCount > 0 ? <span className="tile-foot"> · estimation calendaire</span> : null}</td><td className="num">{row.amount === null ? <span className="nd" title={row.reason ?? undefined}>n.d.</span> : euros(row.amount)}{row.reason ? <p className="tile-foot">{row.reason}</p> : null}</td></tr>)}</tbody>
+                  </table></div>
+                  <p className="tile-foot"><a href={`${msHref}#actual-non-recurring`}>Voir les identifications et leurs sources dans le réel →</a></p>
+                </div>}
+                {nonRecurringError && <NdState testid="sy-non-recurring-error" heading="Éléments non récurrents identifiés" reason={nonRecurringError} action={{ href: msHref, label: "Vérifier les identifications du réel" }} />}
               </>
             ) : (
               <NdState testid="sy-chart-masse-nd-state" heading={masseTitle} reason={capital(pay ? (seriesReasons(masseS).slice(0, 3).join(" ; ") || "aucune valeur connue sur la période") : (payrollWhy ?? "journal de paie indisponible"))} action={pay ? undefined : dataAction} />

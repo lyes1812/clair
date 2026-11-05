@@ -68,7 +68,7 @@ export function ActualNonRecurring(p: Props) {
   const reason = model.reasons.join(" · ");
   const save = p.editable && p.save && p.syncId && p.input && p.months.length ? p.save : null;
   const contractLabel = (keys: string[]) => keys.length ? keys.map((key) => p.contracts.find((contract) => contract.key === key)?.label ?? "Contrat indisponible dans le référentiel courant").join(" · ") : "Non rattaché à un contrat";
-  return <section className="panel" data-testid="actual-non-recurring">
+  return <section className="panel" id="actual-non-recurring" data-testid="actual-non-recurring">
     <PanelHead title="Éléments non récurrents du réel" desc={<>Éléments identifiés sur la période affichée · <MoneyUnitLabel /></>} />
     <p className="desc">Licenciements, ruptures conventionnelles et tuilages passés : ces coûts sont déjà compris dans la masse salariale réelle, qui reste inchangée. Cette liste déclarative n’est pas exhaustive.</p>
     <dl className="facts ms-tiles" data-testid="actual-non-recurring-kpis">

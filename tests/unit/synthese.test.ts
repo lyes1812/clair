@@ -10,6 +10,7 @@ import { project } from "@/lib/budget/engine";
 import type { BaseSnapshot, Conventions, Hypothesis } from "@/lib/budget/types";
 import { monthRange } from "@/lib/connectors/months";
 import type { JournalInput, LedgerLine, MonthPayroll } from "@/lib/payroll/engine";
+import type { ActualEvent } from "@/lib/payroll/non-recurring";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import type { Delta } from "@/lib/rh/kpi/types";
@@ -50,8 +51,13 @@ const state = vi.hoisted(() => ({
   full: null as unknown,
   budgets: [] as unknown[],
   fail: null as string | null,
+  actualEvents: [] as ActualEvent[],
 }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
+vi.mock("@/lib/payroll/non-recurring-store", () => ({
+  ActualEventError: class extends Error {},
+  listActualEvents: async () => state.actualEvents,
+}));
 vi.mock("@/lib/budget/store", async (orig) => {
   const real = await orig<typeof import("@/lib/budget/store")>();
   return {
@@ -316,7 +322,7 @@ function find(node: unknown, pred: (el: ReactElement) => boolean): ReactElement 
   if (pred(node)) return node;
   return find((node.props as { children?: unknown }).children, pred);
 }
-const reset = () => Object.assign(state, { ctx: makeCtx(), scenarios: [], full: null, budgets: [], fail: null });
+const reset = () => Object.assign(state, { ctx: makeCtx(), scenarios: [], full: null, budgets: [], fail: null, actualEvents: [] });
 
 describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
   it("indicateurs RH (ETP 5,10 / 6,10 / 6,10 ; N-1 4,80) et masse chargée (12 600,00 € face à 11 340,00 €)", async () => {
@@ -361,6 +367,28 @@ describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
     expect(t).toContain("janvier 2026 4 200 € 3 780 €");
     expect(t).toContain("Période 12 600 € 11 340 €");
     expect(text(/data-testid="sy-table-etp"[\s\S]*?<\/details>/.exec(html)![0])).toContain("janvier 2026 5,10 4,80 février 2026 6,10 4,80 mars 2026 6,10 4,80");
+  });
+  it("graphique : les éléments identifiés sont un « dont », les deux années restent inchangées et un montant absent reste n.d.", async () => {
+    reset();
+    const syncId = "11111111-1111-4111-8111-111111111111";
+    state.ctx = { ...makeCtx(), read: { syncId, months: journal.months, startedAt: new Date("2026-10-01T08:00:00Z") } };
+    state.actualEvents = [
+      { id: "22222222-2222-4222-8222-222222222222", syncId, month: "2026-01", kind: "autre", chargedCents: 10000, contractKeys: [], note: "CONFIDENTIEL ne pas exposer" },
+      { id: "33333333-3333-4333-8333-333333333333", syncId, month: "2026-02", kind: "rupture-conventionnelle", chargedCents: null, contractKeys: [], note: "AUTRE NOTE PRIVEE" },
+    ];
+    const { el, html } = await render({ annee: "2026", de: "01", a: "03" });
+    const chart = find(el, (node) => (node.props as { testid?: string }).testid === "sy-chart-masse")!;
+    const props = chart.props as { mode: string; series: { name: string; values: (number | null)[] }[] };
+    expect(props.mode).toBe("grouped");
+    expect(props.series.map((s) => s.values)).toEqual([[420000, 420000, 420000], [378000, 378000, 378000], [10000, null, 0]]);
+    expect(props.series[2].name).toBe("Dont non récurrents identifiés 2026");
+    expect(tile(html, "masse").raw).toContain('data-money-cents="1260000"');
+    expect(text(html)).toContain("Ruptures conventionnelles");
+    expect(text(html)).toContain("Montant chargé non saisi");
+    expect(text(html)).toContain("déjà compris dans la masse salariale réelle");
+    expect(html).not.toMatch(/CONFIDENTIEL|AUTRE NOTE PRIVEE/);
+    expect(html).toContain('href="/e/demo/studio-rh/masse-salariale?annee=2026&amp;de=01&amp;a=03#actual-non-recurring"');
+    expect(text(/data-testid="sy-table-masse"[\s\S]*?<\/details>/.exec(html)![0])).toContain("Période 12 600 € 11 340 € n.d.");
   });
   it("chaque graphique renvoie au glossaire (graphique et tableau exact) ; la clé « n.d. » aussi quand un mois est n.d.", async () => {
     reset();
