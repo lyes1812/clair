@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import { FinanceView } from "@/app/e/[slug]/studio-finance/FinanceView";
 import { FinancePlanGrid } from "@/app/e/[slug]/studio-finance/FinancePlanGrid";
-import type { FinanceMonth, FinancePlan } from "@/lib/finance/types";
+import type { FinanceMonth, FinancePlan, FinanceProjectionMonth } from "@/lib/finance/types";
 import type { FinanceViewProps } from "@/lib/finance/view-types";
 
 // Petits montants fictifs écrits à la main : aucune source client ni appel externe.
@@ -62,6 +62,17 @@ describe("présentation Studio Finance — lectures fictives", () => {
     const value = html({ view: "variance", selectedBudget: null });
     expect(value).toContain("sélectionne un budget de comparaison");
     expect(value).not.toContain('data-testid="finance-variance-table"');
+  });
+
+  it.each(["overview", "variance"] as const)("%s : sans plan, propose la saisie existante sans remplir de budget ni perdre la période", (view) => {
+    const value = html({ view, selectedPlan: null, projection: null, selectedBudget: null, budgetMonths: null, plans: [], canEdit: false });
+    const target = value.match(/<a href="([^"]+)">Ouvrir Budget et prévision<\/a>/)?.[1];
+    expect(target).toBeDefined();
+    const url = new URL(target!.replaceAll("&amp;", "&"), "https://clair.invalid");
+    expect(url.pathname).toBe("/e/espace-fictif/studio-finance");
+    expect([...url.searchParams]).toEqual([["vue", "plans"], ["annee", "2026"], ["debut", "2026-01"], ["fin", "2026-02"]]);
+    expect(value).not.toContain('data-testid="finance-variance-table"');
+    expect(value).not.toContain('data-testid="finance-plan-save"');
   });
 
   it("affiche l’écart réel moins budget au centime fourni, sans inverser les charges", () => {
@@ -127,5 +138,76 @@ describe("saisie financière fictive — euros et douze mois", () => {
     expect(personnelCell).toContain('readOnly=""');
     expect(personnelCell).toContain('value="0"');
     expect(value).toContain("saisies manuelles conservées, non utilisées");
+  });
+});
+
+describe("Finance vers les hypothèses RH explicitement retenues", () => {
+  const source = { id: "abcdefab-0000-4000-8000-000000000002", name: "Prévision RH fictive", firstMonth: "2026-01", lastMonth: "2026-12" };
+  const rhPlan: FinancePlan = { ...plan, name: "Budget lié au RH", personnelSource: "rh", rhScenarioId: source.id };
+  const projection: FinanceProjectionMonth[] = ["2026-01", "2026-02"].map((key) => ({ ...month(key), origin: "plan", personnelOrigin: "rh" }));
+  const sourceNote = (value: string) => value.match(/<p[^>]*data-testid="finance-rh-source"[\s\S]*?<\/p>/)?.[0] ?? "";
+  const links = (value: string) => [...value.matchAll(/<a[^>]*href="([^"]+)"[^>]*>/g)].map((match) => new URL(match[1].replaceAll("&amp;", "&"), "https://clair.invalid"));
+
+  it.each(["overview", "pnl", "plans"] as const)("%s : ouvre le scénario choisi dans le même espace et expose sa période", (view) => {
+    const value = html({ view, selectedPlan: rhPlan, projection, rhOptions: [source], canEdit: false });
+    const note = sourceNote(value);
+    const target = links(note)[0];
+    expect(note).toContain("Budget lié au RH");
+    expect(note).toContain("Prévision RH fictive");
+    expect(note).toContain("Janvier 2026 à Décembre 2026");
+    expect(note).toContain("Le réel comptable reste inchangé");
+    expect(links(note)).toHaveLength(1);
+    expect(target.pathname).toBe("/e/espace-fictif/studio-rh/hypotheses");
+    expect([...target.searchParams]).toEqual([["scenario", source.id]]);
+    // Ajouter l’accès à la source ne change ni le réel ni les résultats fournis.
+    if (view === "pnl") {
+      const baseline = html({ view, selectedPlan: plan, projection });
+      expect(table(value, "finance-pnl-table")).toBe(table(baseline, "finance-pnl-table"));
+      expect(table(value, "finance-projection-table").match(/data-money-cents="\d+"/g)).toEqual(table(baseline, "finance-projection-table").match(/data-money-cents="\d+"/g));
+    }
+  });
+
+  it("reconnaît l’identifiant sélectionné sans changer de scénario lorsque sa casse diffère", () => {
+    const value = html({ view: "pnl", selectedPlan: { ...rhPlan, rhScenarioId: source.id.toUpperCase() }, projection, rhOptions: [source] });
+    expect(links(sourceNote(value))[0].searchParams.get("scenario")).toBe(source.id);
+    expect(sourceNote(value)).not.toContain("indisponible");
+  });
+
+  it("un scénario indisponible reste n.d. et ne renvoie pas vers un autre scénario disponible", () => {
+    const unavailable = projection.map((row) => ({ ...row, cells: { ...row.cells, personnel: { cents: null, reason: "Projection RH indisponible pour ce mois." } } }));
+    const replacement = { ...source, id: "99999999-9999-4999-8999-999999999999", name: "Autre scénario fictif" };
+    const value = html({ view: "pnl", selectedPlan: rhPlan, projection: unavailable, rhOptions: [replacement] });
+    const note = sourceNote(value);
+    expect(note).toContain("scénario RH sélectionné indisponible dans cet espace");
+    expect(note).toContain("Aucune autre source RH n’est choisie à sa place");
+    expect(links(note)[0].pathname).toBe("/e/espace-fictif/studio-rh/hypotheses");
+    expect(links(note)[0].search).toBe("");
+    expect(note).not.toContain(replacement.name);
+    expect(table(value, "finance-projection-table")).toContain("Projection RH indisponible pour ce mois.");
+  });
+
+  it("une saisie manuelle ou l’absence de plan ne crée aucun accès présenté comme source RH", () => {
+    const manual = projection.map((row) => ({ ...row, personnelOrigin: "manual" as const }));
+    expect(sourceNote(html({ view: "pnl", selectedPlan: plan, projection: manual, rhOptions: [source] }))).toBe("");
+    expect(sourceNote(html({ selectedPlan: null, projection: null, rhOptions: [source] }))).toBe("");
+  });
+
+  it("une période entièrement comptable ne fait pas passer son personnel pour une projection RH", () => {
+    const actual: FinanceProjectionMonth[] = projection.map((row) => ({ ...row, origin: "actual", personnelOrigin: "accounting" }));
+    actual.push({ ...month("2026-10"), origin: "plan", personnelOrigin: "rh" });
+    const forecast = { ...rhPlan, kind: "forecast" as const, firstForecastMonth: "2026-10" };
+    for (const view of ["overview", "pnl"] as const) expect(sourceNote(html({ view, selectedPlan: forecast, projection: actual, rhOptions: [source] }))).toBe("");
+    // La lecture annuelle du plan contient en revanche octobre, réellement issu du RH.
+    expect(sourceNote(html({ view: "plans", selectedPlan: forecast, projection: actual, rhOptions: [source], canEdit: false }))).toContain(source.name);
+  });
+
+  it("les écarts ouvrent la source du budget comparé, pas celle d’un autre plan affiché", () => {
+    const other = { ...source, id: "99999999-9999-4999-8999-999999999999", name: "Autre prévision RH fictive" };
+    const value = html({ view: "variance", selectedPlan: { ...rhPlan, id: "88888888-8888-4888-8888-888888888888", rhScenarioId: other.id }, selectedBudget: rhPlan, budgetMonths: projection, rhOptions: [other, source] });
+    const note = sourceNote(value);
+    expect(links(note)[0].searchParams.get("scenario")).toBe(source.id);
+    expect(note).not.toContain(other.name);
+    expect(note).toContain(rhPlan.name);
+    expect(table(value, "finance-variance-table")).toContain('data-money-cents="0"');
   });
 });
