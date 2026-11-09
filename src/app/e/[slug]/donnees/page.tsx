@@ -251,6 +251,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
       <section className="dn-domain" id="domaine-rh" aria-labelledby="dn-rh-title">
         <div className="dn-section-head">
           <h2 id="dn-rh-title" className="group-title">Ressources humaines</h2>
+          {canWrite && <a className="btn" href={`/e/${slug}/donnees/rapprochement`} data-testid="reconciliation-link">Rapprocher DSN / PayFit<ArrowRight size={15} aria-hidden="true" /></a>}
         </div>
         {sourceChoice("rh", rhSource, pendingOf({ label: "PayFit", row: byId.payfit.last }, { label: PROVIDER_LABELS.dsn, row: dsnLast }))}
         <div className="dn-cards">

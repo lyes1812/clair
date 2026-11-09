@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, integer, jsonb, numeric, pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, foreignKey, index, integer, jsonb, numeric, pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import type { Action as ReconciliationAction, Snapshot as ReconciliationSnapshot } from "@/lib/reconciliation/types";
 import type { BaseSnapshot, Conventions, Hypothesis } from "@/lib/budget/types";
 import type {
   CoverageDraft, EndStatus, EventFlag, FieldNd, FindingSeverity, MonthFlag, PresenceBasis, PresenceStatus, Provenance, RhBuildInputs, RhBuildSummary, RhSource, TimeStatus,
@@ -493,3 +494,40 @@ export const budgetReference = pgTable(
   },
   (t) => [index("budget_reference_ws_idx").on(t.workspaceId, t.year), workspaceIsolation("budget_reference")],
 ).enableRLS();
+
+// Contrôles manuels : le snapshot ne dépend d'aucun build RH éphémère. Les décisions ne
+// modifient ni les lectures sources, ni le référentiel, ni les indicateurs de l'espace.
+export const reconciliationRun = pgTable("reconciliation_run", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: wsRef(),
+  controlMonth: text("control_month").notNull(),
+  inputHash: text("input_hash").notNull(),
+  comparatorVersion: integer("comparator_version").notNull(),
+  snapshot: jsonb("snapshot").$type<ReconciliationSnapshot>().notNull(),
+  revision: integer("revision").notNull().default(0),
+  createdBy: text("created_by").notNull(),
+  createdAt: ts("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("reconciliation_run_ws_id_uq").on(t.workspaceId, t.id),
+  uniqueIndex("reconciliation_run_ws_input_uq").on(t.workspaceId, t.inputHash),
+  index("reconciliation_run_ws_created_idx").on(t.workspaceId, t.createdAt),
+  check("reconciliation_run_revision_valid", sql`${t.revision} >= 0`),
+  check("reconciliation_run_month_valid", sql`${t.controlMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  workspaceIsolation("reconciliation_run"),
+]).enableRLS();
+
+export const reconciliationDecision = pgTable("reconciliation_decision", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: wsRef(),
+  runId: uuid("run_id").notNull(),
+  revision: integer("revision").notNull(),
+  inputHash: text("input_hash").notNull(),
+  action: jsonb("action").$type<ReconciliationAction>().notNull(),
+  actorId: text("actor_id").notNull(),
+  createdAt: ts("created_at").defaultNow().notNull(),
+}, (t) => [
+  foreignKey({ name: "reconciliation_decision_ws_run_fk", columns: [t.workspaceId, t.runId], foreignColumns: [reconciliationRun.workspaceId, reconciliationRun.id] }).onDelete("cascade"),
+  uniqueIndex("reconciliation_decision_run_revision_uq").on(t.workspaceId, t.runId, t.revision),
+  check("reconciliation_decision_revision_valid", sql`${t.revision} > 0`),
+  workspaceIsolation("reconciliation_decision"),
+]).enableRLS();

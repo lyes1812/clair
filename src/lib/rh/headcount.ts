@@ -117,7 +117,7 @@ export function payfitExactFrom(data: RhBuildData): string | null {
 }
 // Limite de conservation PayFit (date de lecture − rétention), quel que soit le mode d'historique : un contrat terminé avant
 // cette date a pu disparaître de l'API.
-export function payfitRetentionLimit(data: RhBuildData): string | null {
+export function payfitRetentionLimit(data: { build: Pick<RhBuildData["build"], "source" | "referenceDate"> }): string | null {
   if (data.build.source !== "payfit" || PAYFIT_ARCHIVED_RETENTION_MONTHS === null || !data.build.referenceDate) return null;
   return addMonthsToDate(data.build.referenceDate, -PAYFIT_ARCHIVED_RETENTION_MONTHS);
 }
