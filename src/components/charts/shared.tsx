@@ -66,14 +66,14 @@ export type Tip = { x: number; y: number; title: string; rows: { color?: string;
 // Infobulle : « Série / Groupe / Valeur » de la charte, positionnée sur le point survolé (ou le point focalisé au clavier).
 export function TipBox({ tip, width }: { tip: Tip | null; width: number }) {
   if (!tip) return null;
-  const right = tip.x > width * 0.6;
+  const tipWidth = Math.min(280, Math.max(0, width - 16));
+  const left = Math.max(8, Math.min(tip.x + 12, width - tipWidth - 8));
   return (
-    <div className="chart-tip" role="status" style={{ top: Math.max(0, tip.y), ...(right ? { right: Math.max(0, width - tip.x + 12) } : { left: tip.x + 12 }) }}>
+    <div className="chart-tip" role="status" style={{ top: Math.max(0, tip.y), left, width: tipWidth }}>
       <strong>{tip.title}</strong>
       {tip.rows.map((r) => (
         <div key={r.name} className={r.strong ? "tip-row strong" : "tip-row"}>
-          {r.color && <i className="swatch" style={{ background: r.color }} aria-hidden="true" />}
-          <span>{r.name}</span>
+          <span className="tip-name">{r.color && <i className="swatch" style={{ background: r.color }} aria-hidden="true" />}<span>{r.name}</span></span>
           <b className={r.nd ? "nd" : undefined}>{r.value}</b>
         </div>
       ))}

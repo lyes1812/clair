@@ -22,7 +22,7 @@ export type WaterfallProps = {
 };
 
 // Cascade (pont) : départ, contributions signées, arrivée. Hausse pleine bleue, baisse en aplat gris, totaux en noir ; chaque
-// barre porte sa valeur signée en clair, le sens ne dépend donc pas de la couleur. La baisse n'est pas peinte en rouge : aucune
+// barre porte sa valeur signée quand elle tient ; elle reste accessible dans l'infobulle et au clavier. La baisse n'est pas peinte en rouge : aucune
 // règle métier ne dit qu'une baisse est « défavorable » (aplat gris à contour noir ; la hachure est réservée aux valeurs n.d.). L'axe est tronqué quand les contributions
 // sont petites devant les totaux ; la troncature est écrite sous le graphique.
 export function WaterfallChart(p: WaterfallProps) {
@@ -83,6 +83,7 @@ export function WaterfallChart(p: WaterfallProps) {
                 <text x={-8} y={Y(v)} textAnchor="end" dominantBaseline="middle" className="tick">{tickTexts[index]}</text>
               </g>
             ))}
+            {on !== null && <rect x={on * band + 2} y={0} width={Math.max(0, band - 4)} height={plotH} rx={6} className="selection-band" aria-hidden="true" />}
             {bars.slice(0, -1).map((b, i) => (
               <line key={`c${i}`} x1={i * band + band / 2 + barW / 2} x2={(i + 1) * band + band / 2 - barW / 2} y1={Y(b.to)} y2={Y(b.to)} className="connector" />
             ))}
@@ -90,13 +91,16 @@ export function WaterfallChart(p: WaterfallProps) {
               const a = Y(Math.max(b.from, b.to));
               const h = Math.max(2, Math.abs(Y(b.from) - Y(b.to)));
               const x = i * band + (band - barW) / 2;
+              const valueLabel = valText(b.value, b.kind !== "total");
+              // Chaque valeur reste dans sa bande, avec 8 px de garde entre deux étiquettes.
+              const labelFits = valueLabel.length * 6.2 + 8 <= band;
               return (
                 <g key={`${b.label}-${i}`} opacity={on !== null && on !== i ? 0.55 : 1}>
-                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? (cost ? "var(--bad)" : "var(--chart-1)") : cost ? "var(--good)" : "var(--chart-5)"} stroke={b.kind === "down" && !cost ? "var(--chart-ink)" : "none"} rx={2} />
-                  <text x={x + barW / 2} y={a - 5} textAnchor="middle" className="val">{valText(b.value, b.kind !== "total")}</text>
+                  <rect x={x} y={a} width={barW} height={h} fill={b.kind === "total" ? "var(--chart-ink)" : b.kind === "up" ? (cost ? "var(--bad)" : "var(--chart-1)") : cost ? "var(--good)" : "var(--chart-5)"} stroke={b.kind === "down" && !cost ? "var(--chart-ink)" : "none"} rx={Math.min(5, barW / 2, h / 2)} className="chart-bar" />
+                  {labelFits && <text x={x + barW / 2} y={a - 5} textAnchor="middle" className="val">{valueLabel}</text>}
                   <text className="tick cat" textAnchor={narrow ? "end" : "middle"} transform={narrow ? `translate(${x + barW / 2 + 4},${plotH + 14}) rotate(-40)` : `translate(${x + barW / 2},${plotH + 16})`}>{short(b.label)}</text>
                   <rect x={i * band} y={-topM} width={band} height={plotH + topM + bottomM - 4} fill="transparent" tabIndex={rov.tab(i)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${b.label} : ${b.text}`}
-                    onMouseEnter={() => { setOn(i); setTip(tipOf(i)); }} onFocus={() => { setOn(i); setTip(tipOf(i)); }} onBlur={() => { setOn(null); setTip(null); }} />
+                    onPointerDown={() => { setOn(i); setTip(tipOf(i)); }} onMouseEnter={() => { setOn(i); setTip(tipOf(i)); }} onFocus={() => { setOn(i); setTip(tipOf(i)); }} onBlur={() => { setOn(null); setTip(null); }} />
                 </g>
               );
             })}

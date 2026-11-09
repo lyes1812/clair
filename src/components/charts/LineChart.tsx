@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { niceTicks } from "./scale";
 import { axisLabelWidth, axisTexts, chartUnitText, unitFormat, type UnitName } from "./units";
 import { useMoneyUnit } from "@/components/CurrencyPreference";
@@ -22,6 +22,7 @@ export type LineChartProps = {
 // valeur interpolée. L'infobulle suit la colonne survolée et liste toutes les séries avec leur valeur ou leur raison n.d.
 export function LineChart(p: LineChartProps) {
   const moneyUnit = useMoneyUnit();
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [ref, width] = useWidth();
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [tip, setTip] = useState<Tip | null>(null);
@@ -82,6 +83,14 @@ export function LineChart(p: LineChartProps) {
     <Frame testid={p.testid} title={p.title ? chartUnitText(p.title, p.unit, moneyUnit) : undefined} legend={<Legend items={p.series.map((s, i) => ({ key: s.key, name: s.name, color: colorOf(i, s.color), dashed: s.dashed }))} hidden={hidden} onToggle={p.series.length > 1 ? toggleHidden : undefined} />} note={note || undefined}>
       <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setAt(null); }}>
         <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
+          <defs>
+            {vis.filter(({ s }) => s.area).map(({ s, i }) => (
+              <linearGradient key={s.key} id={`area-${uid}-${i}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor={colorOf(i, s.color)} stopOpacity={0.16} />
+                <stop offset="100%" stopColor={colorOf(i, s.color)} stopOpacity={0.01} />
+              </linearGradient>
+            ))}
+          </defs>
           <g transform={`translate(${left},${top})`}>
             {t.ticks.map((v, index) => (
               <g key={v}>
@@ -96,21 +105,23 @@ export function LineChart(p: LineChartProps) {
             {vis.map(({ s, i }) => {
               const color = colorOf(i, s.color);
               const segs = segments(s.values);
+              const lastCategory = segs.at(-1)?.at(-1)?.c;
               return (
                 <g key={s.key}>
                   {s.area && segs.map((seg, k) => seg.length > 1 && (
-                    <path key={`a${k}`} d={`M ${X(seg[0].c)} ${Y(Math.max(t.min, 0) > 0 ? t.min : 0)} ${seg.map((pt) => `L ${X(pt.c)} ${Y(pt.v)}`).join(" ")} L ${X(seg[seg.length - 1].c)} ${Y(Math.max(t.min, 0) > 0 ? t.min : 0)} Z`} fill={color} opacity={0.1} />
+                    <path key={`a${k}`} className="chart-area" d={`M ${X(seg[0].c)} ${Y(Math.max(t.min, 0) > 0 ? t.min : 0)} ${seg.map((pt) => `L ${X(pt.c)} ${Y(pt.v)}`).join(" ")} L ${X(seg[seg.length - 1].c)} ${Y(Math.max(t.min, 0) > 0 ? t.min : 0)} Z`} fill={`url(#area-${uid}-${i})`} />
                   ))}
                   {segs.map((seg, k) => seg.length > 1 && (
-                    <path key={`p${k}`} d={seg.map((pt, j) => `${j ? "L" : "M"} ${X(pt.c)} ${Y(pt.v)}`).join(" ")} fill="none" stroke={color} strokeWidth={2} strokeDasharray={s.dashed ? "6 4" : undefined} strokeLinejoin="round" strokeLinecap="round" />
+                    <path key={`p${k}`} className="chart-line" d={seg.map((pt, j) => `${j ? "L" : "M"} ${X(pt.c)} ${Y(pt.v)}`).join(" ")} fill="none" stroke={color} strokeWidth={2.5} strokeDasharray={s.dashed ? "6 4" : undefined} strokeLinejoin="round" strokeLinecap="round" />
                   ))}
-                  {segs.map((seg) => seg.map((pt) => <circle key={`${s.key}-${pt.c}`} cx={X(pt.c)} cy={Y(pt.v)} r={at === pt.c ? 4.5 : nCat > 18 && seg.length > 1 ? 0 : 3} fill="#fff" stroke={color} strokeWidth={2} />))}
+                  {segs.map((seg) => seg.map((pt) => <circle key={`${s.key}-${pt.c}`} className="chart-point" cx={X(pt.c)} cy={Y(pt.v)} r={at === pt.c ? 4.5 : seg.length === 1 || pt.c === lastCategory ? 3 : 0} fill="#fff" stroke={color} strokeWidth={2} />))}
                 </g>
               );
             })}
             {Array.from({ length: nCat }, (_, c) => (
               <rect key={`hit${c}`} x={c * band} y={-top} width={band} height={plotH + top + bottom - 4} fill="transparent" tabIndex={rov.tab(c)} onKeyDown={rov.onKeyDown} aria-label={aria(c)} className="hit"
                 onMouseEnter={() => { setTip(tipFor(c)); setAt(c); }} onMouseMove={() => setTip(tipFor(c))}
+                onPointerDown={(event) => { if (event.pointerType === "touch") { setTip(tipFor(c)); setAt(c); } }}
                 onFocus={() => { setTip(tipFor(c)); setAt(c); }} onBlur={() => { setTip(null); setAt(null); }} />
             ))}
           </g>

@@ -80,10 +80,11 @@ export function BarChart(p: BarChartProps) {
       legend={<Legend items={p.series.map((s, i) => ({ key: s.key, name: s.name, color: colorOf(i, s.color) }))} hidden={hidden} onToggle={p.series.length > 1 ? toggleHidden : undefined} />}
       note={p.note}
     >
-      <div ref={ref} className="chart-plot" onMouseLeave={() => setTip(null)}>
+      <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setFocus(null); }}>
         <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
           <defs><NdPattern id={`nd-${uid}`} /></defs>
           <g transform={`translate(${left},${top})`}>
+            {focus !== null && <rect className="selection-band" x={focus * lay.band} y={0} width={lay.band} height={plotH} rx={6} />}
             {t.ticks.map((v, index) => (
               <g key={v}>
                 <line x1={0} x2={plotW} y1={lay.y(v)} y2={lay.y(v)} className={v === 0 ? "axis" : "grid"} />
@@ -104,7 +105,7 @@ export function BarChart(p: BarChartProps) {
             ))}
             {lay.bars.map((b) => {
               const { s, i } = visible[b.ser];
-              return <rect key={`${b.cat}-${b.ser}`} x={b.x} y={b.y} width={b.w} height={b.h} fill={colorOf(i, s.color)} rx={mode === "grouped" ? 2 : 0} opacity={focus !== null && focus !== b.cat ? 0.55 : 1} />;
+              return <rect key={`${b.cat}-${b.ser}`} className="chart-bar" x={b.x} y={b.y} width={b.w} height={b.h} fill={colorOf(i, s.color)} rx={mode === "grouped" ? Math.min(5, b.w / 3, b.h / 2) : 0} opacity={focus !== null && focus !== b.cat ? 0.55 : 1} />;
             })}
             {labelBars && lay.bars.map((b) => (mode === "grouped" || b.h >= 14) && b.v !== 0 ? (
               <text key={`l${b.cat}-${b.ser}`} x={b.x + b.w / 2} y={mode === "grouped" ? (b.v >= 0 ? b.y - 4 : b.y + b.h + 11) : b.y + b.h / 2} textAnchor="middle" dominantBaseline={mode === "grouped" ? undefined : "middle"} className="val" style={mode === "grouped" ? undefined : { fill: onColor(colorOf(visible[b.ser].i, visible[b.ser].s.color)) }}>{labelFmt(b.v)}</text>
@@ -112,6 +113,7 @@ export function BarChart(p: BarChartProps) {
             {Array.from({ length: nCat }, (_, c) => (
               <rect key={`hit${c}`} x={c * lay.band} y={-top} width={lay.band} height={plotH + top + bottom - 4} fill="transparent" tabIndex={rov.tab(c)} onKeyDown={rov.onKeyDown} aria-label={aria(c)} className="hit"
                 onMouseEnter={() => { setTip(tipFor(c)); setFocus(c); }} onMouseMove={() => setTip(tipFor(c))} onMouseLeave={() => setFocus(null)}
+                onPointerDown={(event) => { if (event.pointerType === "touch") { setTip(tipFor(c)); setFocus(c); } }}
                 onFocus={() => { setTip(tipFor(c)); setFocus(c); }} onBlur={() => { setTip(null); setFocus(null); }} />
             ))}
           </g>

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fmtPercent } from "@/lib/rh/kpi/format";
 import { arcPath, sliceAngles } from "./scale";
 import { chartUnitText, unitFormat, type UnitName } from "./units";
@@ -37,11 +37,20 @@ export function DonutChart(p: DonutProps) {
   const many = known.length > maxParts;
   const size = Math.min(220, Math.max(140, width * 0.5));
   const r = size / 2 - 4;
+  const innerR = r * 0.7;
   const slices = sliceAngles(known.map((x) => x.value));
   // Total arrondi dans l'unité sélectionnée, avec une police adaptée au trou de l'anneau.
-  const hole = r * 0.6 * 2 - 10;
+  const hole = innerR * 2 - 18;
   const exact = u.fmt(total);
-  const centerFont = Math.min(15, Math.max(9, hole / Math.max(1, exact.length * 0.58)));
+  const centerText = useRef<SVGTextElement | null>(null);
+  const [centerFont, setCenterFont] = useState(() => Math.min(22, Math.max(9, hole / Math.max(1, exact.length * 0.58))));
+  useEffect(() => {
+    const text = centerText.current;
+    if (!text) return;
+    const measured = text.getComputedTextLength();
+    const fontSize = Number.parseFloat(text.style.fontSize);
+    if (measured > 0) setCenterFont(Math.min(22, fontSize * hole / measured));
+  }, [exact, hole, many]);
   const pct = (v: number) => fmtPercent({ num: v, den: total });
   const tipOf = (i: number): Tip => ({ x: size / 2, y: 8, title: known[i].name, rows: [{ color: colorOf(i, known[i].color), name: "Valeur", value: u.fmt(known[i].value), strong: true }, { name: "Part", value: pct(known[i].value) }] });
   return (
@@ -51,13 +60,12 @@ export function DonutChart(p: DonutProps) {
           <div className="donut-svg" style={{ width: size, height: size }}>
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
               {slices.map((s, k) => (
-                <path key={known[s.index].key} d={arcPath(size / 2, size / 2, r, r * 0.6, s.start, s.end)} fill={colorOf(s.index, known[s.index].color)} stroke="#fff" strokeWidth={known.length > 1 ? 2 : 0} fillRule="evenodd" opacity={on !== null && on !== s.index ? 0.5 : 1} tabIndex={rov.tab(k)} onKeyDown={rov.onKeyDown} className="hit" aria-label={`${known[s.index].name} : ${u.fmt(known[s.index].value)}, ${pct(known[s.index].value)}`}
-                  onMouseEnter={() => { setOn(s.index); setTip(tipOf(s.index)); }} onFocus={() => { setOn(s.index); setTip(tipOf(s.index)); }} onBlur={() => { setOn(null); setTip(null); }} data-slice={k} />
+                <path key={known[s.index].key} d={arcPath(size / 2, size / 2, r, innerR, s.start, s.end)} fill={colorOf(s.index, known[s.index].color)} stroke="#fff" strokeWidth={known.length > 1 ? 3 : 0} fillRule="evenodd" opacity={on !== null && on !== s.index ? 0.5 : 1} tabIndex={rov.tab(k)} onKeyDown={rov.onKeyDown} className="hit chart-donut-slice" aria-label={`${known[s.index].name} : ${u.fmt(known[s.index].value)}, ${pct(known[s.index].value)}`}
+                  onPointerDown={() => { setOn(s.index); setTip(tipOf(s.index)); }} onMouseEnter={() => { setOn(s.index); setTip(tipOf(s.index)); }} onFocus={() => { setOn(s.index); setTip(tipOf(s.index)); }} onBlur={() => { setOn(null); setTip(null); }} data-slice={k} />
               ))}
-              <text x={size / 2} y={size / 2 - 2} textAnchor="middle" className="donut-total" style={{ fontSize: centerFont }}>{exact}</text>
-              {p.centerLabel && <text x={size / 2} y={size / 2 + 14} textAnchor="middle" className="tick">{chartUnitText(p.centerLabel, p.unit, moneyUnit)}</text>}
+              <text ref={centerText} x={size / 2} y={size / 2 - 2} textAnchor="middle" className="donut-total" style={{ fontSize: centerFont }}>{exact}</text>
+              {p.centerLabel && <text x={size / 2} y={size / 2 + 18} textAnchor="middle" className="tick chart-donut-centerlabel">{chartUnitText(p.centerLabel, p.unit, moneyUnit)}</text>}
             </svg>
-            <TipBox tip={tip} width={size} />
           </div>
         )}
         <ul className="parts" aria-label="Répartition">
@@ -78,6 +86,7 @@ export function DonutChart(p: DonutProps) {
             </li>
           ))}
         </ul>
+        <TipBox tip={tip} width={width} />
       </div>
     </Frame>
   );
