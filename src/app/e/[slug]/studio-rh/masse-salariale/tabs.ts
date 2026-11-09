@@ -7,5 +7,5 @@ export const MS_PREVU = [
   { key: "croisee", label: "Masse salariale croisée", path: "/croisee", soon: false },
   { key: "organisation", label: "MS par organisation", path: "/organisation", soon: true },
   { key: "reel", label: "Écart réel", path: "/reel", soon: true },
-  { key: "suivi", label: "Suivi réel / budget", path: "/suivi", soon: true },
+  { key: "suivi", label: "Suivi réel / budget", path: "/suivi", soon: false },
 ] as const;

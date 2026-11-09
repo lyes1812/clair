@@ -1,0 +1,60 @@
+/* Suivi global : montants agrégés seulement ; les courbes et le tableau partagent les mêmes mois. */
+.suivi-page { display: grid; gap: 20px; min-width: 0; }
+.suivi-head, .suivi-section-head, .suivi-context { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px 20px; }
+.suivi-head > div { display: grid; gap: 4px; }
+.suivi-head h2 { font-size: var(--clair-type-panel); }
+.suivi-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); padding: 16px 18px; background: var(--surface); }
+.suivi-filters .field-row { flex: 1 1 180px; min-width: 0; }
+.suivi-filters .suivi-reference-field { flex: 2 1 280px; }
+.suivi-context { align-items: baseline; font-size: var(--clair-type-copy); }
+.suivi-context a { text-decoration: none; }
+.suivi-context a:hover { text-decoration: underline; }
+.suivi-summary { display: grid; gap: 12px; }
+.suivi-section-head h3 { font-size: var(--clair-type-subheading); }
+.suivi-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.suivi-tile { display: grid; align-content: start; gap: 10px; padding: 20px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); min-width: 0; }
+.suivi-tile dt { color: var(--muted); font-size: var(--clair-type-copy); font-weight: 500; }
+.suivi-tile dd { margin: 0; font-size: var(--clair-type-kpi); font-weight: 600; letter-spacing: -.035em; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.suivi-tile dd .nd { font-style: normal; }
+.suivi-tile-foot { font-size: var(--clair-type-copy); color: var(--muted); overflow-wrap: anywhere; }
+.suivi-vigilance-body { display: grid; gap: 10px; min-width: 0; }
+.suivi-vigilance-body h3 { font-size: var(--clair-type-form); }
+.suivi-vigilance-body ul { margin: 0; padding-left: 18px; display: grid; gap: 12px; font-size: var(--clair-type-copy); overflow-wrap: anywhere; }
+.suivi-help { display: inline-grid; place-items: center; width: 15px; height: 15px; border: 1px solid currentColor; border-radius: 50%; font-size: 10px; line-height: 1; }
+.suivi-vigilance .ui-dropdown-panel { max-height: min(65vh, 540px); overflow-y: auto; }
+.suivi-monthly { min-width: 0; }
+.suivi-table-scroll { overflow-x: auto; min-width: 0; max-width: 100%; border: 1px solid var(--line); border-radius: var(--clair-radius-card); }
+.suivi-table-scroll:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.suivi-table { min-width: 760px; }
+.suivi-table :is(th, td) { vertical-align: middle; }
+.suivi-table thead th { white-space: normal; }
+.suivi-table tbody th[scope="row"] { font-size: var(--clair-type-table-cell); font-weight: 500; background: #fff; color: var(--ink); }
+.suivi-table a { text-decoration: none; }
+.suivi-table a:hover, .suivi-table a:focus-visible { text-decoration: underline; }
+.suivi-table [data-col="origin"] { font-size: var(--clair-type-copy); white-space: normal; }
+.suivi-after-cutoff > :is(td, th) { background: var(--surface); }
+.suivi-table tbody .suivi-after-cutoff th[scope="row"] { background: var(--surface); }
+.suivi-after-label { display: block; color: var(--muted); font-size: var(--clair-type-note); font-weight: 400; }
+.suivi-page .trend-bad { color: var(--bad); }
+.suivi-page .trend-good { color: var(--good); }
+.suivi-trend-key { font-size: var(--clair-type-note); }
+.suivi-trend-key span { font-weight: 550; }
+.suivi-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.suivi-page abbr[title] { text-decoration: none; cursor: help; }
+
+@media (max-width: 960px) {
+  .suivi-tile { padding: 16px; }
+  .suivi-tile dd { font-size: 28px; }
+}
+@media (max-width: 620px) {
+  .suivi-tiles { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .suivi-tile { grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 5px 12px; }
+  .suivi-tile dd { font-size: 27px; text-align: right; }
+  .suivi-tile-foot { grid-column: 1 / -1; }
+  .suivi-filters { padding: 14px; }
+  .suivi-filters .field-row, .suivi-filters .suivi-reference-field { flex-basis: 100%; }
+  .suivi-filters .actions { width: 100%; }
+  .suivi-filters .actions > * { flex: 1; }
+  .suivi-vigilance { margin-left: auto; }
+  .suivi-section-head .view-select { margin-left: auto; }
+}

@@ -131,8 +131,8 @@ test("Hypothèses budgétaires : base figée, hypothèses datées, projection tr
   expect(await txt(page.getByTestId("proj-tile-headcount").locator("dd"))).toBe("7 personnes · 6,10 ETP");
   await page.screenshot({ path: `${CAPTURES}/5-02-projection.png`, fullPage: true });
 
-  // Critère d'acceptation : clic sur un mois projeté → hypothèses qui le composent, la somme tombe juste.
-  await page.getByTestId("proj-table").locator("tr[data-month='2026-11'] a").click();
+  // Critère d'acceptation : clic sur le montant projeté → hypothèses qui le composent, la somme tombe juste.
+  await page.getByTestId("proj-table").locator("tr[data-month='2026-11'] td[data-col='cost'] a").click();
   const d = page.getByTestId("proj-detail-hyps");
   const hypCost = (label: string) => d.locator(`tr[data-hyp="${label}"] td[data-col='cost']`);
   expect(await txt(hypCost("Base figée 2026-09"))).toBe("22 140,00 €");

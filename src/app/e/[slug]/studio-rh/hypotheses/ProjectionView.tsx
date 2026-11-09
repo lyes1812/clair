@@ -301,7 +301,7 @@ export function ProjectionView({ slug, scenario, base, proj, landing, month, aff
                     <td>{r.layer === "reel" ? "Réel" : r.layer === "parent" ? (r.source ?? "Projeté (scénario parent)") : "Projeté"}</td>
                     <td className="num">{eur(r.brut)}</td>
                     <td className="num">{eur(r.charges)}</td>
-                    <td className="num" data-col="cost" title={r.nd ?? undefined}>{r.cost === null ? "n.d." : formatEuros(r.cost)}</td>
+                    <td className="num" data-col="cost" title={r.nd ?? undefined}>{r.cost === null ? "n.d." : r.layer === "projete" ? <a href={monthHref(r.month)}>{formatEuros(r.cost)}</a> : formatEuros(r.cost)}</td>
                     <td className="num">{r.headcount ?? "n.d."}</td>
                     <td className="num">{r.etp4 === null ? "n.d." : fmtEtp4(r.etp4)}</td>
                   </tr>

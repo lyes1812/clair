@@ -19,7 +19,6 @@ export default async function MsPrevuPage({ params }: { params: Promise<{ slug: 
   if (!tab) notFound();
   await requireWorkspace(slug);
   const ms = `/e/${slug}/studio-rh/masse-salariale`;
-  const hyp = `/e/${slug}/studio-rh/hypotheses`;
   const content: Record<string, Content> = {
     organisation: {
       lead: "Non réalisé : la masse salariale par organisation (direction, établissement, société) n'existe pas encore dans Clair.",
@@ -36,14 +35,6 @@ export default async function MsPrevuPage({ params }: { params: Promise<{ slug: 
         { href: `${ms}/analyse`, title: "Analyse des écarts", text: "Cascade d'ETP, contributions, pont volume / coût moyen." },
       ],
       open: ["Niveau de détail de l'écart de réel à définir."],
-    },
-    suivi: {
-      lead: "Non réalisé : le suivi mensuel du réel face au budget, hors scénario, n'existe pas encore ; la comparaison se fait aujourd'hui dans un scénario.",
-      existing: [
-        { href: hyp, title: "Hypothèses budgétaires", text: "Résultat › Comparaison, mois par mois, avec budget saisi, réel et N-1." },
-        { href: `${ms}/ecart`, title: "Écart budgétaire", text: "Écart par rubrique entre versions." },
-      ],
-      open: ["Budget de référence et mois de clôture d'un suivi autonome à préciser."],
     },
   };
   // Titre de la page : l'abréviation « MS » de l'onglet est écrite en toutes lettres.

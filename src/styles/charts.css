@@ -1,5 +1,6 @@
-/* Graphiques de Clair (charte « 101 ») : un bleu mesuré, du gris et du noir, étendus à huit teintes de série, toutes à 3:1 au moins
-   sur fond blanc (objets graphiques) ; le texte posé dessus est blanc (1, 2, 4, 5) ou encre (3, 6, 7, 8), à 4,5:1 au moins (voir onColor).
+/* Graphiques de Clair (charte « 101 ») : un bleu mesuré, du gris et du noir, étendus à huit teintes de série.
+   Les lectures comparées en courbes fines excluent les teintes 6 et 8, plus pâles, pour garder 3:1 au moins sur blanc.
+   Le texte posé dessus est blanc (1, 2, 4, 5) ou encre (3, 6, 7, 8), à 4,5:1 au moins (voir onColor).
    Typographie : échelle de typography.css (--clair-type-chart, --clair-type-legend). */
 :root {
   --chart-ink: #1c1c1e;
@@ -8,9 +9,9 @@
   --chart-3: #5f8cff;
   --chart-4: #27428f;
   --chart-5: #4b5563;
-  --chart-6: #7d92c5;
+  --chart-6: #8ea1d4;
   --chart-7: #7b8497;
-  --chart-8: #8792a8;
+  --chart-8: #98a4ba;
   /* Les seules couleurs hors de l'univers bleu / blanc / noir : le rouge et le vert, réservés aux tendances financières
      (hausse d'un coût : rouge ; baisse d'un coût : vert). */
   --bad: #c4302b;
