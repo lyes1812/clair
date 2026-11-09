@@ -56,6 +56,46 @@ describe("Suivi réel / budget : modèle agrégé", () => {
     expect(m.totals.reference.kind).toBe("nd");
     expect(m.chart.actual).toEqual(Array(12).fill(null));
   });
+  it("écarts négatifs exacts de −123,45 € et −0,01 €, cumul négatif : la différence typographique des signes ne les rend pas n.d.", () => {
+    const m = buildSuivi(input({
+      cutoff: "2026-02", actual: series({ "2026-01": 1, "2026-02": 1 }),
+      planned: series({ "2026-01": 12_346, "2026-02": 2 }, () => "budget"),
+    }));
+    expect(m.rows[0].gap).toMatchObject({ kind: "value", cents: -12_345 });
+    expect(m.rows[1].gap).toMatchObject({ kind: "value", cents: -1 });
+    expect(m.totals.gap).toMatchObject({ kind: "value", cents: -12_346 });
+  });
+  it("cellules et cumul réels négatifs : −123,45 € puis −0,01 € restent des montants connus", () => {
+    const m = buildSuivi(input({
+      cutoff: "2026-02", actual: series({ "2026-01": -12_345, "2026-02": -1 }),
+      planned: series({ "2026-01": 0, "2026-02": 0 }, () => "budget"),
+    }));
+    expect(m.rows.slice(0, 2).map((r) => r.actual)).toEqual([{ kind: "value", cents: -12_345 }, { kind: "value", cents: -1 }]);
+    expect(m.totals.actual).toEqual({ kind: "value", cents: -12_346 });
+    expect(m.totals.gap).toMatchObject({ kind: "value", cents: -12_346 });
+    expect(m.chart.actual.slice(0, 2)).toEqual([-12_345, -1]);
+  });
+  it("référence négative et zéro signé : montants exacts, pourcentage sans base positive n.d., −0 normalisé à 0", () => {
+    const m = buildSuivi(input({
+      cutoff: "2026-03", actual: series({ "2026-01": -0, "2026-02": 0, "2026-03": 0 }),
+      planned: series({ "2026-01": -12_345, "2026-02": -1, "2026-03": -0 }, () => "budget"),
+    }));
+    expect(m.rows.slice(0, 3).map((r) => r.reference)).toEqual([{ kind: "value", cents: -12_345 }, { kind: "value", cents: -1 }, { kind: "value", cents: 0 }]);
+    expect(m.rows[0].actual).toEqual({ kind: "value", cents: 0 });
+    expect(m.rows[0].gap).toMatchObject({ kind: "value", cents: 12_345, pct: null });
+    expect(m.totals.reference).toEqual({ kind: "value", cents: -12_346 });
+    expect(m.totals.gap).toMatchObject({ kind: "value", cents: 12_346, pct: null });
+  });
+  it("grand montant négatif : la garde de précision rejette encore un centime perdu à la borne Number", () => {
+    const m = buildSuivi(input({
+      cutoff: "2026-01", actual: series({ "2026-01": -Number.MAX_SAFE_INTEGER }),
+      planned: series({ "2026-01": 0 }, () => "budget"),
+    }));
+    expect(m.rows[0].actual).toEqual({ kind: "nd", reason: "montant hors de la précision exacte en centimes" });
+    expect(m.totals.actual.kind).toBe("nd");
+    expect(m.totals.gap.kind).toBe("nd");
+    expect(m.chart.actual[0]).toBeNull();
+  });
   it("provenance scénario : réel figé, parent, projeté ; lien de détail seulement là où le détail existe", () => {
     const selected: SuiviReferenceOption = { value: "scenario:fixture-scenario", label: "Scénario fictif", kind: "scenario", years: ["2026"], href: "/e/demo/studio-rh/hypotheses?scenario=fixture-scenario" };
     const planned = series({ "2026-01": 1_000_000, "2026-02": 1_050_000, "2026-03": 1_100_000 }, (m) => m === "2026-01" ? "reel" : m === "2026-02" ? "projete-parent" : "projete");

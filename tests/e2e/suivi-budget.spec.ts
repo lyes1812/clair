@@ -25,6 +25,8 @@ test("Suivi : référence explicite, budget incomplet, GET et vigilance au clavi
   const reference = await page.getByLabel("Budget ou scénario de référence").locator("option").filter({ hasText: "Budget Suivi fictif" }).getAttribute("value");
   await page.getByLabel("Budget ou scénario de référence").selectOption(reference!);
   await page.getByTestId("suivi-filters").getByRole("button", { name: "Appliquer" }).click();
+  await page.waitForURL(/[?&]reference=/);
+  await page.waitForLoadState("load");
   await expect(page.getByTestId("suivi-table").locator("tbody tr")).toHaveCount(12);
   expect(await exactText(page.getByTestId("suivi-table").locator('tr[data-month="2026-01"] td[data-col="reference"]'))).toBe("0,00 €");
   expect(await exactText(page.getByTestId("suivi-table").locator('tr[data-month="2026-02"] td[data-col="reference"]'))).toBe("12 345,00 €");

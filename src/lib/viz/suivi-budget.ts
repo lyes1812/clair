@@ -46,9 +46,10 @@ export type SuiviInput = Pick<SuiviModel, "slug" | "years" | "options" | "source
 const ORIGIN = { reel: "Réel figé", "projete-parent": "Projeté du parent", projete: "Projeté", budget: "Budget saisi" } as const;
 const UNSAFE = "montant hors de la précision exacte en centimes";
 // Le formateur commun divise par 100 (Number) : vérifier aussi qu'il conserve le centime à la borne de précision.
-const exactCents = (n: number) => Number.isSafeInteger(n) && formatEuros(n) === `${fmtFixed({ num: n, den: 100 })}\u00a0€`;
+// Comparer les valeurs absolues : ses signes ASCII et le signe moins Unicode de fmtFixed sont typographiques.
+const exactCents = (n: number) => Number.isSafeInteger(n) && formatEuros(Math.abs(n)) === `${fmtFixed({ num: Math.abs(n), den: 100 })}\u00a0€`;
 const point = (s: Series, month: string): Point => s.points.get(month) ?? { month, kind: "nd", reason: "mois non couvert par cette lecture" };
-const cell = (p: Point): SuiviCell => p.kind === "value" ? exactCents(p.cost) ? { kind: "value", cents: p.cost } : { kind: "nd", reason: UNSAFE } : { kind: "nd", reason: p.reason };
+const cell = (p: Point): SuiviCell => p.kind === "value" ? exactCents(p.cost) ? { kind: "value", cents: p.cost === 0 ? 0 : p.cost } : { kind: "nd", reason: UNSAFE } : { kind: "nd", reason: p.reason };
 const totalCell = (s: Series, months: string[]): SuiviCell => {
   let running = 0;
   for (const month of months) {
