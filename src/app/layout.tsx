@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import "@fontsource-variable/inter";
 import "@/styles/typography.css";
 import "@/styles/controls.css";
 import "@/styles/charts.css";

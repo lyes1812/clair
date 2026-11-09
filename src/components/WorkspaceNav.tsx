@@ -41,17 +41,15 @@ export function WorkspaceNav({ slug }: { slug: string }) {
             <BriefcaseBusiness size={16} strokeWidth={1.75} aria-hidden="true" />
             <span>Studio RH</span>
           </a>
-          <button type="button" className="nav-group-toggle" aria-expanded={open} aria-label={open ? "Replier le Studio RH" : "Déplier le Studio RH"} onClick={() => setOpen((o) => !o)}>
+          <button type="button" className="nav-group-toggle" aria-expanded={open} aria-controls="studio-rh-navigation" aria-label={open ? "Replier le Studio RH" : "Déplier le Studio RH"} onClick={() => setOpen((o) => !o)}>
             <ChevronDown className="chevron" size={14} strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
-        {open && (
-          <div className="nav-sub">
-            {STUDIO_RH_ITEMS.map((item) => (
-              <span key={item.path} style={{ display: "contents" }}>{link(item.path, item.label)}</span>
-            ))}
-          </div>
-        )}
+        <div className="nav-sub" id="studio-rh-navigation" hidden={!open}>
+          {STUDIO_RH_ITEMS.map((item) => (
+            <span key={item.path} style={{ display: "contents" }}>{link(item.path, item.label)}</span>
+          ))}
+        </div>
       </div>
       {link(FINANCE_ITEM.path, FINANCE_ITEM.label)}
       {link(RESTRUCTURING_ITEM.path, RESTRUCTURING_ITEM.label)}

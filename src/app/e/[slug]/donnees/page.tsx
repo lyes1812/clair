@@ -1,4 +1,5 @@
 import "@/styles/donnees.css";
+import { ArrowDown, ArrowRight, BookOpen, Check, Cloud, Files, UsersRound } from "lucide-react";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { DATA_ITEM, STUDIO_RH_ITEMS } from "@/lib/nav";
@@ -67,7 +68,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
       <span className="nd">n.d. — aucun dépôt</span>
     );
 
-  // Action principale de la carte (bouton plein) puis « Gérer » (bouton neutre vers la page de la source).
+  // Action principale de la carte, puis accès aux détails et à l'historique de la source.
   const cardFoot = (action: SourceAction, href: string, label: string) => (
     <div className="dn-card-foot">
       {action && (
@@ -75,17 +76,23 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
           {action.label}
         </a>
       )}
-      <a className="btn" href={href} aria-label={`Gérer ${label}`}>Gérer</a>
+      <a className="btn dn-manage" href={href} aria-label={`Gérer ${label}`}>
+        Gérer {label}<ArrowRight size={15} aria-hidden="true" />
+      </a>
     </div>
   );
 
-  // Source retenue : dite une seule fois par domaine, avec la règle de choix et, au besoin, l'étape suivante.
+  const retained = (chosen: boolean) => chosen ? (
+    <span className="dn-retained"><Check size={13} aria-hidden="true" />Source retenue</span>
+  ) : null;
+
+  // Synthèse du domaine : source retenue, règle de choix et, au besoin, étape suivante.
   const sourceChoice = (domain: SourceDomain, r: SourceResolution, pending: Candidate | null) => {
     const w = DOMAIN_WORDS[domain];
     return (
       <section className="panel source-choice dn-choice" data-testid={`source-choice-${domain}`}>
         <div className="source-head">
-          <div>
+          <div className="dn-choice-copy">
             <h3>Source retenue pour les modules<GlossaryLink slug={slug} term={DONNEES_TERMS.sourceRetenue} /></h3>
             <p data-testid={`source-chosen-${domain}`}>
               {r.chosen ? <strong>{PROVIDER_LABELS[r.chosen]}</strong> : <strong>n.d.</strong>} <span className="desc">— {r.reason}</span>
@@ -127,11 +134,13 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
   const apiCard = ({ id, label, summary, conn, last, active }: (typeof states)[number], chosen: boolean) => (
     <section key={id} className="panel dn-card" data-testid={`source-${id}`} data-chosen={chosen ? "true" : undefined}>
       <div className="dn-card-head">
+        <span className="dn-source-icon"><Cloud size={21} strokeWidth={1.7} aria-hidden="true" /></span>
         <div>
           <h3>{label} <span className="tag">API</span></h3>
-          <p className="desc">{summary}</p>
+          {retained(chosen)}
         </div>
       </div>
+      <p className="desc dn-card-summary">{summary}</p>
       <dl className="facts dn-facts">
         <div>
           <dt>Connexion</dt>
@@ -174,11 +183,13 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
   const dsnCard = (
     <section className="panel dn-card" data-testid="source-dsn" data-chosen={rhSource.chosen === "dsn" ? "true" : undefined}>
       <div className="dn-card-head">
+        <span className="dn-source-icon"><Files size={21} strokeWidth={1.7} aria-hidden="true" /></span>
         <div>
           <h3>Fichiers DSN <span className="tag">Fichier</span></h3>
-          <p className="desc">Déclarations mensuelles déposées fichier par fichier : individus, contrats, rémunérations, activités.</p>
+          {retained(rhSource.chosen === "dsn")}
         </div>
       </div>
+      <p className="desc dn-card-summary">Déclarations mensuelles déposées fichier par fichier : individus, contrats, rémunérations, activités.</p>
       <dl className="facts dn-facts">
         <div>
           <dt>Fichiers conservés</dt>
@@ -202,11 +213,13 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
   const fecCard = (
     <section className="panel dn-card" data-testid="source-fec" data-chosen={accountingSource.chosen === "fec" ? "true" : undefined}>
       <div className="dn-card-head">
+        <span className="dn-source-icon"><Files size={21} strokeWidth={1.7} aria-hidden="true" /></span>
         <div>
           <h3>Fichiers FEC <span className="tag">Fichier</span></h3>
-          <p className="desc">Fichier des écritures comptables, un par exercice : toutes les écritures, journaux et comptes.</p>
+          {retained(accountingSource.chosen === "fec")}
         </div>
       </div>
+      <p className="desc dn-card-summary">Fichier des écritures comptables, un par exercice : toutes les écritures, journaux et comptes.</p>
       <dl className="facts dn-facts">
         <div><dt>Fichiers conservés</dt><dd data-testid="fec-files-count">{fecFiles.length === 0 ? "aucun" : fecFiles.length}</dd></div>
         <div><dt>Dernier dépôt</dt><dd>{lastDeposit(fecLast)}</dd></div>
@@ -223,11 +236,17 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
 
   return (
     <>
-      <PageHead kicker="Données" title={DATA_ITEM.label}>
-        <p className="desc">
-          Sources de l'espace, en lecture seule.<GlossaryLink slug={slug} term={DONNEES_TERMS.lecture} />
-        </p>
-      </PageHead>
+      <div className="dn-overview">
+        <PageHead kicker="Sources de l'espace" title={DATA_ITEM.label}>
+          <p className="desc">
+            Connexions et fichiers, en lecture seule.<GlossaryLink slug={slug} term={DONNEES_TERMS.lecture} />
+          </p>
+        </PageHead>
+        <nav className="dn-quick-nav" aria-label="Accès rapide aux sources">
+          <a href="#domaine-rh"><UsersRound size={16} aria-hidden="true" />Ressources humaines<ArrowDown size={14} aria-hidden="true" /></a>
+          <a href="#domaine-comptabilite"><BookOpen size={16} aria-hidden="true" />Comptabilité<ArrowDown size={14} aria-hidden="true" /></a>
+        </nav>
+      </div>
 
       <section className="dn-domain" id="domaine-rh" aria-labelledby="dn-rh-title">
         <div className="dn-section-head">

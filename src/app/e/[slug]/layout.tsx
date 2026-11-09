@@ -20,6 +20,7 @@ export default async function WorkspaceLayout({
   const { session, workspace } = await requireWorkspace(slug);
   return (
     <CurrencyProvider><div className="shell">
+      <a className="skip-link" href="#workspace-content">Aller au contenu</a>
       <aside className="sidebar">
         <div className="sidebar-brand"><Brand /></div>
         <SidebarDrawer>
@@ -39,7 +40,7 @@ export default async function WorkspaceLayout({
       </aside>
       <div className="shell-main">
         <WorkspaceTopBar slug={slug} workspaceName={workspace.name} userName={session.user.name} email={session.user.email} families={menuFamilies(slug)} />
-        <main className="main">{children}</main>
+        <main className="main" id="workspace-content" tabIndex={-1}>{children}</main>
       </div>
     </div></CurrencyProvider>
   );

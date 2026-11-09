@@ -38,29 +38,60 @@
 .dn-tag-inline { margin-left: 8px; }
 .dn-pill-link { display: inline-flex; text-decoration: none; }
 
+/* Vue d'ensemble : accès directs aux deux domaines, sans modifier la navigation métier. */
+.dn-overview { display: grid; gap: 24px; min-width: 0; }
+.dn-quick-nav { display: flex; flex-wrap: wrap; gap: 10px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.dn-quick-nav a { display: inline-flex; align-items: center; gap: 9px; min-height: 42px; padding: 9px 13px; border: 1px solid var(--line); border-radius: var(--clair-radius-control); background: #fff; color: var(--ink); font-size: var(--clair-type-form); font-weight: 550; text-decoration: none; }
+.dn-quick-nav a:hover { border-color: #c7d5ef; background: var(--surface); }
+.dn-quick-nav a > svg:last-child { margin-left: 7px; color: var(--muted); }
+.dn-quick-nav a:focus-visible, .dn-card-foot a:focus-visible { outline: 3px solid #8aafff; outline-offset: 3px; }
+
 /* Un domaine (RH, comptabilité) : règle de choix puis les deux sources côte à côte. */
-.dn-domain { display: grid; gap: 16px; min-width: 0; scroll-margin-top: 16px; }
+.dn-domain { display: grid; gap: 16px; min-width: 0; scroll-margin-top: 24px; }
+.dn-domain + .dn-domain { padding-top: 12px; }
 .dn-domain > .dn-section-head .group-title { font-size: var(--clair-type-panel); } /* la section pèse plus que les cartes qu'elle contient */
-.dn-choice { padding: 18px 20px; }
+.dn-choice { padding: 18px 20px; border-color: var(--line); background: var(--surface); }
 .dn-choice h3 { font-size: var(--clair-type-subheading); }
-.dn-choice .source-head > div { gap: 4px; }
+.dn-choice .source-head { align-items: center; gap: 18px 24px; }
+.dn-choice .source-head > .dn-choice-copy { flex: 1 1 320px; gap: 6px; min-width: 0; }
+.dn-choice-copy p { font-size: var(--clair-type-form); }
+.dn-choice-copy p strong { font-weight: 650; }
 .dn-next { font-size: var(--clair-type-form); line-height: 1.55; }
-.dn-rule { flex: 1 1 380px; justify-content: flex-end; }
-.dn-rule .field-row { flex: 1 1 260px; max-width: 360px; }
+.dn-rule { flex: 0 1 350px; justify-content: flex-end; min-width: 0; }
+.dn-rule .field-row { flex: 1 1 220px; min-width: 0; }
 .dn-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 16px; }
-.panel.dn-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; border-radius: var(--clair-radius-card, 12px); background: #fff; }
-/* Carte de la source retenue : simple repère visuel (l'état est dit en toutes lettres dans « Source retenue pour les modules »). */
+.panel.dn-card { display: flex; flex-direction: column; gap: 18px; min-width: 0; padding: 22px; border-radius: var(--clair-radius-card, 12px); background: #fff; }
+/* La source retenue est identifiée par son libellé, renforcé par un contour bleu discret. */
 .panel.dn-card[data-chosen="true"] { border-color: #a9c2ff; background: #fff; }
+.dn-retained { display: inline-flex; align-items: center; justify-self: start; gap: 5px; color: var(--blue); font-size: var(--clair-type-label); font-weight: 600; }
 .dn-conn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.dn-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 12px; }
-.dn-card-head > div { display: grid; gap: 6px; min-width: 0; flex: 1 1 220px; }
+.dn-card-head { display: flex; align-items: center; gap: 12px; }
+.dn-source-icon { display: grid; place-items: center; flex: none; width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--muted); }
+.dn-card[data-chosen="true"] .dn-source-icon { border-color: #d6e3ff; background: var(--blue-soft); color: var(--blue); }
+.dn-card-head > div { display: grid; gap: 5px; min-width: 0; }
 .dn-card-head h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--clair-type-section); }
-.dn-card-foot { margin-top: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+.dn-card-summary { line-height: 1.65; }
+.dn-card-foot { margin-top: auto; display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
+.dn-card-foot .btn { gap: 8px; }
+.dn-card-foot .dn-manage, html[data-clair-theme="airy"] .dn-card-foot .dn-manage { border-color: transparent; background: transparent; color: var(--muted); box-shadow: none; }
+.dn-card-foot .dn-manage:hover, html[data-clair-theme="airy"] .dn-card-foot .dn-manage:hover { border-color: transparent; background: var(--surface); color: var(--ink); box-shadow: none; }
 .facts.dn-facts { grid-template-columns: minmax(0, 1fr); gap: 0; }
 .facts.dn-facts > div { grid-template-columns: minmax(110px, 150px) minmax(0, 1fr); align-items: baseline; gap: 4px 14px; padding: 10px 0; border-top: 1px solid var(--line); }
 .facts.dn-facts dd { overflow-wrap: anywhere; line-height: 1.5; }
 .facts.dn-facts .status-pill { vertical-align: 1px; }
-@media (max-width: 520px) { .facts.dn-facts > div { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 860px) {
+  .dn-domain { scroll-margin-top: 88px; }
+  .dn-quick-nav a { min-height: 44px; }
+}
+@media (max-width: 520px) {
+  .dn-overview { gap: 20px; }
+  .dn-quick-nav { gap: 8px; padding-bottom: 20px; }
+  .dn-choice, .panel.dn-card { padding: 18px; }
+  .dn-rule { flex-basis: 100%; justify-content: flex-start; }
+  .dn-rule .field-row { flex-basis: 100%; }
+  .facts.dn-facts > div { grid-template-columns: minmax(0, 1fr); }
+  .dn-card-foot .btn { min-height: 44px; }
+}
 
 /* Accès au Studio RH : simple rangée de liens en bas de page (les entrées sont déjà dans le menu). */
 .dn-studio { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding-top: 18px; border-top: 1px solid var(--line); }
