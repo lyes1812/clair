@@ -13,7 +13,7 @@ export const STUDIO_RH_ITEMS: NavItem[] = [
   { label: "KPI RH", path: "studio-rh/kpi", module: 3, summary: "ETP, effectif moyen, turnover et absentéisme, avec comparaison N-1 et définitions paramétrables." },
   { label: "Masse salariale", path: "studio-rh/masse-salariale", module: 4, summary: "Brut, charges et coût chargé par mois et par population, rapprochés des comptes 641/645." },
   { label: "Hypothèses budgétaires", path: "studio-rh/hypotheses", module: 5, summary: "Base figée, hypothèses datées, scénarios et projection traçable de la masse salariale." },
-  { label: "Reporting social", path: "studio-rh/reporting-social", module: 6, summary: "Index égalité FH et BDESE : entrées prévues, pas encore réalisées." },
+  { label: "Reporting social", path: "studio-rh/reporting-social", module: 6, summary: "Rapport de synthèse RH et paie, imprimable en PDF. Index égalité FH et BDESE prévus." },
 ];
 
 // Studio Finance demandé par Lyes ; le catalogue et l'ordre du Studio RH restent inchangés.

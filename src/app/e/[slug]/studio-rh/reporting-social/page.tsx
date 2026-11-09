@@ -1,4 +1,5 @@
 import "@/styles/donnees.css";
+import "@/styles/reporting-social.css";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { Prevu } from "@/components/Prevu";
@@ -6,15 +7,16 @@ import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { PageHead } from "../../donnees/ui";
 import { requireWorkspace } from "@/lib/workspace";
+import { loadPayrollContext } from "@/lib/payroll/context";
+import { socialReportOf } from "@/lib/reporting/social";
+import { isMonth } from "@/lib/connectors/months";
+import { ReportView } from "./ReportView";
+import { REPORTING_VUES, resolveReportingVue } from "./tabs";
 
 export const dynamic = "force-dynamic";
 type Search = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/reporting-social")!;
-const VUES = [
-  { key: "index", label: "Index égalité FH", soon: true },
-  { key: "bdese", label: "BDESE", soon: true },
-] as const;
 
 // Chapitres du catalogue de la BDESE, listés par leur seul numéro et leur nom : ni nombre d'indicateurs, ni contenu, ni obligation
 // n'en sont déduits. Le chapitre 07 est abrégé : son intitulé complet n'est pas lisible dans la source consultée (voir la note sous la grille
@@ -31,22 +33,32 @@ const CHAPITRES = [
 ] as const;
 const OUTILS = ["Saisie de la BDESE", "Gestionnaire de fichiers"] as const;
 
-// Reporting social : deux entrées, toutes deux « Prévu ». Aucune obligation légale, seuil d'effectif ou nombre d'indicateurs n'est
-// affirmé ici : l'aperçu du catalogue BDESE ne construit rien.
+// Le rapport réutilise les agrégats des moteurs RH et paie. Les deux entrées réglementaires restent « Prévu ».
 export default async function ReportingSocialPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
   const sp = await searchParams;
-  await requireWorkspace(slug);
-  const vue = VUES.some((v) => v.key === one(sp.vue)) ? one(sp.vue) : "index";
+  const { workspace } = await requireWorkspace(slug);
+  const vue = resolveReportingVue(one(sp.vue));
   const base = `/e/${slug}/studio-rh/reporting-social`;
   const studio = `/e/${slug}/studio-rh`;
+  const report = vue === "rapport" ? socialReportOf(await loadPayrollContext(slug), sp) : null;
+  const period = new URLSearchParams();
+  if (report?.kind === "ready") {
+    period.set("mode", report.selection.mode);
+    period.set("fin", report.selection.fin);
+    period.set("annee", String(report.selection.year));
+  } else {
+    if (["civil", "glissant"].includes(one(sp.mode))) period.set("mode", one(sp.mode));
+    if (isMonth(one(sp.fin))) period.set("fin", one(sp.fin));
+    if (/^\d{4}$/.test(one(sp.annee))) period.set("annee", one(sp.annee));
+  }
   return (
-    <>
+    <div className="rs-page">
       <PageHead kicker="Studio RH" title={ITEM.label}>
         <p className="desc">{ITEM.summary}</p>
       </PageHead>
-      <FamilyTabs label="Entrées Reporting social" testid="rs-tabs" current={vue} tabs={VUES.map((v) => ({ key: v.key, label: v.label, href: `${base}?vue=${v.key}`, soon: v.soon }))} />
-      {vue === "index" ? (
+      <FamilyTabs label="Entrées Reporting social" testid="rs-tabs" current={vue} tabs={REPORTING_VUES.map((v) => ({ key: v.key, label: v.label, href: `${base}?vue=${v.key}${period.size ? `&${period.toString()}` : ""}`, soon: "soon" in v ? v.soon : undefined }))} />
+      {vue === "rapport" && report ? <ReportView report={report} slug={slug} workspaceName={workspace.name} /> : vue === "index" ? (
         <Prevu
           title="Index égalité FH"
           lead="Non disponible avec les données lues : le calcul de l'index demande le sexe, la catégorie et la rémunération individuelle de chaque collaborateur, et le sexe n'est pas lu aujourd'hui dans le référentiel Collaborateurs."
@@ -101,6 +113,6 @@ export default async function ReportingSocialPage({ params, searchParams }: { pa
           </section>
         </>
       )}
-    </>
+    </div>
   );
 }

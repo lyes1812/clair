@@ -2,6 +2,7 @@ import { TABS as COLLAB_TABS } from "@/app/e/[slug]/studio-rh/collaborateurs/tab
 import { KPI_VUES } from "@/app/e/[slug]/studio-rh/kpi/tabs";
 import { MS_PREVU } from "@/app/e/[slug]/studio-rh/masse-salariale/tabs";
 import { VUES as HYP_VUES } from "@/app/e/[slug]/studio-rh/hypotheses/tabs";
+import { REPORTING_VUES } from "@/app/e/[slug]/studio-rh/reporting-social/tabs";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 
 // Menu général : les cinq familles du Studio RH avec toutes leurs entrées, construit à partir des listes d'onglets de chaque
@@ -24,10 +25,7 @@ export function menuFamilies(slug: string): MenuFamily[] {
       { label: "Analyse des écarts", href: `${root("studio-rh/masse-salariale")}/analyse` },
     ],
     "studio-rh/hypotheses": HYP_VUES.map((v) => ({ label: v.label, href: `${root("studio-rh/hypotheses")}?vue=${v.key}`, soon: "soon" in v ? v.soon : undefined })),
-    "studio-rh/reporting-social": [
-      { label: "Index égalité FH", href: `${root("studio-rh/reporting-social")}?vue=index`, soon: true },
-      { label: "BDESE", href: `${root("studio-rh/reporting-social")}?vue=bdese`, soon: true },
-    ],
+    "studio-rh/reporting-social": REPORTING_VUES.map((v) => ({ label: v.label, href: `${root("studio-rh/reporting-social")}?vue=${v.key}`, soon: "soon" in v ? v.soon : undefined })),
   };
   return STUDIO_RH_ITEMS.map((i) => ({ label: i.label, href: root(i.path), entries: entries[i.path] ?? [] }));
 }

@@ -113,9 +113,15 @@ test("Entrées du cahier : KPI RH par onglet, effectifs mensuels par axe, fiche 
   await page.goto(`/e/${slug}/studio-rh/collaborateurs/tree`);
   await expect(page.getByTestId("prevu")).toContainText("hiérarchie");
 
-  // Reporting social : entrées « Prévu ».
+  // Reporting social : rapport agrégé par défaut, entrées réglementaires toujours « Prévu ».
   await page.goto(`/e/${slug}/studio-rh/reporting-social`);
+  await expect(page.getByTestId("rs-tabs").getByRole("link", { name: "Rapport de synthèse" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("rs-report")).toBeVisible();
+  await expect(page.getByTestId("rs-provenance")).toContainText("Source RH");
+  await expect(page.getByTestId("rs-print")).toHaveText("Imprimer / Enregistrer en PDF");
   await expect(page.getByTestId("rs-tabs")).toContainText("BDESE");
+  await page.getByTestId("rs-tabs").getByRole("link", { name: "Index égalité FH" }).click();
+  await expect(page.getByTestId("prevu")).toContainText("Non disponible");
   await page.getByTestId("rs-tabs").getByRole("link", { name: "BDESE" }).click();
   await expect(page.getByTestId("prevu")).toContainText("ne valide aucune obligation légale");
 });
