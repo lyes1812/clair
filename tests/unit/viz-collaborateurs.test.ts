@@ -539,26 +539,37 @@ describe("rendu : en-tête des écrans Collaborateurs", () => {
     // Le contenu de la page est le dernier élément : rien n'est ajouté après lui.
     expect(html.endsWith('<p id="contenu">contenu</p>')).toBe(true);
   });
-  it("limite de l'historique PayFit : une phrase courte, les textes des specs conservés, « ? » vers la borne basse", () => {
+  it("signale une limite effective dans une aide fermée, avec son impact et l’accès à la couverture", () => {
     const html = render(ctxOf());
-    expect(html).toContain("Limites de la lecture (1)");
+    expect(html).toContain("Vigilance (1)");
+    expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
     expect(html).toContain('data-testid="payfit-history-notice"');
-    expect(html).toContain("Données telles que remontées par l&#x27;API PayFit");
-    expect(html).toContain("faussés dans un sens ou dans l&#x27;autre");
-    expect(html).toContain('href="/e/demo/glossaire#def-lower-bound"');
-    // Le détail (contrat qui fait suite à un contrat non renvoyé, dénominateurs réduits) n'est plus à l'écran.
-    expect(html).not.toMatch(/dénominateurs|compte comme une entrée/);
+    expect(html).toContain("Historique incomplet");
+    expect(html).toContain("01/10/2025");
+    expect(html).toContain("Effectifs, ETP et sorties peuvent être sous-estimés");
+    expect(html).toContain("Entrées, turnover et absentéisme peuvent être faussés");
+    expect(html).toContain('href="/e/demo/parametres#payfit-historique"');
+    expect(html).not.toContain("collab-limits-resume");
   });
-  it("natures comptées : une ligne dans le bloc de lecture, avec son « ? » et le lien vers les Paramètres", () => {
+  it("renvoie les règles d’effectif vers les paramètres et retire les métadonnées techniques du header", () => {
     const html = render(ctxOf());
-    expect(html).toMatch(/data-testid="rh-natures">Natures comptées dans l&#x27;effectif : [^<]+ — valeur par défaut validée · <a href="\/e\/demo\/parametres">Paramètres<\/a><a class="gloss-link" href="\/e\/demo\/glossaire#def-natures"/);
-    expect(render(ctxOf({ natures: { codes: ["01"], origin: "setting" } }))).toContain("modifiée par un administrateur");
+    expect(html).toContain('href="/e/demo/parametres#effectif"');
+    expect(html).toContain('href="/e/demo/donnees"');
+    expect(html).not.toMatch(/rh-natures|rh-build-info|Natures comptées|empreinte|référentiel reconstruit/);
   });
-  it("sans mode brut : aucune limite, le bloc s'intitule « Détail de la lecture »", () => {
+  it("ne compte pas de vigilance sans limite effective", () => {
     const html = render(ctxOf({ payfitHistory: null }));
     expect(html).not.toContain("payfit-history-notice");
-    expect(html).not.toContain("Limites de la lecture");
-    expect(html).toContain("Détail de la lecture · date de référence 30/09/2026");
+    expect(html).not.toContain("Vigilance");
+    expect(html).toContain("Informations sur la lecture");
+    expect(render(ctxOf({ payfitHistory: { mode: "raw", limit: null } }))).not.toContain("Vigilance");
+  });
+  it("un changement de source conserve le signal sans ouvrir l’aide ni afficher l’audit administrateur", () => {
+    const html = render(ctxOf({ switchedAt: new Date("2026-10-01T10:00:00Z"), source: { domain: "rh", chosen: "payfit", mode: "api", reason: "API choisie par l’administrateur.", modeSetAt: new Date("2026-10-01T10:00:00Z"), appliedAt: null } }));
+    expect(html).toContain("Vigilance (2)");
+    expect(html).toContain("Les référentiels PayFit et DSN ne sont pas rapprochés");
+    expect(html).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+    expect(html).not.toMatch(/Choix forcé|API choisie|Source RH changée le|Détail de la lecture/);
   });
   it("source non retenue : le refus est dit en une ligne, avec le lien vers Données", () => {
     const html = render(ctxOf({ data: null, source: { domain: "rh", chosen: null, reason: "aucune source appliquée", mode: "auto", modeSetAt: null, appliedAt: null } }));

@@ -9,7 +9,7 @@ const source: SourceResolution = {
   apiApplied: true, filesApplied: false, appliedAt: new Date("2026-01-15T10:00:00Z"),
   modeSetAt: null, modeSetBy: null,
 };
-const render = (changes: Partial<SourceResolution> = {}) => renderToStaticMarkup(h(SourceBadge, { resolution: { ...source, ...changes }, slug: "fixture" }));
+const render = (changes: Partial<SourceResolution> = {}, compact = false) => renderToStaticMarkup(h(SourceBadge, { resolution: { ...source, ...changes }, slug: "fixture", compact }));
 
 describe("bandeau de source : contexte unique, avertissements conservés", () => {
   it.each(["payfit", "pennylane"] as const)("allège seulement la confirmation automatique %s déjà portée par la source et sa date", (chosen) => {
@@ -46,5 +46,22 @@ describe("bandeau de source : contexte unique, avertissements conservés", () =>
       expect(render(changes)).toContain(source.reason);
     }
     expect(render({ reason: "Lecture partielle : contrats archivés absents." })).toContain("Lecture partielle : contrats archivés absents.");
+  });
+
+  it("garde seulement la source liée et la date en mode compact", () => {
+    const html = render({ mode: "api", reason: "API choisie par l'administrateur.", modeSetAt: new Date("2026-01-16T10:00:00Z") }, true);
+    expect(html).toContain('<a href="/e/fixture/donnees">PayFit</a>');
+    expect(html).toContain("lecture appliquée le");
+    expect(html).not.toContain("administrateur");
+    expect(html).not.toContain(">Données</a>");
+    expect(html.match(/href=/g)).toHaveLength(1);
+  });
+
+  it("garde une source absente explicite et résoluble en mode compact", () => {
+    const reason = "Aucune source appliquée pour ce domaine.";
+    const html = render({ chosen: null, appliedAt: null, apiApplied: false, reason }, true);
+    expect(html).toContain("n.d.");
+    expect(html).toContain(reason);
+    expect(html).toContain('<a href="/e/fixture/donnees">Données</a>');
   });
 });

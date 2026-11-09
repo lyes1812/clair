@@ -13,23 +13,28 @@
 .collab-title { display: grid; gap: 4px; min-width: 0; }
 .panel-head .collab-title { flex: 1 1 320px; }
 
-/* En-tête : titre, source visible ; les limites de la lecture tiennent dans un seul bloc repliable (résumé visible). */
+/* En-tête : source et accès contextuel aux points de vigilance. */
 .collab-head { display: grid; gap: 8px; }
-.collab-read-details { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
-.collab-read-details[open], .collab-read-details.collab-limits { justify-self: stretch; }
-.collab-read-details > summary { cursor: pointer; padding: 7px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
-.collab-read-details[open] > summary { color: var(--ink); border-bottom: 1px solid var(--line); }
-.collab-limits > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; list-style: none; }
-.collab-limits > summary::-webkit-details-marker { display: none; }
-.collab-limits > summary::before { content: ""; flex: none; align-self: center; width: 6px; height: 6px; margin: 0 2px 2px 0; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.15s; }
-.collab-limits[open] > summary::before { transform: rotate(45deg); margin-bottom: 4px; }
-.collab-limits-title { font-weight: 600; color: var(--ink); }
-.collab-limits-resume { flex: 1 1 320px; min-width: 0; font-weight: 400; color: var(--muted); line-height: 1.45; }
-.collab-limits[open] .collab-limits-resume { display: none; }
-.collab-limits-body { display: grid; gap: 10px; padding: 10px 12px 12px; }
-.collab-limits-body > p { overflow-wrap: anywhere; line-height: 1.55; font-size: var(--clair-type-form); }
-.collab-limit { padding-left: 10px; border-left: 3px solid #d6e3ff; color: var(--ink); }
-.collab-limits-sub { font-size: var(--clair-type-label); font-weight: 600; color: var(--muted); }
+.collab-source-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-width: 0; }
+.collab-source-line .source-badge { min-width: 0; }
+.collab-context-help { flex: none; }
+.collab-context-help > summary { min-height: 36px; border-radius: 18px; padding: 6px 10px; font-size: var(--clair-type-label); }
+.collab-context-help.has-vigilance > summary { background: var(--blue-soft); border-color: #b8cdfa; color: #254b92; }
+.collab-context-help.has-vigilance > summary:hover { background: #e2ebff; border-color: #85a9f2; }
+.collab-help-symbol { display: inline-flex; }
+.collab-help-mark { display: inline-grid; place-items: center; width: 17px; height: 17px; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; font-weight: 600; line-height: 1; }
+.collab-context-help .ui-dropdown-panel { width: 360px; max-width: min(360px, calc(100vw - 48px)); padding: 18px; }
+.collab-help-body { display: grid; gap: 16px; font-size: var(--clair-type-form); line-height: 1.5; overflow-wrap: anywhere; }
+.collab-help-item { display: grid; gap: 6px; }
+.collab-help-item h2 { font-size: var(--clair-type-form); font-weight: 600; line-height: 1.4; letter-spacing: normal; }
+.collab-help-item p { color: var(--muted); }
+.collab-help-item a, .collab-help-links a { font-size: var(--clair-type-label); }
+.collab-help-links { display: flex; flex-wrap: wrap; gap: 8px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+@media (max-width: 680px) {
+  .collab-source-line { align-items: flex-start; }
+  .collab-source-line .source-badge { flex-basis: 100%; }
+  .collab-context-help .ui-dropdown-panel { left: 0; right: auto; }
+}
 
 /* Tuiles d'indicateurs : grille régulière (4 colonnes, 5 pour l'année), valeur courte en grand, « n.d. » court (raison dite une fois
    en tête de panneau et au survol). Une dernière rangée incomplète est étirée pour ne laisser aucun emplacement vide. */

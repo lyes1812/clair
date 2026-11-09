@@ -1,16 +1,18 @@
 import { FamilyTabs } from "@/components/FamilyTabs";
+import { DropdownMenu } from "@/components/DropdownMenu";
+import { TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { SourceBadge } from "@/components/SourceBadge";
 import { dateTimeFmt } from "@/lib/connectors/labels";
-import { formatDate, formatMonth, monthsBetween } from "@/lib/dates";
+import { formatDate, formatMonth } from "@/lib/dates";
 import { contractNatureLabel, endReasonLabel } from "@/lib/dsn/labels";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { findingLabel } from "@/lib/rh/findings";
 import type { EventRow, RowState } from "@/lib/rh/headcount";
 import { fieldView, type ContractDraft, type FieldView, type FindingDraft, type PersonDraft, type Provenance, type Traced as TracedRow } from "@/lib/rh/referential/types";
 import { EVENT_FLAG_LABELS, personLabel, type CollabContext, type Shown } from "@/lib/rh/view";
-import { atLeast, clearMonths, monthRangeLabel, PAGE_SIZES, tileFoot } from "@/lib/viz/collaborateurs";
+import { atLeast, clearMonths, PAGE_SIZES, tileFoot } from "@/lib/viz/collaborateurs";
 
 // Composants partagés des écrans Collaborateurs : en-tête (source, limites de la lecture), valeurs tracées, constats. Les définitions sont au glossaire.
 const ITEM = STUDIO_RH_ITEMS.find((i) => i.path === "studio-rh/collaborateurs")!;
@@ -54,22 +56,6 @@ export function PayfitHistoryNotice({ ctx }: { ctx: CollabContext }) {
   );
 }
 
-// Résumé d'une ligne de chaque limite de lecture (visible quand le bloc est replié).
-function limitResumes(ctx: CollabContext): string[] {
-  const out: string[] = [];
-  const r = rawHistory(ctx);
-  if (r) {
-    const l = r.h.limit;
-    out.push(
-      l
-        ? `Historique PayFit tel que renvoyé par l'API : pour ${monthRangeLabel(monthsBetween(l.lowerFrom, l.lowerTo))}, les contrats archivés depuis plus de 12 mois manquent ; effectifs, ETP et sorties peuvent être sous-estimés, entrées, turnover et absentéisme faussés.`
-        : "Historique PayFit tel que renvoyé par l'API : aucun mois de la lecture n'est antérieur à la limite de conservation.",
-    );
-  }
-  if (ctx.switchedAt) out.push(`Source RH changée le ${dateTimeFmt.format(ctx.switchedAt)}.`);
-  return out;
-}
-
 export function BuildInfo({ ctx }: { ctx: CollabContext }) {
   const d = ctx.data;
   if (!d) return null;
@@ -93,51 +79,49 @@ export function BuildInfo({ ctx }: { ctx: CollabContext }) {
   return <p className="desc" data-testid="rh-build-info">{parts.join(" · ")}</p>;
 }
 
-// En-tête des écrans Collaborateurs. Les limites de la lecture tiennent dans un seul bloc repliable (résumé visible) ; une
-// page « Prévu » (prevu) n'affiche aucune donnée : ni limites de lecture, ni définitions.
+// En-tête compact : source et date visibles ; les points de vigilance se consultent à la demande.
+// Une page « Prévu » n'affiche aucune information de lecture.
 export function CollabHeader({ ctx, tab, prevu = false, children }: { ctx: CollabContext; tab: TabId | null; prevu?: boolean; children?: ReactNode }) {
   const { slug, source } = ctx;
   const state = ctx.state;
-  const resumes = limitResumes(ctx);
-  const n = resumes.length;
+  const historyLimit = rawHistory(ctx)?.h.limit;
+  const n = Number(!!historyLimit) + Number(!!ctx.switchedAt);
   return (
     <>
       <div className="collab-head">
         <span className="label">Studio RH</span>
         <h1>{ITEM.label}</h1>
-        <SourceBadge resolution={source} slug={slug} />
-        {ctx.data && !prevu && (
-          <details className={n ? "collab-read-details collab-limits" : "collab-read-details"} data-testid="collab-read-details" open={!!ctx.switchedAt}>
-            <summary>
-              {n ? (
-                <>
-                  <span className="collab-limits-title">Limites de la lecture ({n})</span>
-                  <span className="collab-limits-resume" data-testid="collab-limits-resume">{resumes.join(" ")}</span>
-                </>
-              ) : (
-                <>Détail de la lecture{ctx.data.build.referenceDate ? ` · date de référence ${formatDate(ctx.data.build.referenceDate)}` : ""}</>
-              )}
-            </summary>
-            <div className="collab-limits-body">
-              {rawHistory(ctx) && (
-                <p className="collab-limit" data-testid="payfit-history-notice">
-                  <PayfitHistoryText ctx={ctx} />
-                </p>
-              )}
+        <div className="collab-source-line">
+          <SourceBadge resolution={source} slug={slug} compact />
+          {ctx.data && !prevu && <DropdownMenu
+            className={`collab-context-help${n ? " has-vigilance" : ""}`}
+            testid="collab-read-details"
+            label={<>
+              {n > 0 && <span className="collab-help-symbol"><TriangleAlert size={14} aria-hidden="true" /></span>}
+              <span>{n ? `Vigilance (${n})` : "Informations sur la lecture"}</span>
+              <span className="collab-help-mark" aria-hidden="true">?</span>
+            </>}
+          >
+            <div className="collab-help-body">
+              {historyLimit && <section className="collab-help-item" data-testid="payfit-history-notice">
+                <h2>Historique incomplet</h2>
+                <p>{historyLimit.exactFrom ? `Avant le ${formatDate(historyLimit.exactFrom)}, certains contrats archivés depuis plus de 12 mois sont absents de l’historique PayFit.` : "Certains contrats archivés depuis plus de 12 mois sont absents de l’historique PayFit."}</p>
+                <p>Effectifs, ETP et sorties peuvent être sous-estimés. Entrées, turnover et absentéisme peuvent être faussés.</p>
+                <a href={`/e/${slug}/parametres#payfit-historique`}>Vérifier la couverture historique</a>
+              </section>}
               {ctx.switchedAt && (
-                <p className="collab-limit" data-testid="source-switch-notice">
-                  Source RH changée le {dateTimeFmt.format(ctx.switchedAt)} par un administrateur ({source.reason}). Les identifiants PayFit et DSN sont distincts : aucun lien n'est conservé entre les deux référentiels.
-                </p>
+                <section className="collab-help-item" data-testid="source-switch-notice">
+                  <h2>Changement de source</h2>
+                  <p>Les référentiels PayFit et DSN ne sont pas rapprochés. Les comparaisons entre ces deux sources ne sont pas disponibles.</p>
+                </section>
               )}
-              {n > 0 && <strong className="collab-limits-sub">Détail de la lecture{ctx.data.build.referenceDate ? ` · date de référence ${formatDate(ctx.data.build.referenceDate)}` : ""}</strong>}
-              <BuildInfo ctx={ctx} />
-              <p className="desc" data-testid="rh-natures">
-                Natures comptées dans l'effectif : {ctx.natures.codes.map((c) => contractNatureLabel(c)).join(", ")} — {ctx.natures.origin === "default" ? "valeur par défaut validée" : "modifiée par un administrateur"} · <a href={`/e/${ctx.slug}/parametres`}>Paramètres</a>
-                <GlossaryLink slug={ctx.slug} term="natures" />
-              </p>
+              <nav className="collab-help-links" aria-label="Sources et règles de lecture">
+                <a href={`/e/${slug}/donnees`}>Sources et synchronisations</a>
+                <a href={`/e/${slug}/parametres#effectif`}>Définition de l’effectif</a>
+              </nav>
             </div>
-          </details>
-        )}
+          </DropdownMenu>}
+        </div>
       </div>
       {!source.chosen && (
         <section className="placeholder" data-testid="collaborateurs-nd">

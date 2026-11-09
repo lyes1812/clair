@@ -44,8 +44,13 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   // Historique PayFit brut (défaut validé le 22/10/2026) : chiffres tels que l'API les renvoie, une seule mention en tête d'écran.
   // Le transport fictif renvoie tous les contrats : avril 2025 = 7 personnes, 1 entrée (002), 0 sortie, sans « ≥ » ni n.d.
   await page.goto(`${collab}?mois=2025-04`);
-  await expect(page.getByTestId("payfit-history-notice")).toContainText("Données telles que remontées par l'API PayFit");
-  await expect(page.getByTestId("payfit-history-notice")).toContainText("faussés dans un sens ou dans l'autre");
+  const vigilance = page.getByTestId("collab-read-details");
+  await expect(vigilance.locator("summary")).toContainText("Vigilance");
+  await expect(page.getByTestId("payfit-history-notice")).not.toBeVisible();
+  await vigilance.locator("summary").click();
+  await expect(page.getByTestId("payfit-history-notice")).toContainText("Historique incomplet");
+  await expect(page.getByTestId("payfit-history-notice")).toContainText("absentéisme peuvent être faussés");
+  await vigilance.locator("summary").press("Escape");
   await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("7");
   await expect(page.getByTestId("entries-count").locator("dd")).toHaveText("1");
   await expect(page.getByTestId("exits-count").locator("dd")).toHaveText("0");
@@ -67,13 +72,14 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   await expect(page.getByTestId("setting-payfit-history").getByRole("status")).toContainText("Historique PayFit enregistré");
   await page.getByTestId("setting-payfit-history").screenshot({ path: `${CAPTURES}/2-05-parametres-historique.png` });
 
+  // La date de référence reste consultable dans le détail de lecture des KPI, pas dans l’en-tête Collaborateurs.
+  await page.goto(`/e/${slug}/studio-rh/kpi`);
+  const refText = (await page.getByTestId("rh-build-info").textContent())!.match(/date de référence (\d{2})\/(\d{2})\/(\d{4})/)!;
   // La borne basse PayFit dépend de la date de lecture réelle : fenêtre = mois de la date de référence − 12 (inclus).
   await page.goto(`${collab}?mois=2025-04`);
   await expect(page.getByTestId("payfit-history-notice")).toHaveCount(0);
   await expect(page.getByTestId("source-badge-rh")).toContainText("PayFit");
-  await expect(page.getByTestId("rh-build-info")).toContainText("mois lus 2024-10 → 2026-09");
-  await expect(page.getByTestId("rh-build-info")).toContainText("une société par espace");
-  const refText = (await page.getByTestId("rh-build-info").textContent())!.match(/date de référence (\d{2})\/(\d{2})\/(\d{4})/)!;
+  await expect(page.getByTestId("rh-build-info")).toHaveCount(0);
   const refMonth = `${refText[3]}-${refText[2]}`;
   const windowStart = months("2024-01", refMonth).at(-13)!; // mois de référence − 12
   const lower = (m: string) => m <= windowStart; // entrées et sorties du mois incomplètes
@@ -172,10 +178,13 @@ test("Collaborateurs : liste mensuelle, annuelle, fiche, puis bascule sur les DS
   await expect(page.getByTestId("source-chosen-rh")).toContainText("Fichiers DSN");
 
   await page.goto(`${collab}?mois=2025-12`);
-  await expect(page.getByTestId("source-switch-notice")).toBeVisible();
+  await expect(page.getByTestId("source-switch-notice")).not.toBeVisible();
+  await page.getByTestId("collab-read-details").locator("summary").click();
+  await expect(page.getByTestId("source-switch-notice")).toContainText("Les référentiels PayFit et DSN ne sont pas rapprochés");
   await expect(page.getByTestId("source-badge-rh")).toContainText("Fichiers DSN");
-  await expect(page.getByTestId("source-badge-rh")).toContainText("Choix forcé par l'administrateur");
-  await expect(page.getByTestId("rh-build-info")).toContainText("couverture complète 2024-10 → 2026-09");
+  await expect(page.getByTestId("source-badge-rh")).not.toContainText("Choix forcé par l'administrateur");
+  await expect(page.getByTestId("rh-build-info")).toHaveCount(0);
+  await page.getByTestId("collab-read-details").locator("summary").press("Escape");
   await expect(page.getByTestId("headcount-persons").locator("dd")).toHaveText("7");
   await expect(page.getByTestId("exits-count").locator("dd")).toHaveText("1");
   await expect(page.getByTestId("month-exits")).toContainText("Fin de contrat à durée déterminée (026)");
