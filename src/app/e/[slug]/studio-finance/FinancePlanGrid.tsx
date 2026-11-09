@@ -16,8 +16,9 @@ type Props = {
 export function FinancePlanGrid({ plan, year, rhOptions }: Props) {
   const [kind, setKind] = useState<"budget" | "forecast">(plan?.kind ?? "budget");
   const [personnel, setPersonnel] = useState<"manual" | "rh">(plan?.personnelSource ?? "manual");
+  const [first, setFirst] = useState(plan?.firstForecastMonth ?? "");
   const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, "0")}`);
-  const first = plan?.firstForecastMonth ?? "";
+  const actualMonth = (month: string) => kind === "forecast" && first !== "" && month < first;
   const selectedRh = rhOptions.find((option) => option.id.toLowerCase() === plan?.rhScenarioId?.toLowerCase());
   const unavailableRh = personnel === "rh" && Boolean(plan?.rhScenarioId) && !selectedRh;
   return <>
@@ -25,7 +26,7 @@ export function FinancePlanGrid({ plan, year, rhOptions }: Props) {
       <Field id="finance-plan-name" label="Nom"><input className="input" id="finance-plan-name" name="name" defaultValue={plan?.name ?? ""} maxLength={120} required /></Field>
       <Field id="finance-plan-kind" label="Lecture"><select className="select" id="finance-plan-kind" name="kind" value={kind} onChange={(event) => setKind(event.target.value as "budget" | "forecast")}><option value="budget">Budget</option><option value="forecast">Prévision : réel puis hypothèses</option></select></Field>
       <Field id="finance-plan-year" label="Année" hint="L’année se choisit dans les filtres de la page."><input className="input" id="finance-plan-year" name="year" value={year} readOnly /></Field>
-      {kind === "forecast" ? <Field id="finance-plan-first" label="Premier mois prévisionnel" hint="Les mois précédents restent comptables, même si le réel est incomplet."><select className="select" id="finance-plan-first" name="firstForecastMonth" defaultValue={first} required><option value="" disabled>Choisir le mois…</option>{months.map((month) => <option key={month} value={month}>{formatMonth(month)}</option>)}</select></Field> : <input type="hidden" name="firstForecastMonth" value="" />}
+      {kind === "forecast" ? <Field id="finance-plan-first" label="Premier mois prévisionnel"><select className="select" id="finance-plan-first" name="firstForecastMonth" value={first} onChange={(event) => setFirst(event.target.value)} required aria-describedby="finance-plan-grid-help"><option value="" disabled>Choisir le mois…</option>{months.map((month) => <option key={month} value={month}>{formatMonth(month)}</option>)}</select></Field> : <input type="hidden" name="firstForecastMonth" value="" />}
       <Field id="finance-plan-personnel" label="Personnel projeté"><select className="select" id="finance-plan-personnel" name="personnelSource" value={personnel} onChange={(event) => setPersonnel(event.target.value as "manual" | "rh")}><option value="manual">Montants saisis dans ce plan</option><option value="rh">Scénario du Studio RH</option></select></Field>
       {personnel === "rh" ? <Field id="finance-plan-rh" label="Scénario RH" hint="Remplace uniquement le personnel projeté ; le réel comptable reste inchangé."><SearchableSelect className="select" id="finance-plan-rh" name="rhScenarioId" defaultValue={selectedRh?.id ?? ""} required searchLabel="Scénario RH" options={[
         { value: "", label: "Choisir explicitement un scénario…", disabled: true },
@@ -33,13 +34,17 @@ export function FinancePlanGrid({ plan, year, rhOptions }: Props) {
       ]} /></Field> : <input type="hidden" name="rhScenarioId" value="" />}
     </div>
     {unavailableRh ? <p className="notice">Scénario RH indisponible : choisis un scénario avant d’enregistrer.</p> : personnel === "rh" && rhOptions.length === 0 ? <p className="notice">Aucun scénario RH disponible : crée un scénario dans les Hypothèses budgétaires, puis sélectionne-le ici.</p> : null}
-    <div className="table-wrap scroll finance-plan-grid" tabIndex={0} role="region" aria-label="Montants du plan sur douze mois">
+    <p className="desc" id="finance-plan-grid-help">{kind === "budget" ? "Les douze mois utilisent les hypothèses de ce plan." : first ? `Avant ${formatMonth(first)}, la prévision utilise le réel comptable, même s’il est incomplet. Les cases grisées conservent d’anciennes saisies non utilisées : leurs valeurs ne sont pas le réel comptable. À partir de ce mois, les hypothèses sont utilisées.` : "Choisis le premier mois prévisionnel pour distinguer le réel utilisé des hypothèses. Aucun mois n’est choisi à ta place."}{personnel === "rh" ? " Scénario RH : saisies manuelles conservées, non utilisées. Le scénario fournit le personnel projeté." : null}</p>
+    <div className="table-wrap scroll finance-plan-grid" tabIndex={0} role="region" aria-label="Montants du plan sur douze mois" aria-describedby="finance-plan-grid-help">
       <table className="data-table sticky sticky-first">
         <caption>Montants saisis en euros, avec décimales possibles. Vide = non renseigné ; 0 = montant nul.</caption>
-        <thead><tr><th scope="col">Ligne financière</th>{months.map((month) => <th key={month} scope="col">{formatMonth(month)}</th>)}</tr></thead>
+        <thead><tr><th scope="col">Ligne financière</th>{months.map((month) => <th key={month} scope="col" data-actual-period={actualMonth(month) || undefined}>{formatMonth(month)}{kind === "budget" || first ? <span className="finance-plan-month-origin">{actualMonth(month) ? "Réel utilisé" : "Hypothèses"}</span> : null}</th>)}</tr></thead>
         <tbody>{FINANCE_ROWS.map((row) => <tr key={row.id} data-rh-inactive={row.id === "personnel" && personnel === "rh" ? true : undefined}>
-          <th scope="row">{row.label}{row.id === "personnel" && personnel === "rh" ? <small>Scénario RH : saisies manuelles conservées, non utilisées.</small> : null}</th>
-          {months.map((month) => <td key={month}><input className="input" name={`cell:${month}:${row.id}`} inputMode="decimal" aria-label={`${row.label}, ${formatMonth(month)}, euros`} defaultValue={decText(plan?.cells[month]?.[row.id])} readOnly={row.id === "personnel" && personnel === "rh"} /></td>)}
+          <th scope="row">{row.label}{row.id === "personnel" && personnel === "rh" ? <small>Scénario RH</small> : null}</th>
+          {months.map((month) => {
+            const readOnly = actualMonth(month) || row.id === "personnel" && personnel === "rh";
+            return <td key={month} data-actual-period={actualMonth(month) || undefined}><input className="input" name={`cell:${month}:${row.id}`} inputMode="decimal" aria-label={`${row.label}, ${formatMonth(month)}, euros`} aria-describedby={readOnly ? "finance-plan-grid-help" : undefined} defaultValue={decText(plan?.cells[month]?.[row.id])} readOnly={readOnly} /></td>;
+          })}
         </tr>)}</tbody>
       </table>
     </div>

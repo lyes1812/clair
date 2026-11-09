@@ -21,8 +21,11 @@
 .finance-plans a span { font-size: var(--clair-type-label); color: var(--muted); }
 .finance-plan-fields { align-items: flex-start; }
 .finance-plan-fields .field-row { flex: 1 1 220px; }
+.finance-plan-grid { max-width: 100%; }
 .finance-plan-grid th:first-child { min-width: 190px; }
 .finance-plan-grid th small { display: block; max-width: 190px; font-weight: 400; font-size: var(--clair-type-label); color: var(--muted); }
+.finance-plan-month-origin { display: block; margin-top: 4px; font-weight: 400; font-size: var(--clair-type-label); color: var(--muted); }
+.finance-plan-grid th[data-actual-period] { background: var(--surface); }
 .finance-plan-grid input { min-width: 110px; max-width: 160px; text-align: right; font-variant-numeric: tabular-nums; }
-.finance-plan-grid [data-rh-inactive] input { background: var(--surface); color: var(--muted); }
+.finance-plan-grid [data-rh-inactive] input, .finance-plan-grid [data-actual-period] input { background: var(--surface); color: var(--muted); }
 @media (max-width: 650px) { .finance-header { display: grid; } }
