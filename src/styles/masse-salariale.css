@@ -47,6 +47,7 @@
 .ms-panel-title { display: grid; gap: 4px; min-width: 0; }
 .ms-panel-title .desc { max-width: 78ch; line-height: 1.5; }
 .panel-head .ms-panel-title { flex: 1 1 320px; }
+#actual-non-recurring .panel-tools { margin-left: auto; }
 /* Titre d'un panneau suivi de son « ? » vers le glossaire. */
 .ms-title-row { display: flex; align-items: center; min-width: 0; }
 .ms-title-row h2 { margin: 0; }

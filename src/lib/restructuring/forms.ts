@@ -2,7 +2,7 @@ import type { Amount, Hypothesis } from "@/lib/budget/types";
 import { isIsoDate } from "@/lib/dates";
 import { toCents } from "@/lib/money";
 
-export const EXIT_MOTIFS = ["Licenciement", "Rupture conventionnelle", "Autre départ"] as const;
+export const EXIT_MOTIFS = ["Licenciement", "Licenciement pour faute grave", "Rupture conventionnelle", "Autre départ"] as const;
 type Departure = Extract<Hypothesis, { kind: "depart" }>;
 const text = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 const MAX_MONTH_CENTS = 100_000_000_000_000;
@@ -20,7 +20,7 @@ function amount(form: FormData): Amount {
 /** Saisie d’un coût convenu par l’utilisateur ; aucune règle d’indemnité légale ou conventionnelle. */
 export function exitFromForm(form: FormData, id: string, previous?: Departure): Departure {
   const motif = text(form, "motif");
-  if (!EXIT_MOTIFS.some((value) => value === motif) && !(previous?.motif && motif === previous.motif)) throw new Error("Choisis Licenciement, Rupture conventionnelle ou Autre départ.");
+  if (!EXIT_MOTIFS.some((value) => value === motif) && !(previous?.motif && motif === previous.motif)) throw new Error("Choisis un motif de départ.");
   const lastPaidDate = text(form, "lastPaidDate");
   if (!isIsoDate(lastPaidDate)) throw new Error("Dernier jour payé requis : une date valide est nécessaire.");
   const contractKey = previous?.contractKey ?? text(form, "contractKey");

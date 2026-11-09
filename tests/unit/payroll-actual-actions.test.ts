@@ -84,6 +84,33 @@ describe("Non récurrents du réel : saisie indépendante des scénarios", () =>
     await saveActualEventAction("fictif", sync, {}, undefined, form({ kind: "licenciement", contract2: "", chargedEuros: "1234,56" }));
     expect(mocks.save.mock.calls[1][2].chargedCents).toBe(123456);
   });
+  it.each(["", "0", "1234,56"])("normalise la faute grave sans déduire son montant (%s)", async (chargedEuros) => {
+    const result = await saveActualEventAction("fictif", sync, {}, undefined, form({ kind: "licenciement-faute-grave", contract2: "", chargedEuros }));
+    expect(result?.ok).toBeTruthy();
+    expect(mocks.save.mock.calls[0][2]).toMatchObject({ kind: "licenciement", motif: "faute-grave", chargedCents: chargedEuros === "" ? null : chargedEuros === "0" ? 0 : 123456 });
+  });
+  it("exige aussi un justificatif pour un zéro explicite, sans en exiger pour le montant absent", async () => {
+    const base = { kind: "licenciement-faute-grave", contract2: "", note: "" };
+    expect((await saveActualEventAction("fictif", sync, {}, undefined, form({ ...base, chargedEuros: "0" })))?.error).toContain("pièce ou la source");
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect((await saveActualEventAction("fictif", sync, {}, undefined, form({ ...base, chargedEuros: "" })))?.ok).toBeTruthy();
+    expect(mocks.save.mock.calls[0][2].chargedCents).toBeNull();
+  });
+  it("réédite la qualification sous le même identifiant et retire le motif si la nature redevient standard", async () => {
+    await saveActualEventAction("fictif", sync, { [id]: "version-affichee" }, undefined, form({ id, kind: "licenciement-faute-grave", contract2: "", chargedEuros: "0" }));
+    expect(mocks.save.mock.calls[0]).toEqual(["espace-fictif", "editeur-fictif", expect.objectContaining({ id, kind: "licenciement", motif: "faute-grave", chargedCents: 0 }), "version-affichee"]);
+    await saveActualEventAction("fictif", sync, { [id]: "version-qualifiee" }, undefined, form({ id, kind: "licenciement", contract2: "", chargedEuros: "0" }));
+    expect(mocks.save.mock.calls[1][2]).toMatchObject({ id, kind: "licenciement", chargedCents: 0 });
+    expect(mocks.save.mock.calls[1][2]).not.toHaveProperty("motif");
+    expect(mocks.save.mock.calls[1][3]).toBe("version-qualifiee");
+  });
+  it("ne qualifie pas les autres natures et refuse une autre variante libre", async () => {
+    await saveActualEventAction("fictif", sync, {}, undefined, form({ kind: "rupture-conventionnelle", contract2: "" }));
+    expect(mocks.save.mock.calls[0][2]).not.toHaveProperty("motif");
+    mocks.save.mockClear();
+    expect((await saveActualEventAction("fictif", sync, {}, undefined, form({ kind: "rupture-conventionnelle-faute-grave", contract2: "" })))?.error).toBeTruthy();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
   it.each<Record<string, string>>([{ contract2: "payfit:fictif-a" }, { contract2: "" }, { contract1: "payfit:autre-espace" }, { month: "2026-07" }, { chargedEuros: "-1" }, { chargedEuros: "1.234" }, { chargedEuros: "50", note: "" }, { id }])("refuse une saisie invalide sans écriture", async (patch) => {
     expect((await saveActualEventAction("fictif", sync, {}, undefined, form(patch)))?.error).toBeTruthy(); expect(mocks.save).not.toHaveBeenCalled();
   });

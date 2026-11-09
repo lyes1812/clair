@@ -47,6 +47,23 @@ describe("Déclarations du réel : stockage isolé et journal minimal", () => {
     mocks.selected = [[{ id: event.syncId }], [{ key: `${ACTUAL_NON_RECURRING_KEY}ancien`, value: { ...event, id: "33333333-3333-4333-8333-333333333333", syncId: "44444444-4444-4444-8444-444444444444", contractKeys: [...event.contractKeys].reverse() } }]];
     await expect(saveActualEvent("espace-fictif", "acteur-fictif", event, null)).rejects.toThrow("existe déjà"); expect(mocks.writes).toEqual([]);
   });
+  it.each([false, true])("un licenciement et sa qualification ne créent pas deux événements (%s)", async (previousHasMotif) => {
+    const dismissal: ActualEvent = { ...event, kind: "licenciement", contractKeys: ["fictif-a"] };
+    const qualified: ActualEvent = { ...dismissal, motif: "faute-grave" };
+    const previous = { ...(previousHasMotif ? qualified : dismissal), id: "33333333-3333-4333-8333-333333333333" };
+    mocks.selected = [[{ id: event.syncId }], [{ key: `${ACTUAL_NON_RECURRING_KEY}${previous.id}`, value: previous }]];
+    await expect(saveActualEvent("espace-fictif", "acteur-fictif", previousHasMotif ? dismissal : qualified, null)).rejects.toThrow("existe déjà");
+    expect(mocks.writes).toEqual([]);
+  });
+  it("conserve le motif privé dans la déclaration et sa version, jamais dans le journal", async () => {
+    const qualified: ActualEvent = { ...event, kind: "licenciement", motif: "faute-grave", contractKeys: ["fictif-a"], chargedCents: 0 };
+    await saveActualEvent("espace-fictif", "acteur-fictif", qualified, null);
+    expect(mocks.writes[0]).toMatchObject({ value: qualified });
+    expect(JSON.stringify(mocks.writes[1])).not.toMatch(/motif|faute-grave|fictif-a|SOURCE_PRIVEE/);
+    mocks.selected = [[{ value: qualified }]];
+    expect(await listActualEvents("espace-fictif")).toEqual([qualified]);
+    expect(actualEventVersion(qualified)).not.toBe(actualEventVersion({ ...qualified, motif: undefined }));
+  });
   it("une lecture remplacée est refusée avant écriture", async () => {
     mocks.selected = [[{ id: "autre-lecture" }]];
     await expect(saveActualEvent("espace-fictif", "acteur-fictif", event, null)).rejects.toThrow("lecture PayFit a changé"); expect(mocks.writes).toEqual([]);

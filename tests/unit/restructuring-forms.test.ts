@@ -11,7 +11,7 @@ const form = (patch: Record<string, string> = {}) => {
 const previous: Extract<Hypothesis, { kind: "depart" }> = { id: "depart-fictif", kind: "depart", contractKey: "contrat-fictif", label: "Libellé fictif conservé", motif: "Démission", lastPaidDate: "2026-11-30", exitCost: null };
 
 describe("Saisie non récurrente : licenciement et rupture conventionnelle", () => {
-  it.each(["Licenciement", "Rupture conventionnelle"])("%s est un seul départ avec coût chargé saisi", (motif) => {
+  it.each(["Licenciement", "Licenciement pour faute grave", "Rupture conventionnelle"])("%s est un seul départ avec coût chargé saisi", (motif) => {
     const result = exitFromForm(form({ motif }), "id-fictif");
     expect(result).toMatchObject({ id: "id-fictif", kind: "depart", motif, label: motif, exitCost: { mode: "charge", costCents: 123456 } });
   });
@@ -22,6 +22,12 @@ describe("Saisie non récurrente : licenciement et rupture conventionnelle", () 
   it("coût vide et zéro explicite restent distincts", () => {
     expect(() => exitFromForm(form({ exitCout: "" }), "fictif")).toThrow("Coût de sortie positif ou nul requis");
     expect(exitFromForm(form({ exitCout: "0" }), "fictif").exitCost).toEqual({ mode: "charge", costCents: 0 });
+  });
+  it("faute grave : zéro confirmé accepté, montant positif conservé et coût vide refusé", () => {
+    const motif = "Licenciement pour faute grave";
+    expect(exitFromForm(form({ motif, exitCout: "0" }), "fictif")).toMatchObject({ motif, exitCost: { mode: "charge", costCents: 0 } });
+    expect(exitFromForm(form({ motif, exitCout: "123,45" }), "fictif")).toMatchObject({ motif, exitCost: { mode: "charge", costCents: 12345 } });
+    expect(() => exitFromForm(form({ motif, exitCout: "" }), "fictif")).toThrow("Coût de sortie positif ou nul requis");
   });
   it.each([
     [{ motif: "" }, "Choisis"], [{ lastPaidDate: "2026-02-30" }, "date valide"], [{ exitMode: "aucun" }, "mode de saisie"],

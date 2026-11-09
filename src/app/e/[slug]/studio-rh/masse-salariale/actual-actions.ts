@@ -22,7 +22,9 @@ export async function saveActualEventAction(slug: string, syncId: string, displa
   const amountText = value("chargedEuros");
   const chargedCents = mode === "calendar" || amountText === "" ? null : toCents(amountText);
   if (mode === "manual" && amountText && chargedCents === null) return { error: "Montant chargé invalide : saisis des euros, avec au plus deux décimales." };
-  let event = parseActualEvent({ id: requestedId || randomUUID(), syncId, month: value("month"), kind: value("kind"), chargedCents, contractKeys: [value("contract1"), value("contract2")].filter(Boolean), note: value("note") });
+  const nature = value("kind");
+  const qualification = nature === "licenciement-faute-grave" ? { kind: "licenciement", motif: "faute-grave" } : { kind: nature };
+  let event = parseActualEvent({ id: requestedId || randomUUID(), syncId, month: value("month"), ...qualification, chargedCents, contractKeys: [value("contract1"), value("contract2")].filter(Boolean), note: value("note") });
   if (!event) return { error: "Vérifie le mois, la nature et les contrats : un tuilage demande deux contrats distincts, les autres éléments au plus un contrat." };
   if (event.chargedCents !== null && !event.note) return { error: "Indique la pièce ou la source du montant chargé isolé." };
   try {

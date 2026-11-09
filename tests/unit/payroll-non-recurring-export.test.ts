@@ -21,6 +21,16 @@ describe("Excel du réel non récurrent : agrégats exacts, sans noms", () => {
     const sheet = actualNonRecurringSheet(input, [{ ...event, chargedCents: null }], input.months, syncId);
     expect(sheet.rows[2][2]).toHaveProperty("nd"); expect(sheet.rows.at(-1)?.at(-2)).toHaveProperty("nd");
   });
+  it("agrège le licenciement sans exporter sa qualification individuelle, y compris à zéro", async () => {
+    const dismissal: ActualEvent = { ...event, kind: "licenciement", contractKeys: ["PERSONNE_FICTIVE_PRIVEE_A"], chargedCents: 0 };
+    const qualified: ActualEvent = { ...dismissal, motif: "faute-grave" };
+    const sheet = actualNonRecurringSheet(input, [qualified], input.months, syncId);
+    expect(sheet).toEqual(actualNonRecurringSheet(input, [dismissal], input.months, syncId));
+    expect(sheet.rows[0].slice(0, 4)).toEqual(["Licenciements", 1, 0, 0]);
+    expect(JSON.stringify(sheet)).not.toMatch(/motif|faute|PERSONNE_FICTIVE|NOTE_PRIVEE/);
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await buildWorkbook({ title: "Fictif", workspaceName: "Fictif", generatedAt: "2026-10-28T10:00:00Z", filters: [], sources: [], definitions: [], sheets: [sheet] }) as unknown as ExcelJS.Buffer);
+    expect(JSON.stringify(wb.worksheets[0].model)).not.toMatch(/motif|faute|PERSONNE_FICTIVE|NOTE_PRIVEE/);
+  });
   it("qualifie l’estimation dans le classeur sans exposer dates, contrats, lignes ni note individuelle", async () => {
     const result = estimateActualOverlap({ month: event.month, syncId,
       incoming: { contractKey: event.contractKeys[0], syncId, startDate: "2026-06-11", endDate: null },

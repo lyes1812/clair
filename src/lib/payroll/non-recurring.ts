@@ -7,17 +7,22 @@ import { actualOverlapCalculationSchema, estimateActualOverlap, type ActualOverl
 export type ActualEvent = {
   id: string; syncId: string; month: string;
   kind: "licenciement" | "rupture-conventionnelle" | "tuilage" | "autre";
+  motif?: "faute-grave";
   chargedCents: number | null; contractKeys: string[]; note: string;
   calculation?: ActualOverlapCalculation;
 };
 const actualEvent = z.object({
   id: z.string().uuid(), syncId: z.string().uuid(), month: z.string().refine(isMonth),
   kind: z.enum(["licenciement", "rupture-conventionnelle", "tuilage", "autre"]),
+  motif: z.literal("faute-grave").optional(),
   chargedCents: z.number().int().safe().min(0).max(100_000_000_000_000).nullable(),
   contractKeys: z.array(z.string().min(1).max(300).refine((key) => key === key.trim() && key.trim().length > 0)).max(2),
   note: z.string().max(300),
   calculation: actualOverlapCalculationSchema.optional(),
 }).strict().superRefine((event, ctx) => {
+  if (event.motif && event.kind !== "licenciement") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Le motif de faute grave est réservé aux licenciements." });
+  }
   if (event.kind === "tuilage" ? event.contractKeys.length !== 2 || new Set(event.contractKeys).size !== 2 : event.contractKeys.length > 1) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Un tuilage exige deux contrats distincts ; les autres événements acceptent zéro ou un contrat." });
   }

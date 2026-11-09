@@ -173,7 +173,7 @@ describe("Studio Restructuring — présentation sur fixtures fictives", () => {
     expect(contracts).toContain('<option value="disponible">');
     expect(contracts).not.toContain('<option value="contrat-fictif">');
     for (const name of ["motif", "exitMode"]) expect(select(create, name)).toContain('required=""');
-    for (const motif of ["Licenciement", "Rupture conventionnelle", "Autre départ"]) expect(select(create, "motif")).toContain(`value="${motif}"`);
+    for (const motif of ["Licenciement", "Licenciement pour faute grave", "Rupture conventionnelle", "Autre départ"]) expect(select(create, "motif")).toContain(`value="${motif}"`);
     expect(select(create, "exitMode")).toContain('<option value="" disabled="" selected="">Choisir le mode…</option>');
     expect(select(create, "exitMode")).toContain('<option value="charge">');
     expect(select(create, "exitMode")).toContain('<option value="brut">');

@@ -26,6 +26,18 @@ describe("saisie stricte d’un élément non récurrent réalisé", () => {
     expect(parseActualEvent(event({ chargedCents: 100_000_000_000_000 }))!.chargedCents).toBe(100_000_000_000_000);
   });
 
+  it("conserve le motif de faute grave sans imposer un montant ni requalifier les autres natures", () => {
+    for (const chargedCents of [null, 0, 10_000]) {
+      const input = event({ motif: "faute-grave", chargedCents });
+      expect(parseActualEvent(input)).toEqual(input);
+    }
+    for (const kind of ["rupture-conventionnelle", "tuilage", "autre"] as const) {
+      expect(parseActualEvent(event({ kind, motif: "faute-grave", contractKeys: kind === "tuilage" ? ["fictif-a", "fictif-b"] : [] }))).toBeNull();
+    }
+    expect(parseActualEvent({ ...event(), motif: "faute-simple" })).toBeNull();
+    expect(parseActualEvent({ ...event(), kind: "licenciement-faute-grave" })).toBeNull();
+  });
+
   it("refuse les types, champs supplémentaires, identifiants, mois, notes et montants invalides", () => {
     const invalid = [
       { ...event(), extra: true }, { ...event(), id: "non-uuid" }, { ...event(), syncId: "non-uuid" },
@@ -97,6 +109,15 @@ describe("réel source et retraitement séparés", () => {
     expect(result.raw).toBe(180_000); expect(result.nonRecurring).toBeNull(); expect(result.adjusted).toBeNull();
   });
 
+  it("ne présume aucun coût pour une faute grave : zéro, montant fourni et absence restent distincts", () => {
+    const zero = buildActualNonRecurring(journal(), [event({ motif: "faute-grave", chargedCents: 0 })], ["2026-09"], SYNC);
+    expect(zero).toMatchObject({ nonRecurring: 0, adjusted: 180_000, rows: [{ amount: 0, reason: null }] });
+    const supplied = buildActualNonRecurring(journal(), [event({ motif: "faute-grave", chargedCents: 15_000 })], ["2026-09"], SYNC);
+    expect(supplied).toMatchObject({ nonRecurring: 15_000, adjusted: 165_000, rows: [{ amount: 15_000, reason: null }] });
+    const absent = buildActualNonRecurring(journal(), [event({ motif: "faute-grave", chargedCents: null })], ["2026-09"], SYNC);
+    expect(absent).toMatchObject({ raw: 180_000, nonRecurring: null, adjusted: null, rows: [{ amount: null, reason: expect.stringContaining("non saisi") }] });
+  });
+
   it("ne reporte pas une saisie sur une nouvelle lecture, même si les lignes de paie sont identiques", () => {
     const prior = event({ syncId: OLD_SYNC }), current = event({ id: id(2), kind: "autre" });
     const result = buildActualNonRecurring(journal(), [prior, current], ["2026-09"], SYNC);
@@ -109,7 +130,8 @@ describe("réel source et retraitement séparés", () => {
   it("refuse les identifiants dupliqués et les mêmes catégorie/mois/contrats, quel que soit l’ordre du binôme", () => {
     const duplicateId = [event(), event({ kind: "autre" })];
     const duplicatePair = [event({ kind: "tuilage", contractKeys: ["a", "b"] }), event({ id: id(2), kind: "tuilage", contractKeys: ["b", "a"] })];
-    for (const events of [duplicateId, duplicatePair]) {
+    const duplicateMotif = [event(), event({ id: id(2), motif: "faute-grave" })];
+    for (const events of [duplicateId, duplicatePair, duplicateMotif]) {
       const result = buildActualNonRecurring(journal(), events, ["2026-09"], SYNC);
       expect(result.raw).toBe(180_000); expect(result.nonRecurring).toBeNull(); expect(result.adjusted).toBeNull();
       expect(result.rows.every((row) => row.amount === null)).toBe(true); expect(result.reasons.join(" ")).toContain("doublon");

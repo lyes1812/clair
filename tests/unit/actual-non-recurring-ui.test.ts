@@ -62,6 +62,23 @@ describe("éléments non récurrents du réel — interface et données fictives
     expect(html({ events: [] })).toContain("Aucun élément identifié : cela ne prouve pas son absence");
   });
 
+  it("faute grave : le motif reste sélectionné sans convertir un montant manquant en zéro", () => {
+    const classified: ActualEvent = { ...events()[0], motif: "faute-grave", chargedCents: null, note: "" };
+    const value = html({ events: [classified], editable: true, save });
+    const edit = form(value, `actual-non-recurring-${LIC}`);
+    expect(select(edit, "kind")).toContain('<option value="licenciement-faute-grave" selected="">Licenciement pour faute grave</option>');
+    expect(input(edit, "chargedEuros")).toContain('value=""');
+    expect(value).toContain("Montant chargé non saisi");
+    const zero = html({ events: [{ ...classified, chargedCents: 0, note: "Coût isolé nul confirmé sur justificatif fictif" }], editable: true, save });
+    expect(input(form(zero, `actual-non-recurring-${LIC}`), "chargedEuros")).toContain('value="0"');
+    expect(zero).not.toContain("Montant chargé non saisi");
+    expect(html({ events: [classified], editable: false })).not.toContain('value="licenciement-faute-grave"');
+    const help = value.match(/<details[^>]*data-testid="actual-non-recurring-dismissal-help"[^>]*>/)?.[0] ?? "";
+    expect(help).toBeTruthy();
+    expect(help).not.toContain(" open");
+    expect(value).toContain("Le motif ne fixe aucun montant");
+  });
+
   it("un filtre Service ne reçoit aucune imputation du montant global déclaré", () => {
     const source = journal(); source.serviceAxis = "SERVICE"; source.serviceFilter = { value: "support" };
     source.lines = source.lines.map((line) => ({ ...line, analytic: [{ type: "SERVICE", code: "support", value: "Support fictif" }] }));
