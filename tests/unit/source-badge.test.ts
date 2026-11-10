@@ -35,10 +35,16 @@ describe("bandeau de source : contexte unique, avertissements conservés", () =>
     expect(render({ chosen: "dsn", apiApplied: false, filesApplied: true, reason: fileReason })).toContain(fileReason);
   });
 
-  it("conserve le choix forcé et sa date", () => {
-    const html = render({ mode: "api", reason: "API choisie par l'administrateur.", modeSetAt: new Date("2026-01-16T10:00:00Z") });
-    expect(html).toContain("API choisie par l&#x27;administrateur.");
-    expect(html).toContain("Choix forcé par l&#x27;administrateur le");
+  it.each([
+    { mode: "api", chosen: "payfit", apiApplied: true, filesApplied: false, reason: "Lecture API appliquée." },
+    { mode: "files", chosen: "dsn", apiApplied: false, filesApplied: true, reason: "Fichiers appliqués." },
+  ] as const)("garde source et lecture sans narratif administratif en mode $mode", (changes) => {
+    const html = render({ ...changes, modeSetAt: new Date("2026-01-16T10:00:00Z") });
+    expect(html).toContain(changes.chosen === "payfit" ? "PayFit" : "DSN");
+    expect(html).toContain("lecture appliquée le");
+    expect(html).not.toContain(changes.reason);
+    expect(html).not.toContain("administrateur");
+    expect(html).not.toContain("16/01/2026");
   });
 
   it("ne retire pas une raison dès qu'une confirmation ou une date manque", () => {
@@ -49,7 +55,7 @@ describe("bandeau de source : contexte unique, avertissements conservés", () =>
   });
 
   it("garde seulement la source liée et la date en mode compact", () => {
-    const html = render({ mode: "api", reason: "API choisie par l'administrateur.", modeSetAt: new Date("2026-01-16T10:00:00Z") }, true);
+    const html = render({ mode: "api", reason: "Lecture API appliquée.", modeSetAt: new Date("2026-01-16T10:00:00Z") }, true);
     expect(html).toContain('<a href="/e/fixture/donnees">PayFit</a>');
     expect(html).toContain("lecture appliquée le");
     expect(html).not.toContain("administrateur");

@@ -38,8 +38,8 @@ export function isSourceMode(v: unknown): v is SourceMode {
 
 // Règle pure, testée à la main : quel fournisseur retenir selon le mode et les lectures appliquées.
 export function resolveSourceMode(mode: SourceMode, apiApplied: boolean, filesApplied: boolean): { pick: "api" | "files" | null; reason: string } {
-  if (mode === "api") return apiApplied ? { pick: "api", reason: "API choisie par l'administrateur." } : { pick: null, reason: "API choisie par l'administrateur, mais aucune lecture API appliquée." };
-  if (mode === "files") return filesApplied ? { pick: "files", reason: "Fichiers choisis par l'administrateur." } : { pick: null, reason: "Fichiers choisis par l'administrateur, mais aucun dépôt appliqué." };
+  if (mode === "api") return apiApplied ? { pick: "api", reason: "Lecture API appliquée." } : { pick: null, reason: "Aucune lecture API appliquée." };
+  if (mode === "files") return filesApplied ? { pick: "files", reason: "Fichiers appliqués." } : { pick: null, reason: "Aucun dépôt de fichiers appliqué." };
   if (apiApplied) return { pick: "api", reason: filesApplied ? "API connectée et appliquée : elle fait foi (des fichiers sont aussi appliqués, non utilisés)." : "API connectée et appliquée." };
   if (filesApplied) return { pick: "files", reason: "Aucune lecture API appliquée : les fichiers déposés font foi." };
   return { pick: null, reason: "Aucune source appliquée pour ce domaine." };

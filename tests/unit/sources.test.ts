@@ -16,7 +16,7 @@ describe("source retenue par domaine", () => {
     expect(resolveSourceMode(mode, api, files).pick).toBe(pick);
   });
   it("explique toujours pourquoi, y compris quand rien n'est retenu", () => {
-    expect(resolveSourceMode("api", false, true).reason).toContain("aucune lecture API appliquée");
+    expect(resolveSourceMode("api", false, true).reason).toBe("Aucune lecture API appliquée.");
     expect(resolveSourceMode("auto", false, false).reason).toContain("Aucune source appliquée");
     expect(resolveSourceMode("auto", true, true).reason).toContain("non utilisés");
   });
