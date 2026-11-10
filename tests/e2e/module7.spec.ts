@@ -101,7 +101,7 @@ test("Entrées du cahier : KPI RH par onglet, effectifs mensuels par axe, fiche 
   await expect(page.getByTestId("em-table").locator("thead")).toContainText("proj.");
   await page.screenshot({ path: `${CAPTURES}/7-02-effectifs-scenario.png`, fullPage: true });
 
-  // Collaborateurs : fiche collaborateur par recherche, entrées « Prévu ».
+  // Collaborateurs : fiche par recherche et arborescence documentaire opérationnelle.
   await page.goto(`/e/${slug}/studio-rh/collaborateurs`);
   await expect(page.getByTestId("collab-tabs").getByRole("link", { name: "Liste mensuelle des collaborateurs" })).toHaveAttribute("aria-current", "page");
   await page.getByTestId("collab-tabs").getByRole("link", { name: "Fiche collaborateur" }).click();
@@ -111,7 +111,8 @@ test("Entrées du cahier : KPI RH par onglet, effectifs mensuels par axe, fiche 
   await page.getByTestId("fiche-table").getByRole("link", { name: "Ouvrir la fiche" }).click();
   await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
   await page.goto(`/e/${slug}/studio-rh/collaborateurs/tree`);
-  await expect(page.getByTestId("prevu")).toContainText("hiérarchie");
+  await expect(page.getByTestId("collab-exploration-tree")).toBeVisible();
+  await expect(page.getByTestId("prevu")).toHaveCount(0);
 
   // Reporting social : rapport agrégé par défaut, entrées réglementaires toujours « Prévu ».
   await page.goto(`/e/${slug}/studio-rh/reporting-social`);

@@ -81,11 +81,12 @@ export function BuildInfo({ ctx }: { ctx: CollabContext }) {
 
 // En-tête compact : source et date visibles ; les points de vigilance se consultent à la demande.
 // Une page « Prévu » n'affiche aucune information de lecture.
-export function CollabHeader({ ctx, tab, prevu = false, children }: { ctx: CollabContext; tab: TabId | null; prevu?: boolean; children?: ReactNode }) {
+export function CollabHeader({ ctx, tab, prevu = false, notices = [], children }: { ctx: CollabContext; tab: TabId | null; prevu?: boolean; notices?: string[]; children?: ReactNode }) {
   const { slug, source } = ctx;
   const state = ctx.state;
   const historyLimit = rawHistory(ctx)?.h.limit;
-  const n = Number(!!historyLimit) + Number(!!ctx.switchedAt);
+  const extraNotices = [...new Set(notices)];
+  const n = Number(!!historyLimit) + Number(!!ctx.switchedAt) + extraNotices.length;
   return (
     <>
       <div className="collab-head">
@@ -115,6 +116,10 @@ export function CollabHeader({ ctx, tab, prevu = false, children }: { ctx: Colla
                   <p>Les référentiels PayFit et DSN ne sont pas rapprochés. Les comparaisons entre ces deux sources ne sont pas disponibles.</p>
                 </section>
               )}
+              {extraNotices.length > 0 && <section className="collab-help-item" data-testid="exploration-notices">
+                <h2>Lecture de cette vue</h2>
+                <ul>{extraNotices.map(notice => <li key={notice}>{notice}</li>)}</ul>
+              </section>}
               <nav className="collab-help-links" aria-label="Sources et règles de lecture">
                 <a href={`/e/${slug}/donnees`}>Sources et synchronisations</a>
                 <a href={`/e/${slug}/parametres#effectif`}>Définition de l’effectif</a>
