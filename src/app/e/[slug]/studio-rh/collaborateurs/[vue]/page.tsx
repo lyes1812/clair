@@ -3,13 +3,12 @@ import "@/styles/collaborateurs-exploration.css";
 import { notFound } from "next/navigation";
 import { isMonth } from "@/lib/connectors/months";
 import { loadPayrollContext } from "@/lib/payroll/context";
-import { buildExploration, type ExplorationAxis } from "@/lib/rh/exploration";
+import { buildExploration, explorationDefaultMonth, type ExplorationAxis } from "@/lib/rh/exploration";
 import { buildExplorationAbsences } from "@/lib/rh/exploration-absences";
 import { loadKpiContext } from "@/lib/rh/kpi-context";
 import { buildPayfitPayrollItems } from "@/lib/rh/payroll-items";
 import { loadDsnPayrollItems } from "@/lib/rh/payroll-items-store";
 import { loadCollabContext } from "@/lib/rh/view";
-import { defaultMonth } from "@/lib/viz/collaborateurs";
 import { CollabHeader } from "../components";
 import { ExplorationView, type ExplorationViewFilters, type ExplorationViewOptions } from "../ExplorationView";
 
@@ -36,8 +35,13 @@ export default async function CollabExplorationPage({ params, searchParams }: { 
     ...(payrollContext?.input?.months ?? []),
   ])].filter(isMonth).sort();
   const requested = one(sp.mois);
+  const readMonths = ctx.chosen === "payfit"
+    ? mode === "rubrique"
+      ? (payrollContext?.input?.months ?? payrollContext?.read?.months ?? []).filter(m => !payrollContext?.input?.openMonths.includes(m))
+      : data?.build.inputs.source === "payfit" ? data.build.inputs.scopeMonths : []
+    : null;
   // Un mois demandé hors couverture ne recycle jamais le dernier mois disponible.
-  const month = sp.mois !== undefined ? requested : defaultMonth(knownMonths, data?.build.referenceDate, knownMonths.at(-1) ?? null) || "";
+  const month = sp.mois !== undefined ? requested : explorationDefaultMonth(mode, knownMonths, readMonths, data?.build.referenceDate) || "";
   const months = [...new Set([...knownMonths, ...(isMonth(month) ? [month] : [])])].sort();
   const filters: ExplorationViewFilters = {
     month, q: one(sp.q).trim().slice(0, 80),

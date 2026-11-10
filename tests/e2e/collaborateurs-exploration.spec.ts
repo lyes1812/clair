@@ -55,14 +55,15 @@ async function capture(page: Page, name: string) {
       await writeFile(path.join(CAPTURES, `${name}-${width}-geometry.json`), JSON.stringify(geometry, null, 2));
     }
     expect(overflow, `${name}, largeur ${width}`).toBe(false);
-    if (width < 600 && name.includes("pointage")) {
-      const table = page.getByRole("region", { name: "Pointage mensuel des collaborateurs", exact: true });
-      await table.scrollIntoViewIfNeeded();
-      await table.evaluate((el) => { el.scrollLeft = 0; });
-      await table.focus();
-      await page.keyboard.press("ArrowRight");
-      await expect.poll(() => table.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
-    }
+  }
+  // Le contrôle clavier vient après les captures : l'animation native de la flèche ne doit pas déplacer leur cadrage.
+  if (name.includes("pointage")) {
+    const table = page.getByRole("region", { name: "Pointage mensuel des collaborateurs", exact: true });
+    await table.scrollIntoViewIfNeeded();
+    await table.evaluate((el) => { el.scrollLeft = 0; });
+    await table.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => table.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
 }
@@ -159,6 +160,8 @@ test("Collaborateurs fictifs : arbre, pivot, pointage et rubriques PayFit puis D
   });
 
   await test.step("pointage, zéros et manques restent distincts, source traçable", async () => {
+    await page.goto(`${base}/pointage`);
+    await expect(page.getByRole("combobox", { name: "Mois", exact: true })).toHaveValue(SEP);
     await show(page, base, "pointage", { mois: "2025-06" });
     const table = page.getByTestId("exploration-pointage-table");
     await expect(table.locator("tbody > tr")).toHaveCount(7);
@@ -200,6 +203,8 @@ test("Collaborateurs fictifs : arbre, pivot, pointage et rubriques PayFit puis D
   });
 
   await test.step("rubrique comptable explicite, total primes exact et filtre individuel", async () => {
+    await page.goto(`${base}/rubrique`);
+    await expect(page.getByRole("combobox", { name: "Mois", exact: true })).toHaveValue(SEP);
     await show(page, base, "rubrique");
     await expect(page.getByTestId("exploration-choose-rubric")).toBeVisible();
     await expect(page.getByTestId("exploration-rubrique-table")).toHaveCount(0);

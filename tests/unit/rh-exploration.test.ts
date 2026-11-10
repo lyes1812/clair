@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildExploration, explorationPivot, explorationTimeGap, explorationTree, type ExplorationTreeNode } from "@/lib/rh/exploration";
+import { buildExploration, explorationDefaultMonth, explorationPivot, explorationTimeGap, explorationTree, type ExplorationTreeNode } from "@/lib/rh/exploration";
 import type { ContractDraft, ContractMonthDraft, PersonDraft, Provenance, RhBuildData } from "@/lib/rh/referential/types";
 
 // Référence écrite à la main : 5 contrats, 3 personnes, 1 contrat orphelin. P-A porte deux contrats ; P-A et P-B sont
@@ -28,6 +28,26 @@ function reference(): RhBuildData {
 }
 const opts = { natures: ["01", "02"] };
 const model = () => buildExploration(reference(), MONTH, opts);
+
+describe("Mois par défaut — présence et mois réellement lus", () => {
+  const presence = ["2026-09", "2026-10", "2026-11"];
+  it.each([
+    { mode: "tree", reads: ["2026-09"], reference: "2026-11-10", expected: "2026-10" },
+    { mode: "pivot", reads: ["2026-09"], reference: "2026-11-10", expected: "2026-10" },
+    { mode: "pointage", reads: ["2026-09"], reference: "2026-11-10", expected: "2026-09" },
+    { mode: "rubrique", reads: ["2026-09"], reference: "2026-11-10", expected: "2026-09" },
+    { mode: "pointage", reads: null, reference: "2026-11-10", expected: "2026-10" },
+    { mode: "rubrique", reads: null, reference: "2026-09-30", expected: "2026-09" },
+    { mode: "pointage", reads: [], reference: "2026-11-10", expected: null },
+    { mode: "rubrique", reads: [], reference: "2026-11-10", expected: null },
+    { mode: "pointage", reads: ["2026-09", "2026-08"], reference: "2026-09-21", expected: "2026-08" },
+    { mode: "pointage", reads: ["2026-09", "2026-09", "2026-13", "", "2026-08"], reference: "2026-11-10", expected: "2026-09" },
+    { mode: "rubrique", reads: ["2026-09", "2026-08"], reference: null, expected: "2026-09" },
+    { mode: "rubrique", reads: ["2026-13", ""], reference: undefined, expected: null },
+  ] as const)("$mode / lus=$reads / référence=$reference → $expected", ({ mode, reads, reference, expected }) => {
+    expect(explorationDefaultMonth(mode, Object.freeze(presence.slice()), reads === null ? null : Object.freeze([...reads]), reference)).toBe(expected);
+  });
+});
 
 describe("Exploration mensuelle — unions et périmètre documentaire", () => {
   it("compte les contrats et personnes par union, conserve homonymes, orphelin et observations multisites", () => {

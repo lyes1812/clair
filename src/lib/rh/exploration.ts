@@ -1,5 +1,6 @@
 import { isMonth } from "@/lib/connectors/months";
 import { contractNatureLabel } from "@/lib/dsn/labels";
+import { defaultMonth } from "@/lib/viz/collaborateurs";
 import { monthlyList, natureOfMonth, type MonthlyRow } from "./headcount";
 import type { FieldNd, Provenance, RhBuildData, RhSource } from "./referential/types";
 
@@ -152,6 +153,14 @@ function project(data: RhBuildData, row: MonthlyRow): ExplorationRow {
 
 const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr");
 const matchesCategory = (c: ExplorationCategory, requested: string | undefined) => !requested || requested === c.key || requested === c.value;
+
+// Une présence reconstituable depuis les dates de contrat ne prouve pas que les temps ou le journal du même mois ont été lus.
+// null = source sans scope PayFit (notamment DSN) ; [] = scope PayFit vide, sans repli vers les mois de présence.
+export function explorationDefaultMonth(mode: "tree" | "pivot" | "pointage" | "rubrique", presenceMonths: readonly string[], readMonths: readonly string[] | null, referenceDate: string | null | undefined): string | null {
+  const candidates = (mode === "pointage" || mode === "rubrique") && readMonths !== null ? readMonths : presenceMonths;
+  const months = [...new Set(candidates)].filter(isMonth).sort();
+  return defaultMonth(months, referenceDate, months.at(-1) ?? null);
+}
 
 export function buildExploration(data: RhBuildData, month: string, opts: ExplorationOptions): ExplorationModel {
   const initial = { source: data.build.source, month, referenceDate: data.build.referenceDate };
