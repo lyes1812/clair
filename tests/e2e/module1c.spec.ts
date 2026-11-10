@@ -64,7 +64,7 @@ test("DSN : dépôt, aperçu, application, réimport détecté, annule et rempla
   await choice.getByLabel("Règle").selectOption("api");
   await choice.getByRole("button", { name: "Appliquer" }).click();
   await expect(page.getByTestId("source-chosen-rh")).toContainText("n.d.");
-  await expect(page.getByTestId("source-chosen-rh")).toContainText("aucune lecture API appliquée");
+  await expect(page.getByTestId("source-chosen-rh")).toContainText("Aucune lecture API appliquée");
   await choice.getByLabel("Règle").selectOption("auto");
   await choice.getByRole("button", { name: "Appliquer" }).click();
   await expect(page.getByTestId("source-chosen-rh")).toContainText("Fichiers DSN");

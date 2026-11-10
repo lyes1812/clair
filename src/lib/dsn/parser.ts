@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
+import { DSN_END_CANCELLATION_UNSUPPORTED } from "./issues";
 
-// Lecteur DSN (norme NEODeS, P25V01 / P26V01), réécrit d'après le lecteur Codex vérifié sur des fichiers réels.
+// Lecteur DSN (norme NEODeS, P23V01 à P26V01), réécrit d'après le lecteur Codex vérifié sur des fichiers réels.
 // Lecture partielle et volontairement limitée : déclaration, entreprise, établissement, individus, contrats, fins de
 // contrat, versements, rémunérations et activités. Les autres blocs (cotisations, arrêts…) ne sont pas extraits.
 // Le NIR n'est jamais renvoyé : il sert uniquement à calculer un identifiant de personne propre à l'espace.
 
-export const SUPPORTED_NORMS = new Set(["P25V01", "P26V01"]);
+// Seules ces versions ont été vérifiées sur les rubriques extraites ci-dessous.
+// Les autres blocs et la conformité complète de chaque norme restent hors de cette lecture partielle.
+// Cahiers techniques officiels :
+// https://www.net-entreprises.fr/media/documentation/dsn-cahier-technique-2023.1.pdf
+// https://www.net-entreprises.fr/media/documentation/dsn-cahier-technique-2024.1.pdf
+export const SUPPORTED_NORMS = new Set(["P23V01", "P24V01", "P25V01", "P26V01"]);
 export const DSN_MAX_BYTES = 4 * 1024 * 1024;
 const MAX_ISSUES = 200;
 
@@ -83,6 +89,13 @@ function push(list: string[], message: string) {
   if (list.length < MAX_ISSUES) list.push(message);
   else if (list.length === MAX_ISSUES) list.push("Liste tronquée : d'autres constats existent.");
 }
+function pushEndCancellation(list: string[], line: number) {
+  const message = `Fin de contrat (ligne ${line}) : ${DSN_END_CANCELLATION_UNSUPPORTED} ; aucune sortie n'en est déduite.`;
+  // Ce constat pilote aussi la sélection des déclarations : il ne doit pas
+  // disparaître derrière la limite de présentation des autres erreurs.
+  if (list.length >= MAX_ISSUES) list[MAX_ISSUES - 1] = message;
+  else push(list, message);
+}
 
 // --- Décodage et découpage
 
@@ -149,7 +162,7 @@ export function parseDsn(bytes: Uint8Array, opts: DsnParseOptions): DsnParseResu
   const normRows = rows.filter((r) => r.code === "S10.G00.00.006");
   const norm = normRows.length === 1 && /^P\d{2}V\d{2}$/.test(normRows[0].value) ? normRows[0].value : null;
   if (normRows.length !== 1 || !norm) push(global, "Version de norme (S10.G00.00.006) absente, multiple ou invalide.");
-  else if (!SUPPORTED_NORMS.has(norm)) push(global, `Norme ${norm} non prise en charge (P25V01 ou P26V01 attendue).`);
+  else if (!SUPPORTED_NORMS.has(norm)) push(global, `Norme ${norm} non prise en charge (P23V01, P24V01, P25V01 ou P26V01 attendue).`);
 
   const footers = blocks.filter((b) => b.base === "S90.G00.90");
   if (footers.length !== 1) push(global, "Pied de fichier (S90.G00.90) absent ou multiple.");
@@ -196,7 +209,11 @@ export function parseDsn(bytes: Uint8Array, opts: DsnParseOptions): DsnParseResu
       continue;
     }
     if (PERSON_CHILDREN.has(b.base)) {
-      if (!person) { push(global, `Ligne ${b.line} : bloc ${b.base} sans personne parente.`); continue; }
+      if (!person) {
+        if (b.base === "S21.G00.62" && b.values.get("S21.G00.62.002") === "099") pushEndCancellation(global, b.line);
+        push(global, `Ligne ${b.line} : bloc ${b.base} sans personne parente.`);
+        continue;
+      }
       person.children.push(b);
       continue;
     }
@@ -261,6 +278,12 @@ function buildDeclaration(c: Context, global: string[], opts: DsnParseOptions): 
   const remunerations: DsnRemuneration[] = [];
   const activities: DsnActivity[] = [];
   const seenPeople = new Set<string>();
+
+  // Constater 099 même si une identité invalide empêche ensuite de lire ses
+  // enfants : la déclaration ne prouve pas davantage une ancienne fin maintenue.
+  for (const node of c.people) for (const block of node.children) {
+    if (block.base === "S21.G00.62" && block.values.get("S21.G00.62.002") === "099") pushEndCancellation(blocking, block.line);
+  }
 
   for (const node of c.people) {
     const v = node.block.values;
@@ -330,6 +353,13 @@ function buildDeclaration(c: Context, global: string[], opts: DsnParseOptions): 
         lastContract = contract;
       } else if (b.base === "S21.G00.62") {
         if (paymentDate) push(blocking, `Fin de contrat (${line}) placée après un versement.`);
+        const reason = opt(cv.get("S21.G00.62.002"));
+        // 099 annule une fin : sa date ne constitue pas une nouvelle rupture.
+        // La résolution de l'annulation entre déclarations n'est pas implémentée.
+        // Exclure la déclaration évite de produire une sortie à partir de ce bloc.
+        if (reason === "099") {
+          continue;
+        }
         const end = isoDate(opt(cv.get("S21.G00.62.001")));
         if (!lastContract) push(blocking, `Fin de contrat (${line}) sans contrat.`);
         else if (!end) push(blocking, `Fin de contrat (${line}) : date invalide.`);
@@ -337,7 +367,6 @@ function buildDeclaration(c: Context, global: string[], opts: DsnParseOptions): 
         else if (end < lastContract.startDate) push(blocking, `Fin de contrat (${line}) antérieure au début.`);
         else {
           lastContract.endDate = end;
-          const reason = opt(cv.get("S21.G00.62.002"));
           lastContract.endReason = reason && /^\d{3}$/.test(reason) ? reason : null;
         }
       } else if (b.base === "S21.G00.50") {

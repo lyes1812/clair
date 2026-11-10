@@ -88,9 +88,9 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
     term: "Dépôt de fichiers DSN",
     family: FAMILY,
     definition: [
-      "Déclarations sociales nominatives mensuelles, déposées fichier par fichier (norme P25V01 ou P26V01 ; 24 fichiers et 4 Mo par fichier au plus).",
+      "Déclarations sociales nominatives mensuelles depuis janvier 2023 : normes P23V01, P24V01, P25V01 et P26V01 (24 fichiers par dépôt et 4 Mo par fichier au plus).",
       "Chaque fichier est lu, contrôlé et présenté en aperçu avant d'être appliqué. Un fichier déjà déposé est reconnu à son empreinte et n'est pas importé deux fois. Le fichier d'origine est conservé chiffré ; le NIR n'est jamais stocké en clair.",
-      "Les lectures appliquées s'additionnent. Pour chaque établissement et chaque mois, la déclaration qui fait foi est déterminée par les règles de la norme : numéro d'ordre, annule et remplace, fractions.",
+      "Les lectures appliquées s'additionnent : le nombre total de mois d'historique n'est pas limité à 24. Pour chaque établissement et chaque mois, la déclaration qui fait foi est déterminée par les règles de la norme : numéro d'ordre, annule et remplace, fractions.",
     ].join("\n\n"),
   },
   {

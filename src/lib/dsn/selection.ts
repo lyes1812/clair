@@ -1,3 +1,5 @@
+import { DSN_END_CANCELLATION_UNSUPPORTED } from "./issues";
+
 // Sélection des déclarations qui font foi, par établissement (SIRET), mois et nature, parmi tous les fichiers appliqués.
 // Règles reprises de Codex : numéro d'ordre le plus élevé, « annule et remplace » (03) seulement après une normale (01),
 // fractions complètes et cohérentes ; tout conflit est signalé, jamais tranché en silence.
@@ -25,6 +27,19 @@ export function selectDeclarations(all: SelectableDeclaration[]): CoverageRow[] 
     return r;
   };
 
+  // Une annulation de fin non lue peut remettre en cause une sortie d'une
+  // déclaration antérieure. L'exclure puis reprendre l'ancienne en silence
+  // ferait passer cette sortie pour encore acquise. On bloque le groupe tant
+  // qu'une déclaration éligible d'ordre strictement supérieur ne l'a pas repris.
+  const endCancellations = all.filter((d) => !d.eligible && d.blocking.some((issue) => issue.includes(DSN_END_CANCELLATION_UNSUPPORTED)));
+  const cancellationBlocks = (cancellation: SelectableDeclaration, latest: SelectableDeclaration): boolean => {
+    const fields = ["siret", "month", "nature", "fraction"] as const;
+    if (fields.some((field) => cancellation[field] !== null && cancellation[field] !== latest[field])) return false;
+    if (fields.some((field) => cancellation[field] === null)) return true;
+    if (!cancellation.order || !/^\d{1,20}$/.test(cancellation.order) || /^0+$/.test(cancellation.order)) return true;
+    return BigInt(cancellation.order) >= BigInt(latest.order!);
+  };
+
   const groups = new Map<string, SelectableDeclaration[]>();
   for (const d of all) {
     if (!d.siret || !d.month) continue;
@@ -43,6 +58,13 @@ export function selectDeclarations(all: SelectableDeclaration[]): CoverageRow[] 
       return diff > 0n ? 1 : diff < 0n ? -1 : a.sourceId.localeCompare(b.sourceId);
     });
     const latest = sorted[0];
+    if (endCancellations.some((cancellation) => cancellationBlocks(cancellation, latest))) {
+      const reason = `Fraction ${latest.fraction} : ${DSN_END_CANCELLATION_UNSUPPORTED} ; les déclarations antérieures ne prouvent pas une sortie maintenue.`;
+      r.messages.push(reason);
+      for (const d of sorted) r.excluded.push({ declaration: d, reason });
+      r.status = "blocked";
+      continue;
+    }
     if (sorted.length > 1 && BigInt(sorted[1].order!) === BigInt(latest.order!)) {
       r.messages.push(`Fraction ${latest.fraction} : deux déclarations différentes portent le même numéro d'ordre ${latest.order}.`);
       for (const d of sorted) r.excluded.push({ declaration: d, reason: "numéro d'ordre en conflit" });
@@ -53,7 +75,7 @@ export function selectDeclarations(all: SelectableDeclaration[]): CoverageRow[] 
     if (normals.length > 1) r.messages.push(`Fraction ${latest.fraction} : plusieurs déclarations normales (01) ; la plus récente par numéro d'ordre est retenue.`);
     if (latest.type === "03" && normals.length === 0) {
       r.messages.push(`Fraction ${latest.fraction} : annule et remplace sans déclaration normale ; chaîne incomplète.`);
-      r.status = "incomplete";
+      if (r.status === "complete") r.status = "incomplete";
     }
     if (latest.type === "01" && sorted.some((d) => d.type === "03")) {
       r.messages.push(`Fraction ${latest.fraction} : déclaration normale postérieure à un annule et remplace ; à vérifier.`);

@@ -93,7 +93,7 @@ export function DecisionButtons({ slug, syncId, additive = false }: { slug: stri
 const UPLOAD_HELP = {
   dsn: {
     label: "Fichiers DSN",
-    limits: "Norme P25V01 ou P26V01 · 24 fichiers et 4 Mo par fichier au plus.",
+    limits: "DSN dès janvier 2023 : P23V01, P24V01, P25V01 ou P26V01 · 24 fichiers par dépôt et 4 Mo par fichier au plus.",
     accept: ".dsn,.txt,text/plain",
   },
   fec: {

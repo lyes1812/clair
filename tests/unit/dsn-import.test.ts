@@ -109,7 +109,7 @@ describe("import de fichiers DSN", () => {
     expect(await resolveSource(A, "rh")).toMatchObject({ mode: "auto", chosen: "dsn", filesApplied: true, apiApplied: false });
     await chooseSourceMode(A, "rh", "api", actor);
     expect(await resolveSource(A, "rh")).toMatchObject({ mode: "api", chosen: null });
-    expect((await resolveSource(A, "rh")).reason).toContain("aucune lecture API appliquée");
+    expect((await resolveSource(A, "rh")).reason).toContain("Aucune lecture API appliquée");
     await chooseSourceMode(A, "rh", "auto", actor);
     expect((await resolveSource(A, "rh")).chosen).toBe("dsn");
     expect(await resolveSource(B, "rh")).toMatchObject({ mode: "auto", chosen: null });
