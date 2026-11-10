@@ -584,27 +584,6 @@ describe("écrans sans narratif", () => {
   });
 });
 
-describe("pages « Prévu » de la masse salariale", () => {
-  const src = readFileSync("src/app/e/[slug]/studio-rh/masse-salariale/[vue]/page.tsx", "utf8");
-  it("chaque phrase d'état commence par « Non réalisé : » ou « Non disponible avec les données lues : »", () => {
-    const leads = [...src.matchAll(/lead: "([^"]+)"/g)].map((m) => m[1]);
-    expect(leads).toHaveLength(2); // organisation, reel : les autres entrées ont une page dédiée
-    for (const l of leads) expect(l).toMatch(/^(Non réalisé|Non disponible avec les données lues) : /);
-  });
-  it("aucun terme interdit dans l'interface (outil observé, cahier, webinaire, capture, recette juridique, tutoiement, « rien n'est simulé »)", () => {
-    for (const w of ["outil observé", "cahier", "webinaire", "capture", "recette juridique", "rien n'est simulé", " toi ", "avec toi", "tu "]) expect(src.toLowerCase()).not.toContain(w);
-  });
-  it("pages courtes : phrase d'état d'une ligne, textes des liens et des points ouverts en quelques mots", () => {
-    for (const l of [...src.matchAll(/lead: "([^"]+)"/g)].map((m) => m[1])) expect(l.length).toBeLessThanOrEqual(170);
-    for (const t of [...src.matchAll(/ text: "([^"]+)"/g)].map((m) => m[1])) expect(t.length).toBeLessThanOrEqual(80);
-    for (const o of [...src.matchAll(/open: \["([^"]+)"\]/g)].map((m) => m[1])) expect(o.length).toBeLessThanOrEqual(110);
-    expect([...src.matchAll(/open: \[/g)]).toHaveLength(2);
-  });
-  it("le titre de la page écrit « Masse salariale par organisation » en toutes lettres (l'onglet garde « MS »)", () => {
-    expect(src).toContain('"Masse salariale par organisation"');
-  });
-});
-
 // Poids d'une contribution = contribution ÷ écart total. Cas de référence du tableau de masse (calcul à la main) : écart total
 // 3 550,00 € = 1 875,00 € (rémunération) + 1 000,00 € (primes) + 675,00 € (charges) ; 187 500 ÷ 355 000 = 52,8169 % ;
 // 100 000 ÷ 355 000 = 28,1690 % ; 67 500 ÷ 355 000 = 19,0141 % ; les trois arrondis font 100,00 %.

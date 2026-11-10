@@ -161,16 +161,16 @@ test("Écart budgétaire et analyse des écarts : rubriques, détail par salari�
   expect(await txt(page.getByTestId("pont-cout").locator("dd"))).toBe("−79,51 €");
   await page.screenshot({ path: `${CAPTURES}/6-03-analyse.png`, fullPage: true });
 
-  // Entrées « Prévu » de Masse salariale (par organisation, écart réel, suivi réel / budget) : ouvertes, étiquetées, sans simulation.
+  // Les entrées livrées s'ouvrent sous leur onglet, sans l'ancien panneau Prévu.
   const ms = `/e/${slug}/studio-rh/masse-salariale`;
-  for (const [vue, label, marker] of [["organisation", "MS par organisation", "Non réalisé"], ["reel", "Écart réel", "rubrique de bulletin"], ["suivi", "Suivi réel / budget", "Non réalisé"]] as const) {
+  for (const [vue, label, marker] of [["organisation", "MS par organisation", "payroll-exploration-organisation"], ["reel", "Écart réel", "payroll-exploration-reel"], ["suivi", "Suivi réel / budget", "suivi-budget"]] as const) {
     await page.goto(`${ms}/${vue}`);
     await expect(page.getByTestId("ms-tabs").getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByTestId("prevu")).toContainText(marker);
-    await expect(page.getByTestId("prevu")).toContainText("Prévu");
+    await expect(page.getByTestId(marker)).toBeVisible();
+    await expect(page.getByTestId("prevu")).toHaveCount(0);
   }
-  await expect(page.getByTestId("ms-tabs").locator(".soon")).toHaveCount(3);
-  await page.screenshot({ path: `${CAPTURES}/6-04-ms-prevu.png`, fullPage: true });
+  await expect(page.getByTestId("ms-tabs").locator(".soon")).toHaveCount(0);
+  await page.screenshot({ path: `${CAPTURES}/6-04-ms-livree.png`, fullPage: true });
   expect((await page.request.get(`${ms}/inconnue`)).status()).toBe(404);
   // « Masse salariale croisée » n'est plus « Prévu » : sa page (chapitre 01 par défaut) s'ouvre sous le même onglet.
   await page.goto(`${ms}/croisee`);

@@ -72,8 +72,11 @@ test("Menu général : toutes les entrées s'ouvrent, pas de débordement mobile
   const links = await panel.locator("a").evaluateAll((as) => as.map((a) => ({ href: a.getAttribute("href")!, text: (a.textContent ?? "").trim() })));
   const entries = [...new Map(links.map((l) => [l.href, l])).values()];
   expect(entries.length).toBeGreaterThanOrEqual(30);
-  // Les entrées « Prévu » sont annoncées comme telles.
-  expect(links.filter((l) => /Prévu$/.test(l.text)).length).toBeGreaterThanOrEqual(10);
+  // Les vues livrées ne portent plus la mention Prévu ; la navigation garde toutes ses entrées.
+  for (const label of ["Tree-View", "Collaborateurs par rubrique de paie", "Pointage des collaborateurs", "Pivot · liste mensuelle", "MS par organisation", "Écart réel"]) {
+    const entry = links.find((l) => l.text === label);
+    expect(entry, label).toBeDefined();
+  }
   const extra = [`/e/${slug}/donnees`, `/e/${slug}/parametres`, `/e/${slug}/membres`].map((href) => ({ href, text: href.split("/").pop()! }));
   const all = [...entries, ...extra];
   const slugOf = (t: string, i: number) => `${String(i + 1).padStart(2, "0")}-${t.replace(/Prévu$/, "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
