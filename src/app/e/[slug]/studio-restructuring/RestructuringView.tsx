@@ -22,6 +22,8 @@ const QUESTIONS = {
   overview: "Quelles économies le projet apporte-t-il, et quand absorbe-t-il ses coûts ?",
   measures: "Quelles hypothèses expliquent le projet comparé à la référence ?",
   monthly: "Comment les coûts, les économies et les ETP évoluent-ils chaque mois ?",
+  crisis: "De quelle trésorerie l’entreprise dispose-t-elle, et que doit-elle, à une date donnée ?",
+  cash: "La trésorerie tient-elle sur les treize prochaines semaines, et sinon quand rompt-elle ?",
 };
 type Scenario = NonNullable<RestructuringContext["proposal"]>;
 type Props = RestructuringContext & { saveExit?: ExitCostAction; addHire?: Parameters<typeof HireForm>[0]["action"] };
