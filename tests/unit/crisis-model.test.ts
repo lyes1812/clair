@@ -42,6 +42,7 @@ describe("Cap 13 : position de trésorerie et dettes comptabilisées", () => {
     expect(p.totalDebt.cents).toBe(6_550_000);
     expect(p.coverage.cents).toBe(-2_769_567);
     expect(p.securities.cents).toBe(100_000);
+    expect(p.cash.net.cents).toBe(3_580_433); // 37 804,33 − découvert de 2 000,00
     expect(p.lineCount).toBe(18);
   });
   it("chaque nature porte la somme de ses soldes créditeurs", () => {

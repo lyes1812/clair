@@ -14,6 +14,13 @@ export type CrisisExercise = { filename: string; firstDate: string; lastDate: st
 // ses à-nouveaux ne sont pas garantis, donc un solde de bilan n'y serait pas exact.
 export async function loadCrisisContext(slug: string, query: CrisisQuery) {
   const { workspace } = await requireWorkspace(slug);
+  const { source: _source, ...context } = await readCrisis(workspace, slug, query);
+  return context;
+}
+
+type Workspace = { id: string; name: string; role: Parameters<typeof hasAtLeast>[0] };
+/** Lecture du lot 1 pour un espace déjà vérifié ; `source` désigne la lecture FEC utilisée (jamais renvoyée à l'écran). */
+export async function readCrisis(workspace: Workspace, slug: string, query: CrisisQuery) {
   const applied = (await fecCoverage(workspace.id)).filter((exercise) => !exercise.pending);
   const exercises: (CrisisExercise & { syncId: string })[] = applied
     .map((e) => ({ filename: e.filename, firstDate: e.firstDate, lastDate: e.lastDate, syncId: e.syncId }))
@@ -26,7 +33,7 @@ export async function loadCrisisContext(slug: string, query: CrisisQuery) {
   const notices: string[] = [];
   if (!exercises.length) {
     const position: CrisisPosition = { kind: "nd", reason: "Aucun FEC appliqué dans Données. Dépose le FEC de l’exercice en cours pour lire la trésorerie et les dettes." };
-    return { ...base, exercise: null as CrisisExercise | null, asOf: null as string | null, ranks: null as RankSettings | null, ranksUnreadable: false, position, notices };
+    return { ...base, exercise: null as CrisisExercise | null, asOf: null as string | null, ranks: null as RankSettings | null, ranksUnreadable: false, position, notices, source: null as { syncId: string; filename: string } | null };
   }
   // L'exercice affiché par défaut est le plus récent ; il est toujours nommé à l'écran.
   let exercise = exercises[0];
@@ -50,6 +57,7 @@ export async function loadCrisisContext(slug: string, query: CrisisQuery) {
   return {
     ...base, exercise: { filename: exercise.filename, firstDate: exercise.firstDate, lastDate: exercise.lastDate } as CrisisExercise | null, asOf: asOf as string | null,
     ranks, ranksUnreadable, position: buildCrisisPosition(lines, asOf, ranks), notices,
+    source: { syncId: exercise.syncId, filename: exercise.filename } as { syncId: string; filename: string } | null,
   };
 }
 export type CrisisContext = Awaited<ReturnType<typeof loadCrisisContext>>;

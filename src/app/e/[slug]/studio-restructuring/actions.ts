@@ -2,6 +2,8 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { isIsoDate } from "@/lib/dates";
 import { z } from "zod";
 import type { Hypothesis } from "@/lib/budget/types";
 import { applyChanges, getScenario } from "@/lib/budget/store";
@@ -9,6 +11,8 @@ import { recordEvent } from "@/lib/events";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { exitFromForm } from "@/lib/restructuring/forms";
 import { CRISIS_RANKS_KEY, ranksFromForm } from "@/lib/restructuring/crisis/ranks";
+import { flowFromForm, MAX_FLOWS, startFromForm } from "@/lib/restructuring/crisis/cashplan";
+import { CashPlanError, updateCashPlan } from "@/lib/restructuring/crisis/store";
 import { setSetting } from "@/lib/settings";
 import { requireWorkspace } from "@/lib/workspace";
 import type { FormState } from "../studio-rh/hypotheses/actions";
@@ -57,4 +61,52 @@ export async function saveCrisisRanksAction(slug: string, _previous: FormState, 
   catch { return { error: "Enregistrement des rangs refusé. Recharge la page avant de réessayer." }; }
   revalidatePath(`/e/${slug}/studio-restructuring`);
   return { ok: "Rangs enregistrés pour cet espace." };
+}
+
+const cashFailure = (error: unknown): FormState => ({ error: error instanceof CashPlanError ? error.message : "Enregistrement refusé. Recharge la page avant de réessayer." });
+
+/** Cap 13 : ajoute une ligne de flux au plan de trésorerie de l’espace. */
+export async function addCashFlowAction(slug: string, _previous: FormState, form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  let flow;
+  try { flow = flowFromForm(form, randomUUID()); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Ligne de flux invalide." }; }
+  try {
+    await updateCashPlan(workspace.id, session.user.id, (current) => {
+      if (current.flows.length >= MAX_FLOWS) throw new CashPlanError(`Le plan contient déjà ${MAX_FLOWS} lignes : supprime des lignes avant d’en ajouter.`);
+      return { ...current, flows: [...current.flows, flow] };
+    }, "flow-added");
+  } catch (error) { return cashFailure(error); }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  // Ligne proposée depuis le FEC : retour à un formulaire vide, pour qu'un second envoi ne compte pas la dette deux fois.
+  if (form.get("prefilled") === "1") {
+    const query = new URLSearchParams({ vue: "cash" });
+    const exercice = String(form.get("exercice") ?? "");
+    const arrete = String(form.get("arrete") ?? "");
+    if (exercice && exercice.length <= 255) query.set("exercice", exercice);
+    if (isIsoDate(arrete)) query.set("date", arrete);
+    redirect(`/e/${slug}/studio-restructuring?${query}`);
+  }
+  return { ok: "Ligne ajoutée au plan." };
+}
+
+/** Cap 13 : supprime une ligne de flux. Une ligne déjà supprimée ailleurs n’est pas une erreur. */
+export async function deleteCashFlowAction(slug: string, flowId: string, _previous: FormState, _form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  try { await updateCashPlan(workspace.id, session.user.id, (current) => ({ ...current, flows: current.flows.filter((flow) => flow.id !== flowId) }), "flow-removed"); }
+  catch (error) { return cashFailure(error); }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  return { ok: "Ligne supprimée." };
+}
+
+/** Cap 13 : solde de départ saisi (ou retour au solde du FEC) et découvert autorisé. */
+export async function saveCashStartAction(slug: string, _previous: FormState, form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  let values;
+  try { values = startFromForm(form); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Saisie invalide." }; }
+  try { await updateCashPlan(workspace.id, session.user.id, (current) => ({ ...current, ...values }), "start-changed"); }
+  catch (error) { return cashFailure(error); }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  return { ok: values.start ? "Solde de départ saisi enregistré." : "Le plan part du solde du FEC." };
 }

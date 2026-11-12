@@ -19,7 +19,7 @@ const rankLabel = (id: string | null) => RANKS.find((rank) => rank.id === id)?.l
 
 function tabHref(p: Props, view: string) {
   const query = new URLSearchParams({ vue: view });
-  if (view === "crisis") {
+  if (view === "crisis" || view === "cash") {
     if (p.exercise) query.set("exercice", p.exercise.filename);
     if (p.asOf) query.set("date", p.asOf);
   } else {

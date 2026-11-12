@@ -9,7 +9,11 @@ const sync = await import("@/lib/connectors/sync");
 const { importFecFiles } = await import("@/lib/fec/import");
 const { fixtureFecBytes, fixtureFecFilename } = await import("@/lib/fec/fixture");
 const { ledgerTotals } = await import("@/lib/connectors/views");
-const { readCrisisLines } = await import("@/lib/restructuring/crisis/store");
+const { readCrisisLines, readSupplierLines, getCashPlan, updateCashPlan, CashPlanError } = await import("@/lib/restructuring/crisis/store");
+const { withWorkspace } = await import("@/db/workspace-scope");
+const { workspaceSetting, workspaceEvent } = await import("@/db/schema");
+const { CASH_PLAN_KEY, emptyCashPlan } = await import("@/lib/restructuring/crisis/cashplan");
+type CashFlow = import("@/lib/restructuring/crisis/cashplan").CashFlow;
 const { buildCrisisPosition } = await import("@/lib/restructuring/crisis/model");
 
 // FEC fictif (profil A, exercice clos le 30/09/2025) : salaires dus puis virés chaque mois depuis la banque, cotisations dues.
@@ -58,5 +62,44 @@ describe("Cap 13 : lecture des écritures de bilan d’un FEC appliqué", () => 
   });
   it("un autre nom de fichier ne renvoie rien", async () => {
     expect(await readCrisisLines(A, syncId, "autre.txt", "2025-09-30")).toEqual([]);
+  });
+});
+
+describe("Cap 13 : plan de trésorerie enregistré par espace", () => {
+  const flow = (id: string): CashFlow => ({ id, label: `Flux fictif ${id}`, category: "suppliers", direction: "out", amountCents: 12_345, date: "2026-03-10", recurrence: "once", until: null });
+  it("un espace sans plan lit un plan vide, sans rien écrire", async () => {
+    expect(await getCashPlan(A)).toEqual(emptyCashPlan());
+    expect(await withWorkspace(A, (tx) => tx.select().from(workspaceSetting).where(sql`key = ${CASH_PLAN_KEY}`))).toHaveLength(0);
+  });
+  it("chaque modification incrémente la révision ; le journal ne contient ni libellé ni montant", async () => {
+    await updateCashPlan(A, actor, (c) => ({ ...c, flows: [...c.flows, flow("f1")] }), "flow-added");
+    const after = await updateCashPlan(A, actor, (c) => ({ ...c, start: { date: "2026-03-04", cents: -500 }, overdraftCents: 0 }), "start-changed");
+    expect(after).toMatchObject({ revision: 2, start: { date: "2026-03-04", cents: -500 }, overdraftCents: 0 });
+    expect((await getCashPlan(A)).flows.map((f) => f.id)).toEqual(["f1"]);
+    const events = await withWorkspace(A, (tx) => tx.select({ detail: workspaceEvent.detail }).from(workspaceEvent).where(sql`detail->>'key' = ${CASH_PLAN_KEY}`));
+    expect(events).toHaveLength(2);
+    expect(JSON.stringify(events)).not.toContain("Flux fictif");
+    expect(JSON.stringify(events)).not.toContain("12345");
+  });
+  it("deux ajouts simultanés sont tous deux conservés", async () => {
+    await Promise.all([
+      updateCashPlan(A, actor, (c) => ({ ...c, flows: [...c.flows, flow("f2")] }), "flow-added"),
+      updateCashPlan(A, actor, (c) => ({ ...c, flows: [...c.flows, flow("f3")] }), "flow-added"),
+    ]);
+    expect((await getCashPlan(A)).flows.map((f) => f.id).sort()).toEqual(["f1", "f2", "f3"]);
+  });
+  it("une modification invalide est refusée et n’enregistre rien", async () => {
+    await expect(updateCashPlan(A, actor, (c) => ({ ...c, flows: [...c.flows, { ...flow("f4"), amountCents: -1 }] }), "flow-added")).rejects.toThrow(CashPlanError);
+    await expect(updateCashPlan(A, actor, (c) => ({ ...c, flows: [...c.flows, flow("f1")] }), "flow-added")).rejects.toThrow(CashPlanError);
+    expect((await getCashPlan(A)).flows).toHaveLength(3);
+  });
+  it("isolation : l’espace B ne voit pas le plan de A", async () => {
+    expect(await getCashPlan(B)).toEqual(emptyCashPlan());
+  });
+  it("écritures fournisseurs : aucune dans ce FEC de paie ; lettrage lu à l’import pour les nouveaux dépôts", async () => {
+    expect(await readSupplierLines(A, syncId, filename, "2025-09-30")).toEqual([]);
+    const [record] = await withWorkspace(A, (tx) => tx.execute(sql`select data from source_record where sync_id = ${syncId} and collection = 'ledger_lines' limit 1`)).then((r) => r.rows as { data: Record<string, unknown> }[]);
+    expect(Object.hasOwn(record.data, "lettering")).toBe(true);
+    expect(Object.hasOwn(record.data, "pieceDate")).toBe(true);
   });
 });

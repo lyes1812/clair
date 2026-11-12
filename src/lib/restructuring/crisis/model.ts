@@ -53,7 +53,11 @@ export type CrisisPosition =
   | { kind: "nd"; reason: string }
   | {
     kind: "value"; asOf: string; lineCount: number;
-    cash: { available: Amount; items: CrisisItem[] };
+    cash: {
+      available: Amount; items: CrisisItem[];
+      /** Soldes nets des comptes de trésorerie, découverts compris (hors compte 519) : solde de départ de la trésorerie à 13 semaines. */
+      net: Amount;
+    };
     securities: Amount;
     natures: NatureBlock[];
     totalDebt: Amount;
@@ -176,7 +180,7 @@ export function buildCrisisPosition(lines: CrisisLine[], asOf: string, ranks: Ra
 
   return {
     kind: "value", asOf, lineCount,
-    cash: { available, items: cashBroken ? [] : items(positive, 1n) },
+    cash: { available, items: cashBroken ? [] : items(positive, 1n), net: cashBroken ? nd(BROKEN) : sum(cashGroups, 1n) },
     securities: securitiesBroken ? nd(BROKEN) : exact(securities),
     natures, totalDebt, coverage, ranks: rankView, warnings,
   };
