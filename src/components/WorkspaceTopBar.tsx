@@ -8,6 +8,7 @@ import { SignOutButton } from "./SignOutButton";
 import { TableDensity } from "./TableDensity";
 import { CurrencySwitch } from "./CurrencyPreference";
 import { DropdownMenu } from "./DropdownMenu";
+import "@/styles/ms-page-actions.css";
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
@@ -40,7 +41,7 @@ export function WorkspaceTopBar({ slug, workspaceName, userName, email, families
   return (
     <header className="ws-topbar">
       <div className="topbar-left">
-        {inStudioRh && <MegaMenu families={families} extras={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Studio Finance", href: `/e/${slug}/studio-finance` }, { label: "Studio Restructuring", href: `/e/${slug}/studio-restructuring` }, { label: "Paramètres", href: `/e/${slug}/parametres` }, { label: "Membres et accès", href: `/e/${slug}/membres` }, { label: "Glossaire", href: `/e/${slug}/glossaire` }]} />}
+        {inStudioRh && <MegaMenu label="Fonctionnalités" className="ws-features" families={families} extras={[{ label: "Données", href: `/e/${slug}/donnees` }, { label: "Studio Finance", href: `/e/${slug}/studio-finance` }, { label: "Studio Restructuring", href: `/e/${slug}/studio-restructuring` }, { label: "Paramètres", href: `/e/${slug}/parametres` }, { label: "Membres et accès", href: `/e/${slug}/membres` }, { label: "Glossaire", href: `/e/${slug}/glossaire` }]} />}
         <nav className="breadcrumb" aria-label="Fil d'Ariane">
           <span className="crumb-space">Espace {workspaceName}</span>
           {page && (<><span className="crumb-sep" aria-hidden="true">/</span><strong aria-current="page">{page}</strong></>)}

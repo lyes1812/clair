@@ -122,6 +122,59 @@ describe("étiquettes dans les barres empilées", () => {
   });
 });
 
+describe("contours des histogrammes", () => {
+  const render = (series: { key: string; name: string; values: (number | null)[]; color?: string }[], mode: "grouped" | "stacked" = "stacked") => renderToStaticMarkup(h(BarChart, {
+    testid: "contours", label: "Histogramme de référence", unit: "nombre", categories: ["a", "b", "c"], series, mode,
+  }));
+  const bars = (html: string) => [...html.matchAll(/<rect\b[^>]*class="chart-bar"[^>]*>/g)].map((m) => m[0]);
+
+  it("empilées : les segments positifs partagent un seul contour arrondi, sans coins arrondis aux jonctions", () => {
+    const html = render([
+      { key: "a", name: "A", values: [3, null, 0], color: "var(--chart-1)" },
+      { key: "b", name: "B", values: [4, null, 0], color: "var(--chart-5)" },
+    ]);
+    expect(html.match(/<clipPath\b/g)).toHaveLength(1);
+    const drawn = bars(html).filter((bar) => !bar.includes('height="0"'));
+    expect(drawn).toHaveLength(2);
+    const clips = drawn.map((bar) => /clip-path="([^"]+)"/.exec(bar)?.[1]);
+    expect(new Set(clips).size).toBe(1);
+    expect(clips[0]).toMatch(/-0-positive\)$/);
+    expect(drawn.every((bar) => bar.includes('rx="0"'))).toBe(true);
+    expect(drawn[0]).toContain('fill="var(--chart-1)"');
+    expect(drawn[1]).toContain('fill="var(--chart-5)"');
+    expect(html).toContain("b : A n.d., B n.d.");
+    expect(html).not.toMatch(/NaN|Infinity|undefined/);
+  });
+
+  it("signes mixtes : deux contours indépendants depuis zéro ; zéros et n.d. ne créent pas de pile", () => {
+    const html = render([
+      { key: "a", name: "A", values: [3, 0, null] },
+      { key: "b", name: "B", values: [-2, 0, null] },
+      { key: "c", name: "C", values: [4, null, null] },
+      { key: "d", name: "D", values: [-1, null, null] },
+    ]);
+    expect(html.match(/<clipPath\b/g)).toHaveLength(2);
+    const drawn = bars(html).filter((bar) => !bar.includes('height="0"'));
+    const clips = drawn.map((bar) => /clip-path="([^"]+)"/.exec(bar)?.[1]);
+    expect(clips[0]).toBe(clips[2]);
+    expect(clips[1]).toBe(clips[3]);
+    expect(clips[0]).not.toBe(clips[1]);
+    expect(clips[1]).toMatch(/-0-negative\)$/);
+    expect(bars(html).filter((bar) => bar.includes('height="0"')).every((bar) => !bar.includes("clip-path"))).toBe(true);
+    expect(html).toContain("b : A 0, B 0, C n.d., D n.d.");
+    expect(html).toContain("c : A n.d., B n.d., C n.d., D n.d.");
+  });
+
+  it("groupées et empilées d'une seule série conservent le même rayon ; les groupées gardent leurs couleurs", () => {
+    const series = [{ key: "a", name: "A", values: [3, -2, null], color: "var(--chart-5)" }];
+    const grouped = render(series, "grouped");
+    const stacked = render(series);
+    expect(grouped).not.toContain("<clipPath");
+    expect(bars(grouped).every((bar) => bar.includes('rx="5"') && bar.includes('fill="var(--chart-5)"'))).toBe(true);
+    expect([...stacked.matchAll(/<clipPath\b[^>]*><rect\b[^>]*rx="([^"]+)"/g)].map((m) => m[1])).toEqual(["5", "5"]);
+  });
+});
+
 describe("cas limites de lecture", () => {
   it("anneau d'une seule part : deux cercles complets (extérieur et trou), même à petit rayon", () => {
     const d = arcPath(80, 80, 68.5, 41, 0, Math.PI * 2);

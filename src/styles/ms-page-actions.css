@@ -1,0 +1,38 @@
+/* Les mêmes entrées sont accessibles dans la barre globale ou à côté de l'export de la synthèse. */
+.ws-features > .mega-btn { background: var(--blue); border-color: var(--blue); color: #fff; }
+.ws-features > .mega-btn:hover { background: var(--blue); color: #fff; filter: brightness(.95); }
+.ws-features > .mega-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.ws-features .mega-panel { max-height: min(760px, 80dvh); overflow-y: auto; overscroll-behavior: contain; }
+.mega-panel-close { display: none; }
+
+/* La présence effective des actions de page garde le menu global disponible dans les états DSN ou sans source. */
+body:has(.ms-page-actions) .ws-topbar .ws-features { display: none; }
+.ms-page-actions { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+.ms-page-actions .mega-panel-page { right: 0; left: auto; max-height: min(760px, 80dvh); overflow-y: auto; overscroll-behavior: contain; }
+.ms-page-export .ui-dropdown-panel { width: max-content; min-width: 225px; max-width: calc(100vw - 32px); }
+.ms-page-export .ui-dropdown-panel a, .ms-export-action { display: flex; align-items: center; gap: 9px; }
+.ms-export-action { width: 100%; border: 0; border-radius: var(--clair-radius-control); background: transparent; padding: 9px 12px; text-align: left; cursor: pointer; color: var(--ink); font: inherit; font-size: var(--clair-type-form); }
+.ms-export-action:hover { background: var(--surface); }
+.ms-export-action:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
+@media (max-width: 860px) {
+  .mega-panel-close { display: inline-flex; grid-column: 1 / -1; justify-self: end; position: sticky; top: 0; z-index: 1; min-height: 44px; gap: 7px; background: var(--surface); }
+  .ws-features > .mega-btn, .ms-page-actions > .mega > .mega-btn, .ms-page-export > summary { min-height: 44px; }
+  .ws-features .mega-panel a, .ms-page-actions .mega-panel a { min-height: 44px; }
+  .ms-page-actions .mega-panel-page { position: fixed; left: 16px; right: 16px; top: 120px; width: auto; max-height: calc(100dvh - 140px); }
+  .ms-export-action { min-height: 44px; }
+}
+
+@page ms-synthese { size: A4 landscape; margin: 12mm; }
+@media print {
+  body[data-ms-pdf="synthese"] { page: ms-synthese; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body[data-ms-pdf="synthese"] :is(.sidebar, .ws-topbar, .skip-link, .ms-page-actions, .main > .tabs, .ms-synthese > .tabs, .ms-bar, .view-select, .view-switch, .chart-tip, [data-ms-screen-only]) { display: none !important; }
+  body[data-ms-pdf="synthese"] .ms-synthese :is(form, button),
+  body[data-ms-pdf="synthese"] #actual-non-recurring .ms-read-details:has(form) { display: none !important; }
+  body[data-ms-pdf="synthese"] :is(.shell, .shell-main) { display: block; min-height: 0; background: #fff; }
+  body[data-ms-pdf="synthese"] .main { padding: 0; max-width: none; width: 100%; gap: 16px; }
+  body[data-ms-pdf="synthese"] :is(.panel, .ms-tile, .ms-read) { box-shadow: none; break-inside: avoid; }
+  body[data-ms-pdf="synthese"] :is(.table-wrap, .table-wrap.scroll) { max-height: none; overflow: visible; }
+  body[data-ms-pdf="synthese"] .data-table :is(th, td) { position: static; }
+  body[data-ms-pdf="synthese"] .ms-read-details > .ms-read-body { display: block; }
+}

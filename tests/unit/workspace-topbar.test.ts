@@ -15,13 +15,13 @@ describe("Sommaire RH limité à son module", () => {
   it.each(["", "/collaborateurs", "/kpi", "/masse-salariale/croisee", "/hypotheses", "/reporting-social"])("reste accessible dans Studio RH%s", (path) => {
     const html = render(`/e/espace-fictif/studio-rh${path}`);
     expect(html).toContain('data-testid="mega-button"');
-    expect(html).toContain("Toutes les entrées");
+    expect(html).toContain("Fonctionnalités");
     expect(html).toContain('aria-label="Fil d&#x27;Ariane"');
   });
   it.each(["studio-finance", "studio-finance/modele", "studio-restructuring", "studio-restructuring/export", "donnees", "parametres", "glossaire", "studio-rh-autre"])("n’apparaît pas dans %s", (path) => {
     const html = render(`/e/espace-fictif/${path}`);
     expect(html).not.toContain('data-testid="mega-button"');
-    expect(html).not.toContain("Toutes les entrées");
+    expect(html).not.toContain("Fonctionnalités");
     expect(html).toContain("Espace fictif");
     expect(html).toContain('data-testid="user-menu"');
   });

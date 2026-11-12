@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useId, useMemo, useState } from "react";
-import { barDomain, barLayout, niceTicks } from "./scale";
+import { barDomain, barLayout, niceTicks, type Bar } from "./scale";
 import { colorOf, Frame, Legend, NdPattern, onColor, TipBox, useRoving, useWidth, type ChartSeries, type Tip } from "./shared";
 import { axisLabelWidth, axisTexts, chartUnitText, unitFormat, type UnitName } from "./units";
 import { useMoneyUnit } from "@/components/CurrencyPreference";
@@ -20,6 +20,30 @@ export type BarChartProps = {
 };
 
 const H_DEFAULT = 260;
+const barRadius = (w: number, h: number) => Math.min(5, w / 3, h / 2);
+
+// Un seul contour arrondi par pile et par signe : les segments restent jointifs, même si le dernier
+// segment est absent ou masqué dans la légende. Le bord posé sur zéro reste droit.
+function stackContours(bars: Bar[]) {
+  const contours = new Map<string, { key: string; x: number; y: number; w: number; bottom: number; negative: boolean }>();
+  for (const b of bars) {
+    if (b.h === 0) continue;
+    const key = `${b.cat}-${b.v < 0 ? "negative" : "positive"}`;
+    const previous = contours.get(key);
+    if (previous) {
+      previous.y = Math.min(previous.y, b.y);
+      previous.bottom = Math.max(previous.bottom, b.y + b.h);
+    } else {
+      contours.set(key, { key, x: b.x, y: b.y, w: b.w, bottom: b.y + b.h, negative: b.v < 0 });
+    }
+  }
+  return [...contours.values()].map((contour) => {
+    const h = contour.bottom - contour.y;
+    const radius = barRadius(contour.w, h);
+    // Prolonger le masque côté zéro place ses deux autres coins arrondis hors de la pile.
+    return { ...contour, radius, y: contour.y - (contour.negative ? radius : 0), h: h + radius };
+  });
+}
 
 // Barres groupées ou empilées, une catégorie par mois (ou par groupe). Une catégorie sans aucune valeur (n.d.) est une
 // colonne hachurée avec sa raison ; une valeur absente d'une série n'est jamais dessinée comme zéro.
@@ -30,8 +54,8 @@ export function BarChart(p: BarChartProps) {
   const [mode, setMode] = useState<"grouped" | "stacked">(p.mode ?? "grouped");
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [tip, setTip] = useState<Tip | null>(null);
-  useEffect(() => { setTip(null); }, [moneyUnit]);
   const [focus, setFocus] = useState<number | null>(null);
+  useEffect(() => { setTip(null); setFocus(null); }, [moneyUnit, mode, hidden]);
   const rov = useRoving(p.categories.length);
   const u = unitFormat(p.unit, moneyUnit);
   const axisFmt = u.axis;
@@ -51,6 +75,7 @@ export function BarChart(p: BarChartProps) {
   const plotW = Math.max(40, width - left - right);
   const plotH = Math.max(60, H - top - bottom);
   const lay = barLayout({ series: values, categories: nCat, mode, plotW, plotH, yMin: t.min, yMax: t.max });
+  const contours = mode === "stacked" ? stackContours(lay.bars) : [];
   const ndCat = (c: number) => p.series.every((s) => s.values[c] === null || s.values[c] === undefined);
   const catTitle = (c: number) => p.categoryTitles?.[c] ?? p.categories[c];
   const tipFor = (c: number): Tip => {
@@ -82,7 +107,14 @@ export function BarChart(p: BarChartProps) {
     >
       <div ref={ref} className="chart-plot" onMouseLeave={() => { setTip(null); setFocus(null); }}>
         <svg width={width} height={H} viewBox={`0 0 ${width} ${H}`} role="group" aria-label={chartUnitText(p.label, p.unit, moneyUnit)}>
-          <defs><NdPattern id={`nd-${uid}`} /></defs>
+          <defs>
+            <NdPattern id={`nd-${uid}`} />
+            {contours.map((contour) => (
+              <clipPath key={contour.key} id={`stack-${uid}-${contour.key}`} clipPathUnits="userSpaceOnUse">
+                <rect x={contour.x} y={contour.y} width={contour.w} height={contour.h} rx={contour.radius} />
+              </clipPath>
+            ))}
+          </defs>
           <g transform={`translate(${left},${top})`}>
             {focus !== null && <rect className="selection-band" x={focus * lay.band} y={0} width={lay.band} height={plotH} rx={6} />}
             {t.ticks.map((v, index) => (
@@ -105,7 +137,7 @@ export function BarChart(p: BarChartProps) {
             ))}
             {lay.bars.map((b) => {
               const { s, i } = visible[b.ser];
-              return <rect key={`${b.cat}-${b.ser}`} className="chart-bar" x={b.x} y={b.y} width={b.w} height={b.h} fill={colorOf(i, s.color)} rx={mode === "grouped" ? Math.min(5, b.w / 3, b.h / 2) : 0} opacity={focus !== null && focus !== b.cat ? 0.55 : 1} />;
+              return <rect key={`${b.cat}-${b.ser}`} className="chart-bar" x={b.x} y={b.y} width={b.w} height={b.h} fill={colorOf(i, s.color)} rx={mode === "grouped" ? barRadius(b.w, b.h) : 0} clipPath={mode === "stacked" && b.h > 0 ? `url(#stack-${uid}-${b.cat}-${b.v < 0 ? "negative" : "positive"})` : undefined} opacity={focus !== null && focus !== b.cat ? 0.55 : 1} />;
             })}
             {labelBars && lay.bars.map((b) => (mode === "grouped" || b.h >= 14) && b.v !== 0 ? (
               <text key={`l${b.cat}-${b.ser}`} x={b.x + b.w / 2} y={mode === "grouped" ? (b.v >= 0 ? b.y - 4 : b.y + b.h + 11) : b.y + b.h / 2} textAnchor="middle" dominantBaseline={mode === "grouped" ? undefined : "middle"} className="val" style={mode === "grouped" ? undefined : { fill: onColor(colorOf(visible[b.ser].i, visible[b.ser].s.color)) }}>{labelFmt(b.v)}</text>

@@ -375,9 +375,10 @@ describe("Masse salariale › Synthèse : export Excel", () => {
     const html = renderToStaticMarkup(await Page({ params: Promise.resolve({ slug: "demo" }), searchParams: Promise.resolve({ annee: "2026", de: "01", a: "02" }) }));
     const table = html.slice(html.indexOf('data-testid="ms-monthly-table"'), html.indexOf("</table>", html.indexOf('data-testid="ms-monthly-table"')));
     expect([...table.matchAll(/<tr data-month="(\d{4}-\d{2})"/g)].map((m) => m[1])).toEqual(s.cur.months.map((r) => r.month));
-    // Bouton d'export : à côté de l'Affichage, mêmes paramètres que l'écran.
+    // Export dans les actions de page, mêmes paramètres que l'écran ; la bascule d'affichage reste disponible.
     expect(html).toContain('href="/e/demo/studio-rh/masse-salariale/export?annee=2026&amp;de=01&amp;a=02&amp;format=xlsx" data-testid="ms-export-xlsx"');
-    expect(html.indexOf('data-testid="ms-affichage"')).toBeLessThan(html.indexOf('data-testid="ms-export"'));
+    expect(html).toContain('data-testid="ms-affichage"');
+    expect(html.indexOf('data-testid="ms-page-actions"')).toBeLessThan(html.indexOf('data-testid="ms-export"'));
   });
 
   it("cas de référence écrit à la main (janvier 2026, février 2026, période) et tableaux par service", async () => {

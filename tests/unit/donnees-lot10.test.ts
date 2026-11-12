@@ -322,7 +322,7 @@ describe("Données : écrans sans narratif, avec renvoi au glossaire", () => {
 
     const dsn = renderToStaticMarkup(h(FileUploadForm, { slug: "demo", kind: "dsn" }));
     expect(dsn).toContain(">Fichiers DSN</label>");
-    expect(dsn).toContain("Norme P25V01 ou P26V01 · 24 fichiers et 4 Mo par fichier au plus.");
+    expect(dsn).toContain("DSN dès janvier 2023 : P23V01, P24V01, P25V01 ou P26V01 · 24 fichiers par dépôt et 4 Mo par fichier au plus.");
     expect(dsn).toContain("Déposer et prévisualiser");
     const fec = renderToStaticMarkup(h(FileUploadForm, { slug: "demo", kind: "fec" }));
     expect(fec).toContain(">Fichiers FEC</label>");

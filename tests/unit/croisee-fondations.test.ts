@@ -802,7 +802,9 @@ describe("page Masse salariale croisée", () => {
     const out = await render();
     expect(out).toContain("<h1>Masse salariale</h1>");
     expect(out).toMatch(/data-testid="ms-tabs"[\s\S]*?<a href="\/e\/demo\/studio-rh\/masse-salariale\/croisee" aria-current="page" data-tab="croisee">Masse salariale croisée<\/a>/);
-    expect(out.match(/data-testid="ms-tabs"[\s\S]*?<\/nav>/)![0].match(/class="soon"/g)).toHaveLength(3);
+    const tabs = out.match(/data-testid="ms-tabs"[\s\S]*?<\/nav>/)![0];
+    expect(tabs).not.toContain('class="soon"');
+    for (const path of ["organisation", "reel", "suivi"]) expect(tabs).toContain(`/e/demo/studio-rh/masse-salariale/${path}`);
     for (const id of ["cx-page", "cx-chapter-menu", "cx-chapter-tabs", "cx-chapter-head", "cx-filters", "cx-pager", "cx-foot", "cx-stub-synthese", "cx-print-synthese", "cx-presets", "cx-commun"]) expect(out, id).toContain(`data-testid="${id}"`);
     expect(out).toContain('data-ctx="synthese"'); // le chapitre reçoit le contexte
     expect(out).toContain("01 / 10");

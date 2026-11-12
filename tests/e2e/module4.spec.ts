@@ -81,6 +81,7 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   await detail.screenshot({ path: `${CAPTURES}/4-02-detail-compte.png` });
 
   // Raccourci « Janv.–mars » : 19 530 + 19 530 + 24 600 = 63 660,00 €.
+  await page.getByTestId("ms-filter-disclosure").locator("summary").click();
   await page.getByTestId("ms-presets").getByRole("link", { name: "Janv.–mars" }).click();
   expect(await txt(tile("masse").locator("dd"))).toBe("63 660,00 €");
   // Paramètre GET invalide : remplacé et signalé.

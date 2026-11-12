@@ -1,7 +1,8 @@
 import { MoneyText, MoneyUnitLabel } from "@/components/Money";
 import "@/styles/masse-salariale.css";
+import "@/styles/ms-synthese.css";
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
-import { ExportMenu } from "@/components/ExportMenu";
+import { MsPageActions } from "@/components/MsPageActions";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { ViewSwitch } from "@/components/ViewSwitch";
@@ -25,6 +26,7 @@ import { ActualNonRecurring } from "./ActualNonRecurring";
 import { actualEventVersion, listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { saveActualEventAction } from "./actual-actions";
 import { personLabel } from "@/lib/rh/view";
+import { buildActualNonRecurring } from "@/lib/payroll/non-recurring";
 
 export const dynamic = "force-dynamic";
 
@@ -167,14 +169,49 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const svcMonthNd = serviceRows.some((r) => r.cur.months.some((m) => m.kind === "nd"));
   const svcMonthSeries = serviceMonthSeries(serviceRows.map((r) => ({ value: r.value, months: r.cur.months })));
   const brutCotisSeries = brutCotisationsSeries(cur.months);
-  const sparkMasse = masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" })[0].values;
   const costEtpSeries = costSeries(cur.months, etpCur, prev.months, etpPrev, { cur: `Coût par ETP ${year}`, prev: `Coût par ETP ${year - 1} (N-1)` });
   // Clé de lecture des n.d. : écrite une fois sous les graphiques, seulement si l'un d'eux en contient un.
   const anyNd = [masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" }), brutCotisSeries, costEtpSeries, ...(ctx.service.axis && serviceRows.length > 0 && serviceRows.length <= 8 ? [svcMonthSeries] : [])].some(hasNd);
+  // Repères de présentation : mêmes rubriques que « Fixe & variable » et même modèle d'identification que le détail ci-dessous.
+  // Le budget et la projection restent dans leurs écrans dédiés : aucune lecture métier supplémentaire sur la Synthèse.
+  const variableShare = cur.kind === "value" && cur.brut > 0 ? fmtPercent({ num: cur.byRubric.primes + cur.byRubric.indemnites, den: cur.brut }) : null;
+  const nonRecurring = vue === "synthese" ? buildActualNonRecurring(input, actualEvents, months, ctx.read?.syncId ?? null) : null;
+  const nonRecurringAmount = nonRecurring?.rows.length ? nonRecurring.nonRecurring : null;
+  const exportHref = `${base}/export?annee=${year}&de=${from}&a=${to}${svcParam}&format=xlsx`;
+  const sourceDetails = (
+    <MsRead source={sourceLine}>
+      {gridLine}
+      {cur.kind === "value" && (
+        <div className="ms-read-block" data-testid="ms-hors-masse">
+          <p className="ms-read-line">Postes comptés à part ou hors masse chargée, sur la période<GlossaryLink slug={slug} term={MASSE_TERMS.horsMasse} /></p>
+          <ul className="ms-facts-list">
+            <li>Taxes et contributions sur les salaires (dans les cotisations) : <b>{euros(cur.byRubric.taxes)}</b></li>
+            <li>Gratifications de stage (dans le brut) : <b>{euros(cur.byRubric.stages)}</b></li>
+            <li>Provisions de congés payés (hors masse chargée) : <b>{euros(cur.byRubric["provisions-cp"])}</b></li>
+            <li>Autres charges de personnel (hors masse chargée) : <b>{euros(cur.byRubric["autres-charges"])}</b></li>
+          </ul>
+        </div>
+      )}
+    </MsRead>
+  );
+  const nonRecurringDetails = <ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} />;
+  const periodControls = <PeriodBar
+    years={years}
+    year={year}
+    from={from}
+    to={to}
+    hidden={{ ...(vue !== "synthese" ? { vue } : {}), ...(aff !== "tout" ? { affichage: aff } : {}) }}
+    presets={presets}
+    resetHref={resetHref}
+    service={ctx.service.axis ? { value: serviceValue === undefined ? "" : (serviceValue ?? NV), options: knownServices.map((v) => ({ value: v ?? NV, label: serviceLabel(v) })) } : undefined}
+  />;
 
   return (
-    <MoneyText><>
-      {head()}
+    <MoneyText><div className={`ms-synthese-page${vue === "synthese" ? " ms-synthese" : ""}`}>
+      <div className="ms-synthese-heading">
+        {head()}
+        <MsPageActions slug={slug} exportHref={vue === "synthese" ? exportHref : undefined} />
+      </div>
       <FamilyTabs
         label="Vues"
         testid="ms-tabs"
@@ -188,33 +225,11 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       />
 
       <div className="ms-controls">
-        <MsRead source={sourceLine}>
-          {gridLine}
-          {cur.kind === "value" && (
-            <div className="ms-read-block" data-testid="ms-hors-masse">
-              <p className="ms-read-line">
-                Postes comptés à part ou hors masse chargée, sur la période
-                <GlossaryLink slug={slug} term={MASSE_TERMS.horsMasse} />
-              </p>
-              <ul className="ms-facts-list">
-                <li>Taxes et contributions sur les salaires (dans les cotisations) : <b>{euros(cur.byRubric.taxes)}</b></li>
-                <li>Gratifications de stage (dans le brut) : <b>{euros(cur.byRubric.stages)}</b></li>
-                <li>Provisions de congés payés (hors masse chargée) : <b>{euros(cur.byRubric["provisions-cp"])}</b></li>
-                <li>Autres charges de personnel (hors masse chargée) : <b>{euros(cur.byRubric["autres-charges"])}</b></li>
-              </ul>
-            </div>
-          )}
-        </MsRead>
-        <PeriodBar
-          years={years}
-          year={year}
-          from={from}
-          to={to}
-          hidden={{ ...(vue !== "synthese" ? { vue } : {}), ...(aff !== "tout" ? { affichage: aff } : {}) }}
-          presets={presets}
-          resetHref={resetHref}
-          service={ctx.service.axis ? { value: serviceValue === undefined ? "" : (serviceValue ?? NV), options: knownServices.map((v) => ({ value: v ?? NV, label: serviceLabel(v) })) } : undefined}
-        />
+        {vue !== "synthese" && sourceDetails}
+        {vue === "synthese" ? <details className="ms-synthese-filters" data-testid="ms-filter-disclosure" data-ms-screen-only>
+          <summary><strong>Période et périmètre</strong><span>{label(months)} · {scope}</span></summary>
+          {periodControls}
+        </details> : periodControls}
         {notices.map((n) => (
           <p key={n} className="notice" data-testid="ms-param-notice">{n}</p>
         ))}
@@ -235,30 +250,25 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 { key: "tableau", label: "Tableau", href: tableHref },
               ]}
             />
-            {vue === "synthese" && (
-              <ExportMenu testid="ms-export" options={[{ label: "Excel (.xlsx)", href: `${base}/export?annee=${year}&de=${from}&a=${to}${svcParam}&format=xlsx`, testid: "ms-export-xlsx" }]} />
-            )}
           </div>
         </div>
       </div>
 
-      {vue !== "paie-compta" && <ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} />}
+      {vue === "fixe-variable" && nonRecurringDetails}
 
       {vue === "fixe-variable" && <FixeVariableView slug={slug} input={input} months={months} prevMonths={prevMonths} aff={aff} tableHref={tableHref} />}
       {vue === "paie-compta" && <PaieComptaView slug={slug} input={input} fullInput={fullInput} months={months} serviceFiltered={serviceValue !== undefined} compta={await ctx.compta()} aff={aff} tableHref={tableHref} unfilterHref={href({ svc: "" })} />}
       {vue === "synthese" && (
         <>
-          <section className="panel">
-            <PanelHead title="Vue d'ensemble" />
-            <dl className="facts ms-tiles five">
+          <div className={`ms-synthese-focus${showGraph ? "" : " without-chart"}`} data-testid="ms-synthese-focus">
+            <dl className="facts ms-tiles ms-synthese-kpis" aria-label="Vue d'ensemble">
               <Tile
                 testid="ms-tile-masse"
-                sparkline={sparkMasse}
                 main
                 label="Masse salariale chargée"
                 value={money(cur, (w) => w.masse)}
                 nd={cur.kind === "nd"}
-                compare={<span className="tile-foot" data-testid="ms-tile-masse-n1">N-1 : {money(prev, (w) => w.masse)}</span>}
+                lead="Brut et cotisations patronales"
                 def={MASSE_TERMS.masse}
                 slug={slug}
               />
@@ -275,54 +285,65 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               />
               <Tile
                 testid="ms-tile-cost-etp"
-                sparkline={costEtpSeries[0].values}
                 label="Coût par ETP-mois"
                 value={costText(cost)}
                 nd={cost.kind === "nd"}
                 lead={etpSum(cost) || undefined}
-                compare={<span className="tile-foot">N-1 : {costText(costPrev)}</span>}
                 def={MASSE_TERMS.coutEtp}
                 slug={slug}
               />
               <Tile
                 testid="ms-tile-brut"
-                sparkline={brutCotisSeries.find((s) => s.key === "brut")?.values}
                 label="Brut"
                 value={money(cur, (w) => w.brut)}
                 nd={cur.kind === "nd"}
                 lead={`dont primes : ${money(cur, (w) => w.byRubric.primes)}`}
-                compare={<span className="tile-foot">N-1 : {money(prev, (w) => w.brut)}</span>}
                 def={MASSE_TERMS.brut}
                 slug={slug}
               />
               <Tile
                 testid="ms-tile-cotisations"
-                sparkline={brutCotisSeries.find((s) => s.key === "cotisations")?.values}
                 label="Cotisations patronales"
                 value={money(cur, (w) => w.cotisations)}
                 nd={cur.kind === "nd"}
                 lead={`taux : ${rate(cur)} du brut`}
-                compare={<span className="tile-foot">N-1 : {money(prev, (w) => w.cotisations)}{prev.kind === "value" ? ` (${rate(prev)})` : ""}</span>}
                 def={MASSE_TERMS.cotisations}
                 slug={slug}
               />
+              <Tile testid="ms-tile-variable" label="Part variable" value={variableShare ?? "n.d."} nd={variableShare === null} lead={cur.kind === "nd" ? "Brut indisponible" : cur.brut <= 0 ? "Brut nul ou négatif" : "Primes et indemnités / brut"} def={MASSE_TERMS.fixeVariable} slug={slug} />
+              <Tile testid="ms-tile-non-recurring" label="Éléments non récurrents" value={<a className="ms-synthese-value-link" href={href({ extra: "#actual-non-recurring" })}>{nonRecurringAmount === null ? "n.d." : euros(nonRecurringAmount)}</a>} nd={nonRecurringAmount === null} lead={nonRecurring?.rows.length ? "Coûts identifiés · détail" : "Aucun élément identifié"} def={MASSE_TERMS.primes} slug={slug} />
+              <Tile testid="ms-tile-budget" label="Écart au budget" value={<a className="ms-synthese-value-link" href={`${base}/suivi?annee=${year}&de=${from}&a=${to}${svcParam}`}>n.d.</a>} nd lead="Non chargé sur cette vue" def="croisee-ecart-budget" slug={slug} />
+              <Tile testid="ms-tile-landing" label={`Atterrissage ${year}`} value={<a className="ms-synthese-value-link" href={`/e/${slug}/studio-rh/hypotheses?vue=resultat&sous=atterrissage`}>n.d.</a>} nd lead="Non chargé sur cette vue" def="atterrissage" slug={slug} />
             </dl>
-            <NdLines lines={tileNd} testid="ms-tiles-nd" />
+            {showGraph && <section className="panel ms-synthese-trend" aria-label="Évolution mensuelle" data-testid="ms-synthese-trend">
+              <PanelHead title="Évolution mensuelle" desc={`${label(months)} · comparaison aux mêmes mois de ${year - 1}`} slug={slug} term={MASSE_TERMS.evolution} tools={<a className="btn small" href={tableHref}>Tableau</a>} />
+              <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
+            </section>}
+          </div>
+          <div className="ms-synthese-qualifiers">
+            <NdLines lines={[...tileNd, ...(nonRecurring?.rows.length && nonRecurringAmount === null ? nonRecurring.reasons : [])]} testid="ms-tiles-nd" />
             {ctx.etpQualifiers.length > 0 && (
               <p className="tile-foot ms-note" data-testid="ms-etp-qualifiers">
                 Coût par ETP-mois — ETP : {ctx.etpQualifiers.join(" ; ")}.
               </p>
             )}
-            {cur.kind === "value" && <Composition brut={cur.brut} cotisations={cur.cotisations} />}
-          </section>
+          </div>
+          <details className="ms-read-details ms-synthese-comparisons" data-ms-print-details>
+            <summary>Comparaisons N-1 et repères de lecture</summary>
+            <div className="ms-read-body">
+              <p className="tile-foot" data-testid="ms-tile-masse-n1">Masse salariale chargée · N-1 : {money(prev, (w) => w.masse)}</p>
+              <p className="tile-foot">Brut · N-1 : {money(prev, (w) => w.brut)} · Cotisations patronales · N-1 : {money(prev, (w) => w.cotisations)}{prev.kind === "value" ? ` (${rate(prev)})` : ""}</p>
+              <p className="tile-foot">Coût par ETP-mois · N-1 : {costText(costPrev)}</p>
+              <p className="tile-foot">Écart au budget et atterrissage : données non chargées sur cette vue. Les liens des cartes ouvrent le suivi réel / budget et le résultat des hypothèses.</p>
+              {!nonRecurring?.rows.length && <p className="tile-foot">Aucun élément non récurrent identifié sur la période : cela ne prouve pas son absence.</p>}
+            </div>
+          </details>
+          {!showGraph && cur.kind === "value" && <Composition brut={cur.brut} cotisations={cur.cotisations} />}
 
           {showGraph && (
             <section className="panel" data-testid="ms-graphs">
-              <PanelHead title="Graphiques" slug={slug} term={MASSE_TERMS.graphiques} />
+              <PanelHead title="Décomposer la masse salariale" slug={slug} term={MASSE_TERMS.graphiques} tools={<a className="btn small" href={href({ v: "&vue=fixe-variable" })}>Fixe & variable</a>} />
               <div className="ms-charts">
-                <div className="ms-chart wide">
-                  <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
-                </div>
                 <div className="ms-chart wide">
                   {ctx.service.axis && serviceRows.length > 0 ? (
                     <div className="ms-charts-split" data-testid="ms-by-service">
@@ -390,6 +411,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                       toggle
                     />
                   </ChartGuard>
+                  {cur.kind === "value" && <Composition brut={cur.brut} cotisations={cur.cotisations} />}
                 </div>
                 <div className={wide}>
                   <ChartGuard testid="ms-chart-cout-etp" title={`Coût par ETP et par mois, ${year} face à ${year - 1} (N-1)`} series={costEtpSeries} lines={ndList}>
@@ -410,6 +432,12 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <GraphFoot aff={aff} tableHref={tableHref} />
             </section>
           )}
+
+          <details className="ms-read-details ms-synthese-sources" id="ms-sources" data-ms-print-details>
+            <summary>Sources et lecture</summary>
+            <div className="ms-read-body">{sourceDetails}</div>
+          </details>
+          {nonRecurringDetails}
 
           {unclassified.size > 0 && (
             <p className="notice" data-testid="ms-unclassified">
@@ -673,6 +701,6 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
           )}
         </>
       )}
-    </></MoneyText>
+    </div></MoneyText>
   );
 }
