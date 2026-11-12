@@ -87,3 +87,22 @@ describe("contrôles FEC", () => {
     expect(r.balanced).toBe(true);
   });
 });
+
+describe("lettrage et tiers lus tels quels (Cap 13)", () => {
+  const header = "JournalCode\tJournalLib\tEcritureNum\tEcritureDate\tCompteNum\tCompteLib\tCompAuxNum\tCompAuxLib\tPieceRef\tPieceDate\tEcritureLib\tDebit\tCredit\tEcritureLet\tDateLet\tValidDate\tMontantdevise\tIdevise";
+  const row = (num: string, account: string, aux: string, auxLib: string, debit: string, credit: string, let_: string, dateLet: string) =>
+    ["AC", "Achats", num, "20260115", account, "Compte fictif", aux, auxLib, "P1", "20260110", "Facture fictive", debit, credit, let_, dateLet, "20260116", "", ""].join("\t");
+  it("EcritureLet, DateLet et CompAuxLib sont conservés ; un champ vide reste null", () => {
+    const r = parseFec(bytes([header,
+      row("1", "607000", "", "", "100,00", "0,00", "", ""),
+      row("1", "401000", "F001", "Fournisseur fictif", "0,00", "100,00", "AA", "20260220"),
+    ].join("\n")));
+    expect(r.lines.map((l) => [l.auxiliaryAccount, l.auxiliaryLabel, l.lettering, l.letteringDate])).toEqual([
+      [null, null, null, null],
+      ["F001", "Fournisseur fictif", "AA", "2026-02-20"],
+    ]);
+  });
+  it("une DateLet illisible est refusée", () => {
+    expect(() => parseFec(bytes([header, row("1", "401000", "F001", "Fournisseur fictif", "0,00", "100,00", "AA", "2026-02-20")].join("\n")))).toThrow(FecError);
+  });
+});

@@ -8,6 +8,8 @@ import { applyChanges, getScenario } from "@/lib/budget/store";
 import { recordEvent } from "@/lib/events";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { exitFromForm } from "@/lib/restructuring/forms";
+import { CRISIS_RANKS_KEY, ranksFromForm } from "@/lib/restructuring/crisis/ranks";
+import { setSetting } from "@/lib/settings";
 import { requireWorkspace } from "@/lib/workspace";
 import type { FormState } from "../studio-rh/hypotheses/actions";
 
@@ -43,4 +45,16 @@ export async function saveExitAction(slug: string, scenarioId: string, displayed
   revalidatePath(`/e/${slug}/studio-rh/hypotheses`);
   revalidatePath(`/e/${slug}/studio-finance`);
   return { ok: previous ? "Coût non récurrent du départ mis à jour une seule fois." : "Départ et coût non récurrent enregistrés dans le projet.", ...(!journalOk ? { details: ["La mesure est enregistrée ; son entrée dans le journal d’administration n’a pas pu être confirmée."] } : {}) };
+}
+
+/** Cap 13 : rang choisi pour chaque nature de dette. Un champ vide retire le rang ; aucun rang n’est supposé. */
+export async function saveCrisisRanksAction(slug: string, _previous: FormState, form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  let ranks;
+  try { ranks = ranksFromForm(form); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Rang invalide." }; }
+  try { await setSetting(workspace.id, CRISIS_RANKS_KEY, ranks, session.user.id); }
+  catch { return { error: "Enregistrement des rangs refusé. Recharge la page avant de réessayer." }; }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  return { ok: "Rangs enregistrés pour cet espace." };
 }
