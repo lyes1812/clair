@@ -31,12 +31,16 @@ export type FecLine = {
   accountId: string;
   accountName: string;
   auxiliaryAccount: string | null;
+  auxiliaryLabel: string | null;
   pieceRef: string;
   pieceDate: string;
   label: string;
   debitCents: number;
   creditCents: number;
   validationDate: string;
+  // Lettrage (EcritureLet, DateLet) : null quand le champ est vide dans le fichier ; aucun lettrage n'est déduit.
+  lettering: string | null;
+  letteringDate: string | null;
   currency: string | null;
 };
 
@@ -145,7 +149,8 @@ export function parseFec(bytes: Uint8Array): FecParseResult {
     const pieceDate = isoDate(v[9].trim());
     const validationDate = isoDate(v[15].trim());
     if (!entryDate || !pieceDate || !validationDate) throw new FecError("row", `Ligne ${number} : date invalide (AAAAMMJJ attendu).`);
-    if (v[14].trim() !== "" && !isoDate(v[14].trim())) throw new FecError("row", `Ligne ${number} : DateLet invalide.`);
+    const letteringDate = v[14].trim() === "" ? null : isoDate(v[14].trim());
+    if (v[14].trim() !== "" && !letteringDate) throw new FecError("row", `Ligne ${number} : DateLet invalide.`);
     let debit: bigint;
     let credit: bigint;
     if (montantSens) {
@@ -185,12 +190,15 @@ export function parseFec(bytes: Uint8Array): FecParseResult {
       accountId,
       accountName: v[5].trim(),
       auxiliaryAccount: v[6].trim() || null,
+      auxiliaryLabel: v[7].trim() || null,
       pieceRef: v[8].trim(),
       pieceDate,
       label: v[10].trim(),
       debitCents: toNumber(debit, `Ligne ${number}`),
       creditCents: toNumber(credit, `Ligne ${number}`),
       validationDate,
+      lettering: v[13].trim() || null,
+      letteringDate,
       currency: currency || null,
     });
   }
