@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractRcPayslip, parseRcPayslipRows, RC_PARSER_VERSION, type RcPayslipTextItem, type RcPayslipTextRow } from "@/lib/payroll/rc-payslip-parser";
+import { extractRcPayslip, parseRcPayslipRows, inspectRcPayslipRows, inspectRcPayslipFormat, RC_PARSER_VERSION, type RcPayslipTextItem, type RcPayslipTextRow } from "@/lib/payroll/rc-payslip-parser";
 
 const item = (text: string, x: number, width = 40): RcPayslipTextItem => ({ text, x, y: 500, width, height: 10 });
 const row = (line: number, items: RcPayslipTextItem[], page = 1): RcPayslipTextRow => ({ page, line, items });
@@ -123,5 +123,23 @@ describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => 
   });
   it("lit le format groupé PayFit dans un PDF fictif complet en mémoire", async () => {
     expect(await extractRcPayslip(fictionalPdf(true))).toMatchObject({ status: "identified", indemnityCents: 123456, components: [{ label: "Indemnite de rupture conventionnelle", amountCents: 123456, page: 1, line: 3 }] });
+  });
+  it("le diagnostic conserve seulement les mots d’entête autorisés et la géométrie, jamais noms, identifiants ou montants", () => {
+    const source = [...groupedHeader(), row(3, [item("NOM_FICTIF_CONFIDENTIEL IDENTIFIANT_SECRET", 20), item("314159,26", 450, 50)]), row(4, [item("MONTANT MOTPRIVE 987654,32", 450, 50)]), groupedRc(5)];
+    const inspected = inspectRcPayslipRows(source);
+    const encoded = JSON.stringify(inspected);
+    expect(encoded).not.toMatch(/NOM_FICTIF|CONFIDENTIEL|IDENTIFIANT_SECRET|MOTPRIVE|314159|987654|123456|99999|Indemnité|rupture/);
+    expect(inspected).toMatchObject({ parserVersion: RC_PARSER_VERSION, extractionStatus: "identified", extractionCode: "explicit-rc-amount" });
+    expect(inspected.headers[0].cells).toContainEqual({ tokens: ["PART", "SALARIE"], x: 380, y: 500, width: 60 });
+    expect(inspected.headers.flatMap(row => row.cells).find(cell => cell.tokens.includes("MONTANT") && cell.y === 500 && cell.x === 450)?.tokens).toEqual(["MONTANT"]);
+    expect(inspected.rcRows).toEqual([{ page: 1, line: 5, monetaryCellCount: 4, cells: [{ x: 280, y: 500, width: 40 }, { x: 360, y: 500, width: 50 }, { x: 450, y: 500, width: 50 }, { x: 535, y: 500, width: 50 }] }]);
+    expect(inspected).not.toHaveProperty("indemnityCents");
+    expect(inspected).not.toHaveProperty("components");
+  });
+  it("l’inspection PDF utilise le même lecteur borné, sans exposer les données extraites", async () => {
+    const inspected = await inspectRcPayslipFormat(fictionalPdf(true));
+    expect(inspected).toMatchObject({ extractionStatus: "identified", extractionCode: "explicit-rc-amount", pageCount: 1, rowCount: 3 });
+    expect(JSON.stringify(inspected)).not.toMatch(/1234,56|123456|9000,00|999,99|Indemnite/);
+    expect(await inspectRcPayslipFormat(new Uint8Array())).toMatchObject({ extractionStatus: "review", extractionCode: "invalid-pdf", headers: [], rcRows: [] });
   });
 });

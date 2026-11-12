@@ -152,9 +152,9 @@ export function parseRcPayslipRows(source: RcPayslipTextRow[]): RcPayslipExtract
   return result("identified", "explicit-rc-amount", components, Number(sum));
 }
 
-/** PDF traité en mémoire ; seuls les composants explicites de RC quittent ce lecteur. */
-export async function extractRcPayslip(bytes: Uint8Array): Promise<RcPayslipExtraction> {
-  if (!(bytes instanceof Uint8Array) || !bytes.byteLength || bytes.byteLength > MAX_BYTES || new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") return result("review", "invalid-pdf");
+/** Pipeline privé commun : les lignes intégrales ne sont jamais exportées hors de ce module. */
+async function withRcPayslipRows<T>(bytes: Uint8Array, consume: (rows: RcPayslipTextRow[]) => T, unavailable: (code: string) => T): Promise<T> {
+  if (!(bytes instanceof Uint8Array) || !bytes.byteLength || bytes.byteLength > MAX_BYTES || new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") return unavailable("invalid-pdf");
   let task: { destroy: () => Promise<void> } | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -166,7 +166,7 @@ export async function extractRcPayslip(bytes: Uint8Array): Promise<RcPayslipExtr
     const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("pdf-timeout")), 20_000); });
     return await Promise.race([deadline, (async () => {
       const document = await loadingTask.promise;
-      if (document.numPages < 1 || document.numPages > 20) return result("review", "page-limit");
+      if (document.numPages < 1 || document.numPages > 20) return unavailable("page-limit");
       const rows: RcPayslipTextRow[] = [];
       let itemCount = 0, characterCount = 0;
       for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
@@ -176,7 +176,7 @@ export async function extractRcPayslip(bytes: Uint8Array): Promise<RcPayslipExtr
         for (const item of content.items) {
           if (!("str" in item) || !item.str.trim()) continue;
           itemCount++; characterCount += item.str.length;
-          if (itemCount > 100_000 || characterCount > 1_000_000) return result("review", "text-limit");
+          if (itemCount > 100_000 || characterCount > 1_000_000) return unavailable("text-limit");
           textItems.push({ text: item.str, x: item.transform[4], y: item.transform[5], width: item.width, height: item.height });
         }
         textItems.sort((a, b) => b.y - a.y || a.x - b.x);
@@ -188,8 +188,55 @@ export async function extractRcPayslip(bytes: Uint8Array): Promise<RcPayslipExtr
         grouped.forEach((items, index) => rows.push({ page: pageNumber, line: index + 1, items: items.sort((a, b) => a.x - b.x) }));
         page.cleanup();
       }
-      return parseRcPayslipRows(rows);
+      return consume(rows);
     })()]);
-  } catch { return result("review", "pdf-unreadable"); }
+  } catch { return unavailable("pdf-unreadable"); }
   finally { if (timer) clearTimeout(timer); await task?.destroy().catch(() => {}); }
+}
+
+/** PDF traité en mémoire ; seuls les composants explicites de RC quittent ce lecteur. */
+export function extractRcPayslip(bytes: Uint8Array): Promise<RcPayslipExtraction> {
+  return withRcPayslipRows(bytes, parseRcPayslipRows, (code) => result("review", code));
+}
+
+const FORMAT_TOKENS = new Set(["BASE", "PART", "SALARIE", "SALARIAL", "SALARIALE", "SALARIALES", "EMPLOYEUR", "PATRONAL", "PATRONALE", "PATRONALES", "TAUX", "OU", "%", "MONTANT", "GAINS", "GAIN", "RETENUE", "RETENUES", "A", "PAYER", "DEDUCTION", "DEDUCTIONS", "DESIGNATION", "LIBELLE", "CHARGES", "COTISATIONS", "NET", "BRUT", "IMPOT", "IMPOTS", "SUR", "REVENU", "DE", "DU", "DES", "LA", "LE"]);
+const FORMAT_ANCHORS = new Set(["BASE", "PART", "SALARIE", "SALARIAL", "SALARIALE", "SALARIALES", "EMPLOYEUR", "TAUX", "MONTANT", "GAINS", "GAIN", "RETENUE", "RETENUES", "DESIGNATION", "LIBELLE"]);
+for (const token of ['MONTANTS','SALARIES','SALARIAUX','EMPLOYEURS','PATRONAUX','PARTS','NOMBRE','VALEUR','VERSER','RETENIR','COTISATION','CHARGE','TOTAL','AMOUNT','AMOUNTS','BASIS','RATE','EMPLOYEE','EMPLOYER','EARNINGS','DEDUCTIONS','WITHHOLDINGS','GROSS']) {
+  FORMAT_TOKENS.add(token); FORMAT_ANCHORS.add(token);
+}
+type FormatCell = { tokens: string[]; x: number; y: number; width: number };
+type PositionOnly = { x: number; y: number; width: number };
+export type RcPayslipFormat = {
+  parserVersion: string; extractionStatus: RcPayslipExtraction["status"]; extractionCode: string;
+  pageCount: number; rowCount: number;
+  headers: { page: number; line: number; cells: FormatCell[] }[];
+  rcRows: { page: number; line: number; monetaryCellCount: number; cells: PositionOnly[] }[];
+};
+const position = (item: RcPayslipTextItem): PositionOnly => ({ x: Math.round(item.x * 100) / 100, y: Math.round(item.y * 100) / 100, width: Math.round(item.width * 100) / 100 });
+const emptyFormat = (code: string): RcPayslipFormat => ({ parserVersion: RC_PARSER_VERSION, extractionStatus: "review", extractionCode: code, pageCount: 0, rowCount: 0, headers: [], rcRows: [] });
+
+/** Diagnostic de géométrie : vocabulaire fermé, aucune valeur, aucun libellé libre, nom ou identifiant. */
+export function inspectRcPayslipRows(rows: RcPayslipTextRow[]): RcPayslipFormat {
+  const extracted = parseRcPayslipRows(rows);
+  if (extracted.code === "unreadable-text") return emptyFormat(extracted.code);
+  const headers: RcPayslipFormat["headers"] = [];
+  const rcRows: RcPayslipFormat["rcRows"] = [];
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    const cells = row.items.flatMap((item): FormatCell[] => {
+      const tokens = (normalized(item.text).match(/[a-z]+|%/g) ?? []).map((word) => word.toUpperCase()).filter((word) => FORMAT_TOKENS.has(word));
+      return tokens.length ? [{ tokens, ...position(item) }] : [];
+    });
+    if (headers.length < 80 && cells.some((cell) => cell.tokens.some((token) => FORMAT_ANCHORS.has(token)))) headers.push({ page: row.page, line: row.line, cells });
+    const previous = rows[index - 1];
+    if (rcRows.length < 20 && (explicitRc(plain(row)) || previous?.page === row.page && previous.line + 1 === row.line && !monetaryItems(previous).length && /\bindemnite/.test(normalized(plain(previous))) && explicitRc(`${plain(previous)} ${plain(row)}`))) {
+      const monetary = monetaryItems(row);
+      rcRows.push({ page: row.page, line: row.line, monetaryCellCount: monetary.length, cells: monetary.map(position) });
+    }
+  }
+  return { parserVersion: RC_PARSER_VERSION, extractionStatus: extracted.status, extractionCode: extracted.code, pageCount: Math.max(...rows.map((row) => row.page)), rowCount: rows.length, headers, rcRows };
+}
+
+export function inspectRcPayslipFormat(bytes: Uint8Array): Promise<RcPayslipFormat> {
+  return withRcPayslipRows(bytes, inspectRcPayslipRows, emptyFormat);
 }
