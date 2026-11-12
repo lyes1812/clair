@@ -47,6 +47,33 @@ describe("Tuilage calculé : autorité serveur et provenance", () => {
     expect(mocks.save.mock.calls[1]).toEqual(["espace-fictif", "editeur-fictif", expect.objectContaining({ id: previous.id, chargedCents: 120_000 }), "version-calcul-affichee"]);
   });
 
+  it("revalide un tuilage d’une ancienne lecture en recalculant sa provenance sur la lecture active", async () => {
+    mocks.context.mockResolvedValue(calculationContext());
+    await saveActualEventAction("fictif", sync, {}, undefined, form({ valuation: "calendar" }));
+    const previous = mocks.save.mock.calls[0][2];
+    mocks.list.mockResolvedValue([previous]);
+    mocks.save.mockClear();
+    const nextSync = "33333333-3333-4333-8333-333333333333";
+    const current = calculationContext();
+    current.read.syncId = nextSync;
+    current.kpi.collab.data.build.inputs.syncId = nextSync;
+    current.input.lines[0].debitCents = 200_000;
+    mocks.context.mockResolvedValue(current);
+
+    const result = await saveActualEventAction("fictif", nextSync, { [previous.id]: "version-ancienne-lecture" }, undefined, form({ id: previous.id, valuation: "calendar", chargedEuros: "1" }));
+
+    expect(result?.ok).toBeTruthy();
+    expect(mocks.save).toHaveBeenCalledExactlyOnceWith("espace-fictif", "editeur-fictif", expect.objectContaining({
+      id: previous.id, syncId: nextSync, chargedCents: 120_000,
+      calculation: expect.objectContaining({
+        incoming: expect.objectContaining({ syncId: nextSync }),
+        outgoing: expect.objectContaining({ syncId: nextSync }),
+        source: expect.objectContaining({ syncId: nextSync, chargedCents: 240_000, lineKeys: ["charges-fictives", "fictif-1"] }),
+      }),
+    }), "version-ancienne-lecture");
+    expect(previous).toMatchObject({ syncId: sync, chargedCents: 70_000, calculation: { source: { syncId: sync, chargedCents: 140_000 } } });
+  });
+
   it("ne remplace jamais silencieusement une saisie manuelle attestée", async () => {
     mocks.context.mockResolvedValue(calculationContext());
     mocks.list.mockResolvedValue([{ id, kind: "tuilage", month: "2026-06", syncId: sync, contractKeys: ["payfit:fictif-a", "payfit:fictif-b"], chargedCents: 8_000, note: "Justificatif fictif validé" }]);
@@ -76,7 +103,7 @@ describe("Non récurrents du réel : saisie indépendante des scénarios", () =>
   it("désigne un binôme sans inventer son coût, et ne touche ni paie ni scénario", async () => {
     expect((await saveActualEventAction("fictif", sync, {}, undefined, form()))?.ok).toBeTruthy();
     expect(mocks.save).toHaveBeenCalledExactlyOnceWith("espace-fictif", "editeur-fictif", expect.objectContaining({ kind: "tuilage", month: "2026-06", chargedCents: null, contractKeys: ["payfit:fictif-a", "payfit:fictif-b"], syncId: sync }), null);
-    expect(mocks.revalidate.mock.calls.map(([path]) => path)).toEqual(["/e/fictif/studio-rh/masse-salariale", "/e/fictif/studio-rh/masse-salariale/croisee", "/e/fictif/studio-rh/hypotheses"]);
+    expect(mocks.revalidate.mock.calls.map(([path]) => path)).toEqual(["/e/fictif/studio-rh", "/e/fictif/studio-rh/masse-salariale", "/e/fictif/studio-rh/masse-salariale/croisee", "/e/fictif/studio-rh/hypotheses"]);
   });
   it("garde le zéro explicite et le montant en euros exact", async () => {
     await saveActualEventAction("fictif", sync, {}, undefined, form({ chargedEuros: "0" }));

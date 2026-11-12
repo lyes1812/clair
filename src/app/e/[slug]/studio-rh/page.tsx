@@ -16,6 +16,8 @@ import { costPerEtp, evolution, monthPayroll, windowPayroll } from "@/lib/payrol
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { ActualEventError, listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { buildActualNonRecurringChart } from "@/lib/viz/actual-non-recurring";
+import { buildActualNonRecurring, type ActualNonRecurring } from "@/lib/payroll/non-recurring";
+import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
 import { headcountAt } from "@/lib/rh/headcount";
 import { absenteeism } from "@/lib/rh/kpi/absence";
 import { etpAverage } from "@/lib/rh/kpi/average";
@@ -431,10 +433,13 @@ export default async function SynthesePage({ params, searchParams }: { params: P
   const masseNames = { cur: `Masse chargée ${year}`, prev: `Masse chargée ${prevYear} (N-1)` };
   const masseS = pay ? masseSeries(pay.cur.months, pay.prev.months, masseNames) : [];
   let nonRecurring = null as ReturnType<typeof buildActualNonRecurringChart> | null;
+  let nonRecurringSummary: ActualNonRecurring | null = null;
   let nonRecurringError: string | null = null;
   if (journal && ctx.read) {
     try {
-      nonRecurring = buildActualNonRecurringChart(journal, await listActualEvents(ws.id), months, ctx.read.syncId);
+      const actualEvents = await listActualEvents(ws.id);
+      nonRecurring = buildActualNonRecurringChart(journal, actualEvents, months, ctx.read.syncId);
+      nonRecurringSummary = buildActualNonRecurring(journal, actualEvents, months, ctx.read.syncId);
     } catch (error) {
       if (!(error instanceof ActualEventError)) throw error;
       nonRecurringError = error.message;
@@ -533,6 +538,8 @@ export default async function SynthesePage({ params, searchParams }: { params: P
         {!journal && <NdState testid="sy-masse-nd" reason={capital(payrollWhy ?? "journal de paie indisponible")} action={dataAction} />}
         {landingError && <p className="error" data-testid="sy-landing-error">Atterrissage non lu : {landingError}</p>}
       </Panel>
+
+      <ActualNonRecurringSummary rows={nonRecurringSummary?.rows ?? []} href={`${msHref}#actual-non-recurring`} testid="sy-non-recurring-summary" unavailable={!nonRecurringSummary} />
 
       <Panel testid="sy-graphs" title="Graphiques">
         <div className="sy-charts">

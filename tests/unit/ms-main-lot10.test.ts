@@ -1,18 +1,20 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DsnView } from "@/app/e/[slug]/studio-rh/masse-salariale/DsnView";
 import { glossaryEntry } from "@/lib/glossary";
 import type { DsnMonth } from "@/lib/payroll/dsn";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
+import type { ActualEvent } from "@/lib/payroll/non-recurring";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 
 // Écrans de la Masse salariale rendus de bout en bout (lot 10) sur un journal fictif écrit à la main : tendances rouge / vert d'un coût,
 // aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif.
-const state = vi.hoisted(() => ({ ctx: null as unknown }));
+const state = vi.hoisted(() => ({ ctx: null as unknown, actualEvents: [] as ActualEvent[] }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
-vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: async () => [], actualEventVersion: () => "fictif" }));
+vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: async () => state.actualEvents, actualEventVersion: () => "fictif" }));
 vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/actual-actions", () => ({ saveActualEventAction: async () => ({ ok: "fictif" }) }));
+beforeEach(() => { state.actualEvents = []; });
 
 // Journal : janvier 2026 (service A : brut 2 200,00 €, cotisations 1 200,00 € ; service B : brut 1 000,00 €, cotisations 500,00 €),
 // février 2026 identique mais non clôturé, janvier 2025 à 90 % de janvier 2026 ; février 2025 absent du journal (n.d.).
@@ -89,6 +91,17 @@ const summaryPanel = (html: string, testid: string) => {
   return html.slice(from, to + "</section>".length);
 };
 const NARRATIF = /Un graphique est une lecture|Sens de « n\.d\. »|Montants tels que (renvoyés|déclarés)|\(N − N-1\) ÷ N-1 =|brut \+ cotisations patronales<|Définitions et règles de calcul|ms-definitions|Coût = masse chargée \(brut|chaque chiffre renvoie à sa définition|une colonne hachurée est un mois n\.d\./i;
+
+// Vérifie la visibilité initiale du résumé, indépendamment de ses détails de vigilance fermés.
+const expectOutsideDetails = (html: string, testid: string) => {
+  const index = html.indexOf(`data-testid="${testid}"`);
+  expect(index).toBeGreaterThanOrEqual(0);
+  const stack: string[] = [];
+  for (const match of html.slice(0, index).matchAll(/<details\b[^>]*>|<\/details>/g)) {
+    if (match[0] === "</details>") stack.pop(); else stack.push(match[0]);
+  }
+  expect(stack).toEqual([]);
+};
 
 describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 10)", () => {
   it("référence écrite à la main : janvier 2026 = 4 900,00 € contre 4 410,00 € en janvier 2025, soit +490,00 € et +11,11\u00a0% (coût en hausse : rouge)", async () => {
@@ -235,6 +248,46 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
     const detail = await page({ mois: "2026-01" });
     expect(detail).toMatch(/<details(?=[^>]*data-testid="ms-synthese-tables-details")(?=[^>]*\bopen="")/);
     expect(detail).toContain('data-testid="ms-detail-accounts"');
+  });
+  it("les quatre natures non récurrentes restent visibles sans identification et hors des détails fermés", async () => {
+    const html = await page({ annee: "2026", de: "01", a: "02" });
+    expectOutsideDetails(html, "ms-non-recurring-summary");
+    const summary = summaryPanel(html, "ms-non-recurring-summary");
+    for (const label of ["Licenciements", "Ruptures conventionnelles", "Tuilages passés", "Autres éléments non récurrents"]) expect(summary).toContain(label);
+    expect(count(summary, />Aucun élément identifié</g)).toBe(4);
+    expect(summary).not.toContain('data-money-cents="0"');
+    expect(summary).toContain('href="/e/demo/studio-rh/masse-salariale?annee=2026&amp;de=01&amp;a=02#actual-non-recurring"');
+  });
+  it("une RC sans montant et un tuilage chiffré sont visibles dès la synthèse, sans leurs sources individuelles", async () => {
+    const previous = state.ctx;
+    const syncId = "11111111-1111-4111-8111-111111111111";
+    try {
+      state.ctx = { ...(previous as object), read: { syncId, startedAt: new Date("2026-03-03T10:00:00Z"), months: input.months } };
+      state.actualEvents = [
+        { id: "22222222-2222-4222-8222-222222222222", syncId, month: "2026-01", kind: "tuilage", chargedCents: 12345, contractKeys: ["PRIVE_ENTRANT_FICTIF", "PRIVE_SORTANT_FICTIF"], note: "SOURCE_TUILAGE_PRIVEE_FICTIVE" },
+        { id: "33333333-3333-4333-8333-333333333333", syncId, month: "2026-02", kind: "rupture-conventionnelle", chargedCents: null, contractKeys: [], note: "SOURCE_RC_PRIVEE_FICTIVE" },
+      ];
+      const html = await page({ annee: "2026", de: "01", a: "02", repartition: "mensuelle" });
+      expectOutsideDetails(html, "ms-non-recurring-summary");
+      const summary = summaryPanel(html, "ms-non-recurring-summary");
+      expect(summary).toContain('data-money-cents="12345"');
+      expect(summary).toContain("Montant à renseigner");
+      expect(summary).toContain('data-testid="ms-non-recurring-summary-rupture-conventionnelle"');
+      expect(summary).toContain('data-testid="ms-non-recurring-summary-tuilage"');
+      expect(summary).toContain('href="/e/demo/studio-rh/masse-salariale?annee=2026&amp;de=01&amp;a=02&amp;repartition=mensuelle#actual-non-recurring"');
+      for (const secret of ["PRIVE_ENTRANT_FICTIF", "PRIVE_SORTANT_FICTIF", "SOURCE_TUILAGE_PRIVEE_FICTIVE", "SOURCE_RC_PRIVEE_FICTIVE"]) expect(html).not.toContain(secret);
+    } finally { state.ctx = previous; }
+  });
+  it("un tuilage d’une ancienne lecture expose son statut sans reprendre son montant dans la synthèse", async () => {
+    const previous = state.ctx;
+    try {
+      state.ctx = { ...(previous as object), read: { syncId: "11111111-1111-4111-8111-111111111111", startedAt: new Date("2026-03-03T10:00:00Z"), months: input.months } };
+      state.actualEvents = [{ id: "22222222-2222-4222-8222-222222222222", syncId: "44444444-4444-4444-8444-444444444444", month: "2026-01", kind: "tuilage", chargedCents: 98765, contractKeys: ["entrant-fictif", "sortant-fictif"], note: "Justificatif privé fictif" }];
+      const summary = summaryPanel(await page(), "ms-non-recurring-summary");
+      expect(summary).toContain("Lecture à vérifier");
+      expect(summary).toContain("n.d.");
+      expect(summary).not.toContain('data-money-cents="98765"');
+    } finally { state.ctx = previous; }
   });
 });
 

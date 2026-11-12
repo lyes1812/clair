@@ -54,6 +54,7 @@ export async function saveActualEventAction(slug: string, syncId: string, displa
   } catch (error) {
     return { error: error instanceof ActualEventError ? error.message : "Enregistrement indisponible. Aucune donnée source n’a été modifiée." };
   }
+  revalidatePath(`/e/${slug}/studio-rh`);
   revalidatePath(`/e/${slug}/studio-rh/masse-salariale`);
   revalidatePath(`/e/${slug}/studio-rh/masse-salariale/croisee`);
   revalidatePath(`/e/${slug}/studio-rh/hypotheses`);

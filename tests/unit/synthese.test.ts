@@ -323,6 +323,16 @@ function find(node: unknown, pred: (el: ReactElement) => boolean): ReactElement 
   return find((node.props as { children?: unknown }).children, pred);
 }
 const reset = () => Object.assign(state, { ctx: makeCtx(), scenarios: [], full: null, budgets: [], fail: null, actualEvents: [] });
+const nonRecurringSummary = (html: string) => {
+  const index = html.indexOf('data-testid="sy-non-recurring-summary"');
+  expect(index).toBeGreaterThanOrEqual(0);
+  const stack: string[] = [];
+  for (const match of html.slice(0, index).matchAll(/<details\b[^>]*>|<\/details>/g)) {
+    if (match[0] === "</details>") stack.pop(); else stack.push(match[0]);
+  }
+  expect(stack).toEqual([]);
+  return html.slice(html.lastIndexOf("<section", index), html.indexOf("</section>", index) + "</section>".length);
+};
 
 describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
   it("indicateurs RH (ETP 5,10 / 6,10 / 6,10 ; N-1 4,80) et masse chargée (12 600,00 € face à 11 340,00 €)", async () => {
@@ -389,6 +399,48 @@ describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
     expect(html).not.toMatch(/CONFIDENTIEL|AUTRE NOTE PRIVEE/);
     expect(html).toContain('href="/e/demo/studio-rh/masse-salariale?annee=2026&amp;de=01&amp;a=03#actual-non-recurring"');
     expect(text(/data-testid="sy-table-masse"[\s\S]*?<\/details>/.exec(html)![0])).toContain("Période 12 600 € 11 340 € n.d.");
+  });
+  it("le résumé visible expose RC sans montant et tuilage chiffré sans transmettre leurs sources individuelles", async () => {
+    reset();
+    const syncId = "11111111-1111-4111-8111-111111111111";
+    state.ctx = { ...makeCtx(), read: { syncId, months: journal.months, startedAt: new Date("2026-10-01T08:00:00Z") } };
+    state.actualEvents = [
+      { id: "22222222-2222-4222-8222-222222222222", syncId, month: "2026-01", kind: "tuilage", chargedCents: 12345, contractKeys: ["ENTRANT_PRIVE_FICTIF", "SORTANT_PRIVE_FICTIF"], note: "SOURCE_TUILAGE_PRIVEE_FICTIVE" },
+      { id: "33333333-3333-4333-8333-333333333333", syncId, month: "2026-02", kind: "rupture-conventionnelle", chargedCents: null, contractKeys: [], note: "SOURCE_RC_PRIVEE_FICTIVE" },
+    ];
+    const { html } = await render({ annee: "2026", de: "01", a: "03" });
+    const summary = nonRecurringSummary(html);
+    expect(summary).toContain('data-money-cents="12345"');
+    expect(summary).toContain("Montant à renseigner");
+    expect(summary).toContain('data-testid="sy-non-recurring-summary-rupture-conventionnelle"');
+    expect(summary).toContain('data-testid="sy-non-recurring-summary-tuilage"');
+    expect(summary).toContain('href="/e/demo/studio-rh/masse-salariale?annee=2026&amp;de=01&amp;a=03#actual-non-recurring"');
+    for (const secret of ["ENTRANT_PRIVE_FICTIF", "SORTANT_PRIVE_FICTIF", "SOURCE_TUILAGE_PRIVEE_FICTIVE", "SOURCE_RC_PRIVEE_FICTIVE"]) expect(html).not.toContain(secret);
+  });
+  it("les catégories restent présentes sans identification ; une ancienne lecture reste signalée sans montant repris", async () => {
+    reset();
+    const syncId = "11111111-1111-4111-8111-111111111111";
+    state.ctx = { ...makeCtx(), read: { syncId, months: journal.months, startedAt: new Date("2026-10-01T08:00:00Z") } };
+    const empty = nonRecurringSummary((await render({ annee: "2026", de: "01", a: "03" })).html);
+    for (const label of ["Licenciements", "Ruptures conventionnelles", "Tuilages passés", "Autres éléments non récurrents"]) expect(empty).toContain(label);
+    expect(empty.match(/>Aucun élément identifié</g)).toHaveLength(4);
+    expect(empty).not.toContain('data-money-cents="0"');
+    state.actualEvents = [{ id: "22222222-2222-4222-8222-222222222222", syncId: "44444444-4444-4444-8444-444444444444", month: "2026-01", kind: "tuilage", chargedCents: 98765, contractKeys: ["entrant-fictif", "sortant-fictif"], note: "Source fictive" }];
+    const stale = nonRecurringSummary((await render({ annee: "2026", de: "01", a: "03" })).html);
+    expect(stale).toContain("Lecture à vérifier");
+    expect(stale).toContain("n.d.");
+    expect(stale).not.toContain('data-money-cents="98765"');
+  });
+  it("le résumé non récurrent reste visible lorsque le graphique de masse est indisponible", async () => {
+    reset();
+    state.ctx = makeCtx({ journal: null });
+    const { html } = await render({ annee: "2026", de: "01", a: "03" });
+    expect(html).not.toContain('data-testid="sy-chart-masse"');
+    const summary = nonRecurringSummary(html);
+    expect(summary).toContain("Lecture indisponible");
+    expect(summary).toContain("Ruptures conventionnelles");
+    expect(summary).toContain("Tuilages passés");
+    expect(summary).not.toContain('data-money-cents="0"');
   });
   it("chaque graphique renvoie au glossaire (graphique et tableau exact) ; la clé « n.d. » aussi quand un mois est n.d.", async () => {
     reset();

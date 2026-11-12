@@ -1,0 +1,40 @@
+.anr-summary.panel { display: grid; gap: 18px; padding: 20px; min-width: 0; font-family: var(--font); }
+.anr-summary-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px 20px; min-width: 0; }
+.anr-summary-head h2 { font-size: 20px; font-weight: 600; letter-spacing: -.015em; }
+.anr-summary-head p { margin-top: 3px; font-size: 11px; color: var(--muted); }
+.anr-summary-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; }
+.anr-summary-actions > a { display: inline-flex; align-items: center; min-height: 32px; text-decoration: none; }
+.anr-summary-actions > a:hover { text-decoration: underline; }
+.anr-summary-vigilance > summary.btn { min-height: 32px; padding: 4px 9px; gap: 6px; border: 1px solid var(--line); border-radius: var(--clair-radius-control); background: var(--surface); color: var(--ink); font-size: 11px; font-weight: 500; }
+.anr-summary-question { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--muted); border-radius: 50%; font-size: 11px; }
+.anr-summary-vigilance .ui-dropdown-panel { width: min(360px, calc(100vw - 64px)); font-size: 12px; }
+.anr-summary-vigilance ul { margin: 0; padding-left: 16px; display: grid; gap: 8px; }
+.anr-summary-categories { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; min-width: 0; }
+.anr-summary-categories > div { display: grid; align-content: start; gap: 6px; min-width: 0; padding-left: 16px; border-left: 1px solid var(--line); }
+.anr-summary-categories > div:first-child { padding-left: 0; border-left: 0; }
+.anr-summary-categories dt { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.anr-summary-categories dd { margin: 0; }
+.anr-summary-amount { color: var(--ink); font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.anr-summary-state { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.anr-summary-meta { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.anr-summary-meta > span { display: block; margin-top: 2px; color: var(--ink); }
+.anr-summary :is(a, summary):focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: var(--clair-radius-control); }
+@media screen and (max-width: 1000px) {
+  .anr-summary-categories { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 16px; }
+  .anr-summary-categories > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+}
+@media screen and (max-width: 520px) {
+  .anr-summary.panel { padding: 16px; gap: 16px; }
+  .anr-summary-head h2 { font-size: 19px; }
+  .anr-summary-actions { width: 100%; justify-content: space-between; }
+  .anr-summary-vigilance .ui-dropdown-panel { left: 0; right: auto; }
+  .anr-summary-actions > a, .anr-summary-vigilance > summary.btn { min-height: 44px; }
+  .anr-summary-categories { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .anr-summary-categories > div { padding: 0 0 14px; border: 0; border-bottom: 1px solid var(--line); }
+  .anr-summary-categories > div:last-child { padding-bottom: 0; border-bottom: 0; }
+  .anr-summary-amount { font-size: 21px; }
+}
+@media print {
+  .anr-summary { break-inside: avoid; }
+  .anr-summary-actions { display: none; }
+}

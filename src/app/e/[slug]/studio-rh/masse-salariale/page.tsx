@@ -28,6 +28,7 @@ import { saveActualEventAction } from "./actual-actions";
 import { personLabel } from "@/lib/rh/view";
 import { buildActualNonRecurring } from "@/lib/payroll/non-recurring";
 import { SyntheseDisclosure } from "./SyntheseDisclosure";
+import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -335,6 +336,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
             </section>}
           </div>
+          <ActualNonRecurringSummary rows={nonRecurring?.rows ?? []} href={href({ extra: "#actual-non-recurring" })} testid="ms-non-recurring-summary" />
           <div className="ms-synthese-aggregate-toolbar" data-ms-screen-only>
             <ViewSwitch testid="ms-summary-periodicity" caption="Vue des répartitions" label="Vue de Brut et cotisations et de Répartition par service" current={repartition} options={[
               { key: "cumule", label: "Cumulé", href: href({ repartition: "cumule" }) },
