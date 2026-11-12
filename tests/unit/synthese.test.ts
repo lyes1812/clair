@@ -11,6 +11,7 @@ import type { BaseSnapshot, Conventions, Hypothesis } from "@/lib/budget/types";
 import { monthRange } from "@/lib/connectors/months";
 import type { JournalInput, LedgerLine, MonthPayroll } from "@/lib/payroll/engine";
 import type { ActualEvent } from "@/lib/payroll/non-recurring";
+import type { RcPayslipScan } from "@/lib/payroll/rc-payslips";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import type { Delta } from "@/lib/rh/kpi/types";
@@ -52,8 +53,10 @@ const state = vi.hoisted(() => ({
   budgets: [] as unknown[],
   fail: null as string | null,
   actualEvents: [] as ActualEvent[],
+  rcScan: null as RcPayslipScan | null,
 }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
+vi.mock("@/lib/payroll/rc-payslips-store", () => ({ getRcPayslipScan: async () => state.rcScan }));
 vi.mock("@/lib/payroll/non-recurring-store", () => ({
   ActualEventError: class extends Error {},
   listActualEvents: async () => state.actualEvents,
@@ -322,7 +325,7 @@ function find(node: unknown, pred: (el: ReactElement) => boolean): ReactElement 
   if (pred(node)) return node;
   return find((node.props as { children?: unknown }).children, pred);
 }
-const reset = () => Object.assign(state, { ctx: makeCtx(), scenarios: [], full: null, budgets: [], fail: null, actualEvents: [] });
+const reset = () => Object.assign(state, { ctx: makeCtx(), scenarios: [], full: null, budgets: [], fail: null, actualEvents: [], rcScan: null });
 const nonRecurringSummary = (html: string) => {
   const index = html.indexOf('data-testid="sy-non-recurring-summary"');
   expect(index).toBeGreaterThanOrEqual(0);
@@ -399,6 +402,19 @@ describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
     expect(html).not.toMatch(/CONFIDENTIEL|AUTRE NOTE PRIVEE/);
     expect(html).toContain('href="/e/demo/studio-rh/masse-salariale?annee=2026&amp;de=01&amp;a=03#actual-non-recurring"');
     expect(text(/data-testid="sy-table-masse"[\s\S]*?<\/details>/.exec(html)![0])).toContain("Période 12 600 € 11 340 € n.d.");
+  });
+  it("l’accueil expose l’indemnité RC du bulletin séparément de sa masse chargée inchangée", async () => {
+    reset();
+    const syncId = "11111111-1111-4111-8111-111111111111";
+    state.ctx = { ...makeCtx(), source: "payfit", read: { syncId, months: journal.months, startedAt: new Date("2026-02-01T08:00:00Z") } };
+    state.actualEvents = [{ id: "33333333-3333-4333-8333-333333333333", syncId, month: "2026-01", kind: "rupture-conventionnelle", chargedCents: null, contractKeys: ["payfit:CONTRAT_RC_PRIVE_FICTIF"], note: "JUSTIFICATIF_RC_PRIVE_FICTIF" }];
+    state.rcScan = { version: 1, id: "22222222-2222-4222-8222-222222222222", payrollSyncId: syncId, companyId: "SOCIETE_FICTIVE", from: "2026-01", to: "2026-01", status: "complete", startedAt: "2026-02-01T08:00:00.000Z", finishedAt: "2026-02-01T08:01:00.000Z", closedMonths: ["2026-01"], unavailableMonths: [], totalCollaborators: 1, completedCollaborators: 1, checkedPayslips: 1, issues: [], records: [{ month: "2026-01", collaboratorId: "COLLAB_RC_PRIVE_FICTIF", contractId: "CONTRAT_RC_PRIVE_FICTIF", payslipId: "PDF_RC_PRIVE_FICTIF", pdfHash: "a".repeat(64), parserVersion: "rc-fictif-v1", status: "identified", code: "identified", indemnityCents: 98765, components: [{ label: "Indemnité de rupture conventionnelle", amountCents: 98765, page: 1, line: 8 }] }] };
+    const { html } = await render({ annee: "2026", de: "01", a: "01" });
+    const summary = /data-testid="sy-non-recurring-summary"[\s\S]*?<\/section>/.exec(html)![0];
+    expect(summary).toContain('data-money-cents="98765"'); expect(summary).toContain("Indemnité RC · bulletin");
+    expect(summary).toContain("Coût chargé identifié : n.d."); expect(summary).toContain("1 élément identifié");
+    expect(tile(html, "masse").raw).toContain('data-money-cents="420000"');
+    expect(html).not.toMatch(/COLLAB_RC_PRIVE|CONTRAT_RC_PRIVE|PDF_RC_PRIVE|JUSTIFICATIF_RC_PRIVE/);
   });
   it("le résumé visible expose RC sans montant et tuilage chiffré sans transmettre leurs sources individuelles", async () => {
     reset();

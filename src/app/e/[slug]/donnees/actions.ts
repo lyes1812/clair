@@ -14,6 +14,7 @@ import { ensureRhBuild } from "@/lib/rh/referential/store";
 import { FEC_MAX_BYTES, FecError } from "@/lib/fec/parser";
 import { chooseSourceMode, DOMAINS, isSourceMode, type SourceDomain } from "@/lib/sources";
 import { requireWorkspace } from "@/lib/workspace";
+import { startRcPayslipScan } from '@/lib/payroll/rc-payslips-store';
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -93,6 +94,15 @@ export async function decideSync(slug: string, syncId: string, decision: "apply"
     }
   }
   revalidatePath(`/e/${slug}`, "layout");
+  if (decision === 'apply' && provider === 'payfit') {
+    const applied = await getSync(workspace.id, syncId);
+    const scope = (applied?.scope as { months?: string[] } | undefined)?.months;
+    if (scope?.length && scope.every(isMonth)) {
+      const sorted = [...scope].sort();
+      try { await startRcPayslipScan(workspace.id, session.user.id, sorted[0], sorted.at(-1)!); }
+      catch { rhNote += ' La lecture complémentaire des indemnités de RC peut être lancée dans Données › PayFit.'; }
+    }
+  }
   return { ok: decision === "apply" ? `Synchronisation appliquée : c'est désormais la source active.${rhNote}` : "Aperçu abandonné." };
 }
 

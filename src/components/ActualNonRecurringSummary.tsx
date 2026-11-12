@@ -1,6 +1,7 @@
 import { DropdownMenu } from "@/components/DropdownMenu";
 import { Money } from "@/components/Money";
 import type { ActualNonRecurring } from "@/lib/payroll/non-recurring";
+import type { RcPayslipPeriod } from "@/lib/payroll/rc-payslips";
 import { ACTUAL_NON_RECURRING_CATEGORIES } from "@/lib/viz/actual-non-recurring";
 import "@/styles/actual-non-recurring-summary.css";
 
@@ -9,6 +10,7 @@ type Props = {
   href: string;
   testid?: string;
   unavailable?: boolean;
+  rc?: RcPayslipPeriod;
 };
 
 const issue = (reason: string) => reason.includes("autre lecture de paie")
@@ -20,7 +22,7 @@ const issue = (reason: string) => reason.includes("autre lecture de paie")
       : { label: "À vérifier", detail: "Une identification doit être vérifiée dans le détail avant de reprendre son montant." };
 
 /** Résumé agrégé uniquement : aucune référence de contrat, note ou provenance individuelle n’est rendue. */
-export function ActualNonRecurringSummary({ rows, href, testid = "actual-non-recurring-summary", unavailable = false }: Props) {
+export function ActualNonRecurringSummary({ rows, href, testid = "actual-non-recurring-summary", unavailable = false, rc }: Props) {
   const categories = ACTUAL_NON_RECURRING_CATEGORIES.map((category) => {
     const selected = rows.filter((row) => row.event.kind === category.kind);
     const issues = selected.flatMap((row) => row.reason ? [issue(row.reason)] : row.amount === null ? [issue("Montant chargé non saisi")] : []);
@@ -35,6 +37,7 @@ export function ActualNonRecurringSummary({ rows, href, testid = "actual-non-rec
     ...categories.flatMap((category) => category.issues.map((entry) => entry.detail)),
     ...(!unavailable && categories.some((category) => !category.count) ? ["Aucun élément identifié ne signifie pas qu’il n’existe aucun coût non récurrent."] : []),
     ...(categories.some((category) => category.estimate) ? ["Le tuilage estimé attribue le coût de l’entrant aux jours de chevauchement ; cette ventilation n’est pas observée dans la paie."] : []),
+    ...(rc?.reason ? [rc.reason] : []),
   ])];
   return <section className="panel anr-summary" data-testid={testid} aria-label="Éléments non récurrents identifiés">
     <div className="anr-summary-head">
@@ -47,14 +50,21 @@ export function ActualNonRecurringSummary({ rows, href, testid = "actual-non-rec
       </div>
     </div>
     <dl className="anr-summary-categories">
-      {categories.map((category) => <div key={category.kind} data-testid={`${testid}-${category.kind}`}>
+      {categories.map((category) => {
+        const bulletin = category.kind === "rupture-conventionnelle" && rc?.status !== "not-read" ? rc : undefined;
+        const count = bulletin ? bulletin.mergedCount : category.count;
+        return <div key={category.kind} data-testid={`${testid}-${category.kind}`}>
         <dt>{category.label}</dt>
-        <dd className={category.amount === null ? "anr-summary-state" : "anr-summary-amount"}>
-          {category.amount !== null ? <Money cents={category.amount} /> : unavailable ? "n.d." : !category.count ? "Aucun élément identifié" : "n.d."}
+        {bulletin && <dd className="anr-summary-meta">Indemnité RC · bulletin</dd>}
+        <dd className={(bulletin ? bulletin.amountCents === null : category.amount === null) ? "anr-summary-state" : "anr-summary-amount"}>
+          {bulletin ? bulletin.amountCents !== null ? <Money cents={bulletin.amountCents} /> : bulletin.status === "none" ? "Aucune indemnité repérée" : bulletin.status === "running" ? "Lecture en cours" : "n.d."
+            : category.amount !== null ? <Money cents={category.amount} /> : unavailable ? "n.d." : !category.count ? "Aucun élément identifié" : "n.d."}
         </dd>
-        {category.count > 0 && <dd className="anr-summary-meta">{category.count} élément{category.count > 1 ? "s" : ""} identifié{category.count > 1 ? "s" : ""}{category.issues.length > 0 ? <span>{[...new Set(category.issues.map((entry) => entry.label))].join(" · ")}</span> : category.estimate ? <span>Estimation calendaire</span> : null}</dd>}
+        {bulletin && <dd className="anr-summary-meta">Coût chargé identifié : {category.amount !== null ? <Money cents={category.amount} /> : "n.d."}{bulletin.status === "review" && <span>Bulletins à vérifier</span>}</dd>}
+        {category.kind === "rupture-conventionnelle" && rc?.status === "not-read" && <dd className="anr-summary-meta">Bulletins non lus</dd>}
+        {count > 0 && <dd className="anr-summary-meta">{count} élément{count > 1 ? "s" : ""} identifié{count > 1 ? "s" : ""}{category.issues.length > 0 ? <span>{[...new Set(category.issues.map((entry) => bulletin?.status === 'value' && entry.label === 'Montant à renseigner' ? 'Coût chargé à compléter' : entry.label))].join(" · ")}</span> : category.estimate ? <span>Estimation calendaire</span> : null}</dd>}
         {unavailable && <dd className="anr-summary-meta">Lecture indisponible</dd>}
-      </div>)}
+      </div>; })}
     </dl>
   </section>;
 }

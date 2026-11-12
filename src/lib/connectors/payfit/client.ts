@@ -1,5 +1,5 @@
 import { toCents } from "@/lib/money";
-import { type FetchLike, ProviderError, requestJson, withRateLimitRetry, defaultSleep } from "../http";
+import { type FetchLike, ProviderError, requestJson, requestPdf, withRateLimitRetry, defaultSleep } from "../http";
 import { isIsoDate, isMonth, monthBounds } from "../months";
 import type { CollectionOutcome, ProviderReadResult, SourceRecordInput } from "../types";
 
@@ -175,7 +175,16 @@ export function createPayFitClient(apiKey: string, opts: PayFitClientOptions = {
   // GET d'un chemin de l'API, construit côté serveur (jamais depuis une donnée reçue).
   const get = (path: string) => call(`${apiBase}${path}`);
 
-  return { introspect, company, paginate, get, callCount: () => calls };
+  const pdf = (path: string) => withRateLimitRetry(async () => {
+    // Chemin de bulletin exclusivement construit par payslips.ts ; aucune URL reçue du fournisseur.
+    if (!/^\/companies\/[A-Za-z0-9_-]+\/collaborators\/[A-Za-z0-9_-]+\/contracts\/[A-Za-z0-9_-]+\/payslips\/[A-Za-z0-9_-]+$/.test(path)) throw new ProviderError("invalid_response", "chemin de bulletin");
+    const wait = last + minInterval - Date.now();
+    if (wait > 0) await sleep(wait);
+    last = Date.now(); calls += 1;
+    return requestPdf(fetchImpl, `${apiBase}${path}`, { headers: auth });
+  }, { sleep });
+
+  return { introspect, company, paginate, get, pdf, callCount: () => calls };
 }
 
 export type PayFitClient = ReturnType<typeof createPayFitClient>;

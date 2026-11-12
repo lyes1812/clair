@@ -102,6 +102,55 @@ export async function requestJson(fetchImpl: FetchLike, url: string, opts: Reque
   }
 }
 
+// Le bulletin reste en mémoire. La lecture est bornée pendant le transfert, même sans Content-Length.
+export async function requestPdf(fetchImpl: FetchLike, url: string, opts: Pick<RequestOptions, "headers" | "timeoutMs" | "maxBytes"> = {}): Promise<Uint8Array> {
+  const { headers = {}, timeoutMs = 20_000, maxBytes = 8 * 1024 * 1024 } = opts;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { method: "GET", headers: { accept: "application/pdf", ...headers }, redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    throw new ProviderError(error instanceof Error && error.name === "TimeoutError" ? "timeout" : "unavailable");
+  }
+  if (response.status !== 200) {
+    await response.body?.cancel().catch(() => {});
+    if (response.status === 401) throw new ProviderError("key_rejected");
+    if (response.status === 403) throw new ProviderError("scope_denied");
+    if (response.status === 404) throw new ProviderError("not_found");
+    if (response.status === 429) throw new ProviderError("rate_limited", undefined, parseRetryAfter(response.headers.get("retry-after")));
+    throw new ProviderError("unavailable", response.status >= 300 && response.status < 400 ? "redirection refusée" : `HTTP ${response.status}`);
+  }
+  if (response.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/pdf") {
+    await response.body?.cancel().catch(() => {});
+    throw new ProviderError("invalid_response", "type de bulletin");
+  }
+  const length = response.headers.get("content-length");
+  if (length && /^\d+$/.test(length) && Number(length) > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw new ProviderError("too_large");
+  }
+  if (!response.body) throw new ProviderError("invalid_response", "bulletin vide");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > maxBytes) { await reader.cancel().catch(() => {}); throw new ProviderError("too_large"); }
+      chunks.push(chunk.value);
+    }
+  } catch (error) {
+    if (error instanceof ProviderError) throw error;
+    throw new ProviderError(error instanceof Error && error.name === "TimeoutError" ? "timeout" : "unavailable");
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  if (new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") throw new ProviderError("invalid_response", "signature de bulletin");
+  return bytes;
+}
+
 // Relance bornée sur limitation (429), en respectant le délai indiqué par le fournisseur.
 export async function withRateLimitRetry<T>(
   fn: () => Promise<T>,

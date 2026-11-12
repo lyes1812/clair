@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { FetchLike } from "../http";
 import { monthBounds } from "../months";
 import { PAYFIT_API, PAYFIT_INTROSPECT } from "./client";
+import { createFixturePayslips } from "./fixture-payslips";
 
 // Transport PayFit fictif : répond au format PayFit à partir de ref/fixtures/clair-test-generic-v1.json.
 // Il n'est utilisé que si CLAIR_ENABLE_FIXTURE_PROVIDERS=true ET la clé commence par « fixture- » ;
@@ -74,11 +75,12 @@ export function createFixtureFetch(apiKey: string): FetchLike {
   const companyId = `test-${letter.toLowerCase()}-${entityIndex}`;
   const scopes = comptaOnly
     ? "accounting:read"
-    : "accounting:read collaborators:read contracts:read contracts:time-information:read time:read";
+    : "accounting:read collaborators:read contracts:read contracts:time-information:read contracts:payslips:read time:read";
   const contracts = ph.contracts.filter((c) => c.entityId === entityId);
   const personIds = new Set(contracts.map((c) => c.personId));
   const people = ph.people.filter((p) => personIds.has(p.id));
   const contractIds = new Set(contracts.map((c) => c.id));
+  const payslips = createFixturePayslips({ companyId, contracts, people, periods: ph.periods, enabled: !comptaOnly });
 
   return async (url, init) => {
     const auth = (init.headers as Record<string, string> | undefined)?.authorization;
@@ -94,6 +96,8 @@ export function createFixtureFetch(apiKey: string): FetchLike {
     const yyyymm = u.searchParams.get("date");
     const month = yyyymm ? `${yyyymm.slice(0, 4)}-${yyyymm.slice(4, 6)}` : null;
     const needs = (scope: string) => scopes.split(" ").includes(scope);
+    const payslip = payslips(rest);
+    if (payslip) return payslip;
 
     if (rest === "") {
       return json({ id: companyId, name: `${profile.label} — société ${entityIndex}`, country: "FR", identificationNumber: "000000000", nbActiveContracts: contracts.length });

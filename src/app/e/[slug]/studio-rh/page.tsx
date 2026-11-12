@@ -18,6 +18,8 @@ import { ActualEventError, listActualEvents } from "@/lib/payroll/non-recurring-
 import { buildActualNonRecurringChart } from "@/lib/viz/actual-non-recurring";
 import { buildActualNonRecurring, type ActualNonRecurring } from "@/lib/payroll/non-recurring";
 import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
+import { buildRcPayslipPeriod } from "@/lib/payroll/rc-payslips";
+import { getRcPayslipScan } from "@/lib/payroll/rc-payslips-store";
 import { headcountAt } from "@/lib/rh/headcount";
 import { absenteeism } from "@/lib/rh/kpi/absence";
 import { etpAverage } from "@/lib/rh/kpi/average";
@@ -445,6 +447,8 @@ export default async function SynthesePage({ params, searchParams }: { params: P
       nonRecurringError = error.message;
     }
   }
+  const rcScan = ctx.source === "payfit" ? await getRcPayslipScan(ws.id) : null;
+  const rcPeriod = buildRcPayslipPeriod(rcScan, months, ctx.read?.syncId ?? null, nonRecurringSummary?.rows.map((row) => row.event) ?? []);
   const nonRecurringName = `Dont non récurrents identifiés ${year}`;
   const nonRecurringSeries = nonRecurring && nonRecurring.count > 0 ? [{
     key: "non-recurring", name: nonRecurringName, color: "var(--chart-3)",
@@ -539,7 +543,7 @@ export default async function SynthesePage({ params, searchParams }: { params: P
         {landingError && <p className="error" data-testid="sy-landing-error">Atterrissage non lu : {landingError}</p>}
       </Panel>
 
-      <ActualNonRecurringSummary rows={nonRecurringSummary?.rows ?? []} href={`${msHref}#actual-non-recurring`} testid="sy-non-recurring-summary" unavailable={!nonRecurringSummary} />
+      <ActualNonRecurringSummary rows={nonRecurringSummary?.rows ?? []} href={`${msHref}#actual-non-recurring`} testid="sy-non-recurring-summary" unavailable={!nonRecurringSummary} rc={rcPeriod} />
 
       <Panel testid="sy-graphs" title="Graphiques">
         <div className="sy-charts">

@@ -53,6 +53,7 @@ vi.mock("@/lib/workspace", () => ({
 vi.mock("@/lib/rh/kpi-context", () => ({ loadKpiContext: async () => mocks.kpiCtx.value }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => mocks.payCtx.value }));
 vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: async () => [], actualEventVersion: () => "fictif" }));
+vi.mock("@/lib/payroll/rc-payslips-store", () => ({ getRcPayslipScan: async () => null }));
 vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/actual-actions", () => ({ saveActualEventAction: async () => ({ ok: "fictif" }) }));
 vi.mock("@/lib/connectors/sync", () => ({
   lastSync: async (_w: string, p: string) => (p === "payfit" || p === "dsn" ? { status: "applied", startedAt: new Date("2026-01-15T09:00:00Z"), finishedAt: new Date("2026-01-15T09:12:00Z") } : null),

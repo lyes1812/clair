@@ -6,15 +6,17 @@ import { glossaryEntry } from "@/lib/glossary";
 import type { DsnMonth } from "@/lib/payroll/dsn";
 import type { JournalInput, LedgerLine } from "@/lib/payroll/engine";
 import type { ActualEvent } from "@/lib/payroll/non-recurring";
+import type { RcPayslipScan } from "@/lib/payroll/rc-payslips";
 import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 
 // Écrans de la Masse salariale rendus de bout en bout (lot 10) sur un journal fictif écrit à la main : tendances rouge / vert d'un coût,
 // aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif.
-const state = vi.hoisted(() => ({ ctx: null as unknown, actualEvents: [] as ActualEvent[] }));
+const state = vi.hoisted(() => ({ ctx: null as unknown, actualEvents: [] as ActualEvent[], rcScan: null as RcPayslipScan | null }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
 vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: async () => state.actualEvents, actualEventVersion: () => "fictif" }));
+vi.mock("@/lib/payroll/rc-payslips-store", () => ({ getRcPayslipScan: async () => state.rcScan }));
 vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/actual-actions", () => ({ saveActualEventAction: async () => ({ ok: "fictif" }) }));
-beforeEach(() => { state.actualEvents = []; });
+beforeEach(() => { state.actualEvents = []; state.rcScan = null; });
 
 // Journal : janvier 2026 (service A : brut 2 200,00 €, cotisations 1 200,00 € ; service B : brut 1 000,00 €, cotisations 500,00 €),
 // février 2026 identique mais non clôturé, janvier 2025 à 90 % de janvier 2026 ; février 2025 absent du journal (n.d.).
@@ -257,6 +259,21 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
     expect(count(summary, />Aucun élément identifié</g)).toBe(4);
     expect(summary).not.toContain('data-money-cents="0"');
     expect(summary).toContain('href="/e/demo/studio-rh/masse-salariale?annee=2026&amp;de=01&amp;a=02#actual-non-recurring"');
+  });
+  it("reprend l’indemnité du bulletin dans la carte RC sans la convertir en coût chargé", async () => {
+    const previous = state.ctx;
+    const syncId = "11111111-1111-4111-8111-111111111111";
+    try {
+      state.ctx = { ...(previous as object), read: { syncId, startedAt: new Date("2026-03-03T10:00:00Z"), months: input.months } };
+      state.actualEvents = [{ id: "33333333-3333-4333-8333-333333333333", syncId, month: "2026-01", kind: "rupture-conventionnelle", chargedCents: null, contractKeys: ["payfit:CONTRAT_RC_PRIVE_FICTIF"], note: "JUSTIFICATIF_RC_PRIVE_FICTIF" }];
+      state.rcScan = { version: 1, id: "22222222-2222-4222-8222-222222222222", payrollSyncId: syncId, companyId: "SOCIETE_FICTIVE", from: "2026-01", to: "2026-01", status: "complete", startedAt: "2026-02-01T08:00:00.000Z", finishedAt: "2026-02-01T08:01:00.000Z", closedMonths: ["2026-01"], unavailableMonths: [], totalCollaborators: 1, completedCollaborators: 1, checkedPayslips: 1, issues: [], records: [{ month: "2026-01", collaboratorId: "COLLAB_RC_PRIVE_FICTIF", contractId: "CONTRAT_RC_PRIVE_FICTIF", payslipId: "PDF_RC_PRIVE_FICTIF", pdfHash: "a".repeat(64), parserVersion: "rc-fictif-v1", status: "identified", code: "identified", indemnityCents: 98765, components: [{ label: "Indemnité de rupture conventionnelle", amountCents: 98765, page: 1, line: 8 }] }] };
+      const html = await page({ annee: "2026", de: "01", a: "01" });
+      const summary = summaryPanel(html, "ms-non-recurring-summary");
+      expect(summary).toContain('data-money-cents="98765"'); expect(summary).toContain("Indemnité RC · bulletin");
+      expect(summary).toContain("Coût chargé identifié : n.d."); expect(summary).toContain("1 élément identifié");
+      expect(html.match(/data-testid="ms-tile-non-recurring"[\s\S]*?<\/div>/)?.[0]).toContain("n.d.");
+      expect(html).not.toMatch(/COLLAB_RC_PRIVE|CONTRAT_RC_PRIVE|PDF_RC_PRIVE|JUSTIFICATIF_RC_PRIVE/);
+    } finally { state.ctx = previous; }
   });
   it("une RC sans montant et un tuilage chiffré sont visibles dès la synthèse, sans leurs sources individuelles", async () => {
     const previous = state.ctx;

@@ -10,6 +10,10 @@ import { requireWorkspace } from "@/lib/workspace";
 import { disconnectSource } from "../actions";
 import { ConnectForm, SyncForm } from "../Forms";
 import { Empty, PageHead, Pill, syncTone } from "../ui";
+import { getRcPayslipScan } from '@/lib/payroll/rc-payslips-store';
+import { RcPayslipForm } from '../RcPayslipForm';
+import { AutoRefresh } from '@/components/AutoRefresh';
+import { formatMonth } from '@/lib/dates';
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +38,9 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
   const isAdmin = workspace.role === "admin";
   const canSync = hasAtLeast(workspace.role, "editor");
   const [conn, syncs] = await Promise.all([getConnection(workspace.id, source), listSyncs(workspace.id, source)]);
+  const rc = source === 'payfit' ? await getRcPayslipScan(workspace.id) : null;
+  const currentMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit' }).format(new Date());
+  const activeMonths = (syncs.find(s => s.status === 'applied')?.scope as { months?: string[] } | undefined)?.months ?? [];
 
   // Où en est la source : d'après la connexion et l'historique, rien d'autre.
   const running = syncs.some((s) => s.status === "running");
@@ -71,6 +78,22 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
           Un aperçu attend une validation (lancé le {dateTimeFmt.format(preview.startedAt)}). <a href={`/e/${slug}/donnees/synchro/${preview.id}`}>Ouvrir l'aperçu</a>
         </p>
       )}
+
+      {source === 'payfit' && conn && <section className="panel" id="indemnites-rc" data-testid="rc-payslip-source">
+        <h2>Indemnités de rupture conventionnelle</h2>
+        <p className="desc">Lecture automatique des lignes d’indemnité sur les bulletins PDF des mois clôturés. Le montant du bulletin reste distinct du coût chargé.</p>
+        {rc && <dl className="facts dn-facts" data-testid="rc-payslip-progress">
+          <div><dt>Statut</dt><dd>{rc.status === 'running' ? 'Lecture en cours' : rc.status === 'complete' ? 'Lecture terminée' : rc.status === 'partial' ? 'Vigilance · lecture partielle' : 'Lecture interrompue'}</dd></div>
+          <div><dt>Période demandée</dt><dd>{formatMonth(rc.from)} → {formatMonth(rc.to)}</dd></div>
+          <div><dt>Dernière paie clôturée contrôlée</dt><dd>{rc.closedMonths.length ? formatMonth(rc.closedMonths.at(-1)!) : 'n.d.'}</dd></div>
+          <div><dt>Progression</dt><dd>{rc.completedCollaborators} / {rc.totalCollaborators} collaborateurs · {rc.checkedPayslips} bulletins contrôlés</dd></div>
+          <div><dt>Suite</dt><dd><a href={`/e/${slug}/studio-rh/masse-salariale?annee=${rc.to.slice(0, 4)}&de=01&a=${rc.closedMonths.at(-1)?.slice(5) ?? rc.to.slice(5)}#rc-payslip-details`}>Voir les indemnités dans la synthèse →</a></dd></div>
+        </dl>}
+        {rc?.status === 'running' && <AutoRefresh everyMs={5000} />}
+        {rc?.status === 'failed' && <p className="notice">La lecture n’a pas abouti. Vérifie la connexion PayFit puis relance ; les déclarations et le journal restent conservés.</p>}
+        {canSync && <RcPayslipForm slug={slug} from={rc?.from ?? activeMonths[0] ?? monthsAgo(23)} to={rc?.to ?? currentMonth} running={rc?.status === 'running'} />}
+        <details className="ms-read-details"><summary>Vigilance et couverture</summary><p className="desc">Clair recherche les bulletins des collaborateurs accessibles et de ceux connus dans les anciennes lectures de cette société. Un collaborateur jamais connu ou devenu inaccessible peut manquer. Les bulletins rectificatifs multiples et les montants ambigus sont signalés sans addition automatique. Aucun taux de charges n’est appliqué à l’indemnité.</p></details>
+      </section>}
 
       <div className="dn-split">
         <section className="panel" id="connexion">

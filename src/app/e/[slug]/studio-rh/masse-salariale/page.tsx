@@ -29,6 +29,9 @@ import { personLabel } from "@/lib/rh/view";
 import { buildActualNonRecurring } from "@/lib/payroll/non-recurring";
 import { SyntheseDisclosure } from "./SyntheseDisclosure";
 import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
+import { buildRcPayslipPeriod } from "@/lib/payroll/rc-payslips";
+import { getRcPayslipScan } from "@/lib/payroll/rc-payslips-store";
+import { RcPayslipDetails } from "./RcPayslipDetails";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +104,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const { fullInput, notices, vue, aff, knownServices, serviceValue, input, years, year, lastOfYear, from, to, months, prevMonths, cur, prev, evo, etpCur, etpPrev, cost, costPrev, serviceRows, totalCur, totalPrev, totalEvo, serviceNd, showDsn } = synthese;
   const editable = ctx.kpi.collab.workspace.role !== "reader";
   const actualEvents = vue !== "paie-compta" ? await listActualEvents(ctx.kpi.collab.workspace.id) : [];
+  const rcScan = ctx.source === "payfit" && vue !== "paie-compta" ? await getRcPayslipScan(ctx.kpi.collab.workspace.id) : null;
+  const rcPeriod = buildRcPayslipPeriod(rcScan, months, ctx.read?.syncId ?? null, actualEvents, serviceValue !== undefined);
   const actualVersions = Object.fromEntries(actualEvents.map((event) => [event.id, actualEventVersion(event)]));
   const people = new Map(ctx.kpi.collab.data?.persons.map((person) => [person.personKey, person]));
   const actualContracts = editable ? (ctx.kpi.collab.data?.contracts ?? []).map((contract) => ({ key: contract.contractKey, label: `${personLabel(contract.personKey ? people.get(contract.personKey) : null) ?? "Contrat sans nom"} · ${contract.startDate ?? "début n.d."}` })) : [];
@@ -201,7 +206,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       )}
     </MsRead>
   );
-  const nonRecurringDetails = <ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} />;
+  const nonRecurringDetails = <><ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} /><RcPayslipDetails slug={slug} period={rcPeriod} scan={rcScan} editable={editable} contracts={actualContracts} /></>;
   const periodControls = <PeriodBar
     years={years}
     year={year}
@@ -336,7 +341,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
             </section>}
           </div>
-          <ActualNonRecurringSummary rows={nonRecurring?.rows ?? []} href={href({ extra: "#actual-non-recurring" })} testid="ms-non-recurring-summary" />
+          <ActualNonRecurringSummary rows={nonRecurring?.rows ?? []} href={href({ extra: "#actual-non-recurring" })} testid="ms-non-recurring-summary" rc={rcPeriod} />
           <div className="ms-synthese-aggregate-toolbar" data-ms-screen-only>
             <ViewSwitch testid="ms-summary-periodicity" caption="Vue des répartitions" label="Vue de Brut et cotisations et de Répartition par service" current={repartition} options={[
               { key: "cumule", label: "Cumulé", href: href({ repartition: "cumule" }) },

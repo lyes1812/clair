@@ -10,6 +10,8 @@ import { periodLabel, serviceLabel, syntheseOf } from "../synthese-data";
 import { monthlySheet, servicesMonthsSheet, servicesSheet } from "./sheets";
 import { listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { actualNonRecurringSheet } from "@/lib/payroll/non-recurring-export";
+import { getRcPayslipScan } from "@/lib/payroll/rc-payslips-store";
+import { rcPayslipSheet } from "@/lib/payroll/rc-payslips-export";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +43,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
     ...(s.notices.length ? [{ label: "Paramètres ignorés", value: s.notices.join(" ; ") }] : []),
   ];
   const sheets: SheetSpec[] = [monthlySheet({ ...s, dsn: ctx.dsn })];
-  sheets.push(actualNonRecurringSheet(s.input, await listActualEvents(workspace.id), s.months, ctx.read?.syncId ?? null));
+  const actualEvents = await listActualEvents(workspace.id);
+  sheets.push(actualNonRecurringSheet(s.input, actualEvents, s.months, ctx.read?.syncId ?? null));
+  const rcScan = await getRcPayslipScan(workspace.id);
+  if (rcScan) sheets.push(rcPayslipSheet(rcScan, s.months, ctx.read?.syncId ?? null, actualEvents, s.serviceValue !== undefined));
   if (ctx.service.axis && s.serviceRows.length > 0) {
     sheets.push(servicesSheet({ rows: s.serviceRows, totalCur: s.totalCur, totalPrev: s.totalPrev, totalEvo: s.totalEvo, year: s.year }));
     sheets.push(servicesMonthsSheet({ rows: s.serviceRows, totalCur: s.totalCur, months: s.months }));

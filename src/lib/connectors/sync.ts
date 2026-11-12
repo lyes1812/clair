@@ -4,7 +4,7 @@ import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, decryptSecret, encryptSecret, sha256 } from "@/lib/crypto";
 import { recordEvent } from "@/lib/events";
 import { ProviderError } from "./http";
-import { PROVIDERS, type VerifiedConnection } from "./providers";
+import { PROVIDERS, payfitClientFor, type VerifiedConnection } from "./providers";
 import { sourceFile } from "@/db/schema";
 import type { CollectionOutcome, ProviderId, SourceId, SourceRecordInput } from "./types";
 
@@ -124,6 +124,12 @@ async function readSecret(workspaceId: string, provider: ProviderId): Promise<{ 
   } catch {
     throw new ProviderError("key_rejected", "clé enregistrée illisible : reconnectez la source");
   }
+}
+
+// Les lecteurs auxiliaires obtiennent un client serveur, jamais la clé en clair.
+export async function configuredPayfitClient(workspaceId: string) {
+  const { apiKey, companyId } = await readSecret(workspaceId, "payfit");
+  return { client: payfitClientFor(apiKey), companyId };
 }
 
 // --- Synchronisations
