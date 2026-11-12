@@ -1,5 +1,5 @@
 import { requireWorkspace } from "@/lib/workspace";
-import { buildCashPlan, emptyCashPlan, FLOW_CATEGORIES, MAX_AMOUNT_CENTS, openSupplierItems, type CashPlanSettings, type FlowCategoryId, type OpenItems, type PlanStart } from "./cashplan";
+import { buildCashPlan, buildScenarioPlan, emptyCashPlan, FLOW_CATEGORIES, MAX_AMOUNT_CENTS, openSupplierItems, type CashPlanSettings, type FlowCategoryId, type OpenItems, type PlanStart } from "./cashplan";
 import { readCrisis, type CrisisQuery } from "./context";
 import type { DebtNatureId } from "./model";
 import { CashPlanError, getCashPlan, readSupplierLines } from "./store";
@@ -45,10 +45,15 @@ export async function loadCashContext(slug: string, query: CrisisQuery) {
   const suppliers = position.kind === "value" ? position.natures.find((n) => n.id === "suppliers") ?? null : null;
   const supplierNet = suppliers && suppliers.debt.cents !== null && suppliers.debitBalances.cents !== null ? suppliers.debt.cents - suppliers.debitBalances.cents : null;
 
+  const plan = buildCashPlan(start, startReason, settings);
+  // Scénario explicitement choisi : aucun scénario n'est affiché par défaut.
+  const scenario = query.scenario ? settings.scenarios.find((item) => item.id === query.scenario) ?? null : null;
+  if (query.scenario && !scenario) notices.push("Scénario demandé indisponible dans cet espace : le plan de base est affiché.");
+
   const { source: _source, ...shown } = crisis;
   return {
     ...shown, notices, settings, settingsUnreadable, fecStart, fecReason,
-    plan: buildCashPlan(start, startReason, settings),
+    plan, scenarioPlan: scenario ? buildScenarioPlan(plan, settings, scenario) : null,
     toPlan, openItems, supplierNet, prefill: prefillOf(query),
   };
 }

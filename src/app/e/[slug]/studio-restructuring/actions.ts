@@ -11,7 +11,7 @@ import { recordEvent } from "@/lib/events";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { exitFromForm } from "@/lib/restructuring/forms";
 import { CRISIS_RANKS_KEY, ranksFromForm } from "@/lib/restructuring/crisis/ranks";
-import { flowFromForm, MAX_FLOWS, startFromForm } from "@/lib/restructuring/crisis/cashplan";
+import { flowFromForm, MAX_FLOWS, MAX_MEASURES, MAX_SCENARIOS, measureFromForm, scenarioNameFromForm, startFromForm } from "@/lib/restructuring/crisis/cashplan";
 import { CashPlanError, updateCashPlan } from "@/lib/restructuring/crisis/store";
 import { setSetting } from "@/lib/settings";
 import { requireWorkspace } from "@/lib/workspace";
@@ -109,4 +109,72 @@ export async function saveCashStartAction(slug: string, _previous: FormState, fo
   catch (error) { return cashFailure(error); }
   revalidatePath(`/e/${slug}/studio-restructuring`);
   return { ok: values.start ? "Solde de départ saisi enregistré." : "Le plan part du solde du FEC." };
+}
+
+/** Cap 13 : crée un scénario vide (le plan de base n’est pas modifié), puis l’ouvre. */
+export async function createCashScenarioAction(slug: string, _previous: FormState, form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  let name: string;
+  try { name = scenarioNameFromForm(form); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Nom invalide." }; }
+  const id = randomUUID();
+  try {
+    await updateCashPlan(workspace.id, session.user.id, (current) => {
+      if (current.scenarios.length >= MAX_SCENARIOS) throw new CashPlanError(`${MAX_SCENARIOS} scénarios au plus : supprime un scénario avant d’en créer un autre.`);
+      if (current.scenarios.some((scenario) => scenario.name.toLowerCase() === name.toLowerCase())) throw new CashPlanError("Un scénario porte déjà ce nom.");
+      return { ...current, scenarios: [...current.scenarios, { id, name, measures: [] }] };
+    }, "scenario-created");
+  } catch (error) { return cashFailure(error); }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  const query = new URLSearchParams({ vue: "cash", scenario: id });
+  const exercice = String(form.get("exercice") ?? "");
+  const arrete = String(form.get("arrete") ?? "");
+  if (exercice && exercice.length <= 255) query.set("exercice", exercice);
+  if (isIsoDate(arrete)) query.set("date", arrete);
+  redirect(`/e/${slug}/studio-restructuring?${query}#cash-scenario`);
+}
+
+/** Cap 13 : supprime un scénario et ses mesures. Le plan de base est inchangé. */
+export async function deleteCashScenarioAction(slug: string, scenarioId: string, _previous: FormState, _form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  try { await updateCashPlan(workspace.id, session.user.id, (current) => ({ ...current, scenarios: current.scenarios.filter((scenario) => scenario.id !== scenarioId) }), "scenario-removed"); }
+  catch (error) { return cashFailure(error); }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  return { ok: "Scénario supprimé." };
+}
+
+/** Cap 13 : ajoute une mesure à un scénario. Une ligne de base ne porte qu’une mesure par scénario. */
+export async function addCashMeasureAction(slug: string, scenarioId: string, _previous: FormState, form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  let measure;
+  try { measure = measureFromForm(form, randomUUID()); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Mesure invalide." }; }
+  try {
+    await updateCashPlan(workspace.id, session.user.id, (current) => {
+      const scenario = current.scenarios.find((item) => item.id === scenarioId);
+      if (!scenario) throw new CashPlanError("Scénario introuvable. Recharge la page.");
+      if (scenario.measures.length >= MAX_MEASURES) throw new CashPlanError(`${MAX_MEASURES} mesures au plus par scénario.`);
+      if (measure.kind !== "encaissement") {
+        const flow = current.flows.find((item) => item.id === measure.flowId);
+        if (!flow) throw new CashPlanError("La ligne visée n’existe plus dans le plan de base. Recharge la page.");
+        if (flow.direction !== "out") throw new CashPlanError("Seul un décaissement peut être reporté ou étalé.");
+        if (scenario.measures.some((item) => item.kind !== "encaissement" && item.flowId === measure.flowId)) throw new CashPlanError("Cette ligne porte déjà une mesure dans ce scénario : supprime-la avant d’en saisir une autre.");
+      }
+      return { ...current, scenarios: current.scenarios.map((item) => item.id === scenarioId ? { ...item, measures: [...item.measures, measure] } : item) };
+    }, "measure-added");
+  } catch (error) { return cashFailure(error); }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  return { ok: "Mesure ajoutée au scénario." };
+}
+
+/** Cap 13 : supprime une mesure d’un scénario. */
+export async function deleteCashMeasureAction(slug: string, scenarioId: string, measureId: string, _previous: FormState, _form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  try {
+    await updateCashPlan(workspace.id, session.user.id, (current) => ({
+      ...current, scenarios: current.scenarios.map((item) => item.id === scenarioId ? { ...item, measures: item.measures.filter((measure) => measure.id !== measureId) } : item),
+    }), "measure-removed");
+  } catch (error) { return cashFailure(error); }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  return { ok: "Mesure supprimée." };
 }

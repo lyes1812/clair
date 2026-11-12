@@ -11,7 +11,7 @@ vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
 vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error(`REDIRECT ${url}`); } }));
 import { loadCrisisContext } from "@/lib/restructuring/crisis/context";
 import { CRISIS_RANKS_KEY } from "@/lib/restructuring/crisis/ranks";
-import { addCashFlowAction, deleteCashFlowAction, saveCashStartAction, saveCrisisRanksAction } from "@/app/e/[slug]/studio-restructuring/actions";
+import { addCashFlowAction, addCashMeasureAction, createCashScenarioAction, deleteCashFlowAction, deleteCashMeasureAction, deleteCashScenarioAction, saveCashStartAction, saveCrisisRanksAction } from "@/app/e/[slug]/studio-restructuring/actions";
 import { loadCashContext } from "@/lib/restructuring/crisis/cash-context";
 import { emptyCashPlan, type CashPlanSettings } from "@/lib/restructuring/crisis/cashplan";
 
@@ -161,5 +161,62 @@ describe("Cap 13 : écritures du plan réservées aux éditeurs", () => {
     const state = await saveCashStartAction("fictif", undefined, form({ startDate: "", startAmount: "", overdraft: "8000" }));
     expect((await mocks.update.mock.results[0].value) as CashPlanSettings).toMatchObject({ start: null, overdraftCents: 800_000 });
     expect(state?.ok).toContain("FEC");
+  });
+});
+
+describe("Cap 13 : scénarios, choix explicite et écritures réservées aux éditeurs", () => {
+  const form = (entries: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(entries)) f.set(k, v); return f; };
+  const out = { id: "out", label: "Décaissement fictif", category: "suppliers", direction: "out", amountCents: 100, date: "2026-10-10", recurrence: "once", until: null } as const;
+  const inflow = { ...out, id: "in", direction: "in" } as const;
+  const stored = (measures: CashPlanSettings["scenarios"][number]["measures"] = []): CashPlanSettings => ({ ...emptyCashPlan(), flows: [out, inflow], scenarios: [{ id: "sc1", name: "Moratoire fictif", measures }] });
+  const applied = async () => (await mocks.update.mock.results.at(-1)!.value) as CashPlanSettings;
+  beforeEach(() => {
+    mocks.plan.mockResolvedValue(stored());
+    mocks.update.mockImplementation(async (_ws: string, _actor: string, change: (c: CashPlanSettings) => CashPlanSettings) => change(stored([{ id: "m0", kind: "report", flowId: "out", weeks: 1 }])));
+  });
+  it("aucun scénario affiché par défaut ; un identifiant inconnu ne montre que le plan de base", async () => {
+    expect((await loadCashContext("fictif", {})).scenarioPlan).toBeNull();
+    const unknown = await loadCashContext("fictif", { scenario: "autre-espace" });
+    expect(unknown.scenarioPlan).toBeNull(); expect(unknown.notices.join(" ")).toContain("Scénario demandé indisponible");
+    const chosen = await loadCashContext("fictif", { scenario: "sc1" });
+    expect(chosen.scenarioPlan?.kind === "value" && chosen.scenarioPlan.scenario.name).toBe("Moratoire fictif");
+  });
+  it("un lecteur refusé n’écrit rien", async () => {
+    mocks.auth.mockRejectedValue(new Error("404"));
+    await expect(createCashScenarioAction("fictif", undefined, form({ name: "S" }))).rejects.toThrow("404");
+    await expect(deleteCashScenarioAction("fictif", "sc1", undefined, form({}))).rejects.toThrow("404");
+    await expect(addCashMeasureAction("fictif", "sc1", undefined, form({ kind: "report", flowId: "out", weeks: "2" }))).rejects.toThrow("404");
+    await expect(deleteCashMeasureAction("fictif", "sc1", "m0", undefined, form({}))).rejects.toThrow("404");
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it("création : scénario vide ajouté puis ouvert ; nom en double ou sixième scénario refusés", async () => {
+    await expect(createCashScenarioAction("fictif", undefined, form({ name: "Cession fictive", exercice: "", arrete: "" }))).rejects.toThrow(/REDIRECT \/e\/fictif\/studio-restructuring\?vue=cash&scenario=[0-9a-f-]{36}#cash-scenario/);
+    expect((await applied()).scenarios.map((s) => [s.name, s.measures.length])).toEqual([["Moratoire fictif", 1], ["Cession fictive", 0]]);
+    mocks.update.mockImplementation(async (_ws: string, _actor: string, change: (c: CashPlanSettings) => CashPlanSettings) => change(stored()));
+    expect((await createCashScenarioAction("fictif", undefined, form({ name: "moratoire FICTIF" })))?.error).toContain("déjà ce nom");
+    mocks.update.mockImplementation(async (_ws: string, _actor: string, change: (c: CashPlanSettings) => CashPlanSettings) => change({ ...emptyCashPlan(), scenarios: Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, name: `S${i}`, measures: [] })) }));
+    expect((await createCashScenarioAction("fictif", undefined, form({ name: "Sixième" })))?.error).toContain("5 scénarios");
+  });
+  it("mesure : ajoutée au seul scénario visé, dans l’espace vérifié", async () => {
+    const state = await addCashMeasureAction("fictif", "sc1", undefined, form({ kind: "encaissement", label: "Cession fictive", nature: "cession", amount: "1000", date: "2026-10-20" }));
+    expect(mocks.update).toHaveBeenCalledWith("espace-fictif", "editeur-fictif", expect.any(Function), "measure-added");
+    expect((await applied()).scenarios[0].measures.map((m) => m.kind)).toEqual(["report", "encaissement"]);
+    expect(state?.ok).toBeTruthy();
+  });
+  it("mesure refusée : ligne déjà visée, encaissement, ligne ou scénario introuvable, saisie invalide", async () => {
+    expect((await addCashMeasureAction("fictif", "sc1", undefined, form({ kind: "etalement", flowId: "out", count: "3", frequency: "weekly", firstDate: "2026-10-20" })))?.error).toContain("déjà une mesure");
+    expect((await addCashMeasureAction("fictif", "sc1", undefined, form({ kind: "report", flowId: "in", weeks: "2" })))?.error).toContain("décaissement");
+    expect((await addCashMeasureAction("fictif", "sc1", undefined, form({ kind: "report", flowId: "absente", weeks: "2" })))?.error).toContain("n’existe plus");
+    expect((await addCashMeasureAction("fictif", "inconnu", undefined, form({ kind: "report", flowId: "out", weeks: "2" })))?.error).toContain("introuvable");
+    mocks.update.mockClear();
+    expect((await addCashMeasureAction("fictif", "sc1", undefined, form({ kind: "report", flowId: "out", weeks: "99" })))?.error).toContain("1 à 52");
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+  it("suppression d’une mesure ou d’un scénario : le plan de base est inchangé", async () => {
+    await deleteCashMeasureAction("fictif", "sc1", "m0", undefined, form({}));
+    expect((await applied()).scenarios[0].measures).toEqual([]);
+    await deleteCashScenarioAction("fictif", "sc1", undefined, form({}));
+    const after = await applied();
+    expect(after.scenarios).toEqual([]); expect(after.flows.map((f) => f.id)).toEqual(["out", "in"]);
   });
 });

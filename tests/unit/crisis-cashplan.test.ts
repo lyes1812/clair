@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildCashPlan, emptyCashPlan, flowFromForm, mondayOf, occurrences, openSupplierItems, parseCashPlan, startFromForm,
-  type CashFlow, type CashPlanSettings, type PlanStart, type SupplierLine,
+  buildCashPlan, buildScenarioPlan, emptyCashPlan, flowFromForm, measureFromForm, mondayOf, occurrences, openSupplierItems, parseCashPlan, scenarioNameFromForm, startFromForm,
+  type CashFlow, type CashPlanSettings, type Measure, type PlanStart, type Scenario, type SupplierLine,
 } from "@/lib/restructuring/crisis/cashplan";
 
 // Cas de référence écrit à la main (société fictive). Départ le mercredi 04/03/2026, solde saisi de 20 000,00 €.
@@ -90,7 +90,7 @@ describe("Cap 13 : trésorerie à 13 semaines, plan de base", () => {
 describe("Cap 13 : paramètre stocké et saisies du plan", () => {
   const stored = { revision: 3, start: { date: "2026-03-04", cents: -1200 }, overdraftCents: 500_000, flows: [FLOWS[0], FLOWS[6]] };
   it("lecture stricte : une valeur invalide rend l’ensemble illisible", () => {
-    expect(parseCashPlan(stored)).toEqual(stored);
+    expect(parseCashPlan(stored)).toEqual({ ...stored, scenarios: [] }); // plan enregistré avant les scénarios
     expect(parseCashPlan(emptyCashPlan())).toEqual(emptyCashPlan());
     for (const broken of [
       { ...stored, flows: [{ ...FLOWS[0], amountCents: 0 }] }, { ...stored, flows: [{ ...FLOWS[0], category: "inconnue" }] },
@@ -144,5 +144,113 @@ describe("Cap 13 : factures fournisseurs non lettrées, proposées à la saisie"
     expect(openSupplierItems([line({ creditCents: 100, letteringKnown: false })], "2026-02-28")).toEqual({ kind: "nd", reason: expect.stringContaining("lettrage") });
     expect(openSupplierItems([line({ creditCents: null })], "2026-02-28").kind).toBe("nd");
     expect(openSupplierItems([], "2026-02-28")).toEqual({ kind: "value", items: [], count: 0, totalCents: 0 });
+  });
+});
+
+// Cas de référence écrit à la main, sur le plan de base ci-dessus :
+//  - report de 4 semaines de l'URSSAF (9 000,00 du 16/03, S3 → 13/04, S7) ;
+//  - étalement des salaires (3 × 12 000,00 = 36 000,00) en 4 échéances mensuelles de 9 000,00 à partir du 15/04 :
+//    15/04 (S7), 15/05 (S11), 15/06 et 15/07 après la semaine 13 → 18 000,00 reportés ;
+//  - cession d'actif de 10 000,00 le 28/04 (S9).
+describe("Cap 13 : scénarios comparés au plan de base", () => {
+  const MEASURES: Measure[] = [
+    { id: "m1", kind: "report", flowId: "D", weeks: 4 },
+    { id: "m2", kind: "etalement", flowId: "B", count: 4, frequency: "monthly", firstDate: "2026-04-15" },
+    { id: "m3", kind: "encaissement", label: "Cession fictive", nature: "cession", amountCents: 1_000_000, date: "2026-04-28" },
+  ];
+  const scenario = (measures: Measure[] = MEASURES): Scenario => ({ id: "s1", name: "Scénario fictif", measures });
+  const run = (measures: Measure[] = MEASURES, patch: Partial<CashPlanSettings> = {}) => {
+    const base = buildCashPlan(START, "sans objet", settings(patch));
+    const result = buildScenarioPlan(base, settings(patch), scenario(measures));
+    if (result.kind !== "value" || base.kind !== "value") throw new Error("plan non calculable");
+    return { base, result };
+  };
+  it("cas de référence : soldes de fin de semaine du scénario", () => {
+    expect(run().result.plan.weeks.map((w) => w.closing)).toEqual([
+      2_500_000, 2_540_000, 2_580_000, 2_620_000, 2_610_000, 2_600_000, 790_000, 780_000, 1_770_000, 1_760_000, 850_000, 840_000, 830_000,
+    ]);
+  });
+  it("cas de référence : point bas, rupture, écarts et montant reporté après la semaine 13", () => {
+    const { base, result } = run();
+    expect(result.plan.lowPoint).toEqual({ week: 8, cents: 780_000 });
+    expect(result.lowPointDelta).toBe(780_000 - -1_970_000);
+    expect(result.plan.rupture).toBeNull();
+    expect(result.baseRupture?.week).toBe(9);
+    expect(result.beyondCents).toBe(1_800_000);
+    expect(result.comparison[12]).toEqual({ week: 13, base: -1_970_000, scenario: 830_000, delta: 2_800_000 });
+    for (const c of result.comparison) expect(c.delta).toBe(c.scenario - c.base);
+    // Ce que le scénario gagne en fin de plan = encaissement exceptionnel + décaissements sortis de l'horizon.
+    expect(result.comparison[12].delta).toBe(1_000_000 + result.beyondCents);
+    expect(base.weeks.map((w) => w.closing)[12]).toBe(-1_970_000); // le plan de base n'est pas modifié
+  });
+  it("chaque montant du scénario remonte à sa mesure et à la ligne de base", () => {
+    const week7 = run().result.plan.weeks[6].contributions;
+    expect(week7.map((c) => [c.flowId, c.measureId, c.date, c.cents])).toEqual([["D", "m1", "2026-04-13", -900_000], ["B", "m2", "2026-04-15", -900_000], ["C", null, "2026-04-15", -10_000]]);
+    expect(week7[0].label).toContain("reporté de 4 sem., prévu le 16/03/2026");
+    expect(week7[1].label).toContain("échéance 1/4");
+    const week9 = run().result.plan.weeks[8];
+    expect(week9.contributions.find((c) => c.measureId === "m3")).toMatchObject({ flowId: null, cents: 1_000_000 });
+    expect(run().result.plan.rows.find((r) => r.category === "exceptional")).toMatchObject({ direction: "in", label: "Exceptionnels", total: 1_000_000 });
+  });
+  it("étalement : échéances égales, reliquat d’arrondi sur la dernière, total conservé", () => {
+    const flows = [flow("X", { amountCents: 100_000, date: "2026-03-10" })];
+    const { result } = run([{ id: "m", kind: "etalement", flowId: "X", count: 3, frequency: "weekly", firstDate: "2026-03-17" }], { flows });
+    const parts = result.plan.weeks.flatMap((w) => w.contributions).map((c) => [c.date, c.cents]);
+    expect(parts).toEqual([["2026-03-17", -33_333], ["2026-03-24", -33_333], ["2026-03-31", -33_334]]);
+    expect(result.beyondCents).toBe(0);
+  });
+  it("un report au-delà de la semaine 13 sort du plan mais reste compté comme dû", () => {
+    const { result } = run([{ id: "m", kind: "report", flowId: "C", weeks: 12 }]);
+    expect(result.outcomes[0]).toMatchObject({ inapplicable: null, beyondCents: 120_000 });
+    expect(result.plan.rows.some((r) => r.category === "suppliers")).toBe(false);
+    expect(result.comparison[12].delta).toBe(120_000);
+  });
+  it("une mesure qui ne peut pas s’appliquer entièrement n’est pas appliquée, avec sa raison", () => {
+    const { base, result } = run([
+      { id: "a", kind: "report", flowId: "supprimée", weeks: 2 },
+      { id: "b", kind: "report", flowId: "A", weeks: 2 },
+      { id: "c", kind: "etalement", flowId: "E", count: 2, frequency: "weekly", firstDate: "2026-03-20" },
+      { id: "d", kind: "etalement", flowId: "D", count: 2, frequency: "weekly", firstDate: "2026-03-04" },
+      { id: "e", kind: "encaissement", label: "Trop tôt", nature: "autre", amountCents: 5, date: "2026-03-04" },
+      { id: "f", kind: "encaissement", label: "Trop tard", nature: "apport", amountCents: 5, date: "2026-06-01" },
+    ]);
+    expect(result.outcomes.map((o) => o.inapplicable?.split(" :")[0])).toEqual([
+      "la ligne visée a été supprimée du plan de base", "la ligne visée est un encaissement",
+      "la ligne visée n’a aucune occurrence dans les 13 semaines", "première échéance antérieure ou égale à la date de départ",
+      "date antérieure ou égale à la date de départ", "date postérieure à la treizième semaine",
+    ]);
+    expect(result.plan.weeks.map((w) => w.closing)).toEqual(base.weeks.map((w) => w.closing));
+    expect(result.beyondCents).toBe(0);
+  });
+  it("un scénario sans mesure est identique au plan de base ; sans plan de base, n.d.", () => {
+    const { result } = run([]);
+    expect(result.comparison.every((c) => c.delta === 0)).toBe(true);
+    expect(buildScenarioPlan({ kind: "nd", reason: "Aucun solde de départ." }, settings(), scenario())).toEqual({ kind: "nd", reason: "Aucun solde de départ." });
+  });
+  it("paramètre stocké : scénarios lus strictement, une ligne ne porte qu’une mesure par scénario", () => {
+    const stored = { ...emptyCashPlan(), flows: FLOWS, scenarios: [scenario()] };
+    expect(parseCashPlan(stored)).toEqual(stored);
+    const withMeasures = (measures: unknown[]) => parseCashPlan({ ...stored, scenarios: [{ id: "s1", name: "S", measures }] });
+    expect(withMeasures([MEASURES[0], { id: "m9", kind: "etalement", flowId: "D", count: 2, frequency: "weekly", firstDate: "2026-04-01" }])).toBeNull();
+    expect(withMeasures([{ ...MEASURES[0], weeks: 0 }])).toBeNull();
+    expect(withMeasures([{ ...MEASURES[1], count: 1 }])).toBeNull();
+    expect(withMeasures([{ ...MEASURES[2], nature: "inconnue" }])).toBeNull();
+    expect(withMeasures([MEASURES[0], MEASURES[0]])).toBeNull();
+    expect(parseCashPlan({ ...stored, scenarios: Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, name: `S${i}`, measures: [] })) })).toBeNull();
+    expect(parseCashPlan({ ...stored, scenarios: [{ id: "s1", name: "", measures: [] }] })).toBeNull();
+  });
+  const form = (entries: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(entries)) f.set(k, v); return f; };
+  it("saisie des mesures : chaque type validé, refus avec sa raison", () => {
+    expect(measureFromForm(form({ kind: "report", flowId: "D", weeks: "4" }), "id")).toEqual({ id: "id", kind: "report", flowId: "D", weeks: 4 });
+    expect(measureFromForm(form({ kind: "etalement", flowId: "B", count: "4", frequency: "monthly", firstDate: "2026-04-15" }), "id")).toEqual({ id: "id", kind: "etalement", flowId: "B", count: 4, frequency: "monthly", firstDate: "2026-04-15" });
+    expect(measureFromForm(form({ kind: "encaissement", label: "Cession fictive", nature: "cession", amount: "10 000", date: "2026-04-28" }), "id")).toEqual({ id: "id", kind: "encaissement", label: "Cession fictive", nature: "cession", amountCents: 1_000_000, date: "2026-04-28" });
+    for (const [entries, message] of [
+      [{ kind: "report", flowId: "D", weeks: "0" }, "1 à 52"], [{ kind: "report", flowId: "D", weeks: "2,5" }, "1 à 52"], [{ kind: "report", flowId: "", weeks: "2" }, "ligne"],
+      [{ kind: "etalement", flowId: "B", count: "1", frequency: "monthly", firstDate: "2026-04-15" }, "2 à 60"], [{ kind: "etalement", flowId: "B", count: "3", frequency: "annuel", firstDate: "2026-04-15" }, "fréquence"],
+      [{ kind: "etalement", flowId: "B", count: "3", frequency: "weekly", firstDate: "" }, "première échéance"], [{ kind: "encaissement", label: "x", nature: "", amount: "5", date: "2026-04-28" }, "nature"],
+      [{ kind: "encaissement", label: "x", nature: "cession", amount: "0", date: "2026-04-28" }, "positif"], [{ kind: "autre" }, "inconnu"],
+    ] as const) expect(() => measureFromForm(form(entries), "id")).toThrow(message);
+    expect(scenarioNameFromForm(form({ name: "  Moratoire fictif " }))).toBe("Moratoire fictif");
+    expect(() => scenarioNameFromForm(form({ name: "" }))).toThrow("Nom");
   });
 });

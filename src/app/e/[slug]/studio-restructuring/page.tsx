@@ -4,7 +4,7 @@ import { RestructuringView } from "./RestructuringView";
 import { loadCashContext } from "@/lib/restructuring/crisis/cash-context";
 import { CrisisView } from "./CrisisView";
 import { CashPlanView } from "./CashPlanView";
-import { addCashFlowAction, deleteCashFlowAction, saveCashStartAction, saveCrisisRanksAction, saveExitAction } from "./actions";
+import { addCashFlowAction, addCashMeasureAction, createCashScenarioAction, deleteCashFlowAction, deleteCashMeasureAction, deleteCashScenarioAction, saveCashStartAction, saveCrisisRanksAction, saveExitAction } from "./actions";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +22,16 @@ export default async function RestructuringPage({ params, searchParams }: {
   if (query.vue === "cash") {
     const cash = await loadCashContext(slug, query);
     const editable = cash.canEdit && !cash.settingsUnreadable;
+    const selected = cash.scenarioPlan?.kind === "value" ? cash.scenarioPlan.scenario : null;
+    const scenarioActions = {
+      create: createCashScenarioAction.bind(null, slug),
+      remove: Object.fromEntries(cash.settings.scenarios.map((scenario) => [scenario.id, deleteCashScenarioAction.bind(null, slug, scenario.id)])),
+      addMeasure: selected ? addCashMeasureAction.bind(null, slug, selected.id) : undefined,
+      removeMeasure: selected ? Object.fromEntries(selected.measures.map((measure) => [measure.id, deleteCashMeasureAction.bind(null, slug, selected.id, measure.id)])) : {},
+    };
     return <CashPlanView {...cash} addFlow={editable ? addCashFlowAction.bind(null, slug) : undefined} saveStart={editable ? saveCashStartAction.bind(null, slug) : undefined}
-      deleteFlow={editable ? Object.fromEntries(cash.settings.flows.map((flow) => [flow.id, deleteCashFlowAction.bind(null, slug, flow.id)])) : undefined} />;
+      deleteFlow={editable ? Object.fromEntries(cash.settings.flows.map((flow) => [flow.id, deleteCashFlowAction.bind(null, slug, flow.id)])) : undefined}
+      scenarioActions={editable ? scenarioActions : undefined} />;
   }
   const context = await loadRestructuringContext(slug, query);
   const versions = Object.fromEntries(context.proposal?.hypotheses.filter((h) => h.kind === "depart").map((h) => [h.id, sha256(canonicalJson(h))]) ?? []);
