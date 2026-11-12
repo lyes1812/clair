@@ -26,6 +26,7 @@ export type KpiFormProps = {
   kinds: Record<string, OriginKind>; // clé du paramètre → nature de l'origine
   notes: { etp: string | null; turnover: string | null; absence: string | null }; // phrase unique de chaque carte (défauts validés)
   natures: { code: string; label: string }[];
+  headcountNatures?: string[];
   types: { type: string; label: string | null; count: number; inRead: boolean }[];
   readLabel: string | null; // « lecture du 21/10/2026 » ; null si aucune lecture PayFit appliquée
   statuses: { code: string; label: string }[];
@@ -55,10 +56,15 @@ const ItemHead = ({ id, title, help }: { id: string; title: string; help?: React
 const CardNote = ({ id, text }: { id: string; text: string | null }) =>
   text ? <p className="desc pm-origin pm-card-note" data-testid={`setting-kpi-defaults-${id}`}>{text}</p> : null;
 
-export function KpiForm({ slug, values, origins, kinds, notes, natures, types, readLabel, statuses, disabled, helps = {} }: KpiFormProps) {
+export function KpiForm({ slug, values, origins, kinds, notes, natures, headcountNatures = [], types, readLabel, statuses, disabled, helps = {} }: KpiFormProps) {
   const [state, action, pending] = useActionState(saveKpiSettings.bind(null, slug), undefined);
   const selectedNatures = values.turnoverNatures ?? [];
-  const [population, setPopulation] = useState(!selectedNatures.length ? "headcount" : JSON.stringify([...selectedNatures].sort()) === '["01","07"]' ? "cdi" : "custom");
+  const [population, setPopulation] = useState(!selectedNatures.length ? "headcount" : "custom");
+  const [chosenNatures, setChosenNatures] = useState<string[]>([...(selectedNatures.length ? selectedNatures : headcountNatures)]);
+  const choices = [...natures];
+  for (const code of new Set([...chosenNatures, ...headcountNatures])) if (!choices.some((nature) => nature.code === code)) choices.push({ code, label: `Nature sans libellé (${code})` });
+  choices.sort((a, b) => a.code.localeCompare(b.code));
+  const shownNatures = population === 'headcount' ? headcountNatures : chosenNatures;
   return (
     <form className="form" action={action}>
       <Feedback state={state} testid="setting-kpi-status" />
@@ -109,10 +115,15 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
             <CardNote id="turnover" text={notes.turnover} />
             <div className="pm-item" role="group" aria-labelledby="kpi-population-title">
               <ItemHead id="kpi-population-title" title="Population du turnover" />
-              <label className="check"><input type="radio" name="turnoverPopulation" value="headcount" checked={population === "headcount"} onChange={() => setPopulation("headcount")} /><span>Même population que les effectifs</span></label>
-              <label className="check"><input type="radio" name="turnoverPopulation" value="cdi" checked={population === "cdi"} onChange={() => setPopulation("cdi")} data-testid="setting-kpi-turnover-cdi" /><span>CDI uniquement · CDI et CDI intermittent</span></label>
-              <label className="check"><input type="radio" name="turnoverPopulation" value="custom" checked={population === "custom"} onChange={() => setPopulation("custom")} /><span>Choisir les natures de contrats</span></label>
-              {population === "custom" && <div className="pm-checks pm-chips">{natures.map((nature) => <label className="check" key={nature.code}><input type="checkbox" name="turnoverNatures" value={nature.code} defaultChecked={selectedNatures.includes(nature.code)} /><span>{nature.label}</span></label>)}</div>}
+              <label className="check"><input type="radio" name="turnoverPopulation" value="headcount" checked={population === "headcount"} onChange={() => setPopulation("headcount")} data-testid="setting-kpi-turnover-follow-headcount" /><span>Suivre la population des effectifs</span></label>
+              <label className="check"><input type="radio" name="turnoverPopulation" value="custom" checked={population === "custom"} onChange={() => setPopulation("custom")} data-testid="setting-kpi-turnover-custom" /><span>Personnaliser les contrats inclus</span></label>
+              <div className="actions">
+                <button className="btn small" type="button" data-testid="setting-kpi-turnover-cdi" onClick={() => { setPopulation('custom'); setChosenNatures(['01', '07']); }}>CDI uniquement</button>
+                <button className="btn small" type="button" onClick={() => { setPopulation('custom'); setChosenNatures(choices.map((nature) => nature.code)); }}>Tout sélectionner</button>
+              </div>
+              <p className="desc" id="kpi-turnover-natures-help">{population === 'custom' ? 'Coche les natures à inclure ; décoche les CDD, stages ou autres contrats à exclure.' : 'Les cases suivent le réglage des effectifs. Choisis « Personnaliser » pour modifier uniquement le turnover.'}</p>
+              <div className="pm-checks pm-chips" role="group" aria-label="Natures incluses dans le turnover" aria-describedby="kpi-turnover-natures-help" data-testid="setting-kpi-turnover-natures">{choices.map((nature) => <label className="check" key={nature.code}><input type="checkbox" name="turnoverNatures" value={nature.code} disabled={population !== 'custom'} checked={shownNatures.includes(nature.code)} onChange={(event) => setChosenNatures((current) => event.target.checked ? [...current, nature.code] : current.filter((code) => code !== nature.code))} data-testid={`setting-kpi-turnover-nature-${nature.code}`} /><span>{nature.label}</span></label>)}</div>
+              {population === 'custom' && <p className="desc" aria-live="polite">{chosenNatures.length} nature{chosenNatures.length > 1 ? 's' : ''} sélectionnée{chosenNatures.length > 1 ? 's' : ''} pour le turnover.</p>}
               <p className="desc">La même population est retenue pour les entrées, les sorties et l’effectif de base. Les autres indicateurs gardent leur périmètre.</p>
               <Origin id="turnover-population" name="turnoverNatures" kinds={kinds} origins={origins} />
             </div>

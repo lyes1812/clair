@@ -57,7 +57,7 @@ export const KPI_PARSERS: { [K in KpiSettingKey]: (v: unknown) => KpiSettingValu
   forfaitJoursIsOne: bool,
   etpDecimals: (v) => (v === 2 || v === 3 || v === 4 ? v : null),
   turnoverFormula: (v) => (v === "half_sum" || v === "exits_over_start" ? (v as TurnoverFormula) : null),
-  turnoverNatures: (v) => (v === undefined ? [] : Array.isArray(v) && v.every((x) => typeof x === "string" && /^\d{2}$/.test(x)) ? sortedUnique(v) : null),
+  turnoverNatures: (v) => (v === undefined ? [] : Array.isArray(v) && v.length <= 100 && v.every((x) => typeof x === "string" && /^\d{2}$/.test(x)) ? sortedUnique(v) : null),
   excludedExitNatures: (v) => (Array.isArray(v) && v.every((x) => typeof x === "string" && /^\d{2}$/.test(x)) ? sortedUnique(v) : null),
   neutralizeContinuity: bool,
   absenceTypes: (v) => (Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0 && x.length <= 128 && !/\s/.test(x)) ? sortedUnique(v) : null),

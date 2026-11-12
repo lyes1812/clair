@@ -10,10 +10,22 @@ const groupedHeader = () => [
   row(2, [item("TAUX OU %", 360, 50), item("MONTANT", 450, 50), item("MONTANT", 535, 50)]),
 ];
 const groupedRc = (line = 3, value = "1 234,56") => row(line, [item("Indemnité de rupture conventionnelle", 20, 225), item("9 000,00", 280, 40), item("20,00", 360, 50), item(value, 450, 50), item("999,99", 535, 50)]);
+const atY = (label: string, x: number, y: number, width = 50) => ({ ...item(label, x, width), y });
+const staggeredHeader = () => [
+  row(1, [atY("PART SALARIÉ", 340, 620, 60)]),
+  row(2, [atY("DÉSIGNATION", 30, 612, 120), atY("BASE", 245, 612), atY("PART EMPLOYEUR", 480, 612, 90)]),
+  row(3, [atY("NOTE_FICTIVE", 30, 608)]),
+  row(4, [atY("TAUX OU %", 325, 604), atY("MONTANT", 400, 604)]),
+];
+const staggeredRc = (line = 5) => row(line, [atY("Indemnité de rupture conventionnelle", 25, 580, 225), atY("1 234,56", 410, 580)]);
 // PDF minimal créé en mémoire : aucune fixture contenant des données clients.
-function fictionalPdf(grouped = false): Uint8Array {
+function fictionalPdf(grouped = false, staggered = false): Uint8Array {
   const text = (label: string, x: number, y: number) => `BT /F1 9 Tf 1 0 0 1 ${x} ${y} Tm (${label}) Tj ET\n`;
-  const content = grouped
+  const content = staggered
+    ? text("PART SALARIE", 340, 720) + text("DESIGNATION", 30, 712) + text("BASE", 245, 712) + text("PART EMPLOYEUR", 480, 712)
+      + text("NOTE_FICTIVE", 30, 708) + text("TAUX OU %", 325, 704) + text("MONTANT", 400, 704)
+      + text("Indemnite de rupture conventionnelle", 25, 680) + text("9000,00", 245, 680) + text("20,00", 325, 680) + text("1234,56", 410, 680) + text("999,99", 500, 680)
+    : grouped
     ? text("DESIGNATION", 20, 720) + text("BASE", 280, 720) + text("PART SALARIE", 380, 720) + text("PART EMPLOYEUR", 525, 720)
       + text("TAUX OU %", 360, 700) + text("MONTANT", 450, 700) + text("MONTANT", 535, 700)
       + text("Indemnite de rupture conventionnelle", 20, 680) + text("9000,00", 280, 680) + text("20,00", 360, 680) + text("1234,56", 450, 680) + text("999,99", 535, 680)
@@ -105,6 +117,35 @@ describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => 
     const onlyEmployer = groupedRc(); onlyEmployer.items = onlyEmployer.items.filter(item => item.x !== 450);
     expect(parseRcPayslipRows([...groupedHeader(), onlyEmployer])).toMatchObject({ status: "review", code: "amount-column-ambiguous", indemnityCents: null });
   });
+  it("regroupe des parents adjacents décalés verticalement et une sous-entête trois lignes plus bas", () => {
+    expect(parseRcPayslipRows([...staggeredHeader(), staggeredRc()])).toMatchObject({ status: "identified", indemnityCents: 123456, components: [{ amountCents: 123456, page: 1, line: 5 }] });
+  });
+  it.each(["PART SALARIÉ", "PART EMPLOYEUR"])("plusieurs parents voisins %s restent à vérifier", (label) => {
+    const headers = staggeredHeader();
+    headers[1].items.push(atY(label, label === "PART SALARIÉ" ? 345 : 490, 612, 60));
+    expect(parseRcPayslipRows([...headers, staggeredRc()])).toMatchObject({ status: "review", code: "amount-column-unrecognized", indemnityCents: null, components: [] });
+  });
+  it("sans groupe employeur, aucune sous-colonne MONTANT n’est présumée salariale", () => {
+    const headers = staggeredHeader(); headers[1].items = headers[1].items.filter(item => item.text !== "PART EMPLOYEUR");
+    expect(parseRcPayslipRows([...headers, staggeredRc()])).toMatchObject({ status: "review", code: "amount-column-unrecognized", indemnityCents: null });
+  });
+  it("plusieurs MONTANT dans le groupe salarié empêchent le choix d’une valeur", () => {
+    const headers = staggeredHeader(); headers[3].items.push(atY("MONTANT", 380, 604, 20));
+    expect(parseRcPayslipRows([...headers, staggeredRc()])).toMatchObject({ status: "review", code: "amount-column-unrecognized", indemnityCents: null });
+  });
+  it("le taux et le montant employeur ne remplacent pas l’indemnité manquante", () => {
+    const missing = staggeredRc(); missing.items.pop();
+    missing.items.push(atY("20,00", 325, 580), atY("999,99", 500, 580));
+    expect(parseRcPayslipRows([...staggeredHeader(), missing])).toMatchObject({ status: "review", code: "amount-column-ambiguous", indemnityCents: null });
+  });
+  it("une sous-entête fiscale plus bas ne remplace pas les groupes principal vérifiés", () => {
+    const tax = row(8, [atY("Impôts", 30, 550), atY("BASE", 245, 550), atY("TAUX", 325, 550), atY("MONTANT", 500, 550)]);
+    expect(parseRcPayslipRows([...staggeredHeader(), tax, staggeredRc(12)])).toMatchObject({ status: "identified", indemnityCents: 123456 });
+  });
+  it("les titres de groupes de pages différentes ne sont jamais assemblés", () => {
+    const headers = staggeredHeader(); headers[0].page = 2;
+    expect(parseRcPayslipRows([...headers, staggeredRc()])).toMatchObject({ status: "review", code: "amount-column-unrecognized", indemnityCents: null });
+  });
   it("ne renvoie aucun autre texte du bulletin ni montant partiel en cas de doute", () => {
     const value = parseRcPayslipRows([header(), row(2, [item("NOM_FICTIF_CONFIDENTIEL", 20)]), rc("Indemnité rupture conventionnelle", "123,45", 3), rc("Indemnité rupture conventionnelle", "", 4)]);
     expect(value.status).toBe("review");
@@ -123,6 +164,9 @@ describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => 
   });
   it("lit le format groupé PayFit dans un PDF fictif complet en mémoire", async () => {
     expect(await extractRcPayslip(fictionalPdf(true))).toMatchObject({ status: "identified", indemnityCents: 123456, components: [{ label: "Indemnite de rupture conventionnelle", amountCents: 123456, page: 1, line: 3 }] });
+  });
+  it("lit un PDF fictif avec parents sur deux lignes de base et sous-entête décalée", async () => {
+    expect(await extractRcPayslip(fictionalPdf(false, true))).toMatchObject({ parserVersion: "payfit-rc-coordinate-v3", status: "identified", indemnityCents: 123456, components: [{ label: "Indemnite de rupture conventionnelle", amountCents: 123456, page: 1, line: 5 }] });
   });
   it("le diagnostic conserve seulement les mots d’entête autorisés et la géométrie, jamais noms, identifiants ou montants", () => {
     const source = [...groupedHeader(), row(3, [item("NOM_FICTIF_CONFIDENTIEL IDENTIFIANT_SECRET", 20), item("314159,26", 450, 50)]), row(4, [item("MONTANT MOTPRIVE 987654,32", 450, 50)]), groupedRc(5)];

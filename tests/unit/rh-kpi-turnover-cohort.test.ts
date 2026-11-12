@@ -39,6 +39,16 @@ describe('Turnover : cohorte indépendante sur données fictives',()=>{
     const base=input();
     expect(turnover({...base,params:{...base.params,turnoverFormula:'exits_over_start',turnoverNatures:['01','07']}},w)).toMatchObject({kind:'exact',entries:1,exits:1,ratio:{num:1,den:3},base:{kind:'start',persons:3}});
   });
+  it('inclure les CDD ou les stages applique la même sélection aux mouvements et au dénominateur',()=>{
+    const base=input();
+    const withCdd=turnover({...base,params:{...base.params,turnoverNatures:['01','02','07']}},w);
+    expect(withCdd).toMatchObject({kind:'exact',entries:2,exits:2});expect(withCdd.kind==='exact'&&same(withCdd.ratio,{num:1,den:1})).toBe(true);
+    const withStage=turnover({...base,params:{...base.params,turnoverNatures:['01','07','29']}},w);
+    expect(withStage).toMatchObject({kind:'exact',entries:2,exits:1});expect(withStage.kind==='exact'&&same(withStage.ratio,{num:1,den:2})).toBe(true);
+    const all=turnover({...base,params:{...base.params,turnoverNatures:['01','02','07','29']}},w);
+    expect(all).toMatchObject({kind:'exact',entries:3,exits:2});expect(all.kind==='exact'&&same(all.ratio,{num:5,den:6})).toBe(true);
+    expect(base.params.natures).toEqual(['01','02','29']);
+  });
   it('sans paramètre ou avec une liste vide, conserve exactement le calcul historique',()=>{
     const base=input();
     expect(turnoverCohort(base)).toBe(base);

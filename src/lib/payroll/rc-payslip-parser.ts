@@ -1,6 +1,6 @@
 import { toCents } from "@/lib/money";
 
-export const RC_PARSER_VERSION = "payfit-rc-coordinate-v2";
+export const RC_PARSER_VERSION = "payfit-rc-coordinate-v3";
 export type RcPayslipTextItem = { text: string; x: number; y: number; width: number; height?: number };
 export type RcPayslipTextRow = { page: number; line: number; items: RcPayslipTextItem[] };
 export type RcPayslipComponent = { label: string; amountCents: number; page: number; line: number };
@@ -23,7 +23,7 @@ const amount = (text: string): number | null => {
   return toCents(clean);
 };
 type Column = { x: number; role: "employee" | "other" };
-type ParentColumn = { x: number; role: "base" | "employee-group" | "employer-group" };
+type ParentColumn = { x: number; y: number; rowIndex: number; role: "base" | "employee-group" | "employer-group" };
 
 function headerCells(row: RcPayslipTextRow): RcPayslipTextItem[] {
   const out: RcPayslipTextItem[] = [];
@@ -46,28 +46,36 @@ function columnsFor(rows: RcPayslipTextRow[], at: number): Column[] | null {
     const cells = headerCells(rows[index]);
     // Entête PayFit à deux niveaux : la largeur du texte « PART SALARIÉ » n’est pas celle du groupe.
     // Ses bornes viennent des groupes voisins ; les sous-colonnes identifient ensuite taux et montant.
-    const parents = cells.flatMap<ParentColumn>((cell) => {
-      const text = normalized(cell.text), x = cell.x + cell.width / 2;
-      if (text === "base") return [{ x, role: "base" as const }];
-      if (/^(?:part )?salari(?:al|ale|ales|e|es)$/.test(text)) return [{ x, role: "employee-group" as const }];
-      if (/^(?:part )?(?:employeur|patronal|patronale|patronales)$/.test(text)) return [{ x, role: "employer-group" as const }];
-      return [];
-    }).sort((a, b) => a.x - b.x);
+    const parentCells: ParentColumn[] = [];
+    // Les titres de groupe peuvent avoir des lignes de base différentes, tout en occupant la même entête.
+    // Seulement les lignes adjacentes de la même page et un petit écart vertical sont admissibles.
+    for (let neighbor = Math.max(0, index - 1); neighbor <= Math.min(index + 1, at - 1); neighbor++) {
+      if (rows[neighbor].page !== current.page) continue;
+      for (const cell of headerCells(rows[neighbor])) {
+        const text = normalized(cell.text), x = cell.x + cell.width / 2;
+        const role = text === "base" ? "base" : /^(?:part )?salari(?:al|ale|ales|e|es)$/.test(text) ? "employee-group"
+          : /^(?:part )?(?:employeur|patronal|patronale|patronales)$/.test(text) ? "employer-group" : null;
+        if (role) parentCells.push({ x, y: cell.y, rowIndex: neighbor, role });
+      }
+    }
+    const anchors = parentCells.filter((parent) => parent.rowIndex === index);
+    const parents = parentCells.filter((parent) => anchors.some((anchor) => Math.abs(anchor.y - parent.y) <= 12)).sort((a, b) => a.x - b.x);
     const employeeGroups = parents.filter((parent) => parent.role === "employee-group");
     const employerGroups = parents.filter((parent) => parent.role === "employer-group");
-    let baseGroups = parents.filter((parent) => parent.role === "base");
-    // BASE peut être centrée verticalement sur les deux niveaux et donc extraite sur une autre ligne.
-    if (!baseGroups.length && employeeGroups.length === 1 && employerGroups.length === 1) {
-      const adjacent = rows.slice(Math.max(0, index - 1), Math.min(index + 3, at)).filter((row) => row.page === current.page).flatMap(headerCells)
-        .filter((cell) => normalized(cell.text) === "base" && cell.x + cell.width / 2 < employeeGroups[0].x)
-        .map((cell): ParentColumn => ({ x: cell.x + cell.width / 2, role: "base" }));
-      baseGroups = adjacent.filter((column, position) => !adjacent.slice(0, position).some((other) => Math.abs(other.x - column.x) <= 2));
-    }
+    const baseGroups = parents.filter((parent) => parent.role === "base");
+    if (employeeGroups.length > 1 || employerGroups.length > 1 || baseGroups.length > 1 && employeeGroups.length > 0 && employerGroups.length > 0) return null;
     if (employeeGroups.length === 1 && employerGroups.length === 1 && baseGroups.length === 1) {
       const employeeGroup = employeeGroups[0], employerGroup = employerGroups[0], base = baseGroups[0];
       if (base.x < employeeGroup.x && employeeGroup.x < employerGroup.x) {
         const left = (base.x + employeeGroup.x) / 2, right = (employeeGroup.x + employerGroup.x) / 2;
-        const children = rows.slice(index + 1, Math.min(index + 3, at)).filter((row) => row.page === current.page).flatMap(headerCells);
+        const firstParentRow = Math.min(...parents.map((parent) => parent.rowIndex));
+        const childRows: RcPayslipTextRow[] = [];
+        for (const candidate of rows.slice(firstParentRow + 1, Math.min(firstParentRow + 4, at))) {
+          // Les écritures qui suivent ferment l’entête : un autre tableau plus bas ne peut pas la compléter.
+          if (candidate.page !== current.page || monetaryItems(candidate).length) break;
+          childRows.push(candidate);
+        }
+        const children = childRows.flatMap(headerCells);
         const employeeAmounts = children.filter((cell) => normalized(cell.text) === "montant" && cell.x + cell.width / 2 > left && cell.x + cell.width / 2 < right);
         const employeeRates = children.filter((cell) => /^(?:taux|taux ou %|taux salarial)$/.test(normalized(cell.text)) && cell.x + cell.width / 2 > left && cell.x + cell.width / 2 < right);
         const employerAmounts = children.filter((cell) => normalized(cell.text) === "montant" && cell.x + cell.width / 2 > right);

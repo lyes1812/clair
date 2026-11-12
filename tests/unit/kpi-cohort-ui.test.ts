@@ -30,11 +30,25 @@ describe('KPI : lecture compacte et population explicite',()=>{
   expect(html.match(/<details[^>]*data-testid="kpi-tile-absenteeism-nd-help"[^>]*>/)?.[0]).not.toContain(' open');
  });
  it('l’administrateur retrouve le choix CDI enregistré sans changer les champs des effectifs',()=>{
-  const props:KpiFormProps={slug:'fictif',values:{...KPI_DEFAULTS,turnoverNatures:['01','07']},origins:{},kinds:{},notes:{etp:null,turnover:null,absence:null},natures:[{code:'01',label:'CDI'},{code:'02',label:'CDD'},{code:'07',label:'CDI intermittent'}],types:[],readLabel:null,statuses:[{code:'approved',label:'Approuvée'}],disabled:false};
+  const props:KpiFormProps={slug:'fictif',values:{...KPI_DEFAULTS,turnoverNatures:['01','07']},origins:{},kinds:{},notes:{etp:null,turnover:null,absence:null},natures:[{code:'01',label:'CDI'},{code:'02',label:'CDD'},{code:'03',label:'Contrat de mission (intérim)'},{code:'07',label:'CDI intermittent'},{code:'29',label:'Convention de stage'}],headcountNatures:['01','02','29'],types:[],readLabel:null,statuses:[{code:'approved',label:'Approuvée'}],disabled:false};
   const html=renderToStaticMarkup(h(KpiForm,props));
-  expect(html).toMatch(/name="turnoverPopulation"[^>]*value="cdi"[^>]*checked=""|name="turnoverPopulation"[^>]*checked=""[^>]*value="cdi"/);
+  expect(html).toMatch(/name="turnoverPopulation"[^>]*value="custom"[^>]*checked=""|name="turnoverPopulation"[^>]*checked=""[^>]*value="custom"/);
+  const controls=[...html.matchAll(/<input[^>]+>/g)].map(match=>match[0]).filter(tag=>tag.includes('name="turnoverNatures"'));
+  for(const code of ['01','07'])expect(controls.find(tag=>tag.includes(`value="${code}"`))).toContain('checked=""');
+  for(const code of ['02','03','29'])expect(controls.find(tag=>tag.includes(`value="${code}"`))).not.toContain('checked=""');
+  expect(controls).toHaveLength(5);
+  expect(html).toContain('Convention de stage');
+  expect(html).toContain('Contrat de mission (intérim)');
   expect(html).toContain('CDI uniquement');
   expect(html).not.toContain('name="natures"');
   expect(html).toContain('name="fullTimeIsOne"');
+ });
+ it('sans réglage de turnover, suit les effectifs sans bloquer le passage à une sélection libre',()=>{
+  const props:KpiFormProps={slug:'fictif',values:KPI_DEFAULTS,origins:{},kinds:{},notes:{etp:null,turnover:null,absence:null},natures:[{code:'01',label:'CDI'},{code:'02',label:'CDD'},{code:'29',label:'Convention de stage'}],headcountNatures:['01','02','29'],types:[],readLabel:null,statuses:[{code:'approved',label:'Approuvée'}],disabled:false};
+  const html=renderToStaticMarkup(h(KpiForm,props));
+  expect(html).toContain('Suivre la population des effectifs');
+  expect(html).toContain('Personnaliser les contrats inclus');
+  const controls=[...html.matchAll(/<input[^>]+>/g)].map(match=>match[0]).filter(tag=>tag.includes('name="turnoverNatures"'));
+  expect(controls).toHaveLength(3);for(const control of controls){expect(control).toContain('checked=""');expect(control).toContain('disabled=""');}
  });
 });
