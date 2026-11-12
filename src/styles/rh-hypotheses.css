@@ -1,0 +1,115 @@
+/* Hypothèses : la même composition que la Synthèse, adaptée aux écrans de saisie.
+   Les règles de grille, de lecture seule, de pagination et d'impression restent celles des composants. */
+@media screen {
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) h1 {
+    font-family: var(--font);
+    font-size: 36px;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -.025em;
+  }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) .panel {
+    min-width: 0;
+    padding: 20px;
+    gap: 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--clair-radius-card);
+    background: #fff;
+  }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) .panel-head { align-items: flex-start; gap: 12px 20px; }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) .panel-head h2 { font-size: 20px; line-height: 1.3; font-weight: 600; letter-spacing: -.015em; }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) .table-wrap { min-width: 0; max-width: 100%; overscroll-behavior-inline: contain; }
+
+  .rh-studio .hs-crumb { gap: 12px 20px; }
+  .rh-studio .panel.hs-scenario { gap: 16px; }
+  .rh-studio .hs-scn-line { align-items: flex-start; gap: 16px 28px; }
+  .rh-studio .hs-scn-head { gap: 8px 10px; }
+  .rh-studio .hs-scn-head h2 { font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -.02em; }
+  .rh-studio .facts.hs-facts { gap: 8px 22px; }
+  .rh-studio .facts.hs-facts > div { gap: 6px; min-width: 0; }
+  .rh-studio .facts.hs-facts dt { font-size: 11px; font-weight: 400; line-height: 1.4; }
+  .rh-studio .facts.hs-facts dd { font-size: 13px; line-height: 1.4; font-weight: 500; }
+  .rh-studio .hs-context { font-size: 12px; line-height: 1.5; }
+  .rh-studio .hs-bar { padding-top: 16px; gap: 12px 16px; }
+  .rh-studio .hs-manage-body { gap: 16px; padding-top: 16px; }
+  .rh-studio .hs-act-danger { border-radius: var(--clair-radius-card); padding: 16px; gap: 10px; }
+  .rh-studio .hs-switch-list { padding: 8px; border-radius: var(--clair-radius-card); }
+  .rh-studio .hs-switch-list a { min-height: 40px; padding: 10px 12px; border-radius: var(--clair-radius-control); }
+
+  .rh-studio .hs-title, .rh-studio .hr-title { gap: 6px; }
+  .rh-studio .hs-title .desc, .rh-studio .hr-title .desc { font-size: 12px; line-height: 1.5; }
+  .rh-studio .hs-group { padding: 16px; gap: 14px; border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio .hs-group legend { font-size: 13px; font-weight: 600; padding-inline: 6px; }
+  .rh-studio .hs-group .filters { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 14px 16px; }
+  .rh-studio .hs-checks { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px 16px; }
+  .rh-studio .hs-hire { gap: 16px; }
+  .rh-studio .hs-events { gap: 12px; }
+  .rh-studio .hs-events details { padding-inline: 16px; border-radius: var(--clair-radius-card); }
+  .rh-studio .hs-events details[open] { padding-bottom: 16px; }
+  .rh-studio .hs-events summary { min-height: 44px; padding-block: 13px; line-height: 1.4; }
+  .rh-studio summary.hs-disclose { min-height: 36px; padding: 8px 12px; border-radius: var(--clair-radius-control); }
+  .rh-studio summary.hs-disclose.hs-quiet { padding-inline: 0; }
+
+  .rh-studio .hs-search { gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio .hs-search .field-row { min-width: 0; }
+  .rh-studio .hs-tools { padding: 14px; gap: 12px; border-radius: var(--clair-radius-card); background: var(--sidebar-bg); }
+  .rh-studio .hs-tools-row { gap: 10px 14px; }
+  .rh-studio .hs-fill { gap: 8px; }
+  .rh-studio .hs-grid { gap: 12px; }
+  .rh-studio .hs-grid .table-wrap { border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio .hs-grid .month-grid :is(input.input, select.select) { min-height: 36px; font-family: var(--font); font-size: 13px; }
+  .rh-studio .data-table.hs-table :is(th, td) { padding: 10px 12px; line-height: 1.45; }
+  .rh-studio .hs-grid-form > .actions { gap: 12px 16px; }
+  .rh-studio .hs-grid-form[data-tall="1"] > .actions { padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); }
+
+  .rh-studio .facts.hs-tiles { grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+  .rh-studio .facts.hs-tiles > div { gap: 8px; padding: 20px; border-radius: var(--clair-radius-card); }
+  .rh-studio .facts.hs-tiles dt { font-size: 12px; line-height: 1.4; font-weight: 400; }
+  .rh-studio .facts.hs-tiles dd { font-size: 28px; font-weight: 600; line-height: 1.2; letter-spacing: -.025em; }
+  .rh-studio .facts.hs-tiles dd.nd { font-size: 13px; font-weight: 500; line-height: 1.5; letter-spacing: 0; }
+  .rh-studio .facts.hr-tiles { grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 16px; }
+  .rh-studio .hr-tiles .hr-tile { gap: 8px; padding: 20px; border-radius: var(--clair-radius-card); }
+  .rh-studio .hr-tiles .hr-tile dt { font-size: 12px; line-height: 1.4; font-weight: 400; }
+  .rh-studio .hr-tiles .hr-tile dd { font-size: 28px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio .hr-tiles-sm .hr-tile dd { font-size: 24px; }
+  .rh-studio .hr-tiles .hr-tile dd.nd { font-size: 13px; line-height: 1.5; font-weight: 500; letter-spacing: 0; }
+  .rh-studio .hr-stack, .rh-studio .hr-charts, .rh-studio .hr-charts-2 { gap: 20px; }
+  .rh-studio .hr-charts-2 > .hr-block { padding: 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio .hr-subblock { gap: 16px; }
+  .rh-studio .hr-subhead { gap: 8px; }
+  .rh-studio .hr-nd { border-radius: var(--clair-radius-card); }
+  .rh-studio .hr-seg a, .rh-studio .hr-seg span { min-height: 36px; padding: 8px 12px; }
+  .rh-studio .hr-seg > :first-child { border-radius: var(--clair-radius-control) 0 0 var(--clair-radius-control); }
+  .rh-studio .hr-seg > :last-child { border-radius: 0 var(--clair-radius-control) var(--clair-radius-control) 0; }
+}
+
+@media screen and (max-width: 760px) {
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) h1 { font-size: 30px; }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) .panel { padding: 16px; gap: 16px; }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) :is(.panel-head, .hs-scn-line) { gap: 12px; }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) .panel-head h2 { font-size: 18px; }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) :is(button, select, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), summary.hs-disclose) { min-height: 44px; }
+  .rh-studio:has([data-testid="hyp-scenario"], [data-testid="hyp-list"]) :is(select, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])) { font-size: 16px; }
+  .rh-studio .hs-crumb { align-items: flex-start; }
+  .rh-studio .hs-scn-head h2 { font-size: 22px; }
+  .rh-studio .facts.hs-facts { width: 100%; gap: 10px 16px; }
+  .rh-studio .facts.hs-facts > div { flex-wrap: wrap; }
+  .rh-studio .hs-bar { align-items: flex-start; }
+  .rh-studio .hs-bar .inline-form { max-width: 100%; }
+  .rh-studio .hs-dup .field-row { flex-basis: 100%; }
+  .rh-studio .hs-dup .field-row .input { width: 100%; min-width: 0; }
+  .rh-studio .hs-search { align-items: stretch; }
+  .rh-studio .hs-search .field-row, .rh-studio .hs-search .field-row.hs-narrow { flex: 1 1 100%; max-width: none; }
+  .rh-studio .hs-search > .btn { min-height: 44px; }
+  .rh-studio .hs-group { padding: 14px; }
+  .rh-studio .hs-tools { padding: 12px; }
+  .rh-studio .hs-grid .month-grid :is(input.input, select.select) { min-height: 44px; font-size: 16px; }
+  .rh-studio .hs-grid-form[data-tall="1"] > .actions { padding: 12px; }
+  .rh-studio .facts.hr-tiles { grid-template-columns: minmax(0, 1fr); }
+  .rh-studio .facts.hs-tiles > div, .rh-studio .hr-tiles .hr-tile { padding: 16px; }
+  .rh-studio .hr-charts-2 { grid-template-columns: minmax(0, 1fr); }
+  .rh-studio .hr-seg { width: 100%; }
+  .rh-studio .hr-seg a, .rh-studio .hr-seg span { min-height: 44px; flex: 1 1 auto; justify-content: center; }
+  .rh-studio .hs-switch-list a { min-height: 44px; }
+  .rh-studio .hs-row-actions a { display: inline-flex; align-items: center; min-height: 44px; }
+}

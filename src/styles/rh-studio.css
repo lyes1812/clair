@@ -1,0 +1,38 @@
+/* Une même composition de travail dans les cinq familles RH. */
+.rh-studio { display: grid; align-content: start; gap: 20px; min-width: 0; }
+
+@media screen {
+  body:has(.rh-studio) .ws-topbar .ws-features > .mega-btn { background: var(--blue); border-color: var(--blue); color: #fff; }
+  body:has(.rh-studio) .ws-topbar .ws-features > .mega-btn:hover { filter: brightness(.95); }
+  .rh-studio { font-family: var(--font); }
+  .rh-studio h1 { font-size: 36px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio > :is(.tabs, .panel, .facts, .filters, section) { min-width: 0; max-width: 100%; }
+  .rh-studio :is(.table-wrap, .table-wrap.scroll) { min-width: 0; max-width: 100%; }
+  .rh-studio .placeholder { padding: 24px; border-radius: var(--clair-radius-card); }
+  .rh-studio :where(select, textarea, input:not([type="hidden"], [type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"])) { font-family: var(--font); border: 1px solid var(--line); border-radius: var(--clair-radius-control); }
+  .rh-studio :where(select, textarea, input):focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .rh-studio .sy-head-main { gap: 8px; }
+  .rh-studio .sy-head-main > .label { color: var(--muted); font-size: 11px; }
+  .rh-studio .sy-tiles { gap: 16px; }
+  .rh-studio .sy-tile { padding: 20px; gap: 10px; }
+  .rh-studio .sy-tile-value { font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio .sy-tile-compare { margin-top: 2px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .rh-studio .sy-bar { background: #fff; padding: 18px 20px; border-radius: var(--clair-radius-card); }
+  .rh-studio .sy-charts { gap: 20px; }
+  .rh-studio .sy-charts .panel { padding: 20px; }
+}
+
+@media screen and (max-width: 760px) {
+  .rh-studio { gap: 16px; }
+  .rh-studio h1 { font-size: 30px; }
+  .rh-studio .tabs { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; padding-block: 2px; }
+  .rh-studio .tabs > a { display: inline-flex; align-items: center; min-height: 44px; flex: 0 0 auto; white-space: nowrap; }
+  .rh-studio .sy-tiles { grid-template-columns: minmax(0, 1fr); }
+  .rh-studio .sy-tile, .rh-studio .sy-bar, .rh-studio .sy-charts .panel { padding: 16px; }
+  .rh-studio .sy-bar :is(.btn, .select) { min-height: 44px; }
+}
+
+@media print {
+  .rh-studio { display: contents; }
+  .rh-studio .tabs { display: none !important; }
+}

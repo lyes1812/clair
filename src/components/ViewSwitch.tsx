@@ -2,13 +2,13 @@
 
 // Le choix d'affichage conserve l'adresse exacte fournie par chaque écran, avec ses filtres et ses références.
 export type ViewOption = { key: string; label: string; href: string };
-export type ViewSwitchProps = { options: ViewOption[]; current: string; label?: string; testid: string; resolveHref?: (href: string) => string };
+export type ViewSwitchProps = { options: ViewOption[]; current: string; label?: string; caption?: string; testid: string; resolveHref?: (href: string) => string };
 
-export function ViewSwitch({ options, current, label = "Affichage", testid, resolveHref }: ViewSwitchProps) {
+export function ViewSwitch({ options, current, label = "Affichage", caption = "Affichage", testid, resolveHref }: ViewSwitchProps) {
   const selected = options.find((option) => option.key === current) ?? options[0];
   return (
     <label className="view-select" data-testid={testid}>
-      <span>Affichage</span>
+      <span>{caption}</span>
       <select className="select" aria-label={label} value={selected?.href ?? ""} disabled={!selected}
         onChange={(event) => {
           const option = options.find((item) => item.href === event.currentTarget.value);

@@ -116,13 +116,18 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   for (const r of cur.months) if (r.kind === "value") for (const a of r.unclassified) unclassified.set(a.accountId, { name: a.accountName, cents: (unclassified.get(a.accountId)?.cents ?? 0) + a.balanceCents });
   const svcParam = serviceValue === undefined ? "" : `&service=${encodeURIComponent(serviceValue ?? NV)}`;
   const vueParam = vue === "synthese" ? "" : `&vue=${vue}`;
+  const rawRepartition = one(sp.repartition);
+  const repartition = rawRepartition === "mensuelle" ? "mensuelle" : "cumule";
+  if (rawRepartition && !["cumule", "mensuelle"].includes(rawRepartition)) ignore("repartition", rawRepartition, "valeurs : cumule, mensuelle");
+  const repartitionQ = (value: string) => value === "mensuelle" ? "&repartition=mensuelle" : "";
   const affQ = (a: Affichage) => (a === "tout" ? "" : `&affichage=${a}`);
   // Adresse de l'écran : année, mois, service, onglet et affichage courants, sauf ce que l'appel remplace.
-  const href = (o: { y?: number; de?: string; a?: string; svc?: string; v?: string; aff?: Affichage; extra?: string } = {}) =>
-    `${base}?annee=${o.y ?? year}&de=${o.de ?? from}&a=${o.a ?? to}${o.svc ?? svcParam}${o.v ?? vueParam}${affQ(o.aff ?? aff)}${o.extra ?? ""}`;
+  const href = (o: { y?: number; de?: string; a?: string; svc?: string; v?: string; aff?: Affichage; repartition?: "cumule" | "mensuelle"; extra?: string } = {}) =>
+    `${base}?annee=${o.y ?? year}&de=${o.de ?? from}&a=${o.a ?? to}${o.svc ?? svcParam}${o.v ?? vueParam}${affQ(o.aff ?? aff)}${repartitionQ(o.repartition ?? repartition)}${o.extra ?? ""}`;
   const resetQuery = new URLSearchParams();
   if (vue !== "synthese") resetQuery.set("vue", vue);
   if (aff !== "tout") resetQuery.set("affichage", aff);
+  if (repartition === "mensuelle") resetQuery.set("repartition", repartition);
   const resetHref = `${base}${resetQuery.toString() ? `?${resetQuery.toString()}` : ""}`;
   const presets = [
     { label: "Janv.–mars", de: "01", a: "03" },
@@ -201,7 +206,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
     year={year}
     from={from}
     to={to}
-    hidden={{ ...(vue !== "synthese" ? { vue } : {}), ...(aff !== "tout" ? { affichage: aff } : {}) }}
+    hidden={{ ...(vue !== "synthese" ? { vue } : {}), ...(aff !== "tout" ? { affichage: aff } : {}), ...(repartition === "mensuelle" ? { repartition } : {}) }}
     presets={presets}
     resetHref={resetHref}
     service={ctx.service.axis ? { value: serviceValue === undefined ? "" : (serviceValue ?? NV), options: knownServices.map((v) => ({ value: v ?? NV, label: serviceLabel(v) })) } : undefined}
@@ -330,23 +335,37 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
             </section>}
           </div>
-          <div className="ms-synthese-aggregates">
+          <div className="ms-synthese-aggregate-toolbar" data-ms-screen-only>
+            <ViewSwitch testid="ms-summary-periodicity" caption="Vue des répartitions" label="Vue de Brut et cotisations et de Répartition par service" current={repartition} options={[
+              { key: "cumule", label: "Cumulé", href: href({ repartition: "cumule" }) },
+              { key: "mensuelle", label: "Mensualisé", href: href({ repartition: "mensuelle" }) },
+            ]} />
+          </div>
+          <div className={`ms-synthese-aggregates${repartition === "mensuelle" ? " is-monthly" : ""}`}>
             <section className="panel ms-synthese-aggregate" data-testid="ms-synthese-summary-brut">
-              <PanelHead title="Brut et cotisations" desc="Même période · même périmètre" slug={slug} term={MASSE_TERMS.masse} />
-              {cur.kind === "value" ? <Composition brut={cur.brut} cotisations={cur.cotisations} variant="bars" /> : <NdState testid="ms-summary-brut-nd" reason={cur.nd.reason} />}
+              <PanelHead title="Brut et cotisations" desc={`${label(months)} · ${repartition === "mensuelle" ? "par mois" : "cumul sur la période"}`} slug={slug} term={MASSE_TERMS.masse} />
+              {repartition === "mensuelle" ? aff === "tableau" ? <a className="ms-summary-table-link" href={`${tableHref}#ms-tables`}>Tableau mensuel — brut et cotisations</a> : <ChartGuard testid="ms-summary-brut-monthly" title="Brut et cotisations par mois" series={brutCotisSeries} lines={ndList}>
+                <BarChart testid="ms-summary-brut-monthly-chart" label="Brut et cotisations patronales par mois" title="Brut et cotisations par mois" categories={axisN.categories} categoryTitles={axisN.titles} series={brutCotisSeries} unit="eur" height={280} mode="stacked" toggle />
+              </ChartGuard> : cur.kind === "value" ? <Composition brut={cur.brut} cotisations={cur.cotisations} variant="bars" /> : <NdState testid="ms-summary-brut-nd" reason={cur.nd.reason} />}
             </section>
             <section className="panel ms-synthese-aggregate" data-testid="ms-synthese-summary-services">
               <PanelHead title="Répartition par service" slug={slug} term={MASSE_TERMS.service} />
               {ctx.service.axis && serviceRows.length > 0 ? <>
                 {serviceValue !== undefined && <p className="tile-foot">Le filtre Service ne s'applique pas ici : tous les services sont montrés.</p>}
-                <dl className="ms-summary-bars" aria-label="Masse salariale chargée par service">
+                {repartition === "mensuelle" ? aff === "tableau" ? <a className="ms-summary-table-link" href={`${tableHref}#ms-tables`}>Tableau mensuel par service</a> : serviceRows.length <= 8 ? <>
+                  <ChartGuard testid="ms-summary-services-monthly" title="Masse chargée par service et par mois" series={svcMonthSeries} lines={svcNdList}>
+                    <BarChart testid="ms-summary-services-monthly-chart" label="Masse salariale chargée par service et par mois" title="Masse chargée par service et par mois" categories={axisN.categories} categoryTitles={axisN.titles} series={svcMonthSeries} unit="eur" height={280} mode="stacked" toggle />
+                  </ChartGuard>
+                  {svcMonthNd && <p className="tile-foot">Certains mois ne couvrent pas tous les services : voir les raisons et le tableau exact.</p>}
+                  <a className="ms-summary-table-link" href={`${tableHref}#ms-tables`}>Tableau exact par service et par mois</a>
+                </> : <p className="tile-foot">Plus de huit services : la vue mensualisée reste disponible dans le <a href={`${tableHref}#ms-tables`}>tableau exact par service et par mois</a>.</p> : <dl className="ms-summary-bars" aria-label="Masse salariale chargée par service">
                   {serviceRows.map((row, index) => <div className="ms-summary-bar" key={row.value ?? NV}>
                     <dt><a href={href({ svc: `&service=${encodeURIComponent(row.value ?? NV)}` })}>{serviceLabel(row.value)}</a></dt>
                     <dd className={row.cur.kind === "nd" ? "nd" : undefined}>{money(row.cur, (window) => window.masse)}</dd>
                     {row.cur.kind === "value" && <dd className="ms-summary-track" aria-hidden="true"><i style={{ width: `${servicesMax > 0 ? Math.max(0, row.cur.masse) / servicesMax * 100 : 0}%`, background: serviceColor(index) }} /></dd>}
                     {row.cur.kind === "nd" && <dd className="tile-foot ms-summary-reason">{row.cur.nd.reason}</dd>}
                   </div>)}
-                </dl>
+                </dl>}
               </> : <NdState testid="ms-summary-services-nd" reason={ctx.service.axis ? "Aucune ligne de charges de personnel dans le journal sur la période." : `${capital(serviceNd)}.`} action={ctx.service.axis ? undefined : { href: `/e/${slug}/parametres#masse-salariale`, label: "Choisir l'axe du service dans Paramètres" }} />}
             </section>
           </div>
@@ -478,7 +497,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
           )}
 
           {showTable && (
-            <SyntheseDisclosure summary="Tableaux et détail par compte" testid="ms-synthese-tables-details" initiallyOpen={aff === "tableau" || detail !== null}>
+            <SyntheseDisclosure summary="Tableaux et détail par compte" id="ms-tables" testid="ms-synthese-tables-details" initiallyOpen={aff === "tableau" || detail !== null}>
               <section className="panel" data-testid="ms-services">
                 <PanelHead
                   title="Services"

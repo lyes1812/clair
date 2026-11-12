@@ -1,0 +1,129 @@
+/* Lectures de paie et reporting : même composition que la Synthèse, sans modifier son écran ni l'impression. */
+@media screen {
+  .rh-studio:not(:has(.ms-synthese)) .ms-head { gap: 6px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-head h1 { font-size: 36px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-head .desc { font-size: 13px; line-height: 1.5; }
+
+  .rh-studio :is(.pye, .suivi-page, .cx-page, .rs-page, .rs-report) { gap: 20px; min-width: 0; font-family: var(--font); }
+  .rh-studio:not(:has(.ms-synthese)):has(.ms-head) .panel,
+  .rh-studio .rs-page .panel { padding: 20px; gap: 20px; border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-panel-title,
+  .rh-studio .ecart-panel-title { gap: 6px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-title-row h2,
+  .rh-studio .ecart-title-row h2,
+  .rh-studio :is(.pye-head, .suivi-head, .rs-report-head) h2 { font-size: 20px; line-height: 1.3; letter-spacing: -.015em; font-weight: 600; }
+  .rh-studio :is(.pye-panel h3, .suivi-section-head h3, .rs-section-title h3) { font-size: 20px; line-height: 1.3; letter-spacing: -.015em; font-weight: 600; }
+
+  /* Les filtres gardent leurs champs, actions, présélections et paramètres d'adresse. */
+  .rh-studio:not(:has(.ms-synthese)):has(.ms-head) .filters,
+  .rh-studio :is(.pye-filters, .suivi-filters, .rs-period-controls) {
+    min-width: 0;
+    gap: 14px 16px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--clair-radius-card);
+    background: #fff;
+  }
+  .rh-studio .cx-filters .filters.cx-filter-form { border: 0; border-radius: 0 0 var(--clair-radius-card) var(--clair-radius-card); }
+  .rh-studio :is(.pye-filters, .suivi-filters, .ecart-filters, .rs-period-controls) .field-row { min-width: 0; }
+  .rh-studio:not(:has(.ms-synthese)) :is(.ms-controls, .ms-read-body) { gap: 16px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-toolbar { gap: 12px 20px; }
+  .rh-studio .ecart-filter-actions { flex-wrap: wrap; }
+
+  /* Cartes de chiffres : une échelle commune, sans hauteur fixe qui couperait une raison de n.d. */
+  .rh-studio:not(:has(.ms-synthese)) .facts.ms-tiles,
+  .rh-studio :is(.pye-cards, .suivi-tiles, .pont-tiles, .rs-metrics) { gap: 16px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-tiles .ms-tile,
+  .rh-studio :is(.pye-card, .suivi-tile, .pont-tiles > div, .rs-metric) {
+    min-width: 0;
+    padding: 20px;
+    gap: 10px;
+    border-radius: var(--clair-radius-card);
+    background: #fff;
+  }
+  .rh-studio:not(:has(.ms-synthese)) .ms-tiles .ms-tile dt,
+  .rh-studio :is(.pye-card, .suivi-tile, .pont-tiles > div, .rs-metric) dt { font-size: 12px; line-height: 1.4; font-weight: 400; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-tiles .ms-tile dd,
+  .rh-studio :is(.pye-card, .suivi-tile, .pont-tiles > div) dd,
+  .rh-studio .rs-metric-value { font-size: 28px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-tiles .ms-tile dd.nd.long { font-size: 13px; line-height: 1.5; letter-spacing: normal; }
+  .rh-studio .cx-page .facts.ms-tiles.six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  /* Graphiques : mêmes données et palette ; seules la composition et les respirations changent. */
+  .rh-studio:not(:has(.ms-synthese)) .ms-charts { gap: 20px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-charts-split { gap: 20px; }
+  .rh-studio :is(.cx-syn-body, .cx-syn-comp-body, .cx-masse-charts, .cx-bud-charts) { gap: 20px; }
+  .rh-studio :is(.cx-syn-side, .cx-fold, .pye-groups, .pye-scroll, .suivi-table-scroll, .rs-table-scroll) { border-radius: var(--clair-radius-card); }
+  .rh-studio .cx-syn-side { padding: 20px; background: #fff; }
+
+  /* Le second niveau reste accessible et conserve son état ouvert/fermé. */
+  .rh-studio:not(:has(.ms-synthese)) .ms-read-details,
+  .rh-studio :is(.cx-filters, .cx-fold, .pye-group) { border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-read-details > summary,
+  .rh-studio :is(.cx-filters, .cx-fold, .pye-group) > summary { min-height: 44px; padding: 14px 16px; line-height: 1.4; }
+  .rh-studio .cx-fold-body { padding: 16px; gap: 16px; }
+  .rh-studio .cx-chapter-head { gap: 8px; padding-top: 0; }
+  .rh-studio .cx-chapter-title h2 { font-size: 24px; line-height: 1.25; letter-spacing: -.02em; }
+  .rh-studio .cx-page :is(.cx-chapter-body, .cx-common) { gap: 20px; }
+  .rh-studio .cx-pager { padding-top: 20px; }
+  .rh-studio .cx-pager a { min-height: 52px; }
+
+  /* Contenir les tableaux conserve leurs colonnes, tris, liens et défilement au clavier. */
+  .rh-studio:not(:has(.ms-synthese)):has(.ms-head) .table-wrap.scroll,
+  .rh-studio :is(.pye-scroll, .suivi-table-scroll, .rs-table-scroll) { min-width: 0; max-width: 100%; overscroll-behavior-x: contain; scrollbar-width: thin; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-table :is(th, td) { padding: 10px 12px; }
+  .rh-studio .pye-table :is(th, td) { padding: 12px 14px; }
+  .rh-studio :is(.suivi-table, .rs-table) :is(th, td) { padding: 12px 14px; }
+  .rh-studio .rs-table caption { padding: 14px 16px; }
+
+  /* Le rapport garde la provenance et les réserves dans un cadre calme, distinct des indicateurs. */
+  .rh-studio .rs-report { padding: 20px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio .rs-section { gap: 16px; }
+  .rh-studio .rs-provenance { padding: 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: var(--sidebar-bg); }
+  .rh-studio .rs-provenance .facts { gap: 14px 20px; }
+  .rh-studio .rs-notes { padding: 16px; border-radius: var(--clair-radius-card); }
+  .rh-studio .rs-links { gap: 10px 20px; }
+  .rh-studio .rs-links a { padding-block: 4px; }
+  .rh-studio :is(.rs-chapter, .rs-preview) { border-radius: var(--clair-radius-card); }
+}
+
+@media screen and (max-width: 960px) {
+  .rh-studio:not(:has(.ms-synthese)) .ms-charts { grid-template-columns: minmax(0, 1fr); }
+  .rh-studio .cx-page .facts.ms-tiles.six { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media screen and (max-width: 760px) {
+  .rh-studio:not(:has(.ms-synthese)) .ms-head h1 { font-size: 30px; }
+  .rh-studio :is(.pye, .suivi-page, .cx-page, .rs-page, .rs-report) { gap: 16px; }
+  .rh-studio:not(:has(.ms-synthese)):has(.ms-head) .panel,
+  .rh-studio .rs-page .panel { padding: 16px; gap: 16px; }
+  .rh-studio:not(:has(.ms-synthese)):has(.ms-head) .filters,
+  .rh-studio :is(.pye-filters, .suivi-filters, .rs-period-controls) { padding: 16px; gap: 14px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-title-row h2,
+  .rh-studio .ecart-title-row h2,
+  .rh-studio :is(.pye-head, .suivi-head, .rs-report-head) h2,
+  .rh-studio :is(.pye-panel h3, .suivi-section-head h3, .rs-section-title h3) { font-size: 18px; }
+  .rh-studio .cx-chapter-title h2 { font-size: 22px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-tiles .ms-tile,
+  .rh-studio :is(.pye-card, .suivi-tile, .pont-tiles > div, .rs-metric) { padding: 16px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-tiles .ms-tile dd,
+  .rh-studio :is(.pye-card, .suivi-tile, .pont-tiles > div) dd,
+  .rh-studio .rs-metric-value { font-size: 26px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-tiles .ms-tile dd.nd.long { font-size: 13px; }
+  .rh-studio .cx-page .facts.ms-tiles.six { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rh-studio .cx-fold-body, .rh-studio .cx-syn-side { padding: 16px; }
+  .rh-studio .pye-filters .field-row { flex-basis: 100%; }
+  .rh-studio :is(.pye-filters, .suivi-filters, .rs-period-controls) :is(.input, .select, .btn),
+  .rh-studio .ecart-filter-actions .btn,
+  .rh-studio .cx-bar-tools .btn { min-height: 44px; }
+  .rh-studio .pye-actions { flex-wrap: wrap; }
+  .rh-studio .pye-help > summary { min-width: 44px; min-height: 44px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-table tr > :first-child { min-width: 112px; }
+  .rh-studio:not(:has(.ms-synthese)) .ms-table tbody tr > :first-child a { display: inline-flex; align-items: center; min-height: 44px; }
+  .rh-studio .rs-report { padding: 16px; }
+  .rh-studio .rs-metrics { gap: 12px; }
+  .rh-studio .rs-provenance { padding: 14px; }
+  .rh-studio .rs-provenance .facts { grid-template-columns: minmax(0, 1fr); }
+  .rh-studio .rs-period-controls .field-row { flex-basis: 100%; max-width: none; }
+  .rh-studio .rs-links a, .rh-studio .rs-vigilance-link a { display: inline-flex; align-items: center; min-height: 44px; }
+}

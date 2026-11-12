@@ -1,0 +1,113 @@
+/* Collaborateurs et KPI : même rythme de lecture que la Synthèse, sans modifier les vues ni les états. */
+@media screen {
+  .rh-studio :is(.collab-head, .kpi-head) { gap: 10px; min-width: 0; }
+  .rh-studio :is(.collab-head, .kpi-head) h1 { font-size: 36px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio :is(.collab-source-line, .kpi-read-strip) { gap: 8px 20px; }
+  .rh-studio :is(.collab-panel, .cxp-panel) { gap: 20px; padding: 20px; border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio :is(.collab-title, .kpi-title-stack) { gap: 5px; }
+  .rh-studio :is(.collab-panel, .cxp-panel, .kpi-title, .kpi-title-stack) h2 { font-size: 20px; line-height: 1.3; font-weight: 600; letter-spacing: -.015em; }
+  .rh-studio :is(.cxp, .collab-fiche) { gap: 20px; }
+  .rh-studio .cxp-view-head h2 { font-size: 20px; line-height: 1.3; letter-spacing: -.015em; }
+
+  /* Les chiffres gardent leur qualification, leur provenance et leur lien vers le détail. */
+  .rh-studio .facts.collab-tiles { gap: 16px; }
+  .rh-studio .collab-tiles > .collab-tile { padding: 20px; gap: 10px; border-radius: var(--clair-radius-card); }
+  .rh-studio .collab-tile dt { font-size: 12px; font-weight: 400; line-height: 1.4; }
+  .rh-studio .collab-tile :is(dd.big, dd.nd) { font-size: 30px; line-height: 1.15; letter-spacing: -.025em; font-weight: 600; }
+  .rh-studio .collab-tile dd.lower { font-weight: 500; }
+  .rh-studio .collab-tile .tile-foot { font-size: 11px; line-height: 1.45; }
+  .rh-studio .facts.kpi-tiles { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+  .rh-studio .kpi-tiles .kpi-tile { padding: 20px; gap: 12px; border-radius: var(--clair-radius-card); }
+  .rh-studio .kpi-tiles .kpi-tile dt { font-size: 12px; font-weight: 400; line-height: 1.4; }
+  .rh-studio .kpi-tiles .kpi-tile dd:not(.nd) { font-size: 30px; line-height: 1.15; letter-spacing: -.025em; font-weight: 600; }
+  .rh-studio .kpi-tile .tile-compare { padding-top: 12px; }
+  .rh-studio .kpi-tile .tile-links { line-height: 1.5; }
+  .rh-studio .kpi-tile .tile-more > summary { min-height: 28px; padding-block: 4px; }
+  .rh-studio .cxp-counts { border-radius: var(--clair-radius-card); }
+  .rh-studio .cxp-counts > div { padding: 20px; gap: 6px; }
+  .rh-studio .cxp-counts dt { font-size: 12px; }
+  .rh-studio .cxp-counts dd:not(.cxp-count-note) { font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio .cxp-rubric-total { gap: 16px 32px; }
+  .rh-studio .cxp-rubric-total dd { font-size: 26px; font-weight: 600; letter-spacing: -.025em; }
+
+  /* Les filtres restent des formulaires explicites ; aucune option n'est repliée ou retirée. */
+  .rh-studio :is(.filters.collab-toolbar, .filters.bar.collab-bar, .cxp-filters, .filters.bar.kpi-bar) { padding: 16px; gap: 12px 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; min-width: 0; }
+  .rh-studio :is(.filters.collab-toolbar, .filters.bar.collab-bar, .cxp-filters, .filters.bar.kpi-bar) .field-row { min-width: 0; }
+  .rh-studio :is(.collab-actions, .cxp-actions, .kpi-actions) { gap: 10px; }
+  .rh-studio :is(.collab-ndnote, .kpi-read-details, .kpi-limits, .cxp-vigilance > ul, .cxp-help > div) { border-radius: var(--clair-radius-card); }
+  .rh-studio .kpi-read-details { background: #fff; }
+  .rh-studio .kpi-read-details > summary { min-height: 40px; padding: 10px 14px; }
+  .rh-studio .kpi-limits > summary { padding: 12px 14px; }
+  .rh-studio .kpi-limits-body { padding: 16px; }
+  .rh-studio .collab-context-help > summary { min-height: 40px; }
+
+  /* Cartes graphiques indépendantes : les légendes et les couleurs de série restent celles des sources. */
+  .rh-studio :is(.kpi-charts, .em-charts, .collab-chart-grid) { gap: 20px; }
+  .rh-studio .kpi-charts > .kpi-chart { padding: 20px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; }
+  .rh-studio .kpi-charts .chart-head { margin-bottom: 12px; }
+  .rh-studio .collab-chart-grid { grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); }
+  .rh-studio :is(.em-donut, .em-bars, .kpi-chart) { min-width: 0; }
+
+  /* La largeur des tableaux est contenue dans leur région de défilement. */
+  .rh-studio :is(.table-wrap:has(.collab-table), .table-wrap:has(.kpi-table), .cxp-scroll) { min-width: 0; max-width: 100%; border-radius: var(--clair-radius-card); overscroll-behavior-x: contain; }
+  .rh-studio :is(.data-table.collab-table:not(.collab-fiche-table), .data-table.kpi-table, .cxp-table) :is(th, td) { padding: 12px 14px; }
+  .rh-studio :is(.collab-table, .kpi-table, .cxp-table) thead th { font-size: 12px; font-weight: 500; line-height: 1.4; }
+  .rh-studio .data-table.kpi-table :is(th, td):first-child { min-width: 112px; }
+  .rh-studio .data-table.em-monthly :is(th, td).num { min-width: 56px; }
+  .rh-studio .cxp-scroll { border-color: var(--line); }
+  .rh-studio .cxp-person { gap: 5px; }
+  .rh-studio .cxp-tree { border-radius: var(--clair-radius-card); }
+  .rh-studio .cxp-branch > summary { padding: 14px 16px; gap: 8px 12px; }
+  .rh-studio .cxp-branch-body { min-width: 0; padding-top: 2px; }
+  .rh-studio .cxp-cell-detail > summary { display: inline-flex; align-items: center; min-width: 28px; min-height: 28px; }
+  .rh-studio .cxp-row-details > summary { min-height: 28px; padding-block: 4px; }
+
+  /* Fiches : identité, repères et contrats gardent chacun leur niveau de lecture. */
+  .rh-studio .person-head { gap: 20px; }
+  .rh-studio .person-id { gap: 10px; }
+  .rh-studio .person-id h2 { font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }
+  .rh-studio .person-stats { gap: 12px; }
+  .rh-studio .person-stats > div { padding: 16px 20px; gap: 6px; border-radius: var(--clair-radius-card); }
+  .rh-studio .person-stats dd:not(.nd, .tile-foot) { font-size: 23px; line-height: 1.2; letter-spacing: -.025em; }
+  .rh-studio .collab-fold > summary { min-height: 40px; font-size: 18px; line-height: 1.4; }
+  .rh-studio .collab-fold-body { gap: 16px; padding-top: 14px; }
+  .rh-studio .collab-fold.sub { padding-top: 16px; }
+  .rh-studio .facts.collab-facts { gap: 0 20px; }
+  .rh-studio .collab-facts > div { padding-block: 12px; }
+}
+
+@media screen and (max-width: 1100px) {
+  .rh-studio .collab-chart-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media screen and (max-width: 760px) {
+  .rh-studio :is(.collab-head, .kpi-head) h1 { font-size: 30px; }
+  .rh-studio :is(.collab-panel, .cxp-panel) { padding: 16px; gap: 16px; }
+  .rh-studio :is(.collab-panel, .cxp-panel, .kpi-title, .kpi-title-stack) h2, .rh-studio .cxp-view-head h2 { font-size: 18px; }
+  .rh-studio :is(.cxp, .collab-fiche) { gap: 16px; }
+  .rh-studio .facts.kpi-tiles { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .rh-studio .kpi-tiles .kpi-tile { padding: 16px; }
+  .rh-studio .facts.collab-tiles { gap: 12px; }
+  .rh-studio .collab-tiles > .collab-tile { padding: 16px; gap: 8px; }
+  .rh-studio .collab-tile :is(dd.big, dd.nd) { font-size: 26px; }
+  .rh-studio .cxp-counts > div { padding: 16px; }
+  .rh-studio .cxp-counts dd:not(.cxp-count-note) { font-size: 26px; }
+  .rh-studio :is(.filters.collab-toolbar, .filters.bar.collab-bar, .cxp-filters, .filters.bar.kpi-bar) { padding: 14px; gap: 12px; }
+  .rh-studio :is(.filters.collab-toolbar, .filters.bar.collab-bar, .cxp-filters, .filters.bar.kpi-bar) :is(input:not([type="hidden"]), select, button.btn) { min-height: 44px; }
+  .rh-studio :is(.collab-actions, .cxp-actions, .kpi-actions) { width: 100%; gap: 10px; }
+  .rh-studio :is(.collab-actions, .cxp-actions, .kpi-actions) .btn { min-height: 44px; }
+  .rh-studio :is(.collab-context-help, .kpi-read-details, .kpi-limits, .cxp-vigilance, .cxp-help, .collab-fold, .kpi-tile .tile-more, .cxp-cell-detail, .cxp-row-details) > summary { min-height: 44px; }
+  .rh-studio .cxp-help > summary { min-width: 44px; }
+  .rh-studio .kpi-charts { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .rh-studio .kpi-charts > .kpi-chart { padding: 16px; }
+  .rh-studio :is(.data-table.collab-table:not(.collab-fiche-table), .data-table.kpi-table, .cxp-table) :is(th, td) { padding: 10px 12px; }
+  .rh-studio .data-table.kpi-table :is(th, td):first-child { min-width: 112px; }
+  .rh-studio .data-table.kpi-table tbody td > a, .rh-studio .collab-person-cell > a, .rh-studio .cxp-person > a:first-child { display: inline-flex; align-items: center; min-height: 44px; }
+  .rh-studio .cxp-pivot-table :is(th, td):first-child { min-width: 120px; max-width: 160px; }
+  .rh-studio .cxp-branch > summary { padding: 12px; }
+  .rh-studio .cxp-branch-body { padding-left: 16px; padding-right: 8px; }
+  .rh-studio .person-id h2 { font-size: 23px; }
+  .rh-studio .person-stats { width: 100%; gap: 10px; }
+  .rh-studio .person-stats > div { flex: 1 1 150px; max-width: none; padding: 16px; }
+  .rh-studio .fold-tools .btn { min-height: 44px; }
+}

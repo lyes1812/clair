@@ -195,6 +195,31 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
     expect(panel).toContain('data-money-cents="150000"');
     expect(panel).toContain("Le filtre Service ne s&#x27;applique pas ici : tous les services sont montrés.");
   });
+  it("la vue mensualisée reprend chaque mois source et conserve les filtres et les raisons n.d.", async () => {
+    const html = await page({ annee: "2026", de: "01", a: "02", service: "A", repartition: "mensuelle" });
+    const brut = summaryPanel(html, "ms-synthese-summary-brut");
+    const services = summaryPanel(html, "ms-synthese-summary-services");
+    expect(brut).toContain('data-testid="ms-summary-brut-monthly-chart"');
+    expect(brut).toContain("Brut 2 200 €, Cotisations patronales 1 200 €");
+    expect(services).toContain('data-testid="ms-summary-services-monthly-chart"');
+    expect(services).toContain("A 3 400 €, B 1 500 €");
+    expect(services).toContain("Le filtre Service ne s&#x27;applique pas ici : tous les services sont montrés.");
+    expect(html).toContain('name="repartition" value="mensuelle"');
+    expect(html).toContain("service=A&amp;repartition=mensuelle&amp;mois=2026-01#ms-detail");
+    expect(html).toContain("service=A&amp;affichage=tableau&amp;repartition=mensuelle");
+    const missing = summaryPanel(await page({ annee: "2025", de: "01", a: "02", repartition: "mensuelle" }), "ms-synthese-summary-brut");
+    expect(missing).toContain("journal de paie 2025-02 non renvoyé par PayFit");
+  });
+  it("le mode Tableau reste sans graphique et un filtre de répartition invalide revient au cumul avec avis", async () => {
+    const table = await page({ repartition: "mensuelle", affichage: "tableau" });
+    expect(table).not.toContain('data-testid="ms-summary-brut-monthly-chart"');
+    expect(table).not.toContain('data-testid="ms-summary-services-monthly-chart"');
+    expect(table).toContain("Tableau mensuel — brut et cotisations");
+    expect(table).toContain('id="ms-tables"');
+    const invalid = await page({ repartition: "inconnue" });
+    expect(invalid).toContain("paramètre ignoré : repartition=inconnue");
+    expect(invalid).toContain('data-testid="ms-composition"');
+  });
   it("le second niveau conserve les neuf indicateurs une seule fois et les graphiques, tableaux et éléments non récurrents", async () => {
     const html = await page();
     for (const tile of ["masse", "evolution", "cost-etp", "brut", "cotisations", "variable", "non-recurring", "budget", "landing"]) {

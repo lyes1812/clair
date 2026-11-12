@@ -50,6 +50,12 @@
 .ms-synthese-focus.without-chart .facts.ms-synthese-secondary-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto; grid-auto-rows: minmax(74px, auto); }
 
 /* Deux lectures agrégées : les montants restent ceux de la source déjà chargée. */
+.ms-synthese-aggregate-toolbar { display: flex; justify-content: flex-end; align-items: center; min-width: 0; margin-bottom: -8px; }
+.ms-synthese-aggregate-toolbar .view-select { gap: 8px; }
+.ms-synthese-aggregates.is-monthly .chart-title { display: none; }
+.ms-synthese-aggregates.is-monthly .chart-head { justify-content: flex-end; }
+.ms-synthese-aggregates.is-monthly .chart { min-width: 0; }
+.ms-summary-table-link { font-size: var(--clair-type-form); }
 .ms-synthese-aggregates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; min-width: 0; }
 .ms-synthese-aggregate.panel { padding: 20px; min-height: 226px; gap: 16px; align-content: start; }
 .ms-synthese-aggregate .panel-head h2 { font-size: 20px; letter-spacing: -.015em; }
@@ -110,6 +116,8 @@
   .ms-synthese-trend .panel-head h2, .ms-synthese-aggregate .panel-head h2 { font-size: 17px; }
   .ms-synthese-trend .panel-tools .btn { font-size: 12px; padding-inline: 10px; }
   .ms-synthese-aggregates { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .ms-synthese-aggregate-toolbar { justify-content: flex-start; margin-bottom: 0; }
+  .ms-synthese-aggregate-toolbar .select { min-height: 44px; }
   .ms-synthese-aggregate.panel { min-height: 0; padding: 16px; gap: 16px; }
   .ms-synthese .ms-charts-split { grid-template-columns: minmax(0, 1fr); }
   .ms-synthese .ms-table tr > :first-child { min-width: 112px; }
