@@ -36,6 +36,15 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
 
   // Période par défaut : janvier → dernier mois clos (septembre 2026), comparée aux mêmes mois de 2025.
   await page.goto(ms);
+  // La Synthèse garde les lectures détaillées au second niveau, sans retirer leurs fonctions.
+  const openReading = async (id: string) => {
+    const disclosure = page.getByTestId(id);
+    if ((await disclosure.getAttribute("open")) === null) await disclosure.locator(":scope > summary").click();
+  };
+  await expect(page.getByTestId("ms-synthese-graphs-details")).not.toHaveAttribute("open");
+  await expect(page.getByTestId("ms-synthese-tables-details")).not.toHaveAttribute("open");
+  await openReading("ms-synthese-graphs-details");
+  await openReading("ms-synthese-tables-details");
   await expect(page.getByTestId("ms-source")).toContainText("journal comptable de paie PayFit");
   await expect(page.getByTestId("ms-period")).toContainText("janvier → septembre 2026");
   const tile = (id: string) => page.getByTestId(`ms-tile-${id}`);
@@ -70,6 +79,7 @@ test("Masse salariale : synthèse N / N-1, coût par ETP, détail par compte, gr
   await page.goto(ms);
 
   // Détail par compte de janvier 2026 : 641100 et 645100, contreparties exclues.
+  await openReading("ms-synthese-tables-details");
   await page.getByTestId("ms-monthly-table").locator("tr[data-month='2026-01'] a").first().click();
   const detail = page.getByTestId("ms-detail");
   await expect(detail).toBeVisible();

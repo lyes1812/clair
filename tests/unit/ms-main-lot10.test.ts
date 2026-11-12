@@ -78,6 +78,16 @@ const page = async (sp: Record<string, string> = {}) => {
 // Retire seulement la balise de présentation monétaire pour vérifier le texte et la couleur de son parent.
 const shownHtml = (html: string) => html.replace(/<span class="money-display"[^>]*>([^<]*)<\/span>/g, "$1");
 const count = (html: string, re: RegExp) => (html.match(re) ?? []).length;
+// Panneaux de synthèse autonomes : vérifier leurs montants, sans confondre les mêmes valeurs dans les tableaux détaillés.
+const summaryPanel = (html: string, testid: string) => {
+  const at = html.indexOf(`data-testid="${testid}"`);
+  expect(at, testid).toBeGreaterThanOrEqual(0);
+  const from = html.lastIndexOf("<section", at);
+  const to = html.indexOf("</section>", at);
+  expect(from, testid).toBeGreaterThanOrEqual(0);
+  expect(to, testid).toBeGreaterThan(at);
+  return html.slice(from, to + "</section>".length);
+};
 const NARRATIF = /Un graphique est une lecture|Sens de « n\.d\. »|Montants tels que (renvoyés|déclarés)|\(N − N-1\) ÷ N-1 =|brut \+ cotisations patronales<|Définitions et règles de calcul|ms-definitions|Coût = masse chargée \(brut|chaque chiffre renvoie à sa définition|une colonne hachurée est un mois n\.d\./i;
 
 describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 10)", () => {
@@ -163,6 +173,43 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
     const html = await page({ service: "A" });
     expect(html).toContain("service A");
     expect(html).toContain("Le filtre Service ne s&#x27;applique pas ici : tous les services sont montrés.");
+  });
+  it("le panneau Brut et cotisations suit la période et le service du journal, comme les montants détaillés", async () => {
+    const cases: { sp: Record<string, string>; brut: number; cotisations: number }[] = [
+      { sp: { annee: "2026", de: "01", a: "01" }, brut: 320000, cotisations: 170000 },
+      { sp: { annee: "2026", de: "01", a: "02" }, brut: 640000, cotisations: 340000 },
+      { sp: { annee: "2026", de: "01", a: "01", service: "A" }, brut: 220000, cotisations: 120000 },
+    ];
+    for (const { sp, brut, cotisations } of cases) {
+      const panel = summaryPanel(await page(sp), "ms-synthese-summary-brut");
+      expect(panel).toContain(`data-money-cents="${brut}"`);
+      expect(panel).toContain(`data-money-cents="${cotisations}"`);
+    }
+    const missing = summaryPanel(await page({ annee: "2025", de: "01", a: "02" }), "ms-synthese-summary-brut");
+    expect(missing).toContain("n.d.");
+    expect(missing).not.toContain("data-money-cents=");
+  });
+  it("la répartition agrégée conserve tous les services et dit que le filtre Service ne s'y applique pas", async () => {
+    const panel = summaryPanel(await page({ annee: "2026", de: "01", a: "01", service: "A" }), "ms-synthese-summary-services");
+    expect(panel).toContain('data-money-cents="340000"');
+    expect(panel).toContain('data-money-cents="150000"');
+    expect(panel).toContain("Le filtre Service ne s&#x27;applique pas ici : tous les services sont montrés.");
+  });
+  it("le second niveau conserve les neuf indicateurs une seule fois et les graphiques, tableaux et éléments non récurrents", async () => {
+    const html = await page();
+    for (const tile of ["masse", "evolution", "cost-etp", "brut", "cotisations", "variable", "non-recurring", "budget", "landing"]) {
+      expect(count(html, new RegExp(`data-testid="ms-tile-${tile}"`, "g")), tile).toBe(1);
+    }
+    for (const testid of ["ms-trend", "ms-chart-services", "ms-chart-services-months", "ms-chart-brut-cotisations", "ms-chart-cout-etp", "ms-monthly-table", "ms-services-table", "ms-services-months", "actual-non-recurring", "actual-non-recurring-categories"]) {
+      expect(html, testid).toContain(`data-testid="${testid}"`);
+    }
+    expect(html).toContain('id="actual-non-recurring"');
+    expect(html).toContain('id="ms-sources"');
+    const table = await page({ affichage: "tableau" });
+    expect(table).toMatch(/<details(?=[^>]*data-testid="ms-synthese-tables-details")(?=[^>]*\bopen="")/);
+    const detail = await page({ mois: "2026-01" });
+    expect(detail).toMatch(/<details(?=[^>]*data-testid="ms-synthese-tables-details")(?=[^>]*\bopen="")/);
+    expect(detail).toContain('data-testid="ms-detail-accounts"');
   });
 });
 

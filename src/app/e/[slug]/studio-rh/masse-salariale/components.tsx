@@ -260,11 +260,23 @@ export function TrendChart({ rows, previous, lines }: { rows: MonthPayroll[]; pr
 }
 
 // Composition du coût : part du brut et des cotisations dans la masse chargée.
-export function Composition({ brut, cotisations }: { brut: number; cotisations: number }) {
+export function Composition({ brut, cotisations, variant = "combined" }: { brut: number; cotisations: number; variant?: "combined" | "bars" }) {
   const total = brut + cotisations;
   if (total <= 0) return <MoneyText><p className="nd">n.d. — masse chargée nulle ou négative sur la période</p></MoneyText>;
   const pct = (v: number) => fmtFixed({ num: v * 100, den: total }, 1);
   const width = (v: number) => `${Math.max(0, Math.min(100, (v / total) * 100))}%`;
+  if (variant === "bars") {
+    const max = Math.max(0, brut, cotisations);
+    return <MoneyText><div className="ms-composition ms-composition-amounts" data-testid="ms-composition">
+      <dl className="ms-summary-bars">
+        {[{ key: "brut", label: "Brut", value: brut, color: COLORS.brut }, { key: "cotisations", label: "Cotisations patronales", value: cotisations, color: COLORS.cotisations }].map((part) => <div className="ms-summary-bar" key={part.key}>
+          <dt>{part.label}<span className="ms-summary-share">{pct(part.value)} % du coût</span></dt>
+          <dd>{euros(part.value)}</dd>
+          <dd className="ms-summary-track" aria-hidden="true"><i style={{ width: `${max > 0 ? Math.max(0, part.value) / max * 100 : 0}%`, background: part.color }} /></dd>
+        </div>)}
+      </dl>
+    </div></MoneyText>;
+  }
   return (
     <MoneyText><div className="ms-composition" data-testid="ms-composition">
       <h3 className="ms-sub">Composition de la masse chargée</h3>

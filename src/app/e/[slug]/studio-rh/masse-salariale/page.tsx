@@ -16,7 +16,7 @@ import { gridRubrics } from "@/lib/payroll/grid";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { fmtEtp4, fmtPercent } from "@/lib/rh/kpi/format";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
-import { brutCotisationsSeries, capital, costSeries, euros, eurosSigned, evoDelta, evoPctDelta, hasNd, masseSeries, monthShortYear, monthsAxis, ndGroups, ndLines, numTrend, reasonLines, serviceMonthSeries, servicesParts, sourceReason, trendOf } from "@/lib/viz/masse";
+import { brutCotisationsSeries, capital, costSeries, euros, eurosSigned, evoDelta, evoPctDelta, hasNd, masseSeries, monthShortYear, monthsAxis, ndGroups, ndLines, numTrend, reasonLines, serviceColor, serviceMonthSeries, servicesParts, sourceReason, trendOf } from "@/lib/viz/masse";
 import { ChartGuard, Composition, eurosOf, GraphFoot, monthShort, MsHead, MsRead, NdKey, NdLines, NdState, PanelHead, PeriodBar, ScrollTable, Tile, TrendChart, TrendLegend, type Affichage } from "./components";
 import { DsnView } from "./DsnView";
 import { FixeVariableView, PaieComptaView } from "./Lot2Views";
@@ -27,6 +27,7 @@ import { actualEventVersion, listActualEvents } from "@/lib/payroll/non-recurrin
 import { saveActualEventAction } from "./actual-actions";
 import { personLabel } from "@/lib/rh/view";
 import { buildActualNonRecurring } from "@/lib/payroll/non-recurring";
+import { SyntheseDisclosure } from "./SyntheseDisclosure";
 
 export const dynamic = "force-dynamic";
 
@@ -206,10 +207,33 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
     service={ctx.service.axis ? { value: serviceValue === undefined ? "" : (serviceValue ?? NV), options: knownServices.map((v) => ({ value: v ?? NV, label: serviceLabel(v) })) } : undefined}
   />;
 
+  const readingToolbar = (
+        <div className="ms-toolbar">
+          <p className="desc ms-period" data-testid="ms-period">
+            <strong>{label(months)}</strong> · N-1 : {label(prevMonths)} · {scope} · <MoneyUnitLabel />
+            {vue !== "synthese" && cur.kind === "value" && cur.openMonths.length > 0 && <> · mois provisoires (paie non clôturée) : {cur.openMonths.map(monthShortYear).join(", ")}</>}
+          </p>
+          <TrendLegend slug={slug} />
+          <div className="panel-tools">
+            <ViewSwitch
+              testid="ms-affichage"
+              label="Affichage des résultats"
+              current={aff}
+              options={[
+                { key: "tout", label: "Afficher tout", href: href({ aff: "tout" }) },
+                { key: "graphique", label: "Graphique", href: href({ aff: "graphique" }) },
+                { key: "tableau", label: "Tableau", href: tableHref },
+              ]}
+            />
+          </div>
+        </div>
+  );
+  const servicesMax = Math.max(0, ...serviceRows.map((row) => row.cur.kind === "value" ? row.cur.masse : 0));
+
   return (
     <MoneyText><div className={`ms-synthese-page${vue === "synthese" ? " ms-synthese" : ""}`}>
       <div className="ms-synthese-heading">
-        {head()}
+        {vue === "synthese" ? <MsHead title={ITEM.label} summary="Synthèse" /> : head()}
         <MsPageActions slug={slug} exportHref={vue === "synthese" ? exportHref : undefined} />
       </div>
       <FamilyTabs
@@ -227,31 +251,13 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       <div className="ms-controls">
         {vue !== "synthese" && sourceDetails}
         {vue === "synthese" ? <details className="ms-synthese-filters" data-testid="ms-filter-disclosure" data-ms-screen-only>
-          <summary><strong>Période et périmètre</strong><span>{label(months)} · {scope}</span></summary>
+          <summary><strong>Période et périmètre</strong><span>{label(months)} · {scope}{cur.kind === "value" && cur.openMonths.length > 0 && <> · mois provisoires (paie non clôturée) : {cur.openMonths.map(monthShortYear).join(", ")}</>}</span></summary>
           {periodControls}
         </details> : periodControls}
         {notices.map((n) => (
           <p key={n} className="notice" data-testid="ms-param-notice">{n}</p>
         ))}
-        <div className="ms-toolbar">
-          <p className="desc ms-period" data-testid="ms-period">
-            <strong>{label(months)}</strong> · N-1 : {label(prevMonths)} · {scope} · <MoneyUnitLabel />
-            {cur.kind === "value" && cur.openMonths.length > 0 && <> · mois provisoires (paie non clôturée) : {cur.openMonths.map(monthShortYear).join(", ")}</>}
-          </p>
-          <TrendLegend slug={slug} />
-          <div className="panel-tools">
-            <ViewSwitch
-              testid="ms-affichage"
-              label="Affichage des résultats"
-              current={aff}
-              options={[
-                { key: "tout", label: "Afficher tout", href: href({ aff: "tout" }) },
-                { key: "graphique", label: "Graphique", href: href({ aff: "graphique" }) },
-                { key: "tableau", label: "Tableau", href: tableHref },
-              ]}
-            />
-          </div>
-        </div>
+        {vue !== "synthese" && readingToolbar}
       </div>
 
       {vue === "fixe-variable" && nonRecurringDetails}
@@ -261,7 +267,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       {vue === "synthese" && (
         <>
           <div className={`ms-synthese-focus${showGraph ? "" : " without-chart"}`} data-testid="ms-synthese-focus">
-            <dl className="facts ms-tiles ms-synthese-kpis" aria-label="Vue d'ensemble">
+            <div className="ms-synthese-kpis">
+              <dl className="facts ms-tiles ms-synthese-primary-kpi" aria-label="Masse salariale chargée">
               <Tile
                 testid="ms-tile-masse"
                 main
@@ -272,6 +279,8 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 def={MASSE_TERMS.masse}
                 slug={slug}
               />
+              </dl>
+              <dl className="facts ms-tiles ms-synthese-secondary-kpis" aria-label="Indicateurs de la période" data-testid="ms-synthese-secondary-kpis">
               <Tile
                 testid="ms-tile-evolution"
                 label="Évolution vs N-1"
@@ -314,12 +323,46 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <Tile testid="ms-tile-non-recurring" label="Éléments non récurrents" value={<a className="ms-synthese-value-link" href={href({ extra: "#actual-non-recurring" })}>{nonRecurringAmount === null ? "n.d." : euros(nonRecurringAmount)}</a>} nd={nonRecurringAmount === null} lead={nonRecurring?.rows.length ? "Coûts identifiés · détail" : "Aucun élément identifié"} def={MASSE_TERMS.primes} slug={slug} />
               <Tile testid="ms-tile-budget" label="Écart au budget" value={<a className="ms-synthese-value-link" href={`${base}/suivi?annee=${year}&de=${from}&a=${to}${svcParam}`}>n.d.</a>} nd lead="Non chargé sur cette vue" def="croisee-ecart-budget" slug={slug} />
               <Tile testid="ms-tile-landing" label={`Atterrissage ${year}`} value={<a className="ms-synthese-value-link" href={`/e/${slug}/studio-rh/hypotheses?vue=resultat&sous=atterrissage`}>n.d.</a>} nd lead="Non chargé sur cette vue" def="atterrissage" slug={slug} />
-            </dl>
+              </dl>
+            </div>
             {showGraph && <section className="panel ms-synthese-trend" aria-label="Évolution mensuelle" data-testid="ms-synthese-trend">
               <PanelHead title="Évolution mensuelle" desc={`${label(months)} · comparaison aux mêmes mois de ${year - 1}`} slug={slug} term={MASSE_TERMS.evolution} tools={<a className="btn small" href={tableHref}>Tableau</a>} />
               <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
             </section>}
           </div>
+          <div className="ms-synthese-aggregates">
+            <section className="panel ms-synthese-aggregate" data-testid="ms-synthese-summary-brut">
+              <PanelHead title="Brut et cotisations" desc="Même période · même périmètre" slug={slug} term={MASSE_TERMS.masse} />
+              {cur.kind === "value" ? <Composition brut={cur.brut} cotisations={cur.cotisations} variant="bars" /> : <NdState testid="ms-summary-brut-nd" reason={cur.nd.reason} />}
+            </section>
+            <section className="panel ms-synthese-aggregate" data-testid="ms-synthese-summary-services">
+              <PanelHead title="Répartition par service" slug={slug} term={MASSE_TERMS.service} />
+              {ctx.service.axis && serviceRows.length > 0 ? <>
+                {serviceValue !== undefined && <p className="tile-foot">Le filtre Service ne s'applique pas ici : tous les services sont montrés.</p>}
+                <dl className="ms-summary-bars" aria-label="Masse salariale chargée par service">
+                  {serviceRows.map((row, index) => <div className="ms-summary-bar" key={row.value ?? NV}>
+                    <dt><a href={href({ svc: `&service=${encodeURIComponent(row.value ?? NV)}` })}>{serviceLabel(row.value)}</a></dt>
+                    <dd className={row.cur.kind === "nd" ? "nd" : undefined}>{money(row.cur, (window) => window.masse)}</dd>
+                    {row.cur.kind === "value" && <dd className="ms-summary-track" aria-hidden="true"><i style={{ width: `${servicesMax > 0 ? Math.max(0, row.cur.masse) / servicesMax * 100 : 0}%`, background: serviceColor(index) }} /></dd>}
+                    {row.cur.kind === "nd" && <dd className="tile-foot ms-summary-reason">{row.cur.nd.reason}</dd>}
+                  </div>)}
+                </dl>
+              </> : <NdState testid="ms-summary-services-nd" reason={ctx.service.axis ? "Aucune ligne de charges de personnel dans le journal sur la période." : `${capital(serviceNd)}.`} action={ctx.service.axis ? undefined : { href: `/e/${slug}/parametres#masse-salariale`, label: "Choisir l'axe du service dans Paramètres" }} />}
+            </section>
+          </div>
+          <SyntheseDisclosure summary="Comparaison N-1 et affichage" className="ms-synthese-comparisons" testid="ms-synthese-comparisons">
+            {readingToolbar}
+            <div className="ms-read-body">
+              <p className="tile-foot" data-testid="ms-tile-masse-n1">Masse salariale chargée · N-1 : {money(prev, (w) => w.masse)}</p>
+              <p className="tile-foot">Brut · N-1 : {money(prev, (w) => w.brut)} · Cotisations patronales · N-1 : {money(prev, (w) => w.cotisations)}{prev.kind === "value" ? ` (${rate(prev)})` : ""}</p>
+              <p className="tile-foot">Coût par ETP-mois · N-1 : {costText(costPrev)}</p>
+              <p className="tile-foot">Écart au budget et atterrissage : données non chargées sur cette vue. Les liens des cartes ouvrent le suivi réel / budget et le résultat des hypothèses.</p>
+              {!nonRecurring?.rows.length && <p className="tile-foot">Aucun élément non récurrent identifié sur la période : cela ne prouve pas son absence.</p>}
+            </div>
+          </SyntheseDisclosure>
+
+          <SyntheseDisclosure summary={<span>Données et sources<small>Définitions, provenance et limites de lecture</small></span>} className="ms-synthese-sources" id="ms-sources" testid="ms-synthese-sources-details">
+            {sourceDetails}
           <div className="ms-synthese-qualifiers">
             <NdLines lines={[...tileNd, ...(nonRecurring?.rows.length && nonRecurringAmount === null ? nonRecurring.reasons : [])]} testid="ms-tiles-nd" />
             {ctx.etpQualifiers.length > 0 && (
@@ -328,19 +371,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               </p>
             )}
           </div>
-          <details className="ms-read-details ms-synthese-comparisons" data-ms-print-details>
-            <summary>Comparaisons N-1 et repères de lecture</summary>
-            <div className="ms-read-body">
-              <p className="tile-foot" data-testid="ms-tile-masse-n1">Masse salariale chargée · N-1 : {money(prev, (w) => w.masse)}</p>
-              <p className="tile-foot">Brut · N-1 : {money(prev, (w) => w.brut)} · Cotisations patronales · N-1 : {money(prev, (w) => w.cotisations)}{prev.kind === "value" ? ` (${rate(prev)})` : ""}</p>
-              <p className="tile-foot">Coût par ETP-mois · N-1 : {costText(costPrev)}</p>
-              <p className="tile-foot">Écart au budget et atterrissage : données non chargées sur cette vue. Les liens des cartes ouvrent le suivi réel / budget et le résultat des hypothèses.</p>
-              {!nonRecurring?.rows.length && <p className="tile-foot">Aucun élément non récurrent identifié sur la période : cela ne prouve pas son absence.</p>}
-            </div>
-          </details>
-          {!showGraph && cur.kind === "value" && <Composition brut={cur.brut} cotisations={cur.cotisations} />}
-
+          </SyntheseDisclosure>
           {showGraph && (
+            <SyntheseDisclosure summary="Graphiques détaillés" testid="ms-synthese-graphs-details" initiallyOpen={aff === "graphique"}>
             <section className="panel" data-testid="ms-graphs">
               <PanelHead title="Décomposer la masse salariale" slug={slug} term={MASSE_TERMS.graphiques} tools={<a className="btn small" href={href({ v: "&vue=fixe-variable" })}>Fixe & variable</a>} />
               <div className="ms-charts">
@@ -411,7 +444,6 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                       toggle
                     />
                   </ChartGuard>
-                  {cur.kind === "value" && <Composition brut={cur.brut} cotisations={cur.cotisations} />}
                 </div>
                 <div className={wide}>
                   <ChartGuard testid="ms-chart-cout-etp" title={`Coût par ETP et par mois, ${year} face à ${year - 1} (N-1)`} series={costEtpSeries} lines={ndList}>
@@ -431,13 +463,12 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               {!showTable && <NdLines lines={[...ndList, ...svcNdList]} testid="ms-graph-nd-reasons" />}
               <GraphFoot aff={aff} tableHref={tableHref} />
             </section>
+            </SyntheseDisclosure>
           )}
 
-          <details className="ms-read-details ms-synthese-sources" id="ms-sources" data-ms-print-details>
-            <summary>Sources et lecture</summary>
-            <div className="ms-read-body">{sourceDetails}</div>
-          </details>
-          {nonRecurringDetails}
+          <SyntheseDisclosure summary="Éléments non récurrents du réel" testid="ms-synthese-actual-details">
+            {nonRecurringDetails}
+          </SyntheseDisclosure>
 
           {unclassified.size > 0 && (
             <p className="notice" data-testid="ms-unclassified">
@@ -447,7 +478,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
           )}
 
           {showTable && (
-            <>
+            <SyntheseDisclosure summary="Tableaux et détail par compte" testid="ms-synthese-tables-details" initiallyOpen={aff === "tableau" || detail !== null}>
               <section className="panel" data-testid="ms-services">
                 <PanelHead
                   title="Services"
@@ -697,7 +728,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                   )}
                 </section>
               )}
-            </>
+            </SyntheseDisclosure>
           )}
         </>
       )}
