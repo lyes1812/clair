@@ -14,6 +14,7 @@ import { getRcPayslipScan } from '@/lib/payroll/rc-payslips-store';
 import { RcPayslipForm } from '../RcPayslipForm';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { formatMonth } from '@/lib/dates';
+import { rcPayslipIssueLabel } from '@/lib/payroll/rc-payslip-issues';
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,9 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
   const rc = source === 'payfit' ? await getRcPayslipScan(workspace.id) : null;
   const currentMonth = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit' }).format(new Date());
   const activeMonths = (syncs.find(s => s.status === 'applied')?.scope as { months?: string[] } | undefined)?.months ?? [];
+  const rcIssues = new Map<string, number>();
+  for (const issue of rc?.issues ?? []) rcIssues.set(issue.code, (rcIssues.get(issue.code) ?? 0) + issue.count);
+  for (const row of rc?.records ?? []) if (row.status === 'review') rcIssues.set(row.code, (rcIssues.get(row.code) ?? 0) + 1);
 
   // Où en est la source : d'après la connexion et l'historique, rien d'autre.
   const running = syncs.some((s) => s.status === "running");
@@ -92,7 +96,7 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
         {rc?.status === 'running' && <AutoRefresh everyMs={5000} />}
         {rc?.status === 'failed' && <p className="notice">La lecture n’a pas abouti. Vérifie la connexion PayFit puis relance ; les déclarations et le journal restent conservés.</p>}
         {canSync && <RcPayslipForm slug={slug} from={rc?.from ?? activeMonths[0] ?? monthsAgo(23)} to={rc?.to ?? currentMonth} running={rc?.status === 'running'} />}
-        <details className="ms-read-details"><summary>Vigilance et couverture</summary><p className="desc">Clair recherche les bulletins des collaborateurs accessibles et de ceux connus dans les anciennes lectures de cette société. Un collaborateur jamais connu ou devenu inaccessible peut manquer. Les bulletins rectificatifs multiples et les montants ambigus sont signalés sans addition automatique. Aucun taux de charges n’est appliqué à l’indemnité.</p></details>
+        <details className="ms-read-details" data-testid="rc-payslip-vigilance"><summary>Vigilance et couverture{rcIssues.size > 0 ? ` (${rcIssues.size})` : ''}</summary>{rcIssues.size > 0 && <ul>{[...rcIssues].map(([code, count]) => <li key={code} data-rc-issue={code}>{rcPayslipIssueLabel(code)} · {count}</li>)}</ul>}<p className="desc">Clair recherche les bulletins des collaborateurs accessibles et de ceux connus dans les anciennes lectures de cette société. Un collaborateur jamais connu ou devenu inaccessible peut manquer. Les bulletins rectificatifs multiples et les montants ambigus sont signalés sans addition automatique. Aucun taux de charges n’est appliqué à l’indemnité.</p></details>
       </section>}
 
       <div className="dn-split">

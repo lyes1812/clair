@@ -1,0 +1,20 @@
+const labels: Record<string, string> = {
+  'amount-column-unrecognized': 'Colonne du montant de l’indemnité non reconnue',
+  'amount-column-ambiguous': 'Plusieurs montants possibles pour l’indemnité',
+  'ambiguous-rc-label': 'Libellé de l’indemnité à vérifier',
+  'mixed-rc-label': 'Libellé mêlant plusieurs natures d’indemnité',
+  'mixed-rc-components': 'Composantes de l’indemnité à rapprocher',
+  'multiple-payslips': 'Plusieurs bulletins pour un même contrat et mois',
+  'multiple-payslip-versions': 'Plusieurs versions du même bulletin',
+  'pdf-content-changed': 'Bulletin modifié depuis la dernière lecture',
+  'pdf-unreadable': 'PDF sans texte exploitable',
+  'pdf-unavailable': 'Bulletin indisponible',
+  'pdf-invalid_response': 'Format du bulletin non reconnu',
+  'signed-or-corrected-rc': 'Régularisation ou montant signé à vérifier',
+  'duplicate-rc-line': 'Lignes d’indemnité à rapprocher',
+  'payslip-list-not_found': 'Liste de bulletins indisponible pour un ancien collaborateur',
+  'payslip-list-invalid_response': 'Liste de bulletins au format non reconnu',
+  'scope_denied': 'Droit de lecture des bulletins refusé par PayFit',
+  'key_rejected': 'Connexion PayFit refusée',
+};
+export const rcPayslipIssueLabel = (code: string): string => labels[code] ?? 'Lecture du bulletin à vérifier';
