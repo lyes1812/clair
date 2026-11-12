@@ -111,3 +111,11 @@
   .rh-studio .person-stats > div { flex: 1 1 150px; max-width: none; padding: 16px; }
   .rh-studio .fold-tools .btn { min-height: 44px; }
 }
+
+/* La liste d’entrée montre les repères métier ; les identifiants restent consultables. */
+.rh-studio .collab-technical { min-width: 136px; max-width: 300px; font-size: 12px; }
+.rh-studio .collab-technical > summary { cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; color: var(--blue); }
+.rh-studio .collab-technical dl { display: grid; gap: 10px; margin: 10px 0; }
+.rh-studio .collab-technical dt { color: var(--muted); font-size: 11px; }
+.rh-studio .collab-technical dd { margin: 3px 0 0; overflow-wrap: anywhere; white-space: normal; }
+@media screen and (max-width: 760px) { .rh-studio .collab-technical > summary { min-height: 44px; } }

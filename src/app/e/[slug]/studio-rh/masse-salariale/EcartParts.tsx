@@ -12,7 +12,7 @@ import { NV, type Loaded } from "./ecart-data";
 import { RubInput } from "./ecart/LiveRub";
 import { SearchableSelect } from "@/components/SearchableSelect";
 
-import { MS_PREVU, type MsTab } from "./tabs";
+import { MS_PREVU, MS_TAB_GROUPS, type MsTab } from "./tabs";
 export { MS_PREVU, type MsTab };
 
 // En-tête : le titre seul, comme les autres entrées du Studio RH (le résumé du module n'est plus répété sous chaque écran).
@@ -35,7 +35,7 @@ export function MsTabs({ slug, current, extra = "" }: { slug: string; current: M
     { key: "ecart", label: "Écart budgétaire", href: `${base}/ecart` },
     { key: "analyse", label: "Analyse des écarts", href: `${base}/analyse` },
   ];
-  return <FamilyTabs tabs={tabs} current={current} label="Vues" testid="ms-tabs" />;
+  return <FamilyTabs tabs={tabs} current={current} label="Vues" testid="ms-tabs" groups={MS_TAB_GROUPS} />;
 }
 
 export type Unit = "etp" | "nombre" | "eur";

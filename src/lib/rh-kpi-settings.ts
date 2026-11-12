@@ -10,6 +10,7 @@ export const KPI_KEYS = {
   forfaitJoursIsOne: "rh.kpi.etp.forfaitJoursIsOne",
   etpDecimals: "rh.kpi.etp.decimals",
   turnoverFormula: "rh.kpi.turnover.formula",
+  turnoverNatures: "rh.kpi.turnover.natures",
   excludedExitNatures: "rh.kpi.turnover.excludedExitNatures",
   neutralizeContinuity: "rh.kpi.turnover.neutralizeContinuity",
   absenceTypes: "rh.kpi.absence.types",
@@ -25,6 +26,7 @@ export const KPI_DEFAULTS: KpiSettingValues = {
   forfaitJoursIsOne: true,
   etpDecimals: 4,
   turnoverFormula: "half_sum",
+  turnoverNatures: [],
   excludedExitNatures: [],
   neutralizeContinuity: true,
   absenceTypes: ["fr_maladie_ordinaire"],
@@ -39,6 +41,7 @@ export const KPI_DEFAULT_STATUS: Record<KpiSettingKey, "validated" | "proposed">
   forfaitJoursIsOne: "validated",
   etpDecimals: "proposed",
   turnoverFormula: "validated",
+  turnoverNatures: "proposed",
   excludedExitNatures: "proposed",
   neutralizeContinuity: "proposed",
   absenceTypes: "validated",
@@ -54,6 +57,7 @@ export const KPI_PARSERS: { [K in KpiSettingKey]: (v: unknown) => KpiSettingValu
   forfaitJoursIsOne: bool,
   etpDecimals: (v) => (v === 2 || v === 3 || v === 4 ? v : null),
   turnoverFormula: (v) => (v === "half_sum" || v === "exits_over_start" ? (v as TurnoverFormula) : null),
+  turnoverNatures: (v) => (v === undefined ? [] : Array.isArray(v) && v.every((x) => typeof x === "string" && /^\d{2}$/.test(x)) ? sortedUnique(v) : null),
   excludedExitNatures: (v) => (Array.isArray(v) && v.every((x) => typeof x === "string" && /^\d{2}$/.test(x)) ? sortedUnique(v) : null),
   neutralizeContinuity: bool,
   absenceTypes: (v) => (Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0 && x.length <= 128 && !/\s/.test(x)) ? sortedUnique(v) : null),
@@ -105,9 +109,9 @@ export async function setKpiSettings(workspaceId: string, next: KpiSettingValues
 }
 
 // Origine affichée d'un paramètre (Paramètres et écran KPI RH) : modification datée, valeur illisible, défaut validé ou proposé.
-export function kpiOriginText(key: KpiSettingKey, o: KpiOrigin, formatDateTime: (d: Date) => string): string {
-  if (o.origin === "setting") return `Modifié le ${formatDateTime(o.updatedAt)} par un administrateur.`;
-  if (o.origin === "invalid") return "Valeur enregistrée illisible : à ré-enregistrer (les KPI ne sont pas calculés d'ici là).";
+export function kpiOriginText(key: KpiSettingKey, o: KpiOrigin | undefined, formatDateTime: (d: Date) => string): string {
+  if (o?.origin === "setting") return `Modifié le ${formatDateTime(o.updatedAt)} par un administrateur.`;
+  if (o?.origin === "invalid") return "Valeur enregistrée illisible : à ré-enregistrer (les KPI ne sont pas calculés d'ici là).";
   const [y, m, d] = KPI_DEFAULTS_VALIDATED_ON.split("-");
   return KPI_DEFAULT_STATUS[key] === "validated" ? `Valeur par défaut validée le ${d}/${m}/${y}.` : "Valeur par défaut proposée, à confirmer.";
 }

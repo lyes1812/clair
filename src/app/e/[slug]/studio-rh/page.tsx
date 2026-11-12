@@ -6,9 +6,7 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { MegaMenu } from "@/components/MegaMenu";
 import { SourceBadge } from "@/components/SourceBadge";
 import { BudgetError, getScenario, listBudgets, listScenarios } from "@/lib/budget/store";
-import { landing, project } from "@/lib/budget/engine";
-import { budgetSeries, gap, scenarioSeries, total } from "@/lib/budget/series";
-import { monthRange } from "@/lib/connectors/months";
+import { latestFrozenScenario, syntheseBudget } from '@/lib/payroll/synthese-budget';
 import { dateTimeFmt } from "@/lib/connectors/labels";
 import { formatDate, monthEnd } from "@/lib/dates";
 import { menuFamilies } from "@/lib/menu";
@@ -27,12 +25,11 @@ import { compareWindows, delta, etpValue, type Valued } from "@/lib/rh/kpi/compa
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { fmtEtp4 } from "@/lib/rh/kpi/format";
 import { closedMonths, countedOpts, lastClosedMonth, monthWindow, rollingWindow } from "@/lib/rh/kpi/period";
-import { turnover } from "@/lib/rh/kpi/turnover";
+import { turnover, turnoverPopulationLabel } from "@/lib/rh/kpi/turnover";
 import type { DeltaUnit, EtpMonthEnd, Kind, KpiInput, Ratio, Window } from "@/lib/rh/kpi/types";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { hasAtLeast } from "@/lib/roles";
 import { trendClass, type TrendTone } from "@/lib/trend";
-import { publicScenario } from "@/lib/viz/croisee-budget";
 import { capital, euros, hasData, hasNd, masseSeries, monthLongLabel, monthShortYear, monthsAxis, seriesReasons, sourceReason } from "@/lib/viz/masse";
 import {
   averageTile,
@@ -87,6 +84,7 @@ type TileData = {
   budget?: { label: string; value: TileValue };
   delta?: { label: string; text: string | null; reason: string | null; tone: TrendTone };
   href: string;
+  reference?: string;
 };
 
 // Tuile : libellé et « ? » du glossaire, valeur en grand, N-1 et écart, lien vers l'écran détaillé. Une valeur n.d. s'écrit « n.d. »
@@ -109,7 +107,7 @@ function Tile({ t, slug }: { t: TileData; slug: string }) {
     reasons.push({ key: e.key, text: e.text });
   }
   return (
-    <MoneyText><li className={`sy-tile ${t.size}`} data-testid={`sy-tile-${t.id}`}>
+    <MoneyText keurDecimals={t.id === 'cout-etp' ? 1 : 0}><li className={`sy-tile ${t.size}`} data-testid={`sy-tile-${t.id}`}>
       <h3 className="sy-tile-label">
         {t.label}
         <GlossaryLink slug={slug} term={t.term} label={t.label} />
@@ -127,6 +125,7 @@ function Tile({ t, slug }: { t: TileData; slug: string }) {
           )}
         </div>
       )}
+      {t.reference && <p className="tile-foot" data-testid={`sy-tile-${t.id}-reference`}>{t.reference}</p>}
       {reasons.map((r) => {
         const { short, full } = reasonView(r.text);
         return full === null ? (
@@ -353,7 +352,7 @@ export default async function SynthesePage({ params, searchParams }: { params: P
       { id: "effectif", label: "Effectif (personnes)", term: T.effectif, sub: endLabel, value: headcountTile(hCur), previous: headcountTile(hPrev), size: "kpi", href: kpiHref },
       { id: "etp-fin", label: "ETP contractuel", term: T.etpFin, sub: endLabel, value: etpTile(etpEnd.current), previous: etpTile(etpEnd.previous), delta: { label: "Écart", ...dEtp, tone: "flat" }, size: "kpi", href: kpiHref },
       { id: "etp-moyen", label: "ETP moyen", term: T.etpMoyen, sub: label, value: averageTile(etpAvg.current), previous: averageTile(etpAvg.previous), delta: { label: "Écart", ...dAvg, tone: "flat" }, size: "kpi", href: kpiHref },
-      { id: "turnover", label: "Turnover", term: T.turnover, sub: `12 mois glissants à fin ${monthLongLabel(toMonth).toLowerCase()}`, value: rateTile(to12.current), previous: rateTile(to12.previous), delta: { label: "Écart", ...dTo, tone: "flat" }, size: "kpi", href: kpiHref },
+      { id: "turnover", label: "Turnover", term: T.turnover, sub: `12 mois glissants à fin ${monthLongLabel(toMonth).toLowerCase()} · Population : ${turnoverPopulationLabel(input)}`, value: rateTile(to12.current), previous: rateTile(to12.previous), delta: { label: "Écart", ...dTo, tone: "flat" }, size: "kpi", href: kpiHref },
       { id: "absenteisme", label: "Absentéisme", term: T.absenteisme, sub: label, value: rateTile(abs.current), previous: rateTile(abs.previous), delta: { label: "Écart", ...dAbs, tone: "flat" }, size: "kpi", href: kpiHref },
     );
     etpPoints = { cur: months.map((m) => etpMonthEnd(input, m)), prev: prevMonths.map((m) => etpMonthEnd(input, m)) };
@@ -388,26 +387,20 @@ export default async function SynthesePage({ params, searchParams }: { params: P
     );
   }
 
-  // --- Atterrissage du dernier scénario face au budget saisi (store de budget : lecture seule)
+  // --- Dernier scénario figé et dernier budget de l'année, références validées (lecture seule).
   let landingTile: TileData | null = null;
   let landingError: string | null = null;
   const scenarios = await listScenarios(ws.id);
-  if (scenarios.length > 0) {
-    const s = scenarios[0].scenario; // le plus récent
+  const selectedScenario = latestFrozenScenario(scenarios);
+  if (selectedScenario) {
+    const s = selectedScenario.scenario;
     try {
       const full = await getScenario(ws.id, s.id);
-      if (full) {
-        const years = [...new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)))];
-        const ly = years.includes(String(year)) ? String(year) : years[0];
-        const lyMonths = monthRange(`${ly}-01`, `${ly}-12`);
-        // Raisons n.d. de la projection sans identité (le moteur nomme le contrat : « <libellé> : base n.d. (…) ») : publicScenario,
-        // comme la Masse salariale croisée ; montants identiques, le détail nominatif reste dans Hypothèses budgétaires.
-        const pub = publicScenario(full.base, project(full.base, s.firstMonth, s.lastMonth, full.hypotheses, s.conventions));
-        const land = landing(pub.base, pub.proj, ly);
-        const chosen = [...(await listBudgets(ws.id))].filter((b) => b.year === ly).sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null;
-        const bSeries = chosen ? budgetSeries(`budget-${chosen.id.slice(0, 8)}`, chosen.name, ly, chosen.amounts) : null;
-        const g = land.kind === "value" && bSeries ? gap(scenarioSeries(s.id, s.name, pub.base, pub.proj), bSeries, lyMonths) : null;
-        const v = landingView(land, bSeries ? { total: total(bSeries, lyMonths) } : null, g, ly);
+      if (full?.scenario.status === 'fige') {
+        const ly = String(year);
+        const model = syntheseBudget({ year: ly, months, journal, budgets: await listBudgets(ws.id), frozen: full, currentSyncId: ctx.read?.syncId ?? null });
+        const chosen = model.budget;
+        const v = landingView(model.landing, chosen ? { total: model.annualBudget } : null, model.annualGap, ly);
         landingTile = {
           id: "atterrissage",
           label: `Atterrissage ${ly}`,
@@ -418,6 +411,7 @@ export default async function SynthesePage({ params, searchParams }: { params: P
           delta: { label: "Écart", ...v.gap },
           size: "money",
           href: `${studio}/hypotheses?scenario=${s.id}&vue=resultat&sous=comparaison&annee=${ly}`,
+          reference: `Année ${ly} · scénario figé${s.frozenAt ? ` le ${dateTimeFmt.format(s.frozenAt)}` : ''} · base de ${monthLongLabel(full.base.refMonth).toLowerCase()} · lecture du ${formatDate(full.base.readAt.slice(0, 10))}${model.baseDiffersFromCurrent ? ' · réel de la base figée' : ''}`,
         };
       }
     } catch (e) {

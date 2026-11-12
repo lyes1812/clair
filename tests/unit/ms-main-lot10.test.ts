@@ -11,12 +11,14 @@ import { DEFAULT_PREFIXES } from "@/lib/payroll/grid";
 
 // Écrans de la Masse salariale rendus de bout en bout (lot 10) sur un journal fictif écrit à la main : tendances rouge / vert d'un coût,
 // aucun narratif, « ? » vers le glossaire, légende unique. Le contexte (base de données) est remplacé par un contexte fictif.
-const state = vi.hoisted(() => ({ ctx: null as unknown, actualEvents: [] as ActualEvent[], rcScan: null as RcPayslipScan | null }));
+const state = vi.hoisted(() => ({ ctx: null as unknown, actualEvents: [] as ActualEvent[], rcScan: null as RcPayslipScan | null, budgets: [] as unknown[], scenarios: [] as unknown[], frozen: null as unknown }));
 vi.mock("@/lib/payroll/context", () => ({ loadPayrollContext: async () => state.ctx }));
 vi.mock("@/lib/payroll/non-recurring-store", () => ({ listActualEvents: async () => state.actualEvents, actualEventVersion: () => "fictif" }));
 vi.mock("@/lib/payroll/rc-payslips-store", () => ({ getRcPayslipScan: async () => state.rcScan }));
 vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/actual-actions", () => ({ saveActualEventAction: async () => ({ ok: "fictif" }) }));
-beforeEach(() => { state.actualEvents = []; state.rcScan = null; });
+vi.mock('@/lib/budget/store',()=>({listBudgets:async()=>state.budgets,listScenarios:async()=>state.scenarios,getScenario:async()=>state.frozen}));
+vi.mock('@/lib/croisee-settings',async(orig)=>({...await orig<typeof import('@/lib/croisee-settings')>(),getCroiseeSettings:async()=>({confidentialite:{kind:'set',value:1,updatedAt:null,updatedBy:null},seuilsEffectif:{kind:'absent'},margeAlerte:{kind:'absent'},horizonEcheances:{kind:'absent'}})}));
+beforeEach(() => { state.actualEvents = []; state.rcScan = null; state.budgets=[];state.scenarios=[];state.frozen=null; });
 
 // Journal : janvier 2026 (service A : brut 2 200,00 €, cotisations 1 200,00 € ; service B : brut 1 000,00 €, cotisations 500,00 €),
 // février 2026 identique mais non clôturé, janvier 2025 à 90 % de janvier 2026 ; février 2025 absent du journal (n.d.).
@@ -106,6 +108,63 @@ const expectOutsideDetails = (html: string, testid: string) => {
 };
 
 describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 10)", () => {
+  it('charge le dernier budget sur la période exacte et transmet les mêmes mois et la même référence au détail croisé',async()=>{
+    const old={id:'11111111-1111-4111-8111-111111111111',name:'Ancien budget fictif',year:'2026',amounts:{'2026-01':300000},updatedAt:new Date('2026-01-01'),createdAt:new Date('2026-01-01')};
+    const recent={...old,id:'22222222-2222-4222-8222-222222222222',name:'Dernier budget fictif',amounts:{'2026-01':400000,'2026-02':99000000},updatedAt:new Date('2026-10-01')};
+    state.budgets=[old,recent];
+    const html=await page({annee:'2026',de:'01',a:'01'});
+    const card=html.match(/<div[^>]*data-testid="ms-tile-budget"[\s\S]*?<\/div>/)?.[0]??'';
+    expect(card).toContain('data-money-cents="90000"');
+    expect(card).toContain('class="trend-bad"');
+    expect(card).toContain('/croisee?chapitre=budget&amp;annee=2026&amp;de=01&amp;a=01&amp;budget=22222222-2222-4222-8222-222222222222');
+    expect(card).toContain('affichage=tableau#cx-budget-ecart');
+    const references=html.match(/data-testid="ms-synthese-budget-references"[\s\S]*?<\/div>/)?.[0]??'';
+    expect(references).toContain('Dernier budget fictif');
+    expect(references).toContain('Janvier 2026');
+    expect(html).not.toContain('Non chargé sur cette vue');
+    const main=html.match(/<div[^>]*data-testid="ms-tile-masse"[\s\S]*?<\/div>/)?.[0]??'';
+    expect(main).toContain('Janvier 2026');
+  });
+  it('le détail suit la carte de mars–avril sans reprendre janvier–février dans son écart',async()=>{
+    const original=state.ctx as Record<string,unknown>;
+    const months=['2026-01','2026-02','2026-03','2026-04'];
+    const source:JournalInput={grid:DEFAULT_PREFIXES,months,openMonths:[],lines:months.map((month,index)=>({key:`fictif-${month}`,month,accountId:'6411',accountName:'Salaire fictif',debitCents:[90000000,80000000,12000,24000][index],creditCents:0,contractId:'contrat-fictif'}))};
+    const budget={id:'66666666-6666-4666-8666-666666666666',name:'Budget fictif quatre mois',year:'2026',amounts:{'2026-01':100000,'2026-02':100000,'2026-03':10000,'2026-04':15000},updatedAt:new Date('2026-10-01'),createdAt:new Date('2026-01-01')};
+    state.budgets=[budget];
+    const existing=original.kpi as {collab:Record<string,unknown>};
+    state.ctx={...original,input:source,read:{syncId:'lecture-fictive',months,startedAt:new Date('2026-05-01T10:00:00Z')},axes:[],service:{axis:null,origin:'setting',updatedAt:null},kpi:{...existing,input:null,settings:{invalid:[]},collab:{...existing.collab,source:{chosen:'payfit',reason:null},state:null}}};
+    try{
+      const html=await page({annee:'2026',de:'03',a:'04'});
+      const card=html.match(/<div[^>]*data-testid="ms-tile-budget"[\s\S]*?<\/div>/)?.[0]??'';
+      expect(card).toContain('data-money-cents="11000"');
+      const link=/<a class="ms-synthese-value-link" href="([^"]+)"/.exec(card)?.[1];expect(link).toBeTruthy();
+      const url=new URL(link!.replaceAll('&amp;','&'),'https://clair.invalid');
+      const {loadCroiseeContext}=await import('@/app/e/[slug]/studio-rh/masse-salariale/croisee/context');
+      const {loadBudgetInput,buildBudget}=await import('@/lib/viz/croisee-budget');
+      const context=await loadCroiseeContext('demo',{id:'w1',name:'Espace fictif',slug:'demo',role:'reader'},Object.fromEntries(url.searchParams));
+      expect(context.period?.months).toEqual(['2026-03','2026-04']);
+      expect(context.budget.selected?.id).toBe(budget.id);
+      const detail=buildBudget(await loadBudgetInput(context));
+      expect(detail.tiles.find(t=>t.id==='ecart')?.value.text.replaceAll('\u202f',' ').replaceAll('\u00a0',' ')).toBe('+110,00 €');
+      expect(url.hash).toBe('#cx-budget-ecart');
+    }finally{state.ctx=original;}
+  });
+  it('lit le dernier scénario figé et distingue son année complète du réel courant',async()=>{
+    const scenario={id:'33333333-3333-4333-8333-333333333333',name:'Scénario fictif figé',status:'fige',kind:'budget',firstMonth:'2026-10',lastMonth:'2026-12',conventions:{prorata:'calendaire'},createdAt:new Date('2026-01-01'),frozenAt:new Date('2026-10-04')};
+    state.scenarios=[{scenario:{...scenario,id:'44444444-4444-4444-8444-444444444444',name:'Brouillon fictif récent',status:'brouillon',createdAt:new Date('2026-11-01'),frozenAt:null}},{scenario}];
+    state.frozen={scenario,base:{currency:'EUR',refMonth:'2026-09',syncId:'ancienne-lecture-fictive',readAt:'2026-10-02',contracts:[],actuals:Array.from({length:9},(_,i)=>({month:`2026-${String(i+1).padStart(2,'0')}`,kind:'value',brut:10000,cotisations:0,masse:10000,headcount:0,etp4:0,etpNd:null})),refMasse:10000,refBaseCost:0,etpNote:null},baseHash:'fictif',hypotheses:[]};
+    const html=await page({annee:'2026',de:'01',a:'01'});
+    const card=html.match(/<div[^>]*data-testid="ms-tile-landing"[\s\S]*?<\/div>/)?.[0]??'';
+    expect(card).toContain('data-money-cents="90000"');
+    expect(card).toContain('Année 2026 · scénario figé');
+    expect(card).toContain('scenario=33333333-3333-4333-8333-333333333333');
+    const references=html.match(/data-testid="ms-synthese-budget-references"[\s\S]*?<\/div>/)?.[0]??'';
+    expect(references).toContain('Scénario fictif figé');
+    expect(references).toContain('base de septembre 2026');
+    expect(references).toContain('02/10/2026');
+    expect(references).toContain('réel de la base figée');
+    expect(references).not.toContain('Brouillon fictif récent');
+  });
   it("référence écrite à la main : janvier 2026 = 4 900,00 € contre 4 410,00 € en janvier 2025, soit +490,00 € et +11,11\u00a0% (coût en hausse : rouge)", async () => {
     const html = await page();
     expect(html).toContain('data-testid="ms-tile-masse"');

@@ -478,15 +478,27 @@ describe("page : référence de l'année civile 2025 et période par défaut (va
     reset();
     const y = await render({ annee: "2025", de: "01", a: "12" });
     expect(tile(y.html, "etp-moyen").text).toContain("5,40");
-    expect(tile(y.html, "turnover").text).toContain("12 mois glissants à fin décembre 2025 14,81 %");
+    expect(tile(y.html, "turnover").text).toContain("12 mois glissants à fin décembre 2025");
+    expect(tile(y.html, "turnover").text).toContain("14,81 %");
     reset();
     const d = await render();
     expect(text(d.html)).toContain("janvier → septembre 2026 · N-1 : janvier → septembre 2025");
-    expect(tile(d.html, "turnover").text).toContain("12 mois glissants à fin septembre 2026 14,46 %");
+    expect(tile(d.html, "turnover").text).toContain("12 mois glissants à fin septembre 2026");
+    expect(tile(d.html, "turnover").text).toContain("14,46 %");
     expect(tile(d.html, "etp-fin").text).toContain("6,10");
     // Journal de paie absent d'avril à septembre : la masse chargée de la période est n.d., avec les mois en cause.
     expect(tile(d.html, "masse").text).toContain("n.d.");
     expect(tile(d.html, "masse").text).toContain("2026-04");
+  });
+  it("la carte de turnover nomme sa cohorte CDI et conserve les autres indicateurs", async () => {
+    reset();
+    const before = await render();
+    state.ctx = makeCtx({ input: { ...dsn, params: { ...dsn.params, turnoverNatures: ["01", "07"] } } });
+    const after = await render();
+    expect(tile(after.html, "turnover").text).toContain("Population : CDI, CDI intermittent");
+    expect(tile(after.html, "turnover").text).toContain("12 mois glissants à fin septembre 2026");
+    for (const id of ["effectif", "etp-fin", "etp-moyen", "absenteisme"]) expect(tile(after.html, id).text).toBe(tile(before.html, id).text);
+    reset();
   });
   it("paramètre invalide : valeur par défaut et avis court", async () => {
     reset();
@@ -618,6 +630,18 @@ describe("page : atterrissage du dernier scénario face au budget saisi", () => 
     arm([budget("Ancien", 700000, "2026-01-07T08:00:00Z"), budget("Révision d'octobre", 900000, "2026-10-07T08:00:00Z")]);
     const { html } = await render({ annee: "2026", de: "01", a: "03" });
     expect(tile(html, "atterrissage").text).toContain("Budget saisi « Révision d'octobre » : 108 000 € ? Écart : −13 050 €");
+  });
+  it('ignore le brouillon le plus récent et garde la référence figée et sa période visibles',async()=>{
+    arm([budget('Budget fictif retenu',800000,'2026-10-07T08:00:00Z')]);
+    state.scenarios=[{scenario:{...scenario,id:'55555555-5555-4555-8555-555555555555',name:'Brouillon fictif récent',status:'brouillon',createdAt:new Date('2026-11-10')}},...state.scenarios];
+    const {html}=await render({annee:'2026',de:'01',a:'03'});
+    const t=tile(html,'atterrissage');
+    expect(t.text).toContain('Scénario « Budget 2026 »');
+    expect(t.raw).not.toContain('Brouillon fictif récent');
+    expect(t.raw).toContain('scenario=11111111-1111-4111-8111-111111111111');
+    expect(t.text).toContain('Année 2026 · scénario figé');
+    expect(t.text).toContain('base de septembre 2026');
+    expect(t.text).toContain('lecture du 05/10/2026');
   });
   it("sans budget saisi pour l'année : atterrissage affiché, budget n.d. avec sa raison", async () => {
     arm([]);

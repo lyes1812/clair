@@ -10,6 +10,22 @@ import { kpiNd, periodReason, type EventContribution, type KpiInput, type MonthM
 
 const eventKey = (e: EventDraft) => `${e.contractKey}|${e.kind}`;
 
+/** Cohorte propre au turnover. Les effectifs, mouvements généraux, ETP et absences gardent leur périmètre. */
+export function turnoverCohort(input: KpiInput): KpiInput {
+  const selected = input.params.turnoverNatures;
+  if (!selected?.length) return input;
+  return memo(input, "turnover-cohort", () => ({
+    ...input,
+    params: { ...input.params, turnoverNatures: [], natures: [...new Set(selected)].filter((nature) => !input.scope.nature || nature === input.scope.nature) },
+    scope: { ...input.scope, nature: undefined },
+  }));
+}
+
+export function turnoverPopulationLabel(input: KpiInput): string {
+  const natures = turnoverCohort(input).params.natures;
+  return natures.length ? natures.map((nature) => contractNatureLabel(nature).replace(/\s*\(\d{2}\)$/, "")).join(", ") : "aucune nature dans le filtre affiché";
+}
+
 // Contrats continus : couples « sortie le jour J ↔ entrée le jour J+1 » de la même personne, appariés un pour un (une sortie
 // ne neutralise qu'une entrée). L'appariement dépend du référentiel et des natures comptées (Paramètres), jamais des filtres de
 // l'écran : pour une sortie, entrée d'une nature comptée d'abord, puis de même nature, puis du même établissement, puis par
@@ -130,10 +146,11 @@ export function windowMovements(input: KpiInput, w: Window): { entries: Movement
 // Turnover d'une période close : ((E + S) ÷ 2) ÷ effectif moyen, ou S ÷ effectif au premier jour (Paramètres).
 export function turnover(input: KpiInput, w: Window): Turnover {
   return memo(input, `to:${w.from}:${w.to}`, () => {
+    const cohort = turnoverCohort(input);
     const formula = input.params.turnoverFormula;
     const g = checkWindow(input.data, w, input.openMonths);
     if (g) return { kind: "nd", formula, nd: g, months: [] };
-    const months = w.months.map((m) => monthMovements(input, m));
+    const months = w.months.map((m) => monthMovements(cohort, m));
     // La variante « sorties ÷ effectif au premier jour » n'utilise pas les entrées : seules les sorties doivent être exactes.
     const usesEntries = formula === "half_sum";
     const ndMonths = months.filter((m) => (usesEntries && m.entries.kind === "nd") || m.exits.kind === "nd");
@@ -155,18 +172,18 @@ export function turnover(input: KpiInput, w: Window): Turnover {
     const S = months.reduce((s, m) => s + (m.exits.kind === "nd" ? 0 : m.exits.value), 0);
     const neutralized = months.flatMap((m) => m.events).filter((e) => e.why === "neutralized").length;
     const excluded = months.flatMap((m) => m.events).filter((e) => e.why === "excluded-nature");
-    const qualifiers = ["entrées et sorties en contrats, effectif en personnes"];
+    const qualifiers = ["entrées et sorties en contrats, effectif en personnes", ...(input.params.turnoverNatures?.length ? [`population du turnover : ${turnoverPopulationLabel(input)}`] : [])];
     if (neutralized) qualifiers.push(`${neutralized} mouvement(s) de contrats continus neutralisé(s)`);
     if (excluded.length) qualifiers.push(`${excluded.length} sortie(s) exclue(s) : natures ${[...new Set(excluded.map((e) => e.row.event.nature))].join(", ")}`);
     if (formula === "half_sum") {
-      const avg = headcountAverage(input, w);
+      const avg = headcountAverage(cohort, w);
       if (avg.kind === "nd") return { kind: "nd", formula, months, nd: avg.nd };
       if (avg.ratio.num === 0) return { kind: "nd", formula, months, nd: kpiNd("denominator-zero", "effectif moyen nul sur la période") };
       const n = w.months.length;
       return { kind: "exact", formula, ratio: ratio(n * (E! + S), 2 * avg.ratio.num), entries: E!, exits: S, base: { kind: "average", average: avg }, months, qualifiers };
     }
     const date = monthStart(w.from);
-    const h0 = headcountAt(input.data, date, countedOpts(input));
+    const h0 = headcountAt(input.data, date, countedOpts(cohort));
     if (h0.kind === "nd") return { kind: "nd", formula, months, nd: kpiNd(h0.nd.code, h0.nd.reason) };
     if (h0.kind === "lower_bound") return { kind: "nd", formula, months, nd: kpiNd("month-lower-bound", `effectif au ${formatDate(date)} en borne basse${h0.qualifiers[0] ? ` (${h0.qualifiers[0]})` : ""}`) };
     if (h0.persons === 0) return { kind: "nd", formula, months, nd: kpiNd("denominator-zero", `effectif nul au ${formatDate(date)}`) };

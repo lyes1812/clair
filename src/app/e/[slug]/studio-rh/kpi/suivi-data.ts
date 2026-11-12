@@ -3,6 +3,7 @@ import { CATEGORY_IDS } from "@/lib/budget/types";
 import { formatDate, monthEnd } from "@/lib/dates";
 import { coverageAt, gateAt } from "@/lib/rh/headcount";
 import { kpiDashboard } from "@/lib/rh/kpi/dashboard";
+import { turnoverCohort } from '@/lib/rh/kpi/turnover';
 import { civilWindow, closedMonths, defaultYear, lastClosedMonth, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
 import type { KpiDashboard, KpiInput, Window } from "@/lib/rh/kpi/types";
 import { loadKpiContext, type KpiContext } from "@/lib/rh/kpi-context";
@@ -96,7 +97,9 @@ export function kpiSuiviOf(ctx: KpiContext, sp: Search): KpiSuivi {
   if (rawNature && !nature) ignore("nature", rawNature, "nature non comptée dans l'effectif");
 
   const w: Window = mode === "civil" ? civilWindow(year) : rollingWindow(fin);
-  const input: KpiInput = { ...c.input, scope: { establishments: etab ? [etab] : undefined, nature: nature || undefined } };
+  const scopedInput: KpiInput = { ...c.input, scope: { establishments: etab ? [etab] : undefined, nature: nature || undefined } };
+  // L'onglet Turnover et son export détaillent la cohorte de son taux ; le Suivi conserve les mouvements généraux.
+  const input = vue === 'turnover' ? turnoverCohort(scopedInput) : scopedInput;
   return { kind: "ready", ctx: c, data, open, rawLimit, closed, last, years, vue, mode, fin, year, etab, nature, w, input, dash: kpiDashboard(input, w), notices };
 }
 

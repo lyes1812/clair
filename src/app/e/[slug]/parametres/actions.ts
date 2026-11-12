@@ -84,12 +84,17 @@ export async function saveKpiSettings(slug: string, _prev: FormState, formData: 
   const types = formData.getAll("absenceTypes").map(String);
   const unknown = types.filter((t) => !readTypes.has(t) && !current.values.absenceTypes.includes(t));
   if (unknown.length) return { error: `Motif d'absence absent de la lecture appliquée : ${unknown.join(", ")}.` };
+  const population = String(formData.get("turnoverPopulation") ?? "");
+  if (population && !["headcount", "cdi", "custom"].includes(population)) return { error: "Population du turnover invalide." };
+  const turnoverNatures = population === "cdi" ? ["01", "07"] : population === "headcount" ? [] : population === "custom" ? formData.getAll("turnoverNatures").map(String) : current.values.turnoverNatures ?? [];
+  if (population === "custom" && !turnoverNatures.length) return { error: "Choisis au moins une nature pour la population du turnover." };
   const raw: Record<keyof KpiSettingValues, unknown> = {
     fullTimeIsOne: formData.get("fullTimeIsOne") === "on",
     capAtOne: formData.get("capAtOne") === "on",
     forfaitJoursIsOne: formData.get("forfaitJoursIsOne") === "on",
     etpDecimals: Number(formData.get("etpDecimals")),
     turnoverFormula: String(formData.get("turnoverFormula") ?? ""),
+    turnoverNatures,
     excludedExitNatures: formData.getAll("excludedExitNatures").map(String),
     neutralizeContinuity: formData.get("neutralizeContinuity") === "on",
     absenceTypes: types,
@@ -102,6 +107,7 @@ export async function saveKpiSettings(slug: string, _prev: FormState, formData: 
     forfaitJoursIsOne: "Forfait jours = 1",
     etpDecimals: "Décimales des quotités",
     turnoverFormula: "Formule du turnover",
+    turnoverNatures: "Population du turnover",
     excludedExitNatures: "Sorties exclues",
     neutralizeContinuity: "Contrats continus",
     absenceTypes: "Motifs d'absence retenus",

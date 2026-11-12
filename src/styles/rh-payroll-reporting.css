@@ -127,3 +127,25 @@
   .rh-studio .rs-period-controls .field-row { flex-basis: 100%; max-width: none; }
   .rh-studio .rs-links a, .rh-studio .rs-vigilance-link a { display: inline-flex; align-items: center; min-height: 44px; }
 }
+
+/* Un accès compact aux réserves et sources, sans renvois numériques autour de chaque valeur à l’écran. */
+.rh-studio .rs-context { align-self: start; min-width: 0; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; }
+.rh-studio .rs-context > summary { display: inline-flex; align-items: center; gap: 8px; position: relative; min-height: 40px; padding: 8px 34px 8px 12px; cursor: pointer; list-style: none; color: var(--muted); font-size: 12px; font-weight: 500; }
+.rh-studio .rs-context > summary::-webkit-details-marker { display: none; }
+.rh-studio .rs-context > summary::after { content: ""; position: absolute; right: 14px; top: 16px; width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg); }
+.rh-studio .rs-context[open] > summary::after { transform: rotate(225deg); }
+.rh-studio .rs-context > summary span { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--line); border-radius: 50%; font-size: 10px; }
+.rh-studio .rs-context > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: var(--clair-radius-control); }
+.rh-studio .rs-context-body { display: grid; gap: 12px; padding: 16px; border-top: 1px solid var(--line); }
+.rh-studio .rs-context-body .rs-provenance { padding: 0; border: 0; background: transparent; }
+.rh-studio .rs-context-body .rs-notes { padding: 0; border: 0; background: transparent; }
+@media screen { .rh-studio .rs-note-ref { display: none; } }
+@media screen and (max-width: 760px) { .rh-studio .rs-context > summary { min-height: 44px; } .rh-studio .rs-context-body { padding: 14px; } }
+@media print {
+  .rh-studio .rs-context { display: block; border: 0; }
+  .rh-studio .rs-context > summary { display: none; }
+  .rh-studio .rs-context::details-content { content-visibility: visible !important; display: block !important; }
+  .rh-studio .rs-context > .rs-context-body { display: block !important; padding: 0; border: 0; }
+  .rh-studio .rs-context .rs-notes { margin-top: 12pt; }
+  .rh-studio .rs-note-ref { display: inline-flex; }
+}

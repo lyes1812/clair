@@ -9,7 +9,7 @@ import { etpAverage } from "@/lib/rh/kpi/average";
 import { etpMonthEnd } from "@/lib/rh/kpi/etp";
 import { fmtFixed } from "@/lib/rh/kpi/format";
 import { civilWindow, closedMonths, countedOpts, defaultYear, lastClosedMonth, previousWindow, rollingWindow, selectableYears } from "@/lib/rh/kpi/period";
-import { monthMovements, turnover, windowMovements } from "@/lib/rh/kpi/turnover";
+import { monthMovements, turnover, turnoverPopulationLabel, windowMovements } from "@/lib/rh/kpi/turnover";
 import type { Window } from "@/lib/rh/kpi/types";
 import { euros } from "@/lib/viz/masse";
 import { averageTile, etpTile, headcountTile, kpiRefusal, rateTile, SYNTHESE_TERMS, type TileValue } from "@/lib/viz/synthese";
@@ -26,6 +26,7 @@ export type SocialCell = TileValue & { qualifiers: string[]; cents?: number };
 export type SocialMetric = {
   id: string; label: string; term: string; unit: "number" | "etp" | "rate" | "money";
   period: string; current: SocialCell; previous: SocialCell;
+  population?: string;
 };
 export type SocialRow = {
   month: string; coverage: SocialCell; headcount: SocialCell; etp: SocialCell; entries: SocialCell;
@@ -181,13 +182,13 @@ export function socialReportOf(ctx: PayrollContext, raw: SocialSearch): SocialRe
   if ([curPay, prevPay].some((p) => p?.months.some((m) => m.kind === "value" && m.unclassified.length)))
     base.limits.push("des comptes de charges de personnel ne sont pas classés dans la grille de l'espace : ils restent hors masse salariale, comme dans le module Masse salariale");
   const metrics: SocialMetric[] = [];
-  const metric = (id: string, label: string, term: string, unit: SocialMetric["unit"], period: string, current: SocialCell, previous: SocialCell) => metrics.push({ id, label, term, unit, period, current, previous });
+  const metric = (id: string, label: string, term: string, unit: SocialMetric["unit"], period: string, current: SocialCell, previous: SocialCell, population?: string) => metrics.push({ id, label, term, unit, period, current, previous, ...(population ? { population } : {}) });
   metric("effectif", "Effectif (personnes)", SYNTHESE_TERMS.effectif, "number", `fin ${w.to}`, curRh.headcount, prevRh.headcount);
   metric("etp-fin", "ETP contractuel", SYNTHESE_TERMS.etpFin, "etp", `fin ${w.to}`, curRh.etp, prevRh.etp);
   metric("etp-moyen", "ETP moyen", SYNTHESE_TERMS.etpMoyen, "etp", w.label, curRh.average, prevRh.average);
   metric("entrees", "Entrées comptées", "movements", "number", w.label, curRh.entries, prevRh.entries);
   metric("sorties", "Sorties comptées", "movements", "number", w.label, curRh.exits, prevRh.exits);
-  metric("turnover", "Turnover", SYNTHESE_TERMS.turnover, "rate", w.label, curRh.turnover, prevRh.turnover);
+  metric("turnover", "Turnover", SYNTHESE_TERMS.turnover, "rate", w.label, curRh.turnover, prevRh.turnover, input ? turnoverPopulationLabel(input) : undefined);
   metric("absenteisme", "Absentéisme", SYNTHESE_TERMS.absenteisme, "rate", w.label, curRh.absenteeism, prevRh.absenteeism);
   for (const [id, label, term] of [["brut", "Brut", "brut"], ["cotisations", "Cotisations et taxes", "cotisations"], ["masse", "Masse salariale chargée", SYNTHESE_TERMS.masse]] as const)
     metric(id, label, term, "money", w.label, money(curPay, id, w.months), money(prevPay, id, prev.months));

@@ -65,7 +65,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const cardNote = (keys: KpiSettingKey[]) => defaultsNote(keys.map((k) => kinds[k]), KPI_DEFAULTS_VALIDATED_ON);
   const notes = {
     etp: cardNote(["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"]),
-    turnover: cardNote(["turnoverFormula", "neutralizeContinuity", "excludedExitNatures"]),
+    turnover: cardNote(["turnoverNatures", "turnoverFormula", "neutralizeContinuity", "excludedExitNatures"]),
     absence: cardNote(["absenceTypes", "absenceStatuses", "dayBasis"]),
   };
   const updatedAt = (key: string) =>

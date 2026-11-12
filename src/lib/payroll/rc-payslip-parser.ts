@@ -1,6 +1,6 @@
 import { toCents } from "@/lib/money";
 
-export const RC_PARSER_VERSION = "payfit-rc-coordinate-v1";
+export const RC_PARSER_VERSION = "payfit-rc-coordinate-v2";
 export type RcPayslipTextItem = { text: string; x: number; y: number; width: number; height?: number };
 export type RcPayslipTextRow = { page: number; line: number; items: RcPayslipTextItem[] };
 export type RcPayslipComponent = { label: string; amountCents: number; page: number; line: number };
@@ -23,6 +23,7 @@ const amount = (text: string): number | null => {
   return toCents(clean);
 };
 type Column = { x: number; role: "employee" | "other" };
+type ParentColumn = { x: number; role: "base" | "employee-group" | "employer-group" };
 
 function headerCells(row: RcPayslipTextRow): RcPayslipTextItem[] {
   const out: RcPayslipTextItem[] = [];
@@ -31,7 +32,7 @@ function headerCells(row: RcPayslipTextRow): RcPayslipTextItem[] {
     // Le PDF peut séparer les mots d’une même étiquette (« À », « payer »).
     if (last && item.x - (last.x + last.width) >= -1 && item.x - (last.x + last.width) <= 9
       && (!/^(?:base|taux|gains?|retenue|montant|a payer|a deduire|charges patronales)$/.test(normalized(last.text))
-        || /^(?:taux|montant)$/.test(normalized(last.text)) && /^(?:salarial|salarie|patronal)$/.test(normalized(item.text)))) {
+        || /^(?:taux|montant)$/.test(normalized(last.text)) && /^(?:salarial|salarie|patronal|ou)$/.test(normalized(item.text)))) {
       last.text += ` ${item.text}`; last.width = item.x + item.width - last.x;
     } else out.push({ ...item });
   }
@@ -43,17 +44,47 @@ function columnsFor(rows: RcPayslipTextRow[], at: number): Column[] | null {
   // Une entête est locale à la page et doit précéder la ligne d’indemnité.
   for (let index = at - 1; index >= 0 && rows[index].page === current.page; index--) {
     const cells = headerCells(rows[index]);
+    // Entête PayFit à deux niveaux : la largeur du texte « PART SALARIÉ » n’est pas celle du groupe.
+    // Ses bornes viennent des groupes voisins ; les sous-colonnes identifient ensuite taux et montant.
+    const parents = cells.flatMap<ParentColumn>((cell) => {
+      const text = normalized(cell.text), x = cell.x + cell.width / 2;
+      if (text === "base") return [{ x, role: "base" as const }];
+      if (/^(?:part )?salari(?:al|ale|ales|e|es)$/.test(text)) return [{ x, role: "employee-group" as const }];
+      if (/^(?:part )?(?:employeur|patronal|patronale|patronales)$/.test(text)) return [{ x, role: "employer-group" as const }];
+      return [];
+    }).sort((a, b) => a.x - b.x);
+    const employeeGroups = parents.filter((parent) => parent.role === "employee-group");
+    const employerGroups = parents.filter((parent) => parent.role === "employer-group");
+    let baseGroups = parents.filter((parent) => parent.role === "base");
+    // BASE peut être centrée verticalement sur les deux niveaux et donc extraite sur une autre ligne.
+    if (!baseGroups.length && employeeGroups.length === 1 && employerGroups.length === 1) {
+      const adjacent = rows.slice(Math.max(0, index - 1), Math.min(index + 3, at)).filter((row) => row.page === current.page).flatMap(headerCells)
+        .filter((cell) => normalized(cell.text) === "base" && cell.x + cell.width / 2 < employeeGroups[0].x)
+        .map((cell): ParentColumn => ({ x: cell.x + cell.width / 2, role: "base" }));
+      baseGroups = adjacent.filter((column, position) => !adjacent.slice(0, position).some((other) => Math.abs(other.x - column.x) <= 2));
+    }
+    if (employeeGroups.length === 1 && employerGroups.length === 1 && baseGroups.length === 1) {
+      const employeeGroup = employeeGroups[0], employerGroup = employerGroups[0], base = baseGroups[0];
+      if (base.x < employeeGroup.x && employeeGroup.x < employerGroup.x) {
+        const left = (base.x + employeeGroup.x) / 2, right = (employeeGroup.x + employerGroup.x) / 2;
+        const children = rows.slice(index + 1, Math.min(index + 3, at)).filter((row) => row.page === current.page).flatMap(headerCells);
+        const employeeAmounts = children.filter((cell) => normalized(cell.text) === "montant" && cell.x + cell.width / 2 > left && cell.x + cell.width / 2 < right);
+        const employeeRates = children.filter((cell) => /^(?:taux|taux ou %|taux salarial)$/.test(normalized(cell.text)) && cell.x + cell.width / 2 > left && cell.x + cell.width / 2 < right);
+        const employerAmounts = children.filter((cell) => normalized(cell.text) === "montant" && cell.x + cell.width / 2 > right);
+        if (employeeAmounts.length === 1 && employeeRates.length === 1 && employerAmounts.length <= 1) {
+          const amountX = employeeAmounts[0].x + employeeAmounts[0].width / 2;
+          const rateX = employeeRates[0].x + employeeRates[0].width / 2;
+          if (rateX < amountX) return [{ x: base.x, role: "other" }, { x: rateX, role: "other" }, { x: amountX, role: "employee" }, { x: employerAmounts.length ? employerAmounts[0].x + employerAmounts[0].width / 2 : employerGroup.x, role: "other" }];
+        }
+      }
+      // Une entête explicitement groupée mais incohérente reste bloquante, sans reprendre une entête plus ancienne.
+      return null;
+    }
     const columns: Column[] = [];
     for (const cell of cells) {
       const text = normalized(cell.text), x = cell.x + cell.width / 2;
       if (/^(?:a payer|gains?|montant salarial|montant salarie|montant a payer)$/.test(text)) columns.push({ x, role: "employee" });
-      else if (/^(?:base|taux(?: salarial| patronal)?|a deduire|retenues?|charges patronales|cotisations patronales|part patronale|employeur|patronal(?:es)?)$/.test(text)) columns.push({ x, role: "other" });
-      else if (text === "montant") {
-        // Entête à deux niveaux : le montant doit être explicitement sous la part salariale.
-        const parent = rows.slice(Math.max(0, index - 2), index).filter((row) => row.page === current.page).flatMap((row) => row.items).find((item) => /^(?:part )?salari(?:al|ale|ales|e|es)$/.test(normalized(item.text)) && x >= item.x - 20 && x <= item.x + item.width + 20);
-        if (parent) columns.push({ x, role: "employee" });
-        else columns.push({ x, role: "other" });
-      }
+      else if (/^(?:base|taux(?: ou %| salarial| patronal)?|a deduire|retenues?|charges patronales|cotisations patronales|part patronale|part employeur|employeur|patronal(?:es)?|montant)$/.test(text)) columns.push({ x, role: "other" });
     }
     if (columns.length >= 2 && columns.filter((column) => column.role === "employee").length === 1) return columns.sort((a, b) => a.x - b.x);
   }

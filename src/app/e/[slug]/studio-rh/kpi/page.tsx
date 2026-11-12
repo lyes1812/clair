@@ -1,7 +1,7 @@
 import "@/styles/kpi.css";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatMonth } from "@/lib/dates";
 import { CATEGORY_LABELS, type CategoryId } from "@/lib/budget/types";
 import { contractNatureLabel } from "@/lib/dsn/labels";
 import { KPI_TERMS } from "@/lib/glossary/kpi";
@@ -12,10 +12,11 @@ import { KPI_DETAIL_IDS, kpiDetail } from "@/lib/rh/kpi/dashboard";
 import { ETP_PRORATED_LABEL, etpProratedQualifier } from "@/lib/rh/kpi/etp-prorata";
 import { fmtDelta, fmtEtp4, fmtHalfDays, fmtPercent } from "@/lib/rh/kpi/format";
 import { previousWindow } from "@/lib/rh/kpi/period";
+import { turnoverPopulationLabel } from '@/lib/rh/kpi/turnover';
 import type { Compared, KpiDetailId, Ratio } from "@/lib/rh/kpi/types";
 import { ABSENCE_STATUS_LABELS } from "@/lib/rh/labels";
 import type { Shown } from "@/lib/rh/view";
-import { absenceTypeText, absenteeismSeries, deltaExact, etpProratedNotes, etpSeries, headcountSeries, motifsRetenusLine } from "@/lib/viz/kpi";
+import { absenceTypeLabel, absenceTypeText, absenteeismSeries, deltaExact, etpProratedNotes, etpSeries, headcountSeries } from "@/lib/viz/kpi";
 import {
   AbsenceMonthDetail,
   AbsenceTypeNotes,
@@ -43,7 +44,6 @@ import {
   natureList,
   NdReasons,
   PanelTitle,
-  PayfitNotice,
   ratioTitle,
   show,
   showCount,
@@ -89,6 +89,7 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
     ["forfaitJoursIsOne", "Forfait jours sans quotité PayFit = 1 ETP", yes(v.forfaitJoursIsOne)],
     ["etpDecimals", "Décimales de la quotité avant la somme", String(v.etpDecimals)],
     ["turnoverFormula", "Formule du turnover", v.turnoverFormula === "half_sum" ? "moyenne des entrées et des sorties ÷ effectif moyen" : "sorties ÷ effectif du premier jour"],
+    ["turnoverNatures", "Population du turnover", v.turnoverNatures?.length ? natureList(v.turnoverNatures) : "même population que les effectifs"],
     ["neutralizeContinuity", "Contrats continus neutralisés", yes(v.neutralizeContinuity)],
     ["excludedExitNatures", "Sorties non comptées (natures)", v.excludedExitNatures.length ? natureList(v.excludedExitNatures) : "aucune"],
     ["absenceTypes", "Motifs retenus pour l'absentéisme", v.absenceTypes.length ? v.absenceTypes.map(absenceTypeText).join(", ") : "aucun (absentéisme n.d.)"],
@@ -294,8 +295,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
   // Page « Prévu » : aucun chiffre, donc ni limites de la lecture ni paramètres en vigueur à rappeler.
   const prevu = (PREVU_VUES as string[]).includes(vue);
   return (
-    <KpiHeader ctx={ctx} closedMonth={last} bare={prevu}>
-      {!prevu && <PayfitNotice ctx={ctx} />}
+    <KpiHeader ctx={ctx} closedMonth={last} bare={prevu} vigilance={[...covNotices].map(([reason, months]) => <p key={reason} className="notice" data-testid="coverage-notice">{monthRanges(months)} : {reason}</p>)}>
       <FamilyTabs label="Entrées KPI RH" testid="kpi-tabs" current={vue} tabs={KPI_VUES.map((v) => ({ key: v.key, label: v.label, href: v.key === "suivi" ? "?" : `?vue=${v.key}`, soon: "soon" in v ? v.soon : false }))} />
       {prevu ? (
         <Prevu title={KPI_VUES.find((x) => x.key === vue)!.label} {...PREVU[vue as PrevuVue](`/e/${slug}/studio-rh`)} />
@@ -314,7 +314,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           initialMode={mode}
           initialEnd={fin}
           initialYear={String(year)}
-          ends={[...closed].reverse().map((month) => ({ value: month, label: `${month}${lowerMonths.has(month) ? " — borne basse" : ""}` }))}
+          ends={[...closed].reverse().map((month) => ({ value: month, label: `${formatMonth(month)}${lowerMonths.has(month) ? " — borne basse" : ""}` }))}
           years={[...years].reverse().map((entry) => ({ value: String(entry.year), label: `${entry.year}${entry.closed ? "" : " — non close"}` }))}
         />
         {ctx.collab.establishments.length > 1 && (
@@ -322,7 +322,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             <label htmlFor="etab">Établissement</label>
             <select className="select" id="etab" name="etab" defaultValue={etab}>
               <option value="">Tous</option>
-              {ctx.collab.establishments.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+              {ctx.collab.establishments.map((e, index) => <option key={e.id} value={e.id}>{e.label === e.id ? `Établissement ${index + 1}` : e.label}</option>)}
             </select>
           </div>
         )}
@@ -330,7 +330,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
           <label htmlFor="nature">Nature</label>
           <select className="select" id="nature" name="nature" defaultValue={nature}>
             <option value="">Natures comptées</option>
-            {ctx.collab.natures.codes.map((n) => <option key={n} value={n}>{contractNatureLabel(n)}</option>)}
+            {ctx.collab.natures.codes.map((n) => <option key={n} value={n}>{contractNatureLabel(n).replace(/\s*\(\d{2}\)$/, '')}</option>)}
           </select>
         </div>
         <button className="btn primary" type="submit">Afficher</button>
@@ -338,13 +338,10 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
 
       <p className="desc kpi-period" data-testid="kpi-period">
         <strong>{w.label}</strong> · N-1 : {pw.label} · date de référence {formatDate(data.build.referenceDate)}
-        {etab ? ` · établissement ${etab}` : ""}
-        {nature ? ` · nature ${contractNatureLabel(nature)}` : ""}
+        {etab ? ` · ${ctx.collab.establishments.find((e) => e.id === etab)?.label === etab ? 'établissement sélectionné' : ctx.collab.establishments.find((e) => e.id === etab)?.label ?? 'établissement sélectionné'}` : ""}
+        {nature ? ` · nature ${contractNatureLabel(nature).replace(/\s*\(\d{2}\)$/, '')}` : ""}
         <GlossaryLink slug={slug} term={KPI_TERMS.closedPeriod} />
       </p>
-      {[...covNotices].map(([reason, months]) => (
-        <p key={reason} className="notice" data-testid="coverage-notice">{monthRanges(months)} : {reason}</p>
-      ))}
 
       <section className="panel">
         <PanelTitle slug={slug} term={KPI_TERMS.previousPeriod} label="Comparaison N-1 et écart">Indicateurs</PanelTitle>
@@ -427,11 +424,13 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             n1Title={t.turnover.previousWindow.label}
             delta={fmtDelta(t.turnover.delta)}
             deltaTitle={deltaTitle(t.turnover, (x) => (x.kind === "exact" ? x.ratio : null), true)}
-            qualifiers={toCur.kind === "exact" ? toCur.qualifiers : []}
+            qualifiers={toCur.kind === "exact" ? toCur.qualifiers.filter((line) => !line.startsWith('population du turnover :')) : []}
             term={KPI_TERMS.turnover}
             detail={detailHref("turnover", null)}
             detailN1={detailHref("turnover", null, true)}
-          />
+          >
+            <span className="tile-foot" data-testid="kpi-turnover-population">Population : {turnoverPopulationLabel(input)}</span>
+          </KpiTile>
           <KpiTile
             id="absenteeism"
             sparkline={sparkAbsenteeism}
@@ -444,7 +443,7 @@ export default async function KpiPage({ params, searchParams }: { params: Promis
             n1Title={t.absenteeism.previousWindow.label}
             delta={fmtDelta(t.absenteeism.delta)}
             deltaTitle={deltaTitle(t.absenteeism, (x) => (x.kind === "nd" ? null : x.ratio), true)}
-            qualifiers={[motifsRetenusLine(dash.params.absenceTypes), ...(absCur.kind === "nd" ? [] : absCur.qualifiers)]}
+            qualifiers={[`Motifs retenus : ${dash.params.absenceTypes.length ? dash.params.absenceTypes.map((code) => absenceTypeLabel(code) ?? 'motif PayFit sans libellé').join(', ') : 'aucun'}`, ...(absCur.kind === "nd" ? [] : absCur.qualifiers)]}
             warning={
               input.absences.status === "read" && missingTypes.length > 0 ? (
                 <span className="tile-foot" data-testid="kpi-absence-missing">

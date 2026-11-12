@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, type ReactNode } from "react";
+import { useActionState, useState, type ReactNode } from "react";
 import type { OriginKind } from "../donnees/ui";
 import { Feedback } from "./Feedback";
 import { saveKpiSettings } from "./actions";
@@ -10,6 +10,7 @@ type Values = {
   forfaitJoursIsOne: boolean;
   etpDecimals: number;
   turnoverFormula: string;
+  turnoverNatures?: string[];
   excludedExitNatures: string[];
   neutralizeContinuity: boolean;
   absenceTypes: string[];
@@ -56,6 +57,8 @@ const CardNote = ({ id, text }: { id: string; text: string | null }) =>
 
 export function KpiForm({ slug, values, origins, kinds, notes, natures, types, readLabel, statuses, disabled, helps = {} }: KpiFormProps) {
   const [state, action, pending] = useActionState(saveKpiSettings.bind(null, slug), undefined);
+  const selectedNatures = values.turnoverNatures ?? [];
+  const [population, setPopulation] = useState(!selectedNatures.length ? "headcount" : JSON.stringify([...selectedNatures].sort()) === '["01","07"]' ? "cdi" : "custom");
   return (
     <form className="form" action={action}>
       <Feedback state={state} testid="setting-kpi-status" />
@@ -104,6 +107,15 @@ export function KpiForm({ slug, values, origins, kinds, notes, natures, types, r
           <legend className="label">Turnover{helps.turnover}</legend>
           <div className="pm-card-body">
             <CardNote id="turnover" text={notes.turnover} />
+            <div className="pm-item" role="group" aria-labelledby="kpi-population-title">
+              <ItemHead id="kpi-population-title" title="Population du turnover" />
+              <label className="check"><input type="radio" name="turnoverPopulation" value="headcount" checked={population === "headcount"} onChange={() => setPopulation("headcount")} /><span>Même population que les effectifs</span></label>
+              <label className="check"><input type="radio" name="turnoverPopulation" value="cdi" checked={population === "cdi"} onChange={() => setPopulation("cdi")} data-testid="setting-kpi-turnover-cdi" /><span>CDI uniquement · CDI et CDI intermittent</span></label>
+              <label className="check"><input type="radio" name="turnoverPopulation" value="custom" checked={population === "custom"} onChange={() => setPopulation("custom")} /><span>Choisir les natures de contrats</span></label>
+              {population === "custom" && <div className="pm-checks pm-chips">{natures.map((nature) => <label className="check" key={nature.code}><input type="checkbox" name="turnoverNatures" value={nature.code} defaultChecked={selectedNatures.includes(nature.code)} /><span>{nature.label}</span></label>)}</div>}
+              <p className="desc">La même population est retenue pour les entrées, les sorties et l’effectif de base. Les autres indicateurs gardent leur périmètre.</p>
+              <Origin id="turnover-population" name="turnoverNatures" kinds={kinds} origins={origins} />
+            </div>
             <div className="pm-item">
               <label className="check">
                 <input type="radio" name="turnoverFormula" value="half_sum" defaultChecked={values.turnoverFormula === "half_sum"} data-testid="setting-kpi-turnover-formula" />

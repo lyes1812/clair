@@ -38,7 +38,7 @@ describe("Actions de la Synthèse Masse salariale", () => {
       ["Collaborateurs par rubrique de paie", "collaborateurs/rubrique"],
       ["Pointage des collaborateurs", "collaborateurs/pointage"],
       ["Pivot · liste mensuelle", "collaborateurs/pivot"],
-      ["MS par organisation", "masse-salariale/organisation"],
+      ["Masse salariale par organisation", "masse-salariale/organisation"],
       ["Écart réel", "masse-salariale/reel"],
     ]) expect(entries.find((entry) => entry.label === label)?.href).toBe(`/e/${slug}/studio-rh/${path}`);
     const html = renderToStaticMarkup(actions);

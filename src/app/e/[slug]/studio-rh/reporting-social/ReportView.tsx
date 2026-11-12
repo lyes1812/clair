@@ -20,12 +20,13 @@ const PAYROLL_COLUMNS = [
 ] as const;
 const ROW_CELLS = ["coverage", ...RH_COLUMNS.map(([key]) => key), ...PAYROLL_COLUMNS.map(([key]) => key)] as const;
 const fullDateTime = (value: string | null) => value ? dateTimeFmt.format(new Date(value)) : "n.d.";
-const periodLabel = (value: string) => /^fin \d{4}-\d{2}$/.test(value) ? `fin ${formatMonth(value.slice(4)).toLowerCase()}` : value;
+const periodLabel = (value: string) => value.replace(/\b\d{4}-\d{2}\b/g, (month) => formatMonth(month).toLowerCase());
 const cellReasons = (cell: SocialCell) => [...new Set([cell.reason, ...cell.qualifiers].filter((reason): reason is string => !!reason))];
 
 // Les notes sont des mentions du modèle, regroupées une seule fois. Les renvois restent visibles sur papier, même pour les n.d.
 function reportNotes(report: SocialReport): string[] {
   return [...new Set([
+    ...report.notices,
     ...report.limits,
     ...(report.previous.reason ? [report.previous.reason] : []),
     ...report.metrics.flatMap((metric) => [metric.current, metric.previous].flatMap(cellReasons)),
@@ -36,7 +37,7 @@ function reportNotes(report: SocialReport): string[] {
 function Value({ cell, notes, metric = false }: { cell: SocialCell; notes: string[]; metric?: boolean }) {
   const refs = cellReasons(cell).map((reason) => notes.indexOf(reason) + 1).filter((index) => index > 0);
   return (
-    <span className={`${metric ? "rs-metric-value" : "rs-value"} ${cell.kind === "nd" ? "nd" : cell.kind === "lower" ? "lower" : ""}`.trim()}>
+    <span className={`${metric ? "rs-metric-value" : "rs-value"} ${cell.kind === "nd" ? "nd" : cell.kind === "lower" ? "lower" : ""}`.trim()} aria-describedby={refs.length ? refs.map((index) => `rs-note-${index}`).join(" ") : undefined} title={cell.kind === "nd" ? "Voir Vigilance et sources pour la raison de cette donnée indisponible" : undefined}>
       {cell.cents !== undefined ? <Money cents={cell.cents} /> : cell.text}
       {refs.length > 0 && <sup className="rs-note-ref">{refs.map((index) => <a key={index} href={`#rs-note-${index}`} aria-label={`Vigilance ${index}`}>[{index}]</a>)}</sup>}
     </span>
@@ -48,7 +49,7 @@ function MetricCards({ metrics, notes, slug }: { metrics: SocialMetric[]; notes:
     <dl className="rs-metrics">
       {metrics.map((metric) => (
         <div className="rs-metric" key={metric.id} data-testid={`rs-metric-${metric.id}`}>
-          <dt>{metric.label}<GlossaryLink slug={slug} term={metric.term} /><span className="rs-metric-period">{periodLabel(metric.period)}</span></dt>
+          <dt>{metric.label}<GlossaryLink slug={slug} term={metric.term} /><span className="rs-metric-period">{periodLabel(metric.period)}</span>{metric.population && <span className="rs-metric-period" data-testid={`rs-metric-${metric.id}-population`}>Population : {metric.population}</span>}</dt>
           <dd>
             <Value cell={metric.current} notes={notes} metric />
             <span className="rs-previous"><span>N-1</span><Value cell={metric.previous} notes={notes} /></span>
@@ -104,7 +105,6 @@ export function ReportView({ report, slug, workspaceName }: { report: SocialRepo
         />
         <div className="actions"><button className="btn primary" type="submit">Appliquer</button><a className="btn" href={base}>Réinitialiser</a></div>
       </form>}
-      {report.notices.map((notice) => <p key={notice} className="notice rs-screen-only" data-testid="rs-param-notice">{notice}</p>)}
       <article className="rs-report" data-testid="rs-report" aria-labelledby="rs-report-title">
         <header className="rs-report-head">
           <div>
@@ -117,14 +117,22 @@ export function ReportView({ report, slug, workspaceName }: { report: SocialRepo
           {report.kind === "ready" && <PrintAction />}
         </header>
 
+        <details className="rs-context" data-testid="rs-context">
+          <summary>Vigilance{notes.length > 0 ? ` (${notes.length})` : ""} et sources <span aria-hidden="true">?</span></summary>
+          <div className="rs-context-body">
         <section className="rs-provenance" aria-label="Sources et date de référence" data-testid="rs-provenance">
           <dl className="facts">
             <div><dt>Source RH</dt><dd>{source}<small>Lecture : {fullDateTime(report.source.readAt)}</small></dd></div>
             <div><dt>Date de référence RH</dt><dd>{formatDate(report.source.referenceDate)}<small>{report.window ? `${formatMonth(report.window.from)} → ${formatMonth(report.window.to)}` : "Aucune période disponible"}</small></dd></div>
             <div><dt>Source paie</dt><dd>{report.source.payrollKind === "payfit" ? "Journal comptable PayFit" : "n.d."}<small>Lecture : {fullDateTime(report.source.payrollReadAt)}</small></dd></div>
           </dl>
-          {notes.length > 0 && <p className="rs-vigilance-link"><a href="#rs-notes">Vigilance ({notes.length}) <span aria-hidden="true">?</span></a></p>}
         </section>
+        {notes.length > 0 && <section className="rs-notes" aria-labelledby="rs-notes" data-testid="rs-notes">
+          <h3 id="rs-notes">Points de vigilance</h3>
+          <ol>{notes.map((note, index) => <li id={`rs-note-${index + 1}`} key={note}>{note}</li>)}</ol>
+        </section>}
+          </div>
+        </details>
 
         {report.kind === "no-period" ? (
           <section className="placeholder rs-empty" data-testid="rs-no-period">
@@ -147,10 +155,6 @@ export function ReportView({ report, slug, workspaceName }: { report: SocialRepo
           </section>
         </>}
 
-        {notes.length > 0 && <section className="rs-notes" aria-labelledby="rs-notes" data-testid="rs-notes">
-          <h3 id="rs-notes">Vigilance ({notes.length})</h3>
-          <ol>{notes.map((note, index) => <li id={`rs-note-${index + 1}`} key={note}>{note}</li>)}</ol>
-        </section>}
         <nav className="rs-links rs-screen-only" aria-label="Explorer les données du rapport">
           <a href={`/e/${slug}/studio-rh/kpi`}>Détail des KPI RH</a>
           <a href={`/e/${slug}/studio-rh/masse-salariale`}>Détail de la masse salariale</a>

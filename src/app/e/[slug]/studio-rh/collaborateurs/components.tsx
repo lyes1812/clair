@@ -320,7 +320,7 @@ export function ListToolbar({ testid, label, hidden, q, size, resetHref, submitL
 
 // Nom du collaborateur (lien) et, en ligne secondaire, l'identifiant technique de la source. `inline` : les deux sur une même
 // ligne (listes à puces).
-export function PersonCell({ person, contract, slug, inline = false }: { person: PersonDraft | null; contract: ContractDraft; slug: string; inline?: boolean }) {
+export function PersonCell({ person, contract, slug, inline = false, compact = false }: { person: PersonDraft | null; contract: ContractDraft; slug: string; inline?: boolean; compact?: boolean }) {
   if (!person) {
     return (
       <span>
@@ -333,7 +333,7 @@ export function PersonCell({ person, contract, slug, inline = false }: { person:
   return (
     <span className={inline ? "collab-person-cell inline" : "collab-person-cell"}>
       <a href={personHref(slug, person.personKey)}>{label ?? <span className="nd">n.d. — {person.fieldsNd.familyName?.reason ?? "nom absent"}</span>}</a>{" "}
-      <ShortId id={person.externalId} sub={!inline} />
+      {!compact && <ShortId id={person.externalId} sub={!inline} />}
     </span>
   );
 }
@@ -344,8 +344,8 @@ export function ShortId({ id, sub = false }: { id: string; sub?: boolean }) {
   return id.length > 24 ? <code className={cls} title={id}>{id.slice(0, 8)}…</code> : <code className={cls}>{id}</code>;
 }
 
-export function Nature({ code }: { code: string | null }) {
-  return code === null ? <span className="nd">nature : n.d.</span> : <span>{contractNatureLabel(code)}</span>;
+export function Nature({ code, compact = false }: { code: string | null; compact?: boolean }) {
+  return code === null ? <span className="nd">nature : n.d.</span> : <span>{compact ? contractNatureLabel(code).replace(/\s*\(\d{2}\)$/, "") : contractNatureLabel(code)}</span>;
 }
 
 // Texte de la colonne « Fin » (mêmes mots que EndCell, sans balisage ni provenance) : sert à la recherche sur toutes les colonnes.

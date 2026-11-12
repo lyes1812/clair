@@ -30,6 +30,27 @@ const html = (report = fixture()) => renderToStaticMarkup(createElement(ReportVi
 const table = (value: string, id: string) => value.match(new RegExp(`<table[^>]*data-testid="${id}"[\\s\\S]*?<\\/table>`))?.[0] ?? "";
 
 describe("Reporting social — présentation des agrégats fictifs", () => {
+  it("affiche la population du turnover à côté de sa période, sans codes techniques", () => {
+    const report = fixture();
+    report.metrics.push({ id: "turnover", label: "Turnover", term: "turnover", unit: "rate", period: report.window!.label, population: "CDI, CDI intermittent", current: known("12,50 %"), previous: known("10,00 %") });
+    const value = html(report);
+    expect(value).toContain('data-testid="rs-metric-turnover-population"');
+    expect(value).toContain("Population : CDI, CDI intermittent");
+    expect(value).toContain(report.window!.label);
+  });
+  it("regroupe réserves et provenance dans un seul accès fermé, sans perdre leurs références", () => {
+    const value = html();
+    expect(value.match(/data-testid="rs-context"/g)).toHaveLength(1);
+    expect(value).toContain('Vigilance (');
+    expect(value).toContain('et sources');
+    expect(value).not.toMatch(/<details[^>]*\bopen(?:=|\s|>)/);
+    expect(value).toContain('aria-describedby="rs-note-');
+    const notes = value.match(/<section[^>]*data-testid="rs-notes"[\s\S]*?<\/section>/)?.[0] ?? '';
+    expect(notes).toContain('Absences non lues dans la source fictive.');
+    const css = readFileSync('src/styles/rh-payroll-reporting.css', 'utf8');
+    expect(css).toContain('.rh-studio .rs-context::details-content { content-visibility: visible !important; display: block !important; }');
+    expect(css).toContain('@media screen { .rh-studio .rs-note-ref { display: none; } }');
+  });
   it("affiche la période exacte, son N-1 et les deux lectures avec leur date de référence", () => {
     const value = html();
     expect(value).toContain("12 mois glissants : mars 2025 → février 2026");
