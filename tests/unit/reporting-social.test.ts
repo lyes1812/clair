@@ -226,6 +226,16 @@ describe("Reporting social V1 : adaptateur pur des moteurs existants", () => {
     expect(r.limits.join(" ")).toContain("hors masse salariale");
   });
 
+  it("expose la population CDI du turnover sans modifier les périodes ni les autres indicateurs", async () => {
+    const ctx = await context(dsnFixtureBuild());
+    const before = socialReportOf(ctx, {});
+    ctx.kpi.input = { ...ctx.kpi.input!, params: { ...ctx.kpi.input!.params, turnoverNatures: ["01", "07"] } };
+    const after = socialReportOf(ctx, {});
+    expect(metric(after, "turnover").population).toBe("CDI, CDI intermittent");
+    expect(metric(after, "turnover").period).toBe(metric(before, "turnover").period);
+    expect(after.metrics.filter((item) => item.id !== "turnover")).toEqual(before.metrics.filter((item) => item.id !== "turnover"));
+  });
+
   it("raisons et limites publiques : aucun nom, contrat, NIR, absence, ligne, paramètre libre ou détail moteur", async () => {
     const d = await payfitFixtureBuild();
     const person = d.persons[0];

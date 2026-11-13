@@ -67,7 +67,7 @@ const cls = (s: Shown) => (s.kind === "nd" ? "nd" : s.kind === "lower" ? "lower"
 // --- En-tête
 
 // bare : page « Prévu » (aucun chiffre) : ni dernier mois clos ni détails de la lecture, qui n'ont rien à qualifier.
-export function KpiHeader({ ctx, closedMonth, children, bare = false }: { ctx: KpiContext; closedMonth: string | null; children?: ReactNode; bare?: boolean }) {
+export function KpiHeader({ ctx, closedMonth, children, vigilance, bare = false }: { ctx: KpiContext; closedMonth: string | null; children?: ReactNode; vigilance?: ReactNode; bare?: boolean }) {
   const { slug, source, state, switchedAt } = ctx.collab;
   return (
     <>
@@ -76,21 +76,24 @@ export function KpiHeader({ ctx, closedMonth, children, bare = false }: { ctx: K
         <h1>{ITEM.label}</h1>
         <div className="kpi-read-strip">
           <div className="kpi-source">
-            <SourceBadge resolution={source} slug={slug} />
+            <SourceBadge resolution={source} slug={slug} compact />
             {source.chosen && <GlossaryLink slug={slug} term={KPI_TERMS.sourceGaps} label="Écarts entre PayFit et DSN" />}
           </div>
           {ctx.collab.data && !bare && (
             <p className="desc" data-testid="kpi-closed-month">
-              Dernier mois clos : {closedMonth ? <strong>{closedMonth}</strong> : <span className="nd">n.d. — aucun mois clos à la date de référence</span>}
+              Dernier mois clos : {closedMonth ? <strong>{formatMonth(closedMonth)}</strong> : <span className="nd">n.d. — aucun mois clos à la date de référence</span>}
               {(ctx.input?.openMonths ?? []).length > 0 && (
-                <span data-testid="kpi-payroll-open"> · paie non clôturée à la lecture : {ctx.input!.openMonths!.join(", ")} (mois non clos)</span>
+                <span data-testid="kpi-payroll-open"> · paie non clôturée à la lecture : {ctx.input!.openMonths!.map(formatMonth).join(", ")} (mois non clos)</span>
               )}
             </p>
           )}
         </div>
+        {!bare && (ctx.collab.data || switchedAt) && <details className="kpi-vigilance" data-testid="kpi-vigilance">
+          <summary>Vigilance <span aria-hidden="true">?</span></summary>
+          <div className="kpi-vigilance-body">
         {switchedAt && (
           <p className="notice" data-testid="source-switch-notice">
-            Source RH changée le {dateTimeFmt.format(switchedAt)} par un administrateur ({source.reason}) : aucune comparaison entre PayFit et DSN.
+            Source RH changée le {dateTimeFmt.format(switchedAt)} : aucune comparaison entre PayFit et DSN.
           </p>
         )}
         {ctx.collab.data && !bare && (
@@ -99,6 +102,10 @@ export function KpiHeader({ ctx, closedMonth, children, bare = false }: { ctx: K
             <BuildInfo ctx={ctx.collab} />
           </details>
         )}
+        <PayfitNotice ctx={ctx} />
+        {vigilance}
+          </div>
+        </details>}
       </div>
       {!source.chosen && (
         <section className="placeholder" data-testid="kpi-nd">
@@ -226,19 +233,21 @@ export function KpiTile(props: {
   const { id, slug, label, shown, title, n1, n1Title, delta, deltaTitle, qualifiers = [], warning, term, detail, detailN1, children, visible = true } = props;
   if (!visible) return null;
   const notes = readingQualifiers(qualifiers);
+  const previousMissing = n1.startsWith('n.d.');
   return (
     <div className="kpi-tile" data-testid={`kpi-tile-${id}`}>
       <dt>{label}<GlossaryLink slug={slug} term={term} /></dt>
-      <dd className={cls(shown)} title={title}>{shown.text}</dd>
+      <dd className={cls(shown)} title={shown.kind === 'nd' ? shown.text : title}>{shown.kind === 'nd' ? 'n.d.' : shown.text}</dd>
       {/* Toujours présent, même vide : la rangée des remarques garde la grille des tuiles alignée (N-1 et écart, liens). */}
       <div className="tile-notes">
+        {(shown.kind === 'nd' || previousMissing) && <details className="tile-more" data-testid={`kpi-tile-${id}-nd-help`}><summary>Pourquoi n.d. ?</summary>{shown.kind === 'nd' && <p className="tile-foot">{shown.text}</p>}{previousMissing && <p className="tile-foot">N-1 : {n1}</p>}</details>}
         {notes.map((q) => <span key={q} className="tile-foot">{q}</span>)}
         {warning}
         {children}
         {shown.kind === "value" && props.sparkline && <Sparkline values={props.sparkline} />}
       </div>
       <span className="tile-compare">
-        <span className="tile-foot" title={n1Title} data-testid={`kpi-tile-${id}-n1`}>N-1 : {n1}</span>
+        <span className="tile-foot" title={previousMissing ? `${n1Title ?? 'N-1'} · ${n1}` : n1Title} data-testid={`kpi-tile-${id}-n1`}>N-1 : {previousMissing ? 'n.d.' : n1}</span>
         <span className="tile-foot" title={deltaTitle} data-testid={`kpi-tile-${id}-delta`}>Écart : {delta}</span>
       </span>
       <span className="tile-foot tile-links">
@@ -271,7 +280,7 @@ export function KpiCharts({ slug, vue, rows, turnover, absenteeism }: { slug: st
   const axisN1 = monthAxis(months, rows.map((r) => r.previous.month)); // séries avec leur N-1 : l'infobulle nomme les deux mois
   const etp = etpSeries(rows);
   const headcount = headcountSeries(rows);
-  const moves = movementSeries(rows);
+  const moves = movementSeries(vue === "turnover" ? rows.map((row) => ({ ...row, movements: turnover.current.months.find((month) => month.month === row.month) ?? row.movements })) : rows);
   const abs = absenteeismSeries(rows);
   const turn = comparedRate("Turnover", { label: turnover.previousWindow.label, value: turnover.previous }, { label: turnover.window.label, value: turnover.current });
   const absPeriod = comparedRate("Absentéisme", { label: absenteeism.previousWindow.label, value: absenteeism.previous }, { label: absenteeism.window.label, value: absenteeism.current });

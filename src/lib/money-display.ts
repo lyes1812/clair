@@ -1,14 +1,17 @@
 export type MoneyDisplayUnit = "eur" | "keur";
 
 const whole = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+const tenth = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /** Unité de lecture seulement : les montants sources restent en centimes. */
-export function formatMoneyDisplay(cents: number, unit: MoneyDisplayUnit, signed = false): string {
+export function formatMoneyDisplay(cents: number, unit: MoneyDisplayUnit, signed = false, keurDecimals: 0 | 1 = 0): string {
   if (!Number.isFinite(cents)) return "n.d.";
   const value = cents / (unit === "keur" ? 100_000 : 100);
   const divisor = unit === "keur" ? 100_000n : 100n;
   const absolute = Number.isSafeInteger(cents) ? BigInt(Math.abs(cents)) : null;
-  const number = whole.format(absolute === null ? Math.abs(value) : absolute / divisor + (absolute % divisor * 2n >= divisor ? 1n : 0n));
+  const number = unit === 'keur' && keurDecimals === 1
+    ? tenth.format(absolute === null ? Math.abs(value) : Number(absolute / 10_000n + (absolute % 10_000n * 2n >= 10_000n ? 1n : 0n)) / 10)
+    : whole.format(absolute === null ? Math.abs(value) : absolute / divisor + (absolute % divisor * 2n >= divisor ? 1n : 0n));
   // Arrondir un petit écart à zéro ne doit pas afficher « −0 » ou « +0 ».
   const nonzero = /[1-9]/.test(number);
   const sign = nonzero && cents < 0 ? "−" : nonzero && signed && cents > 0 ? "+" : "";

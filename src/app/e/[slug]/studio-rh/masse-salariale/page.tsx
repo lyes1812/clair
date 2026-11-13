@@ -1,4 +1,5 @@
-import { MoneyText, MoneyUnitLabel } from "@/components/Money";
+import { Money, MoneyText, MoneyUnitLabel } from "@/components/Money";
+import { roundDiv } from '@/lib/budget/engine';
 import "@/styles/masse-salariale.css";
 import "@/styles/ms-synthese.css";
 import { BarChart, DonutChart, LineChart } from "@/components/charts";
@@ -8,7 +9,7 @@ import { GlossaryLink } from "@/components/GlossaryLink";
 import { ViewSwitch } from "@/components/ViewSwitch";
 import { isMonth } from "@/lib/connectors/months";
 import { dateTimeFmt } from "@/lib/connectors/labels";
-import { formatMonth } from "@/lib/dates";
+import { formatDate, formatMonth } from "@/lib/dates";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { dsnBrutWindow } from "@/lib/payroll/dsn";
 import { monthPayroll, type CostPerEtp, type EtpMonth, type Evolution, type MonthPayroll, type PayrollWindow } from "@/lib/payroll/engine";
@@ -21,7 +22,7 @@ import { ChartGuard, Composition, eurosOf, GraphFoot, monthShort, MsHead, MsRead
 import { DsnView } from "./DsnView";
 import { FixeVariableView, PaieComptaView } from "./Lot2Views";
 import { NV, periodLabel, serviceLabel, syntheseOf, VUES } from "./synthese-data";
-import { MS_PREVU } from "./tabs";
+import { MS_PREVU, MS_TAB_GROUPS } from "./tabs";
 import { ActualNonRecurring } from "./ActualNonRecurring";
 import { actualEventVersion, listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { saveActualEventAction } from "./actual-actions";
@@ -30,8 +31,12 @@ import { buildActualNonRecurring } from "@/lib/payroll/non-recurring";
 import { SyntheseDisclosure } from "./SyntheseDisclosure";
 import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
 import { buildRcPayslipPeriod } from "@/lib/payroll/rc-payslips";
+import { resolveLiveNonRecurring } from "@/lib/payroll/live-non-recurring";
+import { rcCostsCoveredByPayroll } from "@/lib/payroll/rc-cost-coverage";
 import { getRcPayslipScan } from "@/lib/payroll/rc-payslips-store";
 import { RcPayslipDetails } from "./RcPayslipDetails";
+import { getScenario, listBudgets, listScenarios } from '@/lib/budget/store';
+import { latestFrozenScenario, syntheseBudget } from '@/lib/payroll/synthese-budget';
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +50,7 @@ const evoText = (e: Evolution) => (e.kind === "nd" ? "n.d." : e.ratio === null ?
 const evoEuros = (e: Evolution) => (e.kind === "nd" ? "" : eurosSigned(e.deltaCents));
 // Écart de montant d'une tuile : la couleur de tendance (coût en hausse : rouge, en baisse : vert) et le signe écrit.
 const delta = (cents: number, text: string) => <span className={`ms-delta ${trendOf(cents)}`.trim()}>{text}</span>;
-const costText = (c: CostPerEtp) => (c.kind === "nd" ? "n.d." : eurosOf(c.costCents));
+const costText = (c: CostPerEtp) => (c.kind === "nd" ? "n.d." : <Money cents={roundDiv(BigInt(c.costCents.num), BigInt(c.costCents.den))} keurDecimals={1} />);
 const cell = (r: MonthPayroll, pick: (x: Extract<MonthPayroll, { kind: "value" }>) => number) => (r.kind === "nd" ? "n.d." : euros(pick(r)));
 
 export default async function MasseSalarialePage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
@@ -185,10 +190,34 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   // Clé de lecture des n.d. : écrite une fois sous les graphiques, seulement si l'un d'eux en contient un.
   const anyNd = [masseSeries(cur.months, prev.months, { cur: "N", prev: "N-1" }), brutCotisSeries, costEtpSeries, ...(ctx.service.axis && serviceRows.length > 0 && serviceRows.length <= 8 ? [svcMonthSeries] : [])].some(hasNd);
   // Repères de présentation : mêmes rubriques que « Fixe & variable » et même modèle d'identification que le détail ci-dessous.
-  // Le budget et la projection restent dans leurs écrans dédiés : aucune lecture métier supplémentaire sur la Synthèse.
+  // Références validées : dernier budget de l'année et dernier scénario figé, sans modification de leurs calculs.
+  let budgetModel: ReturnType<typeof syntheseBudget> | null = null;
+  if (vue === 'synthese') {
+    const [budgets, scenarios] = await Promise.allSettled([listBudgets(ctx.kpi.collab.workspace.id), listScenarios(ctx.kpi.collab.workspace.id)]);
+    const selected = scenarios.status === 'fulfilled' ? latestFrozenScenario(scenarios.value) : null;
+    let frozen = null as Awaited<ReturnType<typeof getScenario>>;
+    let landingReason = scenarios.status === 'rejected' ? 'La liste des scénarios figés est indisponible.' : undefined;
+    if (selected) {
+      try { frozen = await getScenario(ctx.kpi.collab.workspace.id, selected.scenario.id); }
+      catch { landingReason = 'Le dernier scénario figé ne peut pas être lu ; vérifier sa base dans Hypothèses budgétaires.'; }
+      if (!frozen && !landingReason) landingReason = 'Le dernier scénario figé est devenu indisponible.';
+    }
+    budgetModel = syntheseBudget({ year: String(year), months, journal: input, serviceFiltered: serviceValue !== undefined,
+      budgets: budgets.status === 'fulfilled' ? budgets.value : [], frozen, currentSyncId: ctx.read?.syncId ?? null,
+      budgetReason: budgets.status === 'rejected' ? 'La liste des budgets est indisponible.' : undefined, landingReason });
+    if (budgetModel.gap.kind === 'nd') tileNd.push(`Écart au budget : ${budgetModel.gap.reason}`);
+    if (budgetModel.landing.kind === 'nd') tileNd.push(`Atterrissage ${year} : ${budgetModel.landing.reason}`);
+  }
+  // Le détail croisé lit la même fenêtre de mois ; le Suivi est un cumul annuel à clôture.
+  const budgetHref = `${base}/croisee?chapitre=budget&annee=${year}&de=${from}&a=${to}${svcParam}${budgetModel?.budget ? `&budget=${encodeURIComponent(budgetModel.budget.id)}` : ''}&affichage=tableau#cx-budget-ecart`;
+  const landingHref = `/e/${slug}/studio-rh/hypotheses?vue=resultat&sous=atterrissage&annee=${year}${budgetModel?.scenario ? `&scenario=${encodeURIComponent(budgetModel.scenario.id)}` : ''}`;
   const variableShare = cur.kind === "value" && cur.brut > 0 ? fmtPercent({ num: cur.byRubric.primes + cur.byRubric.indemnites, den: cur.brut }) : null;
-  const nonRecurring = vue === "synthese" ? buildActualNonRecurring(input, actualEvents, months, ctx.read?.syncId ?? null) : null;
-  const nonRecurringAmount = nonRecurring?.rows.length ? nonRecurring.nonRecurring : null;
+  const nonRecurring = vue === "synthese" ? resolveLiveNonRecurring({
+    declared: buildActualNonRecurring(input, actualEvents, months, ctx.read?.syncId ?? null), rcPeriod,
+    months, syncId: ctx.read?.syncId ?? null, serviceFiltered: serviceValue !== undefined,
+    sourceIncluded: rcCostsCoveredByPayroll(input, rcPeriod),
+  }) : null;
+  const nonRecurringAmount = nonRecurring?.count ? nonRecurring.nonRecurring : null;
   const exportHref = `${base}/export?annee=${year}&de=${from}&a=${to}${svcParam}&format=xlsx`;
   const sourceDetails = (
     <MsRead source={sourceLine}>
@@ -206,7 +235,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       )}
     </MsRead>
   );
-  const nonRecurringDetails = <><ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} /><RcPayslipDetails slug={slug} period={rcPeriod} scan={rcScan} editable={editable} contracts={actualContracts} /></>;
+  const nonRecurringDetails = <><ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} rcPeriod={rcPeriod} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} /><RcPayslipDetails slug={slug} period={rcPeriod} scan={rcScan} editable={editable} contracts={actualContracts} /></>;
   const periodControls = <PeriodBar
     years={years}
     year={year}
@@ -248,6 +277,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
         <MsPageActions slug={slug} exportHref={vue === "synthese" ? exportHref : undefined} />
       </div>
       <FamilyTabs
+        groups={MS_TAB_GROUPS}
         label="Vues"
         testid="ms-tabs"
         current={vue}
@@ -286,12 +316,12 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 label="Masse salariale chargée"
                 value={money(cur, (w) => w.masse)}
                 nd={cur.kind === "nd"}
-                lead="Brut et cotisations patronales"
+                lead={label(months)}
                 def={MASSE_TERMS.masse}
                 slug={slug}
               />
               </dl>
-              <dl className="facts ms-tiles ms-synthese-secondary-kpis" aria-label="Indicateurs de la période" data-testid="ms-synthese-secondary-kpis">
+              <dl className="facts ms-tiles ms-synthese-secondary-kpis" aria-label={`Indicateurs de la période : ${label(months)}`} data-testid="ms-synthese-secondary-kpis">
               <Tile
                 testid="ms-tile-evolution"
                 label="Évolution vs N-1"
@@ -331,9 +361,9 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 slug={slug}
               />
               <Tile testid="ms-tile-variable" label="Part variable" value={variableShare ?? "n.d."} nd={variableShare === null} lead={cur.kind === "nd" ? "Brut indisponible" : cur.brut <= 0 ? "Brut nul ou négatif" : "Primes et indemnités / brut"} def={MASSE_TERMS.fixeVariable} slug={slug} />
-              <Tile testid="ms-tile-non-recurring" label="Éléments non récurrents" value={<a className="ms-synthese-value-link" href={href({ extra: "#actual-non-recurring" })}>{nonRecurringAmount === null ? "n.d." : euros(nonRecurringAmount)}</a>} nd={nonRecurringAmount === null} lead={nonRecurring?.rows.length ? "Coûts identifiés · détail" : "Aucun élément identifié"} def={MASSE_TERMS.primes} slug={slug} />
-              <Tile testid="ms-tile-budget" label="Écart au budget" value={<a className="ms-synthese-value-link" href={`${base}/suivi?annee=${year}&de=${from}&a=${to}${svcParam}`}>n.d.</a>} nd lead="Non chargé sur cette vue" def="croisee-ecart-budget" slug={slug} />
-              <Tile testid="ms-tile-landing" label={`Atterrissage ${year}`} value={<a className="ms-synthese-value-link" href={`/e/${slug}/studio-rh/hypotheses?vue=resultat&sous=atterrissage`}>n.d.</a>} nd lead="Non chargé sur cette vue" def="atterrissage" slug={slug} />
+              <Tile testid="ms-tile-non-recurring" label="Éléments non récurrents" value={<a className="ms-synthese-value-link" href={href({ extra: "#actual-non-recurring" })}>{nonRecurringAmount === null ? "n.d." : euros(nonRecurringAmount)}</a>} nd={nonRecurringAmount === null} lead={nonRecurring?.count ? "Coûts chargés identifiés · détail" : "Aucun élément identifié"} compare={nonRecurringAmount === null && rcPeriod.amountCents !== null ? <>Indemnités RC : <Money cents={rcPeriod.amountCents} /> · hors charges</> : undefined} def={MASSE_TERMS.nonRecurring} slug={slug} />
+              <Tile testid="ms-tile-budget" label="Écart au budget" value={<a className="ms-synthese-value-link" href={budgetHref}>{budgetModel?.gap.kind === 'value' ? eurosSigned(budgetModel.gap.delta) : 'n.d.'}</a>} nd={budgetModel?.gap.kind !== 'value'} trend={budgetModel?.gap.kind === 'value' ? trendOf(budgetModel.gap.delta) : undefined} lead={budgetModel?.budget ? `${label(months)} · dernier budget` : 'Budget indisponible'} def="croisee-ecart-budget" slug={slug} />
+              <Tile testid="ms-tile-landing" label={`Atterrissage ${year}`} value={<a className="ms-synthese-value-link" href={landingHref}>{budgetModel?.landing.kind === 'value' ? euros(budgetModel.landing.total) : 'n.d.'}</a>} nd={budgetModel?.landing.kind !== 'value'} lead={budgetModel?.scenario ? `Année ${year} · scénario figé` : 'Scénario figé indisponible'} def="atterrissage" slug={slug} />
               </dl>
             </div>
             {showGraph && <section className="panel ms-synthese-trend" aria-label="Évolution mensuelle" data-testid="ms-synthese-trend">
@@ -341,7 +371,11 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <TrendChart rows={cur.months} previous={prev.months} lines={ndList} />
             </section>}
           </div>
-          <ActualNonRecurringSummary rows={nonRecurring?.rows ?? []} href={href({ extra: "#actual-non-recurring" })} testid="ms-non-recurring-summary" rc={rcPeriod} />
+          <div className="ms-toolbar" data-testid="ms-synthese-budget-references">
+            <p className="tile-foot">{budgetModel?.budget ? <>Budget « {budgetModel.budget.name} » · {label(months)} · global</> : <>Budget {year} non disponible</>}</p>
+            <p className="tile-foot">{budgetModel?.scenario ? <>Scénario figé « {budgetModel.scenario.name} » · année {year}{budgetModel.scenario.frozenAt ? ` · figé le ${dateTimeFmt.format(budgetModel.scenario.frozenAt)}` : ''} · base de {budgetModel.baseRefMonth ? formatMonth(budgetModel.baseRefMonth).toLowerCase() : 'n.d.'}{budgetModel.baseReadAt ? `, lecture du ${formatDate(budgetModel.baseReadAt.slice(0, 10))}` : ''}{budgetModel.baseDiffersFromCurrent ? ' · réel de la base figée' : ''}</> : 'Scénario figé indisponible'}</p>
+          </div>
+          <ActualNonRecurringSummary rows={nonRecurring?.rows ?? []} live={nonRecurring ?? undefined} href={href({ extra: "#actual-non-recurring" })} testid="ms-non-recurring-summary" rc={rcPeriod} />
           <div className="ms-synthese-aggregate-toolbar" data-ms-screen-only>
             <ViewSwitch testid="ms-summary-periodicity" caption="Vue des répartitions" label="Vue de Brut et cotisations et de Répartition par service" current={repartition} options={[
               { key: "cumule", label: "Cumulé", href: href({ repartition: "cumule" }) },
@@ -382,15 +416,15 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <p className="tile-foot" data-testid="ms-tile-masse-n1">Masse salariale chargée · N-1 : {money(prev, (w) => w.masse)}</p>
               <p className="tile-foot">Brut · N-1 : {money(prev, (w) => w.brut)} · Cotisations patronales · N-1 : {money(prev, (w) => w.cotisations)}{prev.kind === "value" ? ` (${rate(prev)})` : ""}</p>
               <p className="tile-foot">Coût par ETP-mois · N-1 : {costText(costPrev)}</p>
-              <p className="tile-foot">Écart au budget et atterrissage : données non chargées sur cette vue. Les liens des cartes ouvrent le suivi réel / budget et le résultat des hypothèses.</p>
-              {!nonRecurring?.rows.length && <p className="tile-foot">Aucun élément non récurrent identifié sur la période : cela ne prouve pas son absence.</p>}
+              <p className="tile-foot">Écart au budget : réel courant sur les mois affichés face au dernier budget de l'année. Atterrissage : année complète du dernier scénario figé, avec le réel conservé dans sa base.</p>
+              {!nonRecurring?.count && <p className="tile-foot">Aucun élément non récurrent identifié sur la période : cela ne prouve pas son absence.</p>}
             </div>
           </SyntheseDisclosure>
 
           <SyntheseDisclosure summary={<span>Données et sources<small>Définitions, provenance et limites de lecture</small></span>} className="ms-synthese-sources" id="ms-sources" testid="ms-synthese-sources-details">
             {sourceDetails}
           <div className="ms-synthese-qualifiers">
-            <NdLines lines={[...tileNd, ...(nonRecurring?.rows.length && nonRecurringAmount === null ? nonRecurring.reasons : [])]} testid="ms-tiles-nd" />
+            <NdLines lines={[...tileNd, ...(nonRecurring?.count && nonRecurringAmount === null ? nonRecurring.reasons : [])]} testid="ms-tiles-nd" />
             {ctx.etpQualifiers.length > 0 && (
               <p className="tile-foot ms-note" data-testid="ms-etp-qualifiers">
                 Coût par ETP-mois — ETP : {ctx.etpQualifiers.join(" ; ")}.

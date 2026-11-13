@@ -14,6 +14,14 @@
 /* Source suivie de son « ? » (écarts entre PayFit et DSN) : le renvoi reste collé au badge, même sur deux lignes. */
 .kpi-source { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .kpi-source .gloss-link { flex: none; margin-left: 0; }
+.kpi-vigilance { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: var(--clair-radius-control, 8px); background: var(--surface); }
+.kpi-vigilance > summary { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 6px 11px; list-style: none; cursor: pointer; font-size: var(--clair-type-form); }
+.kpi-vigilance > summary::-webkit-details-marker { display: none; }
+.kpi-vigilance > summary > span { display: inline-flex; justify-content: center; align-items: center; width: 16px; height: 16px; border: 1px solid var(--muted); border-radius: 50%; font-size: 11px; }
+.kpi-vigilance[open] { justify-self: stretch; }
+.kpi-vigilance-body { display: grid; gap: 10px; padding: 12px; border-top: 1px solid var(--line); }
+.kpi-vigilance-body .notice { margin: 0; }
+.kpi-vigilance summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: inherit; }
 .kpi-read-details { justify-self: start; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--sidebar-bg); }
 .kpi-read-details[open] { justify-self: stretch; }
 .kpi-read-details > summary { cursor: pointer; padding: 7px 12px; font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); }
@@ -41,12 +49,10 @@
 .kpi-tiles .kpi-tile dt { font-size: var(--clair-type-form); font-weight: 500; color: var(--muted); line-height: 1.45; }
 .kpi-tiles .kpi-tile dd { margin: 0; font-size: var(--clair-type-kpi); font-weight: 550; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kpi-tiles .kpi-tile dd.lower { color: var(--muted); }
-.kpi-tiles .kpi-tile:first-child dd:not(.nd, .lower) { color: var(--blue); }
 /* Valeur n.d. : la raison s'écrit en texte courant, pas en gros chiffre. */
 .kpi-tiles .kpi-tile dd.nd { font-size: var(--clair-type-form); font-weight: 500; letter-spacing: 0; line-height: 1.5; }
 .kpi-tile .tile-notes { display: grid; gap: 2px; }
 .kpi-tile .tile-sparkline { display: block; width: 100%; height: 32px; margin-top: 8px; color: #8b95a6; }
-.kpi-tile:first-child .tile-sparkline { color: var(--blue); }
 .kpi-tile .tile-notes .tile-foot { font-style: italic; line-height: 1.45; }
 .kpi-tile .tile-compare { display: grid; gap: 2px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
 .kpi-tile .tile-compare .tile-foot { font-size: var(--clair-type-description); line-height: 1.45; }

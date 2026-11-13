@@ -16,6 +16,7 @@ export type KpiParams = {
   forfaitJoursIsOne: boolean; // PayFit : forfait jours sans quotité ni indicateur temps plein = 1 ETP
   etpDecimals: 2 | 3 | 4;
   turnoverFormula: TurnoverFormula;
+  turnoverNatures?: string[]; // vide/absent : population de l'effectif ; sinon cohorte propre au turnover
   excludedExitNatures: string[];
   neutralizeContinuity: boolean;
   absenceTypes: string[];

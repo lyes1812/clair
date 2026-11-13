@@ -2,6 +2,10 @@
 .ms-synthese-page { display: contents; }
 .ms-synthese-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; min-width: 0; }
 .ms-synthese { display: grid; gap: 20px; min-width: 0; align-content: start; font-family: var(--font); }
+.ms-synthese [data-testid='ms-synthese-budget-references'] > p { min-width: 0; overflow-wrap: anywhere; }
+.ms-synthese [data-testid='ms-synthese-summary-services'] .ms-summary-track > i { background: var(--blue) !important; }
+.ms-synthese-trend { --chart-7: #8992a1; }
+.ms-synthese-aggregate.panel { align-self: start; min-height: 0; }
 .ms-synthese .ms-head { gap: 6px; }
 .ms-synthese .ms-head > .label { display: none; }
 .ms-synthese .ms-head h1 { font-size: 36px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }

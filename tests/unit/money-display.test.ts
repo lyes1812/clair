@@ -8,6 +8,13 @@ import { formatEuros, toCents } from "@/lib/money";
 
 const plain = (text: string) => text.replace(/[\u00a0\u202f]/g, " ");
 describe("montants : préférence de lecture sans arrondir les données", () => {
+  it('le coût par ETP-mois conserve une décimale en k€ sans changer les centimes sources', () => {
+    expect(plain(formatMoneyDisplay(735000, 'keur', false, 1))).toBe('7,4 k€');
+    expect(plain(formatMoneyDisplay(700000, 'keur', false, 1))).toBe('7,0 k€');
+    expect(plain(formatMoneyDisplay(-735000, 'keur', true, 1))).toBe('−7,4 k€');
+    expect(plain(formatMoneyDisplay(1, 'keur', true, 1))).toBe('0,0 k€');
+    expect(plain(formatMoneyDisplay(735000, 'eur', false, 1))).toBe('7 350 €');
+  });
   it.each([
     [123456, "eur", "1 235 €"], [123449, "eur", "1 234 €"],
     [-123450, "eur", "−1 235 €"], [49, "eur", "0 €"], [-49, "eur", "0 €"],

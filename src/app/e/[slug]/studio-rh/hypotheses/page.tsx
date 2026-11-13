@@ -20,6 +20,7 @@ import { listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
 import { ActionForm } from "./ActionForm";
+import { FrenchMonthInput } from "./FrenchMonthInput";
 import { createChainedScenarioAction, createScenarioAction, deleteBudgetAction, deleteScenarioAction, duplicateScenarioAction, freezeScenarioAction, saveBudgetAction } from "./actions";
 import { ComparisonView } from "./ComparisonView";
 import { ActualNonRecurringStatus, LandingView, variantOptions } from "./LandingView";
@@ -391,8 +392,10 @@ export default async function HypothesesPage({ params, searchParams }: { params:
         )}
       </section>
       <BudgetsSection slug={slug} budgets={budgets} canEdit={canEdit} />
-      <section className="panel" data-testid="hyp-create">
-        <CardTitle title="Nouveau scénario" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.scenario} />} />
+      <details className="panel hs-create-disclosure" data-testid="hyp-create">
+        <summary className="hs-create-summary">Nouveau scénario</summary>
+        <div className="hs-create-body">
+        <CardTitle title="Créer un scénario" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.scenario} />} />
         {unavailable ? (
           <p className="nd" data-testid="hyp-nd">n.d. — base figée impossible : {unavailable}. <a href={`/e/${slug}/donnees`}>Données</a></p>
         ) : !conv ? (
@@ -404,7 +407,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
             <p className="desc">Lecture PayFit du {ctx.read ? dateTimeFmt.format(ctx.read.startedAt) : "n.d."} · prorata : {PRORATA_LABELS[conv.conventions.prorata]}</p>
             <ActionForm action={createScenarioAction.bind(null, slug)} submit="Créer le scénario" testid="hyp-create-form">
               <FieldGroup title="Scénario">
-                <Field id="name" label="Nom"><input className="input" id="name" name="name" maxLength={120} required /></Field>
+                <Field id="name" label="Nom" hint="Utilise un nom neutre, sans nom de salarié, par exemple « Simulation de départ »."><input className="input" id="name" name="name" maxLength={120} required /></Field>
                 <Field id="kind" label="Type">
                   <select className="select" id="kind" name="kind" defaultValue="">
                     <option value="" disabled>Choisir…</option>
@@ -420,12 +423,13 @@ export default async function HypothesesPage({ params, searchParams }: { params:
                     {firsts.map((m) => <option key={m} value={m}>{formatMonth(m)} (base {formatMonth(addMonths(m, -1)).toLowerCase()})</option>)}
                   </select>
                 </Field>
-                <Field id="lastMonth" label="Dernier mois projeté" hint="24 mois au plus."><input className="input" type="month" id="lastMonth" name="lastMonth" defaultValue={`${firsts.at(-1)!.slice(0, 4)}-12`} required /></Field>
+                <Field id="lastMonth" label="Dernier mois projeté" hint="24 mois au plus."><FrenchMonthInput id="lastMonth" name="lastMonth" defaultValue={`${firsts.at(-1)!.slice(0, 4)}-12`} required /></Field>
               </FieldGroup>
             </ActionForm>
           </>
         )}
-      </section>
+        </div>
+      </details>
     </Header>
   );
 }

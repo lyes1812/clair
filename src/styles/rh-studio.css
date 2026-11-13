@@ -2,8 +2,11 @@
 .rh-studio { display: grid; align-content: start; gap: 20px; min-width: 0; }
 
 @media screen {
-  body:has(.rh-studio) .ws-topbar .ws-features > .mega-btn { background: var(--blue); border-color: var(--blue); color: #fff; }
-  body:has(.rh-studio) .ws-topbar .ws-features > .mega-btn:hover { filter: brightness(.95); }
+  body:has(.rh-studio) .ws-topbar .ws-features > .mega-btn { background: var(--blue-soft); border-color: var(--line); color: var(--blue); box-shadow: none; }
+  body:has(.rh-studio) .ws-topbar .ws-features > .mega-btn:hover { border-color: var(--blue); }
+  .rh-studio .ms-page-actions .mega-page > .mega-btn { color: var(--blue); background: var(--blue-soft); border-color: var(--line); box-shadow: none; }
+  .rh-studio .ms-page-actions .mega-page > .mega-btn:hover { color: var(--blue); background: var(--blue-soft); border-color: var(--blue); }
+  body:has(.rh-studio) .main { max-width: none; }
   .rh-studio { font-family: var(--font); }
   .rh-studio h1 { font-size: 36px; line-height: 1.2; font-weight: 600; letter-spacing: -.025em; }
   .rh-studio > :is(.tabs, .panel, .facts, .filters, section) { min-width: 0; max-width: 100%; }
@@ -20,7 +23,25 @@
   .rh-studio .sy-bar { background: #fff; padding: 18px 20px; border-radius: var(--clair-radius-card); }
   .rh-studio .sy-charts { gap: 20px; }
   .rh-studio .sy-charts .panel { padding: 20px; }
+  .rh-studio details:not(.ui-dropdown) > summary { list-style: none; }
+  .rh-studio details:not(.ui-dropdown) > summary::-webkit-details-marker { display: none; }
+  .rh-studio details:not(.ui-dropdown):not(.ms-synthese-detail):not(.ms-synthese-filters) > summary::before { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 10px 2px 1px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+  .rh-studio details[open]:not(.ui-dropdown):not(.ms-synthese-detail):not(.ms-synthese-filters) > summary::before { transform: rotate(45deg); }
 }
+
+.rh-studio .tab-planned { color: var(--muted); background: var(--surface); }
+.rh-studio .tabs.tabs-grouped { overflow: visible; flex-wrap: nowrap; gap: 8px; align-items: stretch; border: 0; background: none; }
+.family-tab-group > summary.btn { height: 100%; min-height: 40px; font-size: 12px; border-radius: var(--clair-radius-control); border: 1px solid var(--line); background: #fff; color: var(--muted); }
+.family-tab-group.is-current > summary.btn { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); }
+.family-tab-group summary small { display: block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; margin-top: 2px; }
+.family-tab-group .ui-dropdown-panel { left: 0; right: auto; }
+.family-tab-entries { display: grid; min-width: min(260px, calc(100vw - 64px)); }
+.family-tab-entries a { display: block; padding: 10px 12px; font-size: 13px; border: 0; border-radius: var(--clair-radius-control); white-space: normal; }
+.family-tab-entries a:hover { background: var(--surface); }
+.family-tab-entries a[aria-current='page'] { color: var(--blue); background: var(--blue-soft); }
+@media screen and (min-width: 1200px) { body:has(.rh-studio) .main { padding-inline: 24px; } }
+@media screen and (max-width: 520px) { .family-tab-group > summary.btn { min-height: 44px; padding: 6px 8px; } .family-tab-group summary small { max-width: 112px; } .family-tab-group .ui-dropdown-panel { position: fixed; left: 14px; right: 14px; top: auto; width: auto; max-width: none; } }
+@media print { .gloss-popover, .tabs-grouped { display: none !important; } }
 
 @media screen and (max-width: 760px) {
   .rh-studio { gap: 16px; }

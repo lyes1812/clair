@@ -33,8 +33,8 @@ describe("éléments non récurrents du réel — interface et données fictives
     expect(value).toContain('data-money-cents="280000"');
     expect(value).toContain('data-money-cents="35801"');
     expect(value).toContain('data-money-cents="244199"');
-    expect(value).toContain("la masse salariale réelle, qui reste inchangée");
-    expect(value).toContain("Cette liste déclarative n’est pas exhaustive");
+    expect(value).toContain("lecture analytique du réel, sans modification de la paie");
+    expect(value).toContain("Liste non exhaustive");
     expect(value).toContain("Réel − coûts identifiés · lecture analytique");
     expect(value).toContain("aucun prorata");
     for (const label of ["Licenciements", "Ruptures conventionnelles", "Tuilages passés", "Autres éléments non récurrents"]) expect(value).toContain(label);

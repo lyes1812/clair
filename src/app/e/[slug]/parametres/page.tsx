@@ -65,7 +65,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   const cardNote = (keys: KpiSettingKey[]) => defaultsNote(keys.map((k) => kinds[k]), KPI_DEFAULTS_VALIDATED_ON);
   const notes = {
     etp: cardNote(["fullTimeIsOne", "capAtOne", "forfaitJoursIsOne", "etpDecimals"]),
-    turnover: cardNote(["turnoverFormula", "neutralizeContinuity", "excludedExitNatures"]),
+    turnover: cardNote(["turnoverNatures", "turnoverFormula", "neutralizeContinuity", "excludedExitNatures"]),
     absence: cardNote(["absenceTypes", "absenceStatuses", "dayBasis"]),
   };
   const updatedAt = (key: string) =>
@@ -189,6 +189,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
               kinds={kinds}
               notes={notes}
               natures={natureChoices().map((n) => ({ code: n.code, label: n.label }))}
+              headcountNatures={natures.codes}
               types={typeRows}
               readLabel={active ? `lecture du ${dateTimeFmt.format(active.startedAt)}` : null}
               statuses={[...ABSENCE_STATUSES].map((code) => ({ code, label: ABSENCE_STATUS_LABELS[code] ?? code }))}

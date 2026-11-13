@@ -309,7 +309,7 @@ describe("écran KPI RH : assemblage (lecture du code de la page)", () => {
   });
   it("l'absentéisme garde son nom, ajoute la ligne des motifs retenus, et son détail de période reçoit absenceByMotif", () => {
     expect(page).toContain('label="Absentéisme"');
-    expect(page).toContain("motifsRetenusLine(dash.params.absenceTypes)");
+    expect(page).toContain("Motifs retenus :");
     expect(page).toContain("motifs={absenceByMotif(input, detail.window)}");
   });
   it("ni rouge ni vert, aucune formule de calcul ajoutée sur l'écran", () => {

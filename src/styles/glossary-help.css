@@ -1,0 +1,6 @@
+.gloss-popover { position: fixed; z-index: 100; width: min(380px, calc(100vw - 24px)); max-height: min(300px, calc(100vh - 24px)); overflow: auto; padding: 16px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; box-shadow: 0 12px 36px #14182420; color: var(--ink); font: 13px/1.55 var(--font); }
+.gloss-popover p { margin: 10px 0; }
+.gloss-popover-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.gloss-popover-head button { min-width: 32px; min-height: 32px; padding: 0; font-size: 20px; }
+.gloss-popover-formula { padding: 8px 10px; background: var(--surface); border-radius: var(--clair-radius-control); }
+@media print { .gloss-popover { display: none !important; } }

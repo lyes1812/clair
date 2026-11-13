@@ -90,6 +90,7 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
   };
   const rows = ml.rows.filter(matches);
   const pg = paginate(rows, pageOf(one(sp.page)), size);
+  const showEmployeeNumber = ml.rows.some((row) => !!row.person?.employeeNumber?.trim());
   const badCoverage = ml.coverage.filter((c) => c.presenceStatus !== "complete");
 
   // Cellules n.d. du tableau : « n.d. » court (raison au survol), chaque raison dite une fois sous le tableau.
@@ -104,11 +105,10 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
     ndLog.push(...endNd(c));
     return (
       <tr key={`${m.contractKey}-${m.establishmentId}`} data-contract={c.externalId}>
-        <td><PersonCell person={r.person} contract={c} slug={slug} /></td>
-        <td>{r.person ? (r.person.employeeNumber ?? nd(r.person.fieldsNd.employeeNumber?.reason ?? "valeur absente", "Matricule")) : "—"}</td>
-        <td><a href={contractHref(slug, c.contractKey)}><code>{c.externalId}</code></a></td>
-        <td><code>{m.establishmentId}</code></td>
-        <td><Nature code={c.nature} /></td>
+        <td><PersonCell person={r.person} contract={c} slug={slug} compact /></td>
+        {showEmployeeNumber && <td>{r.person ? (r.person.employeeNumber?.trim() || nd(r.person.fieldsNd.employeeNumber?.reason ?? "valeur absente", "Matricule")) : "—"}</td>}
+        <td><a href={contractHref(slug, c.contractKey)}>Fiche du contrat</a></td>
+        <td><Nature code={c.nature} compact /></td>
         <td className="col-date">{c.startDate ? formatDate(c.startDate) : nd(c.fieldsNd.startDate?.reason ?? "date absente", "Début")}</td>
         <td className="col-wide"><EndCell c={c} slug={slug} prov={false} short /></td>
         <td className="col-state"><StatePill code={r.state.code} label={r.state.label} /></td>
@@ -132,7 +132,10 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
           <td className="num">{m.paymentCount === null ? <span className="nd">n.d.</span> : m.paymentCount === 0 ? <span title={m.fieldsNd.paymentCount?.reason}>0 — aucun versement</span> : m.paymentCount}</td>
         )}
         <td><FlagTags flags={m.flags} labels={MONTH_FLAG_LABELS} /></td>
-        <td><ProvenanceDetails row={m} slug={slug} /></td>
+        <td><details className="collab-technical" data-testid="collab-contract-references"><summary>Références et sources</summary>
+          <dl><div><dt>Identifiant du contrat</dt><dd><code>{c.externalId}</code></dd></div><div><dt>Établissement</dt><dd><code>{m.establishmentId}</code></dd></div><div><dt>Nature source</dt><dd>{c.nature ?? "n.d."}</dd></div>{r.person && <div><dt>Identifiant du collaborateur</dt><dd><code>{r.person.externalId}</code></dd></div>}</dl>
+          <ProvenanceDetails row={m} slug={slug} />
+        </details></td>
       </tr>
     );
   });
@@ -242,10 +245,10 @@ export default async function CollaborateursMoisPage({ params, searchParams }: {
               <caption className="collab-sr">Contrats du mois — {formatMonth(month)} : une ligne par contrat et par établissement</caption>
               <thead>
                 <tr>
-                  <th scope="col">Personne</th><th scope="col">Matricule</th><th scope="col">Contrat</th><th scope="col">Établissement</th><th scope="col">Nature</th><th scope="col">Début</th><th scope="col" className="col-wide">Fin</th><th scope="col" className="col-state">État fin de mois<GlossaryLink slug={slug} term="month-states" /></th>
+                  <th scope="col">Personne</th>{showEmployeeNumber && <th scope="col">Matricule</th>}<th scope="col">Contrat</th><th scope="col">Nature</th><th scope="col">Début</th><th scope="col" className="col-wide">Fin</th><th scope="col" className="col-state">État fin de mois<GlossaryLink slug={slug} term="month-states" /></th>
                   <th scope="col" className="col-qty">Quotité<GlossaryLink slug={slug} term="quota-and-time" /></th><th scope="col" className="col-qty">Temps payé / travaillé</th>
                   {isPayfit ? <th scope="col">Statut source</th> : <th scope="col" className="num">Versements</th>}
-                  <th scope="col">Drapeaux</th><th scope="col">Provenance</th>
+                  <th scope="col">Drapeaux</th><th scope="col">Sources</th>
                 </tr>
               </thead>
               <tbody>{body}</tbody>
