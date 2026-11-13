@@ -305,3 +305,39 @@ describe("coût RC strict : indemnité indépendante et charges patronales expli
     expect(JSON.stringify(inspected)).not.toMatch(/100000|25000|125000|1 000,00|250,00|25,00|30,00/);
   });
 });
+
+describe("diagnostic fermé : abréviations, codes explicites et formes numériques sans valeurs", () => {
+  it("sélectionne RC seule et Contrib. pat. Rupt. conv. sans modifier la reconnaissance nominale", () => {
+    const source = [header(), row(2, [item("Indem. RC NOMCONFIDENTIEL IDENTIFIANTSECRET", 20, 225), item("12 345,67", 420, 50)]), row(3, [item("Contrib. pat. Rupt. conv. MOTPRIVE", 20, 225), item("4321", 280), item("17,7777 %", 350), item("9 876,54", 520, 50)])];
+    const inspected = inspectRcPayslipRows(source);
+    expect(inspected.extractionStatus).toBe("none");
+    expect(inspected.parserVersion).toBe("payfit-rc-coordinate-v4");
+    expect(inspected.chargeCandidates).toHaveLength(2);
+    expect(inspected.chargeCandidates[0]).toMatchObject({ labelTokens: ["INDEM", "RC"], qualifiers: { explicitRc: false, abbreviatedRc: true, abbreviatedCharge: false } });
+    expect(inspected.chargeCandidates[1]).toMatchObject({ labelTokens: ["CONTRIB", "PAT", "RUPT", "CONV", "%"], qualifiers: { explicitRc: false, abbreviatedRc: true, abbreviatedCharge: true }, monetaryCells: [{ x: 520, y: 500, width: 50 }], numericCells: [{ x: 280, y: 500, width: 40 }, { x: 350, y: 500, width: 40 }, { x: 520, y: 500, width: 50 }] });
+    expect(JSON.stringify(inspected)).not.toMatch(/NOMCONFIDENTIEL|IDENTIFIANTSECRET|MOTPRIVE|12 345,67|1234567|4321|17,7777|987654|9 876,54/);
+  });
+  it("signale CTP719 uniquement comme code explicitement préfixé, jamais à partir d’un montant", () => {
+    const inspected = inspectRcPayslipRows([header(), row(2, [item("CTP 719", 20), item("1234", 280)]), row(3, [item("CTP719", 20), item("17,7777", 350)]), row(4, [item("Contribution patronale", 20, 225), item("719", 520, 50)]), row(5, [item("CTP 7191", 20)])]);
+    expect(inspected.chargeCandidates).toHaveLength(3);
+    expect(inspected.chargeCandidates.map(candidate => candidate.qualifiers.hasCtp719)).toEqual([true, true, false]);
+    expect(inspected.chargeCandidates[0]).toMatchObject({ labelTokens: ["CTP"], numericCells: [{ x: 280, y: 500, width: 40 }] });
+    expect(inspected.chargeCandidates[1]).toMatchObject({ labelTokens: ["CTP"], numericCells: [{ x: 350, y: 500, width: 40 }] });
+    expect(inspected.chargeCandidates[2]).toMatchObject({ monetaryCells: [], numericCells: [{ x: 520, y: 500, width: 50 }] });
+    expect(JSON.stringify(inspected)).not.toMatch(/1234|17,7777|7191|\"719\"|CTP719/);
+  });
+  it("distingue contribution d’équilibre général et technique sans leur attribuer une RC", () => {
+    const inspected = inspectRcPayslipRows([header(), row(2, [item("CONTRIBUTION EQUILIBRE GENERAL AGIRC ARRCO", 20, 225), item("11,1111", 350), item("2 222,22", 520, 50)]), row(3, [item("CONTRIB EQUILIBRE TECHNIQUE", 20, 225), item("333", 280)]), row(4, [item("Cot. financement dialogue solidarite autonomie formation NOMPRIVE", 20, 225), item("4 444,44", 520, 50)])]);
+    expect(inspected.chargeCandidates[0]).toMatchObject({ labelTokens: ["CONTRIBUTION", "EQUILIBRE", "GENERAL", "AGIRC", "ARRCO"], qualifiers: { equilibriumContribution: true, explicitRc: false, abbreviatedRc: false } });
+    expect(inspected.chargeCandidates[1]).toMatchObject({ qualifiers: { equilibriumContribution: true, abbreviatedCharge: true, explicitRc: false } });
+    expect(inspected.chargeCandidates[2]).toMatchObject({ labelTokens: ["COT", "FINANCEMENT", "DIALOGUE", "SOLIDARITE", "AUTONOMIE", "FORMATION"], qualifiers: { abbreviatedCharge: true, equilibriumContribution: false, explicitRc: false } });
+    expect(JSON.stringify(inspected)).not.toMatch(/11,1111|222222|2 222,22|333|444444|4 444,44|NOMPRIVE/);
+  });
+  it("conserve le plafond de quatre-vingts candidats et ne renvoie aucun montant ou taux", () => {
+    const rows = [header(), ...Array.from({ length: 85 }, (_, i) => row(i + 2, [item("Contrib. RC", 20, 225), item("88,8888 %", 350), item("7 654,32", 520, 50)]))];
+    const inspected = inspectRcPayslipRows(rows);
+    expect(inspected.chargeCandidates).toHaveLength(80);
+    expect(inspected.chargeCandidates.every(candidate => !Object.hasOwn(candidate, "amountCents") && !Object.hasOwn(candidate, "rate"))).toBe(true);
+    expect(JSON.stringify(inspected)).not.toMatch(/88,8888|7 654,32|765432/);
+  });
+});

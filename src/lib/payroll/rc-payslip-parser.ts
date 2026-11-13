@@ -297,6 +297,7 @@ for (const token of ['MONTANTS','SALARIES','SALARIAUX','EMPLOYEURS','PATRONAUX',
   FORMAT_TOKENS.add(token); FORMAT_ANCHORS.add(token);
 }
 const CHARGE_TOKENS = new Set([...FORMAT_TOKENS, "INDEMNITE", "INDEMNITES", "RUPTURE", "RUPTURES", "CONVENTIONNELLE", "CONVENTIONNELLES", "RC", "CONTRIBUTION", "CONTRIBUTIONS", "COTISATION", "COTISATIONS", "EXONERE", "EXONEREE", "EXONEREES", "EXONERES", "SOUMIS", "SOUMISE", "SOUMISES", "ASSIETTE", "FORFAIT", "SOCIAL", "SOCIALE", "SOCIALES", "SOCIAUX", "CSG", "CRDS", "AUTRE", "AUTRES", "DUE", "DUES", "DUS", "RETRAITE", "LICENCIEMENT", "DEPART", "DEPARTS", "MISE", "NON", "ET", "PAR", "L", "TRANSACTIONNELLE", "TRANSACTIONNELLES"]);
+for (const token of ["EQUILIBRE", "GENERAL", "GENERALE", "TECHNIQUE", "DIALOGUE", "SOLIDARITE", "AUTONOMIE", "FORMATION", "AGIRC", "ARRCO", "CTP", "CONTRIB", "COT", "PAT", "INDEM", "RUPT", "CONV", "FINANCEMENT"]) CHARGE_TOKENS.add(token);
 type FormatCell = { tokens: string[]; x: number; y: number; width: number };
 type PositionOnly = { x: number; y: number; width: number };
 export type RcPayslipFormat = {
@@ -306,8 +307,8 @@ export type RcPayslipFormat = {
   headers: { page: number; line: number; cells: FormatCell[] }[];
   rcRows: { page: number; line: number; monetaryCellCount: number; cells: PositionOnly[] }[];
   chargeCandidates: {
-    page: number; line: number; labelTokens: string[]; monetaryCells: PositionOnly[];
-    qualifiers: { explicitRc: boolean; indemnity: boolean; contribution: boolean; forfaitSocial: boolean; employer: boolean; employee: boolean; employeeDeduction: boolean; basis: boolean; exempt: boolean; liable: boolean; mixedDeparture: boolean; genericOther: boolean };
+    page: number; line: number; labelTokens: string[]; monetaryCells: PositionOnly[]; numericCells: PositionOnly[];
+    qualifiers: { explicitRc: boolean; indemnity: boolean; contribution: boolean; forfaitSocial: boolean; employer: boolean; employee: boolean; employeeDeduction: boolean; basis: boolean; exempt: boolean; liable: boolean; mixedDeparture: boolean; genericOther: boolean; hasCtp719: boolean; equilibriumContribution: boolean; abbreviatedRc: boolean; abbreviatedCharge: boolean };
   }[];
 };
 const position = (item: RcPayslipTextItem): PositionOnly => ({ x: Math.round(item.x * 100) / 100, y: Math.round(item.y * 100) / 100, width: Math.round(item.width * 100) / 100 });
@@ -333,11 +334,16 @@ export function inspectRcPayslipRows(rows: RcPayslipTextRow[]): RcPayslipFormat 
       rcRows.push({ page: row.page, line: row.line, monetaryCellCount: monetary.length, cells: monetary.map(position) });
     }
     const text = normalized(plain(row));
-    if (chargeCandidates.length < 80 && /\b(?:ruptures?|conventionnelles?|contributions?|cotisations?|forfait social)\b/.test(text)) {
+    const hasCtp719 = /\bctp[\s:.-]*719\b/.test(text);
+    const abbreviatedRc = /\brc\b|\brupt\.?\s+(?:conv\.?|conventionnelles?)\b|\bruptures?\s+conv\b/.test(text);
+    const abbreviatedCharge = /\b(?:contrib|cot|pat)\b/.test(text);
+    if (chargeCandidates.length < 80 && (hasCtp719 || /\b(?:ruptures?|conventionnelles?|contributions?|cotisations?|forfait social|rc|contrib|cot|pat|rupt|conv)\b/.test(text))) {
       const labelTokens = (text.match(/[a-z]+|%/g) ?? []).map((word) => word.toUpperCase()).filter((word) => CHARGE_TOKENS.has(word));
       const exempt = /\b(?:exonere(?:e|es|s)?|non soumis(?:e|es)?)\b/.test(text);
       chargeCandidates.push({
         page: row.page, line: row.line, labelTokens, monetaryCells: monetaryItems(row).map(position),
+        // Forme numérique seulement : quantités et taux restent visibles par leur géométrie, jamais par leur valeur.
+        numericCells: numberItems(row).filter((item) => /^[\s+−–()\-]*\d[\d\s.,%€)\u00a0\u202f]*$/.test(item.text.trim())).map(position),
         qualifiers: {
           explicitRc: /\bruptures? conventionnelles?\b/.test(text),
           indemnity: /\bindemnites?\b/.test(text), contribution: /\b(?:contributions?|cotisations?)\b/.test(text),
@@ -345,6 +351,7 @@ export function inspectRcPayslipRows(rows: RcPayslipTextRow[]): RcPayslipFormat 
           employee: /\b(?:salaries?|salarial(?:e|es)?|salariaux)\b/.test(text), employeeDeduction: /\b(?:csg|crds)\b/.test(text),
           basis: /\b(?:base|assiette)\b/.test(text), exempt, liable: !exempt && /\bsoumis(?:e|es)?\b/.test(text),
           mixedDeparture: /\b(?:licenciement|retraite|transactionnelles?)\b/.test(text), genericOther: /\bautres? (?:contributions?|cotisations?)\b/.test(text),
+          hasCtp719, equilibriumContribution: /\b(?:contributions?|contrib)\b/.test(text) && /\bequilibre\b/.test(text), abbreviatedRc, abbreviatedCharge,
         },
       });
     }
