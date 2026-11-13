@@ -28,5 +28,18 @@
 .restructuring-exit-editor { border: 1px solid var(--line); border-radius: var(--clair-radius-control); }
 .restructuring-exit-editor > summary { cursor: pointer; padding: 14px 16px; font-size: var(--clair-type-form); font-weight: 500; }
 .restructuring-exit-editor > .form { padding: 8px 16px 18px; }
+.crisis-natures td.num, .crisis-ranks td.num { min-width: 130px; vertical-align: top; }
+.crisis-natures th:first-child { min-width: 240px; }
+.crisis-natures th small, .crisis-ranks td small { display: block; color: var(--muted); font-weight: 400; font-size: var(--clair-type-label); margin-top: 4px; }
+.crisis-detail { border: 1px solid var(--line); border-radius: var(--clair-radius-control); }
+.crisis-detail > summary { cursor: pointer; padding: 14px 16px; font-size: var(--clair-type-form); font-weight: 500; }
+.crisis-detail > .table-wrap { margin: 0 16px 16px; }
+.crisis-details { display: grid; gap: 12px; }
+.crisis-rank-fields .field-row { flex: 1 1 240px; min-width: 200px; }
+.cash-weeks td.num, .cash-weeks th.num { min-width: 104px; }
+.cash-weeks th:first-child { min-width: 230px; }
+.cash-weeks th small { display: block; color: var(--muted); font-weight: 400; font-size: var(--clair-type-label); margin-top: 2px; white-space: nowrap; }
+.cash-weeks tr.cash-total th, .cash-weeks tr.cash-total td { font-weight: 600; }
+.cash-flows td .form.inline { display: inline-flex; margin: 0; }
 @media (max-width: 1100px) { .restructuring-charts { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 650px) { .restructuring-header { display: grid; } .restructuring-filters .field-row { flex-basis: 100%; min-width: 0; } }
