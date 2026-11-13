@@ -1,6 +1,7 @@
 import "@/styles/masse-salariale.css";
 import "@/styles/restructuring.css";
 import { Money, MoneyUnitLabel } from "@/components/Money";
+import { ExportMenu } from "@/components/ExportMenu";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { formatDate } from "@/lib/dates";
 import type { CrisisContext } from "@/lib/restructuring/crisis/context";
@@ -86,7 +87,7 @@ function Ranks({ p, position }: { p: Props; position: Value }) {
 export function CrisisView(p: Props) {
   const position = p.position;
   return <div className="restructuring-view" data-testid="studio-restructuring-crisis">
-    <header className="restructuring-header"><div className="ms-head"><span className="label">Studio Restructuring</span><h1>{VIEWS.find((view) => view.id === "crisis")?.label}</h1><p className="desc">De quelle trésorerie l’entreprise dispose-t-elle, et que doit-elle, à une date donnée ?</p></div></header>
+    <header className="restructuring-header"><div className="ms-head"><span className="label">Studio Restructuring</span><h1>{VIEWS.find((view) => view.id === "crisis")?.label}</h1><p className="desc">De quelle trésorerie l’entreprise dispose-t-elle, et que doit-elle, à une date donnée ?</p></div>{p.canEdit && position.kind === "value" ? <ExportMenu testid="cap13-export" options={[{ label: "Dossier de crise (Excel)", href: tabHref(p, "cash").replace("/studio-restructuring?", "/studio-restructuring/cap13-export?"), testid: "cap13-export-xlsx" }]} /> : null}</header>
     <FamilyTabs current="crisis" label="Vues du Studio Restructuring" testid="restructuring-tabs" tabs={VIEWS.map((view) => ({ key: view.id, label: view.label, href: tabHref(p, view.id) }))} />
     <Reading p={p} />
     <Filters p={p} />

@@ -368,7 +368,7 @@ export function buildScenarioPlan(base: CashPlan, settings: CashPlanSettings, sc
     if (measure.kind === "encaissement") {
       if (measure.date <= start.date) outcome.inapplicable = "date antérieure ou égale à la date de départ";
       else if (measure.date > horizonEnd) outcome.inapplicable = "date postérieure à la treizième semaine";
-      else entries.push({ flowId: null, measureId: measure.id, label: `${measure.label} (${INFLOW_NATURES.find((n) => n.id === measure.nature)!.label.toLowerCase()})`, category: "exceptional", direction: "in", date: measure.date, amountCents: measure.amountCents });
+      else entries.push({ flowId: null, measureId: measure.id, label: `${measure.label} · ${INFLOW_NATURES.find((n) => n.id === measure.nature)!.label}`, category: "exceptional", direction: "in", date: measure.date, amountCents: measure.amountCents });
       continue;
     }
     const own = entries.filter((e) => e.flowId === measure.flowId && e.measureId === null);

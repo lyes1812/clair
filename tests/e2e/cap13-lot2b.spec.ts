@@ -97,6 +97,18 @@ test("Cap 13 lot 2b : scénario comparé au plan de base, mesures tracées, plan
   await expect(page.getByTestId("cash-tile-rupture")).toContainText("Semaine 9");
   await page.screenshot({ path: `${CAPTURES}/cap13-05-scenario.png`, fullPage: true });
 
+  // Lot 3 : le classeur du dossier de crise s'exporte avec le scénario affiché, sans mise en cache.
+  await page.getByTestId("cap13-export").click();
+  const exportHref = await page.getByTestId("cap13-export-xlsx").getAttribute("href");
+  expect(exportHref).toMatch(/\/studio-restructuring\/cap13-export\?vue=cash&scenario=[0-9a-f-]{36}/);
+  const exported = await page.request.get(exportHref!);
+  expect(exported.status()).toBe(200);
+  expect(exported.headers()["content-type"]).toContain("spreadsheetml");
+  expect(exported.headers()["content-disposition"]).toContain("cap13-dossier-de-crise-2026-03-04.xlsx");
+  expect(exported.headers()["cache-control"]).toBe("no-store");
+  expect((await exported.body()).byteLength).toBeGreaterThan(5_000);
+  await page.keyboard.press("Escape");
+
   // Ligne de base supprimée : la mesure qui la visait est signalée, ni appliquée ni effacée.
   await page.getByTestId("cash-flows-table").getByRole("row").filter({ hasText: "URSSAF fictive" }).getByRole("button", { name: /Supprimer/ }).click();
   await expect(page.getByTestId("cash-measures-table")).toContainText("non appliquée — la ligne visée a été supprimée du plan de base", slow);

@@ -2,6 +2,7 @@ import "@/styles/masse-salariale.css";
 import "@/styles/hypotheses-saisie.css";
 import "@/styles/restructuring.css";
 import { Money, MoneyUnitLabel } from "@/components/Money";
+import { ExportMenu } from "@/components/ExportMenu";
 import { FamilyTabs } from "@/components/FamilyTabs";
 import { formatDate } from "@/lib/dates";
 import type { CashContext } from "@/lib/restructuring/crisis/cash-context";
@@ -34,6 +35,7 @@ function href(p: Props, view: string, extra: Record<string, string> = {}) {
   for (const [key, value] of Object.entries(extra)) query.set(key, value);
   return `/e/${p.slug}/studio-restructuring?${query}`;
 }
+const exportHref = (p: Props) => href(p, "cash").replace("/studio-restructuring?", "/studio-restructuring/cap13-export?");
 const planHref = (p: Props, label: string, cents: number, category: FlowCategoryId) => `${href(p, "cash", { pl: label.slice(0, 120), pm: String(cents), pc: category })}#cash-flow-form`;
 
 function Reading({ p }: { p: Props }) {
@@ -185,7 +187,7 @@ function Scenarios({ p }: { p: Props }) {
   const selected = p.scenarioPlan?.kind === "value" ? p.scenarioPlan : null;
   const actions = p.scenarioActions;
   const link = (id: string | null) => { const query = new URLSearchParams({ vue: "cash" }); if (p.exercise) query.set("exercice", p.exercise.filename); if (p.asOf) query.set("date", p.asOf); if (id) query.set("scenario", id); return `/e/${p.slug}/studio-restructuring?${query}${id ? "#cash-scenario" : ""}`; };
-  return <section className="panel restructuring-section" data-testid="cash-scenarios"><PanelHead title="Scénarios" desc={`Des mesures appliquées par-dessus le plan de base, qui n’est jamais modifié · ${list.length} scénario${list.length === 1 ? "" : "s"} sur ${MAX_SCENARIOS}`} />
+  return <section className="panel restructuring-section" data-testid="cash-scenarios"><PanelHead title="Scénarios" desc={`Des mesures appliquées par-dessus le plan de base, qui n’est jamais modifié · ${list.length} scénario${list.length > 1 ? "s" : ""} sur ${MAX_SCENARIOS}`} />
     {list.length ? <div className="table-wrap"><table className="data-table cash-flows" data-testid="cash-scenarios-table"><thead><tr><th scope="col">Scénario</th><th scope="col" className="num">Mesures</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{list.map((scenario) => <tr key={scenario.id}><th scope="row">{scenario.name}{selected?.scenario.id === scenario.id ? " · affiché" : ""}</th><td className="num">{scenario.measures.length}</td><td><div className="restructuring-actions">{selected?.scenario.id === scenario.id ? <a className="btn hs-compact" href={link(null)}>Revenir au plan de base</a> : <a className="btn hs-compact" href={link(scenario.id)}>Comparer au plan de base</a>}{actions?.remove[scenario.id] ? <ActionForm action={actions.remove[scenario.id]} submit="Supprimer" srLabel={`le scénario ${scenario.name}`} confirm={`Supprimer le scénario « ${scenario.name} » et ses mesures ?`} testid={`cash-scenario-delete-${scenario.id}`} className="form inline" danger compact /> : null}</div></td></tr>)}</tbody></table></div> : <p className="desc" data-testid="cash-scenarios-empty">Aucun scénario. Crée-en un pour tester un moratoire, un étalement ou une cession d’actif.</p>}
     {actions && list.length < MAX_SCENARIOS ? <ActionForm action={actions.create} submit="Créer le scénario" testid="cash-scenario-form" className="form">
       <input type="hidden" name="exercice" value={p.exercise?.filename ?? ""} /><input type="hidden" name="arrete" value={p.asOf ?? ""} />
@@ -218,7 +220,7 @@ function ToPlan({ p }: { p: Props }) {
 export function CashPlanView(p: Props) {
   const plan = p.plan;
   return <div className="restructuring-view" data-testid="studio-restructuring-cash">
-    <header className="restructuring-header"><div className="ms-head"><span className="label">Studio Restructuring</span><h1>{VIEWS.find((view) => view.id === "cash")?.label}</h1><p className="desc">La trésorerie tient-elle sur les treize prochaines semaines, et sinon quand rompt-elle ?</p></div></header>
+    <header className="restructuring-header"><div className="ms-head"><span className="label">Studio Restructuring</span><h1>{VIEWS.find((view) => view.id === "cash")?.label}</h1><p className="desc">La trésorerie tient-elle sur les treize prochaines semaines, et sinon quand rompt-elle ?</p></div>{p.canEdit && (plan.kind === "value" || p.position.kind === "value") ? <ExportMenu testid="cap13-export" options={[{ label: "Dossier de crise (Excel)", href: exportHref(p), testid: "cap13-export-xlsx" }]} /> : null}</header>
     <FamilyTabs current="cash" label="Vues du Studio Restructuring" testid="restructuring-tabs" tabs={VIEWS.map((view) => ({ key: view.id, label: view.label, href: href(p, view.id) }))} />
     <Reading p={p} />
     <Filters p={p} />
