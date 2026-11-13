@@ -212,6 +212,7 @@ const FORMAT_ANCHORS = new Set(["BASE", "PART", "SALARIE", "SALARIAL", "SALARIAL
 for (const token of ['MONTANTS','SALARIES','SALARIAUX','EMPLOYEURS','PATRONAUX','PARTS','NOMBRE','VALEUR','VERSER','RETENIR','COTISATION','CHARGE','TOTAL','AMOUNT','AMOUNTS','BASIS','RATE','EMPLOYEE','EMPLOYER','EARNINGS','DEDUCTIONS','WITHHOLDINGS','GROSS']) {
   FORMAT_TOKENS.add(token); FORMAT_ANCHORS.add(token);
 }
+const CHARGE_TOKENS = new Set([...FORMAT_TOKENS, "INDEMNITE", "INDEMNITES", "RUPTURE", "RUPTURES", "CONVENTIONNELLE", "CONVENTIONNELLES", "RC", "CONTRIBUTION", "CONTRIBUTIONS", "COTISATION", "COTISATIONS", "EXONERE", "EXONEREE", "EXONEREES", "EXONERES", "SOUMIS", "SOUMISE", "SOUMISES", "ASSIETTE", "FORFAIT", "SOCIAL", "SOCIALE", "SOCIALES", "SOCIAUX", "CSG", "CRDS", "AUTRE", "AUTRES", "DUE", "DUES", "DUS", "RETRAITE", "LICENCIEMENT", "DEPART", "DEPARTS", "MISE", "NON", "ET", "PAR", "L", "TRANSACTIONNELLE", "TRANSACTIONNELLES"]);
 type FormatCell = { tokens: string[]; x: number; y: number; width: number };
 type PositionOnly = { x: number; y: number; width: number };
 export type RcPayslipFormat = {
@@ -219,9 +220,13 @@ export type RcPayslipFormat = {
   pageCount: number; rowCount: number;
   headers: { page: number; line: number; cells: FormatCell[] }[];
   rcRows: { page: number; line: number; monetaryCellCount: number; cells: PositionOnly[] }[];
+  chargeCandidates: {
+    page: number; line: number; labelTokens: string[]; monetaryCells: PositionOnly[];
+    qualifiers: { explicitRc: boolean; indemnity: boolean; contribution: boolean; forfaitSocial: boolean; employer: boolean; employee: boolean; employeeDeduction: boolean; basis: boolean; exempt: boolean; liable: boolean; mixedDeparture: boolean; genericOther: boolean };
+  }[];
 };
 const position = (item: RcPayslipTextItem): PositionOnly => ({ x: Math.round(item.x * 100) / 100, y: Math.round(item.y * 100) / 100, width: Math.round(item.width * 100) / 100 });
-const emptyFormat = (code: string): RcPayslipFormat => ({ parserVersion: RC_PARSER_VERSION, extractionStatus: "review", extractionCode: code, pageCount: 0, rowCount: 0, headers: [], rcRows: [] });
+const emptyFormat = (code: string): RcPayslipFormat => ({ parserVersion: RC_PARSER_VERSION, extractionStatus: "review", extractionCode: code, pageCount: 0, rowCount: 0, headers: [], rcRows: [], chargeCandidates: [] });
 
 /** Diagnostic de géométrie : vocabulaire fermé, aucune valeur, aucun libellé libre, nom ou identifiant. */
 export function inspectRcPayslipRows(rows: RcPayslipTextRow[]): RcPayslipFormat {
@@ -229,6 +234,7 @@ export function inspectRcPayslipRows(rows: RcPayslipTextRow[]): RcPayslipFormat 
   if (extracted.code === "unreadable-text") return emptyFormat(extracted.code);
   const headers: RcPayslipFormat["headers"] = [];
   const rcRows: RcPayslipFormat["rcRows"] = [];
+  const chargeCandidates: RcPayslipFormat["chargeCandidates"] = [];
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index];
     const cells = row.items.flatMap((item): FormatCell[] => {
@@ -241,8 +247,24 @@ export function inspectRcPayslipRows(rows: RcPayslipTextRow[]): RcPayslipFormat 
       const monetary = monetaryItems(row);
       rcRows.push({ page: row.page, line: row.line, monetaryCellCount: monetary.length, cells: monetary.map(position) });
     }
+    const text = normalized(plain(row));
+    if (chargeCandidates.length < 80 && /\b(?:ruptures?|conventionnelles?|contributions?|cotisations?|forfait social)\b/.test(text)) {
+      const labelTokens = (text.match(/[a-z]+|%/g) ?? []).map((word) => word.toUpperCase()).filter((word) => CHARGE_TOKENS.has(word));
+      const exempt = /\b(?:exonere(?:e|es|s)?|non soumis(?:e|es)?)\b/.test(text);
+      chargeCandidates.push({
+        page: row.page, line: row.line, labelTokens, monetaryCells: monetaryItems(row).map(position),
+        qualifiers: {
+          explicitRc: /\bruptures? conventionnelles?\b/.test(text),
+          indemnity: /\bindemnites?\b/.test(text), contribution: /\b(?:contributions?|cotisations?)\b/.test(text),
+          forfaitSocial: /\bforfait social\b/.test(text), employer: /\b(?:employeurs?|patronal(?:e|es)?|patronaux)\b/.test(text),
+          employee: /\b(?:salaries?|salarial(?:e|es)?|salariaux)\b/.test(text), employeeDeduction: /\b(?:csg|crds)\b/.test(text),
+          basis: /\b(?:base|assiette)\b/.test(text), exempt, liable: !exempt && /\bsoumis(?:e|es)?\b/.test(text),
+          mixedDeparture: /\b(?:licenciement|retraite|transactionnelles?)\b/.test(text), genericOther: /\bautres? (?:contributions?|cotisations?)\b/.test(text),
+        },
+      });
+    }
   }
-  return { parserVersion: RC_PARSER_VERSION, extractionStatus: extracted.status, extractionCode: extracted.code, pageCount: Math.max(...rows.map((row) => row.page)), rowCount: rows.length, headers, rcRows };
+  return { parserVersion: RC_PARSER_VERSION, extractionStatus: extracted.status, extractionCode: extracted.code, pageCount: Math.max(...rows.map((row) => row.page)), rowCount: rows.length, headers, rcRows, chargeCandidates };
 }
 
 export function inspectRcPayslipFormat(bytes: Uint8Array): Promise<RcPayslipFormat> {

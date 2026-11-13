@@ -14,7 +14,7 @@ export default async function ControleBulletinsPage({ params }: { params: Promis
   const source = await activeSync(workspace.id, "payfit");
   const unavailable = <section className="panel"><h1>Contrôle du format des bulletins</h1><p>Lecture indisponible ou remplacée. Relance la lecture des bulletins PayFit.</p></section>;
   if (!scan || source?.id !== scan.payrollSyncId) return unavailable;
-  const selected = scan.records.filter((record) => record.status === "review" && record.pdfHash).slice(0, 5);
+  const selected = scan.records.filter((record) => (record.status === "identified" || record.status === "review") && record.pdfHash).slice(0, 5);
   const inspected: { month: string; storedParserVersion: string; format: RcPayslipFormat | null; state: string }[] = [];
   try {
     const { client, companyId } = await configuredPayfitClient(workspace.id);
@@ -33,7 +33,7 @@ export default async function ControleBulletinsPage({ params }: { params: Promis
     }
   } catch { return unavailable; }
   return <div className="page-stack" data-testid="rc-payslip-format-control">
-    <section className="panel"><h1>Contrôle du format des bulletins</h1><p>Lecteur actuel : <code>{RC_PARSER_VERSION}</code></p><p>Géométrie et vocabulaire d’entête uniquement. Aucun montant ou texte individuel n’est affiché.</p></section>
+    <section className="panel"><h1>Contrôle du format des bulletins</h1><p>Lecteur actuel : <code>{RC_PARSER_VERSION}</code></p><p>Vocabulaire fermé des entêtes, indemnités et contributions ; géométrie des colonnes uniquement. Aucun montant, taux ou texte individuel n’est affiché.</p></section>
     {!selected.length && <p>Aucun bulletin à vérifier dans la lecture courante.</p>}
     {inspected.map((item, index) => <section className="panel" key={index} data-testid="rc-payslip-format-result">
       <h2>Bulletin {index + 1} · {item.month}</h2>

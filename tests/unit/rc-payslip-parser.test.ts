@@ -186,4 +186,28 @@ describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => 
     expect(JSON.stringify(inspected)).not.toMatch(/1234,56|123456|9000,00|999,99|Indemnite/);
     expect(await inspectRcPayslipFormat(new Uint8Array())).toMatchObject({ extractionStatus: "review", extractionCode: "invalid-pdf", headers: [], rcRows: [] });
   });
+  it("le diagnostic des contributions n’expose que vocabulaire fermé, positions et qualificatifs", () => {
+    const source = [header(), rc("Indemnité de rupture conventionnelle", "1 234,56"),
+      row(3, [item("Contribution patronale sur indemnité de rupture conventionnelle NOMPRIVE IDENTIFIANTSECRET", 20, 225), item("25,00", 350, 40), item("321,09", 520, 50)]),
+      row(4, [item("Autres contributions dues par l’employeur TEXTEPRIVE", 20, 225), item("987,65", 520, 50)]),
+      row(5, [item("CSG CRDS sur indemnité de rupture conventionnelle", 20, 225), item("111,11", 420, 50)]),
+      row(6, [item("Forfait social sur indemnité de rupture conventionnelle ou départ retraite", 20, 225), item("222,22", 520, 50)]),
+    ];
+    const inspected = inspectRcPayslipRows(source);
+    expect(inspected.parserVersion).toBe("payfit-rc-coordinate-v3");
+    expect(inspected.extractionStatus).toBe("identified");
+    expect(inspected.chargeCandidates).toHaveLength(5);
+    expect(inspected.chargeCandidates[1]).toMatchObject({ page: 1, line: 3, labelTokens: ["CONTRIBUTION", "PATRONALE", "SUR", "INDEMNITE", "DE", "RUPTURE", "CONVENTIONNELLE"], monetaryCells: [{ x: 350, y: 500, width: 40 }, { x: 520, y: 500, width: 50 }], qualifiers: { explicitRc: true, indemnity: true, contribution: true, employer: true, employeeDeduction: false } });
+    expect(inspected.chargeCandidates[2]).toMatchObject({ qualifiers: { explicitRc: false, contribution: true, employer: true, genericOther: true } });
+    expect(inspected.chargeCandidates[3]).toMatchObject({ qualifiers: { explicitRc: true, employeeDeduction: true, employer: false } });
+    expect(inspected.chargeCandidates[4]).toMatchObject({ qualifiers: { explicitRc: true, forfaitSocial: true, mixedDeparture: true } });
+    expect(JSON.stringify(inspected)).not.toMatch(/NOMPRIVE|IDENTIFIANTSECRET|TEXTEPRIVE|1234,56|123456|321,09|32109|987,65|98765|25,00|111,11|11111|222,22|22222/);
+  });
+  it("le diagnostic distingue libellé exonéré, soumis et assiette sans calculer ni restituer un taux", () => {
+    const inspected = inspectRcPayslipRows([header(), rc("Indemnité de rupture conventionnelle exonérée", "1 000,00"), row(3, [item("Contribution rupture conventionnelle soumise assiette", 20, 225), item("17,77", 350, 40)])]);
+    expect(inspected.chargeCandidates[0]).toMatchObject({ qualifiers: { explicitRc: true, exempt: true, liable: false } });
+    expect(inspected.chargeCandidates[1]).toMatchObject({ qualifiers: { explicitRc: true, exempt: false, liable: true, basis: true } });
+    expect(JSON.stringify(inspected)).not.toContain("17,77");
+    expect(inspected.chargeCandidates.every(candidate => !Object.hasOwn(candidate, "amountCents") && !Object.hasOwn(candidate, "rate"))).toBe(true);
+  });
 });
