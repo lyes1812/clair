@@ -31,6 +31,8 @@ import { buildActualNonRecurring } from "@/lib/payroll/non-recurring";
 import { SyntheseDisclosure } from "./SyntheseDisclosure";
 import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
 import { buildRcPayslipPeriod } from "@/lib/payroll/rc-payslips";
+import { resolveLiveNonRecurring } from "@/lib/payroll/live-non-recurring";
+import { rcCostsCoveredByPayroll } from "@/lib/payroll/rc-cost-coverage";
 import { getRcPayslipScan } from "@/lib/payroll/rc-payslips-store";
 import { RcPayslipDetails } from "./RcPayslipDetails";
 import { getScenario, listBudgets, listScenarios } from '@/lib/budget/store';
@@ -210,8 +212,12 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
   const budgetHref = `${base}/croisee?chapitre=budget&annee=${year}&de=${from}&a=${to}${svcParam}${budgetModel?.budget ? `&budget=${encodeURIComponent(budgetModel.budget.id)}` : ''}&affichage=tableau#cx-budget-ecart`;
   const landingHref = `/e/${slug}/studio-rh/hypotheses?vue=resultat&sous=atterrissage&annee=${year}${budgetModel?.scenario ? `&scenario=${encodeURIComponent(budgetModel.scenario.id)}` : ''}`;
   const variableShare = cur.kind === "value" && cur.brut > 0 ? fmtPercent({ num: cur.byRubric.primes + cur.byRubric.indemnites, den: cur.brut }) : null;
-  const nonRecurring = vue === "synthese" ? buildActualNonRecurring(input, actualEvents, months, ctx.read?.syncId ?? null) : null;
-  const nonRecurringAmount = nonRecurring?.rows.length ? nonRecurring.nonRecurring : null;
+  const nonRecurring = vue === "synthese" ? resolveLiveNonRecurring({
+    declared: buildActualNonRecurring(input, actualEvents, months, ctx.read?.syncId ?? null), rcPeriod,
+    months, syncId: ctx.read?.syncId ?? null, serviceFiltered: serviceValue !== undefined,
+    sourceIncluded: rcCostsCoveredByPayroll(input, rcPeriod),
+  }) : null;
+  const nonRecurringAmount = nonRecurring?.count ? nonRecurring.nonRecurring : null;
   const exportHref = `${base}/export?annee=${year}&de=${from}&a=${to}${svcParam}&format=xlsx`;
   const sourceDetails = (
     <MsRead source={sourceLine}>
@@ -229,7 +235,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
       )}
     </MsRead>
   );
-  const nonRecurringDetails = <><ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} /><RcPayslipDetails slug={slug} period={rcPeriod} scan={rcScan} editable={editable} contracts={actualContracts} /></>;
+  const nonRecurringDetails = <><ActualNonRecurring slug={slug} input={input} events={actualEvents} months={months} syncId={ctx.read?.syncId ?? null} rcPeriod={rcPeriod} contracts={actualContracts} editable={editable} save={editable && ctx.read ? saveActualEventAction.bind(null, slug, ctx.read.syncId, actualVersions) : undefined} /><RcPayslipDetails slug={slug} period={rcPeriod} scan={rcScan} editable={editable} contracts={actualContracts} /></>;
   const periodControls = <PeriodBar
     years={years}
     year={year}
@@ -355,7 +361,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
                 slug={slug}
               />
               <Tile testid="ms-tile-variable" label="Part variable" value={variableShare ?? "n.d."} nd={variableShare === null} lead={cur.kind === "nd" ? "Brut indisponible" : cur.brut <= 0 ? "Brut nul ou négatif" : "Primes et indemnités / brut"} def={MASSE_TERMS.fixeVariable} slug={slug} />
-              <Tile testid="ms-tile-non-recurring" label="Éléments non récurrents" value={<a className="ms-synthese-value-link" href={href({ extra: "#actual-non-recurring" })}>{nonRecurringAmount === null ? "n.d." : euros(nonRecurringAmount)}</a>} nd={nonRecurringAmount === null} lead={nonRecurring?.rows.length ? "Coûts identifiés · détail" : "Aucun élément identifié"} def={MASSE_TERMS.primes} slug={slug} />
+              <Tile testid="ms-tile-non-recurring" label="Éléments non récurrents" value={<a className="ms-synthese-value-link" href={href({ extra: "#actual-non-recurring" })}>{nonRecurringAmount === null ? "n.d." : euros(nonRecurringAmount)}</a>} nd={nonRecurringAmount === null} lead={nonRecurring?.count ? "Coûts chargés identifiés · détail" : "Aucun élément identifié"} compare={nonRecurringAmount === null && rcPeriod.amountCents !== null ? <>Indemnités RC : <Money cents={rcPeriod.amountCents} /> · hors charges</> : undefined} def={MASSE_TERMS.nonRecurring} slug={slug} />
               <Tile testid="ms-tile-budget" label="Écart au budget" value={<a className="ms-synthese-value-link" href={budgetHref}>{budgetModel?.gap.kind === 'value' ? eurosSigned(budgetModel.gap.delta) : 'n.d.'}</a>} nd={budgetModel?.gap.kind !== 'value'} trend={budgetModel?.gap.kind === 'value' ? trendOf(budgetModel.gap.delta) : undefined} lead={budgetModel?.budget ? `${label(months)} · dernier budget` : 'Budget indisponible'} def="croisee-ecart-budget" slug={slug} />
               <Tile testid="ms-tile-landing" label={`Atterrissage ${year}`} value={<a className="ms-synthese-value-link" href={landingHref}>{budgetModel?.landing.kind === 'value' ? euros(budgetModel.landing.total) : 'n.d.'}</a>} nd={budgetModel?.landing.kind !== 'value'} lead={budgetModel?.scenario ? `Année ${year} · scénario figé` : 'Scénario figé indisponible'} def="atterrissage" slug={slug} />
               </dl>
@@ -369,7 +375,7 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
             <p className="tile-foot">{budgetModel?.budget ? <>Budget « {budgetModel.budget.name} » · {label(months)} · global</> : <>Budget {year} non disponible</>}</p>
             <p className="tile-foot">{budgetModel?.scenario ? <>Scénario figé « {budgetModel.scenario.name} » · année {year}{budgetModel.scenario.frozenAt ? ` · figé le ${dateTimeFmt.format(budgetModel.scenario.frozenAt)}` : ''} · base de {budgetModel.baseRefMonth ? formatMonth(budgetModel.baseRefMonth).toLowerCase() : 'n.d.'}{budgetModel.baseReadAt ? `, lecture du ${formatDate(budgetModel.baseReadAt.slice(0, 10))}` : ''}{budgetModel.baseDiffersFromCurrent ? ' · réel de la base figée' : ''}</> : 'Scénario figé indisponible'}</p>
           </div>
-          <ActualNonRecurringSummary rows={nonRecurring?.rows ?? []} href={href({ extra: "#actual-non-recurring" })} testid="ms-non-recurring-summary" rc={rcPeriod} />
+          <ActualNonRecurringSummary rows={nonRecurring?.rows ?? []} live={nonRecurring ?? undefined} href={href({ extra: "#actual-non-recurring" })} testid="ms-non-recurring-summary" rc={rcPeriod} />
           <div className="ms-synthese-aggregate-toolbar" data-ms-screen-only>
             <ViewSwitch testid="ms-summary-periodicity" caption="Vue des répartitions" label="Vue de Brut et cotisations et de Répartition par service" current={repartition} options={[
               { key: "cumule", label: "Cumulé", href: href({ repartition: "cumule" }) },
@@ -411,14 +417,14 @@ export default async function MasseSalarialePage({ params, searchParams }: { par
               <p className="tile-foot">Brut · N-1 : {money(prev, (w) => w.brut)} · Cotisations patronales · N-1 : {money(prev, (w) => w.cotisations)}{prev.kind === "value" ? ` (${rate(prev)})` : ""}</p>
               <p className="tile-foot">Coût par ETP-mois · N-1 : {costText(costPrev)}</p>
               <p className="tile-foot">Écart au budget : réel courant sur les mois affichés face au dernier budget de l'année. Atterrissage : année complète du dernier scénario figé, avec le réel conservé dans sa base.</p>
-              {!nonRecurring?.rows.length && <p className="tile-foot">Aucun élément non récurrent identifié sur la période : cela ne prouve pas son absence.</p>}
+              {!nonRecurring?.count && <p className="tile-foot">Aucun élément non récurrent identifié sur la période : cela ne prouve pas son absence.</p>}
             </div>
           </SyntheseDisclosure>
 
           <SyntheseDisclosure summary={<span>Données et sources<small>Définitions, provenance et limites de lecture</small></span>} className="ms-synthese-sources" id="ms-sources" testid="ms-synthese-sources-details">
             {sourceDetails}
           <div className="ms-synthese-qualifiers">
-            <NdLines lines={[...tileNd, ...(nonRecurring?.rows.length && nonRecurringAmount === null ? nonRecurring.reasons : [])]} testid="ms-tiles-nd" />
+            <NdLines lines={[...tileNd, ...(nonRecurring?.count && nonRecurringAmount === null ? nonRecurring.reasons : [])]} testid="ms-tiles-nd" />
             {ctx.etpQualifiers.length > 0 && (
               <p className="tile-foot ms-note" data-testid="ms-etp-qualifiers">
                 Coût par ETP-mois — ETP : {ctx.etpQualifiers.join(" ; ")}.

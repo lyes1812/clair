@@ -412,7 +412,7 @@ describe("page : janvier à mars 2026 face à janvier à mars 2025", () => {
     const { html } = await render({ annee: "2026", de: "01", a: "01" });
     const summary = /data-testid="sy-non-recurring-summary"[\s\S]*?<\/section>/.exec(html)![0];
     expect(summary).toContain('data-money-cents="98765"'); expect(summary).toContain("Indemnité RC · bulletin");
-    expect(summary).toContain("Coût chargé identifié : n.d."); expect(summary).toContain("1 élément identifié");
+    expect(summary).toContain("Coût chargé RC"); expect(summary).toContain("Coût chargé à vérifier"); expect(summary).toContain("1 élément identifié");
     expect(tile(html, "masse").raw).toContain('data-money-cents="420000"');
     expect(html).not.toMatch(/COLLAB_RC_PRIVE|CONTRAT_RC_PRIVE|PDF_RC_PRIVE|JUSTIFICATIF_RC_PRIVE/);
   });

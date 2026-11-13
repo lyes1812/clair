@@ -14,8 +14,10 @@ import { costPerEtp, evolution, monthPayroll, windowPayroll } from "@/lib/payrol
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { ActualEventError, listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { buildActualNonRecurringChart } from "@/lib/viz/actual-non-recurring";
-import { buildActualNonRecurring, type ActualNonRecurring } from "@/lib/payroll/non-recurring";
+import { buildActualNonRecurring } from "@/lib/payroll/non-recurring";
 import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
+import { resolveLiveNonRecurring, type LiveNonRecurring } from '@/lib/payroll/live-non-recurring';
+import { rcCostsCoveredByPayroll } from '@/lib/payroll/rc-cost-coverage';
 import { buildRcPayslipPeriod } from "@/lib/payroll/rc-payslips";
 import { getRcPayslipScan } from "@/lib/payroll/rc-payslips-store";
 import { headcountAt } from "@/lib/rh/headcount";
@@ -429,19 +431,21 @@ export default async function SynthesePage({ params, searchParams }: { params: P
   const masseNames = { cur: `Masse chargée ${year}`, prev: `Masse chargée ${prevYear} (N-1)` };
   const masseS = pay ? masseSeries(pay.cur.months, pay.prev.months, masseNames) : [];
   let nonRecurring = null as ReturnType<typeof buildActualNonRecurringChart> | null;
-  let nonRecurringSummary: ActualNonRecurring | null = null;
+  let nonRecurringSummary: LiveNonRecurring | null = null;
   let nonRecurringError: string | null = null;
+  const rcScan = ctx.source === "payfit" ? await getRcPayslipScan(ws.id) : null;
   if (journal && ctx.read) {
     try {
       const actualEvents = await listActualEvents(ws.id);
-      nonRecurring = buildActualNonRecurringChart(journal, actualEvents, months, ctx.read.syncId);
-      nonRecurringSummary = buildActualNonRecurring(journal, actualEvents, months, ctx.read.syncId);
+      const period = buildRcPayslipPeriod(rcScan, months, ctx.read.syncId, actualEvents);
+      nonRecurring = buildActualNonRecurringChart(journal, actualEvents, months, ctx.read.syncId, rcScan);
+      nonRecurringSummary = resolveLiveNonRecurring({ declared: buildActualNonRecurring(journal, actualEvents, months, ctx.read.syncId), rcPeriod: period,
+        months, syncId: ctx.read.syncId, sourceIncluded: rcCostsCoveredByPayroll(journal, period) });
     } catch (error) {
       if (!(error instanceof ActualEventError)) throw error;
       nonRecurringError = error.message;
     }
   }
-  const rcScan = ctx.source === "payfit" ? await getRcPayslipScan(ws.id) : null;
   const rcPeriod = buildRcPayslipPeriod(rcScan, months, ctx.read?.syncId ?? null, nonRecurringSummary?.rows.map((row) => row.event) ?? []);
   const nonRecurringName = `Dont non récurrents identifiés ${year}`;
   const nonRecurringSeries = nonRecurring && nonRecurring.count > 0 ? [{
@@ -537,7 +541,7 @@ export default async function SynthesePage({ params, searchParams }: { params: P
         {landingError && <p className="error" data-testid="sy-landing-error">Atterrissage non lu : {landingError}</p>}
       </Panel>
 
-      <ActualNonRecurringSummary rows={nonRecurringSummary?.rows ?? []} href={`${msHref}#actual-non-recurring`} testid="sy-non-recurring-summary" unavailable={!nonRecurringSummary} rc={rcPeriod} />
+      <ActualNonRecurringSummary rows={nonRecurringSummary?.rows ?? []} live={nonRecurringSummary ?? undefined} href={`${msHref}#actual-non-recurring`} testid="sy-non-recurring-summary" unavailable={!nonRecurringSummary} rc={rcPeriod} />
 
       <Panel testid="sy-graphs" title="Graphiques">
         <div className="sy-charts">

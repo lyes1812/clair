@@ -1,6 +1,9 @@
 import { isMonth } from "@/lib/connectors/months";
 import type { JournalInput } from "@/lib/payroll/engine";
 import { buildActualNonRecurring, parseActualEvent, type ActualEvent, type ActualNonRecurring } from "@/lib/payroll/non-recurring";
+import { buildRcPayslipPeriod, type RcPayslipScan } from '@/lib/payroll/rc-payslips';
+import { resolveLiveNonRecurring } from '@/lib/payroll/live-non-recurring';
+import { rcCostsCoveredByPayroll } from '@/lib/payroll/rc-cost-coverage';
 
 export const ACTUAL_NON_RECURRING_CATEGORIES = [
   { kind: "licenciement", label: "Licenciements" },
@@ -27,7 +30,7 @@ const publicReasons = (model: ActualNonRecurring): string[] => [...new Set(model
 const rowReasons = (rows: ActualNonRecurring["rows"]) => [...new Set(rows.flatMap((row) => row.reason ? [row.reason] : []))];
 
 /** Lecture publique du modèle existant : aucun identifiant, contrat, note libre ni provenance individuelle transmis au graphique. */
-export function buildActualNonRecurringChart(input: JournalInput | null, events: ActualEvent[], months: string[], syncId: string | null): ActualNonRecurringChart {
+function declaredChart(input: JournalInput | null, events: ActualEvent[], months: string[], syncId: string | null): ActualNonRecurringChart {
   const period = buildActualNonRecurring(input, events, months, syncId);
   const result: ActualNonRecurringChart = { points: [], rows: [], total: period.nonRecurring, count: period.rows.length, reasons: publicReasons(period), qualification: ACTUAL_NON_RECURRING_QUALIFICATION };
   if (!months.length || months.some((month) => !isMonth(month)) || new Set(months).size !== months.length) return result;
@@ -47,6 +50,36 @@ export function buildActualNonRecurringChart(input: JournalInput | null, events:
       result.rows.push({ month, kind: category.kind, label: category.label, amount: inheritedKind.length ? null : model.nonRecurring, count: selectedKind.length,
         estimatedCount: selectedKind.filter((row) => parseActualEvent(row.event)?.calculation).length,
         reason: kindReasons.length ? kindReasons.join(" · ") : null });
+    }
+  }
+  return result;
+}
+
+/** Les preuves RC restent côté serveur ; seuls les agrégats canoniques atteignent les graphiques. */
+export function buildActualNonRecurringChart(input: JournalInput | null, events: ActualEvent[], months: string[], syncId: string | null, rcScan?: RcPayslipScan | null): ActualNonRecurringChart {
+  if (!rcScan) return declaredChart(input, events, months, syncId);
+  const modelFor = (window: string[]) => {
+    const rcPeriod = buildRcPayslipPeriod(rcScan, window, syncId, events, Boolean(input?.serviceFilter));
+    return resolveLiveNonRecurring({ declared: buildActualNonRecurring(input, events, window, syncId), rcPeriod,
+      months: window, syncId, serviceFiltered: Boolean(input?.serviceFilter), sourceIncluded: rcCostsCoveredByPayroll(input, rcPeriod) });
+  };
+  const period = modelFor(months);
+  const result: ActualNonRecurringChart = { points: [], rows: [], total: period.nonRecurring, count: period.count, reasons: publicReasons(period), qualification: ACTUAL_NON_RECURRING_QUALIFICATION };
+  if (!months.length || months.some((month) => !isMonth(month)) || new Set(months).size !== months.length) return result;
+  for (const month of months) {
+    const monthly = modelFor([month]);
+    const selected = period.entries.filter((entry) => entry.month === month);
+    const inherited = [...new Set(selected.flatMap((entry) => entry.reason ? [entry.reason] : []))];
+    const reasons = inherited.length ? inherited : monthly.nonRecurring === null ? publicReasons(monthly) : [];
+    result.points.push({ month, amount: inherited.length ? null : monthly.nonRecurring, count: selected.length, reason: reasons.length ? reasons.join(' · ') : null });
+    for (const category of ACTUAL_NON_RECURRING_CATEGORIES) {
+      const entries = selected.filter((entry) => entry.kind === category.kind);
+      if (!entries.length) continue;
+      const issues = [...new Set(entries.flatMap((entry) => entry.amount === null ? [entry.reason ?? 'Coût chargé non confirmé.'] : []))];
+      const total = entries.reduce((sum, entry) => sum + BigInt(entry.amount ?? 0), 0n);
+      const unsafe = total > BigInt(Number.MAX_SAFE_INTEGER) || total < BigInt(Number.MIN_SAFE_INTEGER);
+      result.rows.push({ month, kind: category.kind, label: category.label, count: entries.length, estimatedCount: entries.filter((entry) => entry.estimated).length,
+        amount: issues.length || unsafe ? null : Number(total), reason: issues.length ? issues.join(' · ') : unsafe ? 'Montant hors des centimes entiers sûrs.' : null });
     }
   }
   return result;

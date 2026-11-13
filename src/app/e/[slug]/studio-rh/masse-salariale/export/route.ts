@@ -44,8 +44,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   ];
   const sheets: SheetSpec[] = [monthlySheet({ ...s, dsn: ctx.dsn })];
   const actualEvents = await listActualEvents(workspace.id);
-  sheets.push(actualNonRecurringSheet(s.input, actualEvents, s.months, ctx.read?.syncId ?? null));
   const rcScan = await getRcPayslipScan(workspace.id);
+  sheets.push(actualNonRecurringSheet(s.input, actualEvents, s.months, ctx.read?.syncId ?? null, rcScan));
   if (rcScan) sheets.push(rcPayslipSheet(rcScan, s.months, ctx.read?.syncId ?? null, actualEvents, s.serviceValue !== undefined));
   if (ctx.service.axis && s.serviceRows.length > 0) {
     sheets.push(servicesSheet({ rows: s.serviceRows, totalCur: s.totalCur, totalPrev: s.totalPrev, totalEvo: s.totalEvo, year: s.year }));

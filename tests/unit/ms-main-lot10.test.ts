@@ -329,9 +329,28 @@ describe("Masse salariale, Synthèse : tendances, « ? », aucun narratif (lot 1
       const html = await page({ annee: "2026", de: "01", a: "01" });
       const summary = summaryPanel(html, "ms-non-recurring-summary");
       expect(summary).toContain('data-money-cents="98765"'); expect(summary).toContain("Indemnité RC · bulletin");
-      expect(summary).toContain("Coût chargé identifié : n.d."); expect(summary).toContain("1 élément identifié");
+      expect(summary).toContain("Coût chargé RC"); expect(summary).toContain("Coût chargé à vérifier"); expect(summary).toContain("1 élément identifié");
       expect(html.match(/data-testid="ms-tile-non-recurring"[\s\S]*?<\/div>/)?.[0]).toContain("n.d.");
       expect(html).not.toMatch(/COLLAB_RC_PRIVE|CONTRAT_RC_PRIVE|PDF_RC_PRIVE|JUSTIFICATIF_RC_PRIVE/);
+    } finally { state.ctx = previous; }
+  });
+  it('alimente la vignette principale avec le coût RC du bulletin rapproché au contrat, sans doublon manuel', async () => {
+    const previous = state.ctx, syncId = '11111111-1111-4111-8111-111111111111';
+    try {
+      state.ctx = { ...(previous as object), read: { syncId, startedAt: new Date('2026-02-01T08:00:00Z'), months: input.months } };
+      state.actualEvents = [{ id: '33333333-3333-4333-8333-333333333333', syncId, month: '2026-01', kind: 'rupture-conventionnelle', chargedCents: null, contractKeys: ['payfit:C1'], note: 'JUSTIFICATIF_RC_PRIVE_FICTIF' }];
+      state.rcScan = { version: 1, id: '22222222-2222-4222-8222-222222222222', payrollSyncId: syncId, companyId: 'SOCIETE_FICTIVE', from: '2026-01', to: '2026-01', status: 'complete', startedAt: '2026-02-01T08:00:00.000Z', finishedAt: '2026-02-01T08:01:00.000Z', closedMonths: ['2026-01'], unavailableMonths: [], totalCollaborators: 1, completedCollaborators: 1, checkedPayslips: 1, issues: [], records: [{ month: '2026-01', collaboratorId: 'COLLAB_RC_PRIVE_FICTIF', contractId: 'C1', payslipId: 'PDF_RC_PRIVE_FICTIF', pdfHash: 'a'.repeat(64), parserVersion: 'fictif-v4', status: 'identified', code: 'identified', indemnityCents: 10000, components: [{ label: 'RC fictive non soumise', amountCents: 10000, page: 1, line: 8 }], cost: { status: 'value', code: 'fictif', employerChargesCents: 3500, chargedCents: 13500, components: [{ label: 'Contribution RC fictive', amountCents: 3500, page: 1, line: 6 }] } }] };
+      const html = await page({ annee: '2026', de: '01', a: '01' });
+      const tile = html.match(/data-testid="ms-tile-non-recurring"[\s\S]*?<\/div>/)![0];
+      expect(tile).toContain('135'); expect(tile).not.toContain('n.d.');
+      const summary = summaryPanel(html, 'ms-non-recurring-summary');
+      expect(summary).toContain('data-money-cents="13500"'); expect(summary).toContain('1 élément identifié');
+      expect(state.actualEvents[0].chargedCents).toBeNull();
+      expect(html).not.toMatch(/COLLAB_RC_PRIVE|PDF_RC_PRIVE|JUSTIFICATIF_RC_PRIVE/);
+      state.actualEvents = [];
+      const sourceOnly = await page({ annee: '2026', de: '01', a: '01' });
+      expect(sourceOnly.match(/data-testid="ms-tile-non-recurring"[\s\S]*?<\/div>/)![0]).not.toContain('n.d.');
+      expect(sourceOnly).not.toContain('Aucun élément non récurrent identifié sur la période');
     } finally { state.ctx = previous; }
   });
   it("une RC sans montant et un tuilage chiffré sont visibles dès la synthèse, sans leurs sources individuelles", async () => {

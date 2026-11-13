@@ -1,6 +1,7 @@
 import { toCents } from "@/lib/money";
+import type { RcPayslipCost } from "./rc-payslips";
 
-export const RC_PARSER_VERSION = "payfit-rc-coordinate-v3";
+export const RC_PARSER_VERSION = "payfit-rc-coordinate-v4";
 export type RcPayslipTextItem = { text: string; x: number; y: number; width: number; height?: number };
 export type RcPayslipTextRow = { page: number; line: number; items: RcPayslipTextItem[] };
 export type RcPayslipComponent = { label: string; amountCents: number; page: number; line: number };
@@ -10,6 +11,7 @@ export type RcPayslipExtraction = {
   components: RcPayslipComponent[];
   indemnityCents: number | null;
   parserVersion: string;
+  cost?: RcPayslipCost;
 };
 const MAX_BYTES = 8 * 1024 * 1024;
 const normalized = (text: string) => text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[’']/g, " ").replace(/\s+/g, " ").trim();
@@ -22,7 +24,7 @@ const amount = (text: string): number | null => {
   if (!/^[+-]?(?:\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d+)[,.]\d{2}$/.test(clean)) return null;
   return toCents(clean);
 };
-type Column = { x: number; role: "employee" | "other" };
+type Column = { x: number; role: "employee" | "employer" | "base" | "employee-rate" | "employer-rate" | "other" };
 type ParentColumn = { x: number; y: number; rowIndex: number; role: "base" | "employee-group" | "employer-group" };
 
 function headerCells(row: RcPayslipTextRow): RcPayslipTextItem[] {
@@ -82,7 +84,17 @@ function columnsFor(rows: RcPayslipTextRow[], at: number): Column[] | null {
         if (employeeAmounts.length === 1 && employeeRates.length === 1 && employerAmounts.length <= 1) {
           const amountX = employeeAmounts[0].x + employeeAmounts[0].width / 2;
           const rateX = employeeRates[0].x + employeeRates[0].width / 2;
-          if (rateX < amountX) return [{ x: base.x, role: "other" }, { x: rateX, role: "other" }, { x: amountX, role: "employee" }, { x: employerAmounts.length ? employerAmounts[0].x + employerAmounts[0].width / 2 : employerGroup.x, role: "other" }];
+          const employerRates = children.filter((cell) => /^(?:taux|taux ou %|taux patronal)$/.test(normalized(cell.text)) && cell.x + cell.width / 2 > right);
+          const employerX = employerAmounts.length ? employerAmounts[0].x + employerAmounts[0].width / 2 : employerGroup.x;
+          const employerVerified = employerRates.length === 0 || employerRates.length === 1 && employerAmounts.length === 1 && employerRates[0].x + employerRates[0].width / 2 < employerX;
+          if (rateX < amountX) {
+            const verified: Column[] = [
+              { x: base.x, role: "base" }, { x: rateX, role: "employee-rate" }, { x: amountX, role: "employee" },
+              ...employerRates.map((cell): Column => ({ x: cell.x + cell.width / 2, role: "employer-rate" })),
+              { x: employerX, role: employerVerified ? "employer" : "other" },
+            ];
+            return verified.sort((a, b) => a.x - b.x);
+          }
         }
       }
       // Une entête explicitement groupée mais incohérente reste bloquante, sans reprendre une entête plus ancienne.
@@ -92,14 +104,18 @@ function columnsFor(rows: RcPayslipTextRow[], at: number): Column[] | null {
     for (const cell of cells) {
       const text = normalized(cell.text), x = cell.x + cell.width / 2;
       if (/^(?:a payer|gains?|montant salarial|montant salarie|montant a payer)$/.test(text)) columns.push({ x, role: "employee" });
-      else if (/^(?:base|taux(?: ou %| salarial| patronal)?|a deduire|retenues?|charges patronales|cotisations patronales|part patronale|part employeur|employeur|patronal(?:es)?|montant)$/.test(text)) columns.push({ x, role: "other" });
+      else if (/^(?:charges patronales|cotisations patronales|part patronale|part employeur|montant patronal|montant employeur|employeur|patronal(?:es)?)$/.test(text)) columns.push({ x, role: "employer" });
+      else if (text === "base") columns.push({ x, role: "base" });
+      else if (text === "taux patronal") columns.push({ x, role: "employer-rate" });
+      else if (/^taux(?: ou %| salarial)?$/.test(text)) columns.push({ x, role: "employee-rate" });
+      else if (/^(?:a deduire|retenues?|montant)$/.test(text)) columns.push({ x, role: "other" });
     }
     if (columns.length >= 2 && columns.filter((column) => column.role === "employee").length === 1) return columns.sort((a, b) => a.x - b.x);
   }
   return null;
 }
 
-function monetaryItems(row: RcPayslipTextRow) {
+function numberItems(row: RcPayslipTextRow) {
   const joined: RcPayslipTextItem[] = [];
   for (const item of [...row.items].sort((a, b) => a.x - b.x)) {
     const last = joined.at(-1), gap = last ? item.x - (last.x + last.width) : Infinity;
@@ -109,7 +125,75 @@ function monetaryItems(row: RcPayslipTextRow) {
       last.text += item.text; last.width = item.x + item.width - last.x;
     } else joined.push({ ...item });
   }
-  return joined.filter((item) => amount(item.text) !== null);
+  return joined;
+}
+const monetaryItems = (row: RcPayslipTextRow) => numberItems(row).filter((item) => amount(item.text) !== null);
+
+function columnItems(row: RcPayslipTextRow, columns: Column[], role: Column["role"]): RcPayslipTextItem[] | null {
+  const matches = columns.map((column, index) => ({ column, index })).filter(({ column }) => column.role === role);
+  if (matches.length !== 1) return null;
+  const { column, index } = matches[0];
+  const left = index === 0 ? column.x - 65 : (columns[index - 1].x + column.x) / 2;
+  const right = index === columns.length - 1 ? column.x + 65 : (column.x + columns[index + 1].x) / 2;
+  return numberItems(row).filter((item) => /\d/.test(item.text) && item.x + item.width / 2 >= left && item.x + item.width / 2 < right);
+}
+
+const costReview = (code: string): RcPayslipCost => ({ status: "review", code, employerChargesCents: null, chargedCents: null, components: [] });
+const rcMention = (text: string) => /\bruptures? conventionnelles?\b/.test(normalized(text));
+const chargeMention = (text: string) => /\b(?:contributions?|cotisations?|forfait social)\b/.test(normalized(text));
+const corrections = (text: string) => /\b(?:regularisation|rectificatif|annule|annulation|correction|rappel)\b/.test(normalized(text));
+function exemptNominal(label: string): boolean {
+  const text = normalized(label);
+  if (/\b(?:impots?|fiscal|fiscale|imposable|imposables)\b/.test(text)) return false;
+  const withoutNonSubject = text.replace(/\bnon[\s-]+soumis(?:e|es)?\b/g, "");
+  if (/\bsoumis(?:e|es)?\b/.test(withoutNonSubject)) return false;
+  return /\b(?:exonere(?:e|es|s)?|non[\s-]+soumis(?:e|es)?)\b/.test(text);
+}
+
+/** Coût confirmé seulement lorsque l’indemnité et chaque charge RC patronale sont isolées sur le bulletin. */
+function rcCost(rows: RcPayslipTextRow[], nominal: RcPayslipComponent[], indemnityCents: number): RcPayslipCost {
+  if (!nominal.every((component) => exemptNominal(component.label))) return costReview("rc-exemption-unconfirmed");
+  const components: RcPayslipComponent[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < rows.length; index++) {
+    let row = rows[index], text = plain(row);
+    const next = rows[index + 1];
+    if (chargeMention(text) && !monetaryItems(row).length && next?.page === row.page && next.line === row.line + 1 && rcMention(`${text} ${plain(next)}`)) {
+      text = `${text} ${plain(next)}`; row = next; index++;
+    }
+    // « Indemnité non soumise à cotisations » qualifie le nominal, ce n’est pas une ligne de charges.
+    if (nominal.some((component) => component.page === row.page && component.line === row.line)) continue;
+    if (!chargeMention(text) || !rcMention(text)) continue;
+    const firstNumber = numberItems(row).filter((item) => /\d/.test(item.text))[0]?.x;
+    const label = text === plain(row)
+      ? row.items.filter((item) => firstNumber === undefined || item.x < firstNumber).map((item) => item.text).join(" ").trim()
+      : text.replace(/(?:[+−–-]?\d[\d \u00a0\u202f]*[,.]\d{2}\s*€?\s*)+$/, "").trim();
+    const key = normalized(label);
+    if (!chargeMention(label) || !rcMention(label) || label.length > 160 || /[\u0000-\u001f]/.test(label)) return costReview("ambiguous-rc-charge-label");
+    if (/\b(?:csg|crds)\b/.test(key)) continue;
+    if (/\b(?:licenciement|retraite|transactionnelle|conges payes|annuel|annuelle|annuels|annuelles|cumul)\b/.test(key) || /^(?:total|cumul|base|assiette)\b/.test(key)) return costReview("mixed-rc-charge-label");
+    if (/\b(?:salaries?|salarial(?:e|es)?|salariaux)\b/.test(key)) return costReview("employee-rc-charge-label");
+    if (corrections(label)) return costReview("signed-or-corrected-rc-charge");
+    if (seen.has(key)) return costReview("duplicate-rc-charge");
+    const columns = columnsFor(rows, rows.indexOf(row));
+    if (!columns) return costReview("charge-column-unrecognized");
+    const employer = columnItems(row, columns, "employer");
+    if (employer === null) return costReview("employer-column-unrecognized");
+    if (employer.length !== 1 || amount(employer[0].text) === null) return costReview("employer-amount-ambiguous");
+    const cents = amount(employer[0].text)!;
+    if (cents < 0) return costReview("signed-or-corrected-rc-charge");
+    if (cents > 100_000_000_000_000) return costReview("unsafe-rc-charge");
+    const bases = columnItems(row, columns, "base");
+    if (bases && bases.length > 1) return costReview("rc-charge-base-ambiguous");
+    if (bases?.length && (amount(bases[0].text) === null || amount(bases[0].text) !== indemnityCents)) return costReview("rc-charge-base-mismatch");
+    seen.add(key); components.push({ label, amountCents: cents, page: row.page, line: row.line });
+    if (components.length > 16) return costReview("too-many-rc-charges");
+  }
+  if (!components.length) return costReview("no-explicit-employer-rc-charge");
+  const employer = components.reduce((total, component) => total + BigInt(component.amountCents), 0n);
+  const charged = BigInt(indemnityCents) + employer;
+  if (employer > BigInt(Number.MAX_SAFE_INTEGER) || charged > BigInt(Number.MAX_SAFE_INTEGER)) return costReview("unsafe-rc-cost");
+  return { status: "value", code: "explicit-employer-rc-cost", employerChargesCents: Number(employer), chargedCents: Number(charged), components };
 }
 
 /** Montant nominal de l’indemnité seulement : aucune cotisation, aucun taux ni coût chargé n’est reconstitué. */
@@ -157,7 +241,7 @@ export function parseRcPayslipRows(source: RcPayslipTextRow[]): RcPayslipExtract
   if (components.length > 1 && components.some((component) => !/\b(?:soumis|soumise|soumises|exonere|exoneree|exonerees|imposable|imposables|taxable|taxables)\b/.test(normalized(component.label)))) return result("review", "overlapping-rc-components");
   const sum = components.reduce((total, component) => total + BigInt(component.amountCents), 0n);
   if (sum > BigInt(Number.MAX_SAFE_INTEGER)) return result("review", "unsafe-amount");
-  return result("identified", "explicit-rc-amount", components, Number(sum));
+  return { ...result("identified", "explicit-rc-amount", components, Number(sum)), cost: rcCost(rows, components, Number(sum)) };
 }
 
 /** Pipeline privé commun : les lignes intégrales ne sont jamais exportées hors de ce module. */
@@ -217,6 +301,7 @@ type FormatCell = { tokens: string[]; x: number; y: number; width: number };
 type PositionOnly = { x: number; y: number; width: number };
 export type RcPayslipFormat = {
   parserVersion: string; extractionStatus: RcPayslipExtraction["status"]; extractionCode: string;
+  costStatus?: RcPayslipCost['status']; costCode?: string;
   pageCount: number; rowCount: number;
   headers: { page: number; line: number; cells: FormatCell[] }[];
   rcRows: { page: number; line: number; monetaryCellCount: number; cells: PositionOnly[] }[];
@@ -264,7 +349,7 @@ export function inspectRcPayslipRows(rows: RcPayslipTextRow[]): RcPayslipFormat 
       });
     }
   }
-  return { parserVersion: RC_PARSER_VERSION, extractionStatus: extracted.status, extractionCode: extracted.code, pageCount: Math.max(...rows.map((row) => row.page)), rowCount: rows.length, headers, rcRows, chargeCandidates };
+  return { parserVersion: RC_PARSER_VERSION, extractionStatus: extracted.status, extractionCode: extracted.code, costStatus: extracted.cost?.status, costCode: extracted.cost?.code, pageCount: Math.max(...rows.map((row) => row.page)), rowCount: rows.length, headers, rcRows, chargeCandidates };
 }
 
 export function inspectRcPayslipFormat(bytes: Uint8Array): Promise<RcPayslipFormat> {

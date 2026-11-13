@@ -12,6 +12,7 @@ export const MASSE_TERMS = {
   grille: "grille",
   fixeVariable: "fixe-variable",
   primes: "primes",
+  nonRecurring: "non-recurrents-realises",
   stages: "gratifications-stage",
   horsMasse: "hors-masse",
   provision: "provision",
@@ -184,4 +185,8 @@ const MOVED: GlossaryEntry[] = [
   },
 ];
 
-export const GLOSSARY_MASSE: GlossaryEntry[] = [...FROM_CODE, ...MOVED];
+export const GLOSSARY_MASSE: GlossaryEntry[] = [...FROM_CODE, ...MOVED, {
+  id: 'non-recurrents-realises', term: 'Éléments non récurrents identifiés', family: FAMILY,
+  formula: 'Coûts chargés isolés, rapprochés par contrat et mois ; réel hors éléments identifiés = réel − coûts isolés',
+  definition: 'La liste réunit les déclarations du client, les tuilages estimés et les coûts de RC isolés sur les bulletins PayFit. Le coût de RC est la somme de l’indemnité et des seules contributions patronales explicitement attribuées à cette RC ; aucune cotisation globale ni aucun taux forfaitaire n’est appliqué. Le nominal du bulletin reste visible séparément. Une RC manuelle et son bulletin sont rapprochés par contrat et mois et comptés une fois. Une absence de montant, une ambiguïté ou un désaccord rend le cumul n.d. La reprise dans le réel requiert le même périmètre de journal et la même lecture. Les estimations de tuilage restent qualifiées ; les écritures de paie et les bases figées sont inchangées. Liste non exhaustive : aucun élément identifié ne prouve pas l’absence de coûts non récurrents.',
+}];

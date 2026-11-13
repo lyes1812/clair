@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { buildRcPayslipPeriod, parseRcPayslipScan, type RcPayslipRecord, type RcPayslipScan } from "@/lib/payroll/rc-payslips";
+import { buildRcPayslipPeriod, parseRcPayslipScan, type RcPayslipCost, type RcPayslipRecord, type RcPayslipScan } from "@/lib/payroll/rc-payslips";
 import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
 import { RcPayslipDetails } from "@/app/e/[slug]/studio-rh/masse-salariale/RcPayslipDetails";
 import { buildActualNonRecurring, type ActualEvent } from "@/lib/payroll/non-recurring";
@@ -21,6 +21,10 @@ const scan = (patch: Partial<RcPayslipScan> = {}): RcPayslipScan => ({
 });
 const manual = (patch: Partial<ActualEvent> = {}): ActualEvent => ({ id: "33333333-3333-4333-8333-333333333333", syncId: SYNC, month: "2026-02", kind: "rupture-conventionnelle", chargedCents: null, contractKeys: ["payfit:CONTRAT_PRIVE_FICTIF"], note: "JUSTIFICATIF_PRIVE_FICTIF", ...patch });
 const period = (value = scan(), events: ActualEvent[] = []) => buildRcPayslipPeriod(value, ["2026-01", "2026-02"], SYNC, events);
+const charge = (patch: Partial<RcPayslipCost> = {}): RcPayslipCost => ({
+  status: "value", code: "explicit-rc-employer-charge", employerChargesCents: 15000, chargedCents: 140000,
+  components: [{ label: "Contribution patronale propre à la RC", amountCents: 15000, page: 2, line: 6 }], ...patch,
+});
 
 describe("RC des bulletins — faits distincts du coût chargé", () => {
   it("additionne exactement les composantes imposable et exonérée sans les appeler coût chargé", () => {
@@ -88,6 +92,72 @@ describe("RC des bulletins — faits distincts du coût chargé", () => {
   });
 });
 
+describe("Coût chargé RC — preuve distincte du nominal", () => {
+  it("valide indemnité + cotisations patronales explicites et les agrège au centime", () => {
+    const first = fixtureRecord({ cost: charge() });
+    const second = fixtureRecord({ contractId: "AUTRE_CONTRAT_FICTIF", payslipId: "AUTRE_PDF_FICTIF", cost: charge({ employerChargesCents: 25000, chargedCents: 150000, components: [{ label: "Contribution patronale propre à la RC", amountCents: 10000, page: 1, line: 10 }, { label: "Autre cotisation patronale propre à la RC", amountCents: 15000, page: 1, line: 11 }] }) });
+    expect(period(scan({ records: [first, second] }))).toMatchObject({ status: "value", amountCents: 250000, chargedCents: 290000, employerChargesCents: 40000, costStatus: "value" });
+    expect(period(scan({ records: [first] })).costReason).toContain("explicitement rattachées");
+  });
+
+  it("reste rétrocompatible : absence ou échec de l’extraction du coût conserve le nominal connu", () => {
+    const legacy = period();
+    expect(legacy).toMatchObject({ status: "value", amountCents: 125000, chargedCents: null, employerChargesCents: null, costStatus: "review" });
+    expect(legacy.costReason).toContain("Relire les bulletins");
+    const unavailable = period(scan({ records: [fixtureRecord({ cost: charge({ status: "review", code: "rc-charges-not-isolated", employerChargesCents: null, chargedCents: null, components: [] }) })] }));
+    expect(unavailable).toMatchObject({ status: "value", amountCents: 125000, costStatus: "review", chargedCents: null });
+    expect(unavailable.costReason).toContain("aucun coût chargé partiel");
+  });
+
+  it("un coût malformé est nettoyé indépendamment du nominal et aucune donnée malformée ne ressort", () => {
+    for (const invalid of [
+      charge({ chargedCents: 1 }), charge({ employerChargesCents: 0 }), charge({ components: [] }),
+      charge({ employerChargesCents: -15000, chargedCents: 110000, components: [{ label: "Contribution patronale propre à la RC", amountCents: -15000, page: 1, line: 7 }] }),
+      { ...charge(), chargedCents: "MONTANT_CORROMPU_FICTIF", payload: "FRAGMENT_INTERDIT_FICTIF" },
+    ]) {
+      const raw = scan({ records: [fixtureRecord({ cost: invalid as unknown as RcPayslipCost })] });
+      const parsed = parseRcPayslipScan(raw);
+      expect(parsed).not.toBeNull();
+      expect(parsed!.records[0].cost).toEqual({ status: "review", code: "invalid-cost", chargedCents: null, employerChargesCents: null, components: [] });
+      const result = period(raw);
+      expect(result).toMatchObject({ status: "value", amountCents: 125000, chargedCents: null, costStatus: "review" });
+      expect(JSON.stringify(result)).not.toMatch(/MONTANT_CORROMPU|FRAGMENT_INTERDIT/);
+    }
+    expect(parseRcPayslipScan(scan({ records: [fixtureRecord({ pdfHash: null, cost: charge() })] }))).toBeNull();
+  });
+
+  it("n’infère jamais zéro charge d’un champ vide ; zéro explicite exige une ligne source", () => {
+    const explicit = fixtureRecord({ cost: charge({ employerChargesCents: 0, chargedCents: 125000, components: [{ label: "Contribution patronale propre à la RC", amountCents: 0, page: 1, line: 7 }] }) });
+    expect(period(scan({ records: [explicit] }))).toMatchObject({ amountCents: 125000, employerChargesCents: 0, chargedCents: 125000, costStatus: "value" });
+    const absent = fixtureRecord({ cost: { ...explicit.cost!, components: [] } });
+    expect(period(scan({ records: [absent] }))).toMatchObject({ amountCents: 125000, employerChargesCents: null, chargedCents: null, costStatus: "review" });
+  });
+
+  it("déduplique la même preuve de coût et bloque un conflit de coût sans effacer le nominal", () => {
+    const first = fixtureRecord({ cost: charge() });
+    const duplicate = { ...first, payslipId: "COPIE_PDF_FICTIVE" };
+    expect(period(scan({ records: [first, duplicate] }))).toMatchObject({ amountCents: 125000, chargedCents: 140000, identifiedCount: 1 });
+    const changed = { ...duplicate, cost: charge({ employerChargesCents: 20000, chargedCents: 145000, components: [{ label: "Contribution patronale propre à la RC", amountCents: 20000, page: 2, line: 6 }] }) };
+    const conflict = period(scan({ records: [first, changed] }));
+    expect(conflict).toMatchObject({ status: "value", amountCents: 125000, costStatus: "review", chargedCents: null });
+    expect(conflict.rows[0].cost!.code).toBe("conflicting-cost-versions");
+    expect(period(scan({ records: [first, { ...changed, payslipId: first.payslipId }] }))).toMatchObject({ status: "value", amountCents: 125000, costStatus: "review", chargedCents: null });
+  });
+
+  it("n’expose aucun coût partiel si couverture, lecture ou rapprochement restent bloqués", () => {
+    const valid = fixtureRecord({ cost: charge() });
+    for (const value of [scan({ records: [valid], status: "partial" }), scan({ records: [valid], closedMonths: ["2026-01"] })]) expect(period(value)).toMatchObject({ costStatus: "review", chargedCents: null });
+    expect(buildRcPayslipPeriod(scan({ records: [valid] }), ["2026-02"], "44444444-4444-4444-8444-444444444444")).toMatchObject({ costStatus: "review", chargedCents: null });
+    expect(period(scan({ records: [valid] }), [manual({ contractKeys: [] })])).toMatchObject({ costStatus: "review", chargedCents: null });
+    expect(period(scan({ records: [valid, fixtureRecord({ contractId: "AUTRE_CONTRAT_FICTIF", payslipId: "AUTRE_PDF_FICTIF" })] }))).toMatchObject({ status: "value", amountCents: 250000, chargedCents: null, costStatus: "review" });
+    const largeCharges = 9_000_000_000_000_000 - 125000;
+    const large = fixtureRecord({ cost: charge({ employerChargesCents: largeCharges, chargedCents: 9_000_000_000_000_000, components: [{ label: "Contribution patronale propre à la RC", amountCents: largeCharges, page: 1, line: 10 }] }) });
+    const overflow = period(scan({ records: [large, { ...large, contractId: "AUTRE_CONTRAT_FICTIF", payslipId: "AUTRE_PDF_FICTIF" }] }));
+    expect(overflow).toMatchObject({ status: "value", amountCents: 250000, chargedCents: null, costStatus: "review" });
+    expect(overflow.costReason).toContain("centimes entiers sûrs");
+  });
+});
+
 describe("RC des bulletins — synthèse et confidentialité", () => {
   const renderSummary = (rc = period(scan(), [manual()])) => renderToStaticMarkup(createElement(ActualNonRecurringSummary, { rows: [{ event: manual(), amount: null, reason: "Montant chargé non saisi" }], href: "/detail#actual-non-recurring", rc }));
   const renderDetails = (editable: boolean) => renderToStaticMarkup(createElement(RcPayslipDetails, { slug: "fictif", period: period(), scan: scan(), editable, contracts: [{ key: "payfit:CONTRAT_PRIVE_FICTIF", label: "NOM_PRIVE_FICTIF" }] }));
@@ -95,7 +165,8 @@ describe("RC des bulletins — synthèse et confidentialité", () => {
     const html = renderSummary();
     expect(html).toContain("Indemnité RC · bulletin");
     expect(html).toContain('data-money-cents="125000"');
-    expect(html).toContain("Coût chargé identifié : n.d.");
+    expect(html).toContain("Coût chargé RC");
+    expect(html).toContain("Coût chargé à vérifier");
     expect(html).toContain("1 élément identifié");
     for (const value of ["COLLAB_PRIVE_FICTIF", "CONTRAT_PRIVE_FICTIF", "BULLETIN_PRIVE_FICTIF", "JUSTIFICATIF_PRIVE_FICTIF", "a".repeat(64)]) expect(html).not.toContain(value);
   });

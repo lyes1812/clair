@@ -45,6 +45,12 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
   const rcIssues = new Map<string, number>();
   for (const issue of rc?.issues ?? []) rcIssues.set(issue.code, (rcIssues.get(issue.code) ?? 0) + issue.count);
   for (const row of rc?.records ?? []) if (row.status === 'review') rcIssues.set(row.code, (rcIssues.get(row.code) ?? 0) + 1);
+  const rcIdentified = rc?.records.filter((row) => row.status === 'identified') ?? [];
+  for (const row of rcIdentified) if (row.cost?.status === 'review') rcIssues.set(row.cost.code, (rcIssues.get(row.cost.code) ?? 0) + 1);
+  const rcCostState = rc?.status === 'running' ? 'Lecture en cours'
+    : !rcIdentified.length ? 'Aucune indemnité identifiée'
+      : rcIdentified.some((row) => !row.cost) ? 'Nouvelle lecture nécessaire'
+        : rcIdentified.every((row) => row.cost?.status === 'value') && rc?.status === 'complete' ? 'Charges propres aux RC isolées' : 'Charges propres aux RC à vérifier';
 
   // Où en est la source : d'après la connexion et l'historique, rien d'autre.
   const running = syncs.some((s) => s.status === "running");
@@ -85,9 +91,10 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
 
       {source === 'payfit' && conn && <section className="panel" id="indemnites-rc" data-testid="rc-payslip-source">
         <h2>Indemnités de rupture conventionnelle</h2>
-        <p className="desc">Lecture automatique des lignes d’indemnité sur les bulletins PDF des mois clôturés. Le montant du bulletin reste distinct du coût chargé.</p>
+        <p className="desc">Lecture des indemnités et contributions patronales propres aux RC sur les bulletins des mois clôturés. Indemnité, charges et coût chargé restent distingués.</p>
         {rc && <dl className="facts dn-facts" data-testid="rc-payslip-progress">
           <div><dt>Statut</dt><dd>{rc.status === 'running' ? 'Lecture en cours' : rc.status === 'complete' ? 'Lecture terminée' : rc.status === 'partial' ? 'Vigilance · lecture partielle' : 'Lecture interrompue'}</dd></div>
+          <div data-testid="rc-payslip-cost-progress"><dt>Coût chargé RC</dt><dd>{rcCostState}</dd></div>
           <div><dt>Période demandée</dt><dd>{formatMonth(rc.from)} → {formatMonth(rc.to)}</dd></div>
           <div><dt>Dernière paie clôturée contrôlée</dt><dd>{rc.closedMonths.length ? formatMonth(rc.closedMonths.at(-1)!) : 'n.d.'}</dd></div>
           <div><dt>Progression</dt><dd>{rc.completedCollaborators} / {rc.totalCollaborators} collaborateurs · {rc.checkedPayslips} bulletins contrôlés</dd></div>

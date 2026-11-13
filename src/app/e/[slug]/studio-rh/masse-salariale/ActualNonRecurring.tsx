@@ -3,6 +3,9 @@ import { SearchableSelect } from "@/components/SearchableSelect";
 import { DropdownMenu } from "@/components/DropdownMenu";
 import type { JournalInput } from "@/lib/payroll/engine";
 import { buildActualNonRecurring, type ActualEvent } from "@/lib/payroll/non-recurring";
+import { resolveLiveNonRecurring, type LiveNonRecurringEntry } from "@/lib/payroll/live-non-recurring";
+import { rcCostsCoveredByPayroll } from "@/lib/payroll/rc-cost-coverage";
+import { buildRcPayslipPeriod, type RcPayslipPeriod } from "@/lib/payroll/rc-payslips";
 import { formatMonth } from "@/lib/dates";
 import { ActionForm } from "../hypotheses/ActionForm";
 import type { FormState } from "../hypotheses/actions";
@@ -16,6 +19,7 @@ type Props = {
   events: ActualEvent[];
   months: string[];
   syncId: string | null;
+  rcPeriod?: RcPayslipPeriod;
   contracts: { key: string; label: string }[];
   editable: boolean;
   save?: Save;
@@ -64,8 +68,8 @@ function EventForm({ p, event }: { p: Props & { save: Save }; event?: ActualEven
   </ActionForm>;
 }
 
-function categorySummary(rows: ReturnType<typeof buildActualNonRecurring>["rows"], kind: ActualEvent["kind"]) {
-  const selected = rows.filter((row) => row.event.kind === kind);
+function categorySummary(rows: readonly LiveNonRecurringEntry[], kind: ActualEvent["kind"]) {
+  const selected = rows.filter((row) => row.kind === kind);
   const reasons = [...new Set(selected.flatMap((row) => row.amount === null ? [row.reason ?? "Montant non renseigné."] : []))];
   if (reasons.length) return { count: selected.length, amount: null, reason: reasons.join(" · ") };
   const total = selected.reduce((sum, row) => sum + BigInt(row.amount!), 0n);
@@ -74,7 +78,10 @@ function categorySummary(rows: ReturnType<typeof buildActualNonRecurring>["rows"
 }
 
 export function ActualNonRecurring(p: Props) {
-  const model = buildActualNonRecurring(p.input, p.events, p.months, p.syncId);
+  const rcPeriod = p.rcPeriod ?? buildRcPayslipPeriod(null, p.months, p.syncId, p.events);
+  const model = resolveLiveNonRecurring({ declared: buildActualNonRecurring(p.input, p.events, p.months, p.syncId),
+    rcPeriod, months: p.months, syncId: p.syncId, serviceFiltered: Boolean(p.input?.serviceFilter),
+    sourceIncluded: rcCostsCoveredByPayroll(p.input, rcPeriod) });
   const reason = model.reasons.join(" · ");
   const save = p.editable && p.save && p.syncId && p.input && p.months.length ? p.save : null;
   const contractLabel = (keys: string[]) => keys.length ? keys.map((key) => p.contracts.find((contract) => contract.key === key)?.label ?? "Contrat indisponible dans le référentiel courant").join(" · ") : "Non rattaché à un contrat";
@@ -85,20 +92,21 @@ export function ActualNonRecurring(p: Props) {
       <p>Coût isolé sur justificatif : 0 = zéro confirmé ; vide = n.d.</p>
       <a href="https://www.service-public.gouv.fr/particuliers/vosdroits/F1137" target="_blank" rel="noreferrer">Règles générales · Service Public</a>
     </DropdownMenu>} />
-    <p className="desc">Licenciements, ruptures conventionnelles et tuilages passés : ces coûts sont déjà compris dans la masse salariale réelle, qui reste inchangée. Cette liste déclarative n’est pas exhaustive.</p>
+    <p className="desc">Déclarations, tuilages passés et coûts RC isolés sur les bulletins : lecture analytique du réel, sans modification de la paie. Liste non exhaustive.</p>
     <dl className="facts ms-tiles" data-testid="actual-non-recurring-kpis">
       <Tile testid="actual-non-recurring-raw" label="Masse salariale réelle" value={shown(model.raw, reason)} nd={model.raw === null} lead="Lecture PayFit appliquée, sans modification" />
-      <Tile testid="actual-non-recurring-identified" label="Coûts identifiés" value={shown(model.nonRecurring, reason)} nd={model.nonRecurring === null} lead="Montants fournis ou estimations calendaires, liste non exhaustive" compare={model.nonRecurring === null ? "Un montant non renseigné rend le cumul n.d." : model.rows.length ? `${model.rows.length} élément${model.rows.length === 1 ? "" : "s"} identifié${model.rows.length === 1 ? "" : "s"}` : "Aucun élément identifié : cela ne prouve pas son absence"} />
+      <Tile testid="actual-non-recurring-identified" label="Coûts identifiés" value={shown(model.nonRecurring, reason)} nd={model.nonRecurring === null} lead="Déclarations, bulletins et estimations calendaires" compare={model.nonRecurring === null ? "Un montant non renseigné rend le cumul n.d." : model.count ? `${model.count} élément${model.count === 1 ? "" : "s"} identifié${model.count === 1 ? "" : "s"}` : "Aucun élément identifié : cela ne prouve pas son absence"} />
       <Tile testid="actual-non-recurring-adjusted" label="Hors éléments identifiés" value={shown(model.adjusted, reason)} nd={model.adjusted === null} lead="Réel − coûts identifiés · lecture analytique" compare="Les montants sources ne sont ni réécrits ni diminués" />
     </dl>
     {model.rows.some((row) => row.event.calculation) ? <p className="notice" data-testid="actual-overlap-qualification">Estimation calendaire incluse : coût de l’entrant attribué aux jours de chevauchement. Le montant mensuel vient de la paie ; sa ventilation journalière est calculée, pas observée.</p> : null}
     {model.reasons.length ? <ul className="ms-nd-reasons" data-testid="actual-non-recurring-reasons">{model.reasons.map((line) => <li key={line}>{line}</li>)}</ul> : null}
-    <ScrollTable label="Éléments non récurrents du réel par nature"><table className="data-table sticky sticky-first" data-testid="actual-non-recurring-categories"><thead><tr><th scope="col">Nature</th><th scope="col" className="num">Éléments identifiés</th><th scope="col" className="num">Coût chargé déclaré</th></tr></thead><tbody>{CATEGORIES.map((category) => {
-      const summary = categorySummary(model.rows, category.kind);
+    <ScrollTable label="Éléments non récurrents du réel par nature"><table className="data-table sticky sticky-first" data-testid="actual-non-recurring-categories"><thead><tr><th scope="col">Nature</th><th scope="col" className="num">Éléments identifiés</th><th scope="col" className="num">Coût chargé isolé</th></tr></thead><tbody>{CATEGORIES.map((category) => {
+      const summary = categorySummary(model.entries, category.kind);
       return <tr key={category.kind}><th scope="row">{category.label}</th><td className="num">{summary.count || "Aucun élément identifié"}</td><td className="num">{summary.count ? shown(summary.amount, summary.reason) : "—"}{summary.reason ? <p className="tile-foot">{summary.reason}</p> : null}</td></tr>;
     })}</tbody></table></ScrollTable>
+    {model.sourceRows.length > 0 && <p className="tile-foot">RC identifiées automatiquement : <a href="#rc-payslip-details">bulletins et contributions patronales →</a></p>}
     {p.editable && model.rows.length ? <>
-      <ScrollTable label="Identifications du réel et sources renseignées"><table className="data-table sticky sticky-first" data-testid="actual-non-recurring-details"><thead><tr><th scope="col">Mois</th><th scope="col">Nature</th><th scope="col">Contrat / binôme</th><th scope="col" className="num">Coût chargé isolé</th><th scope="col">Source / justificatif</th></tr></thead><tbody>{model.rows.map((row) => <tr key={row.event.id}><th scope="row">{formatMonth(row.event.month)}</th><td>{natureLabel(row.event)}</td><td className="wrap">{contractLabel(row.event.contractKeys)}</td><td className="num">{shown(row.amount, row.reason)}{row.reason ? <p className="tile-foot">{row.reason}</p> : null}</td><td className="wrap">{row.event.calculation ? <><strong>Estimation calendaire</strong><p className="tile-foot">Coût mensuel de l’entrant <Money cents={row.event.calculation.source.chargedCents!} /> × {row.event.calculation.days.overlap}/{row.event.calculation.days.incomingPresence} jours · {row.event.calculation.interval ? `${row.event.calculation.interval.from} → ${row.event.calculation.interval.to}` : "aucun chevauchement"}. Primes et régularisations non ventilées par jour.</p></> : null}{row.event.note || (!row.event.calculation ? <span className="nd">Source non renseignée</span> : null)}</td></tr>)}</tbody></table></ScrollTable>
+      <ScrollTable label="Identifications du réel et sources renseignées"><table className="data-table sticky sticky-first" data-testid="actual-non-recurring-details"><thead><tr><th scope="col">Mois</th><th scope="col">Nature</th><th scope="col">Contrat / binôme</th><th scope="col" className="num">Coût chargé isolé</th><th scope="col">Source / justificatif</th></tr></thead><tbody>{model.rows.map((row) => <tr key={row.event.id}><th scope="row">{formatMonth(row.event.month)}</th><td>{natureLabel(row.event)}</td><td className="wrap">{contractLabel(row.event.contractKeys)}</td><td className="num">{shown(row.amount, row.reason)}{row.resolvedFrom ? <p className="tile-foot">Coût lu sur le bulletin PayFit · saisie conservée</p> : null}{row.reason ? <p className="tile-foot">{row.reason}</p> : null}</td><td className="wrap">{row.event.calculation ? <><strong>Estimation calendaire</strong><p className="tile-foot">Coût mensuel de l’entrant <Money cents={row.event.calculation.source.chargedCents!} /> × {row.event.calculation.days.overlap}/{row.event.calculation.days.incomingPresence} jours · {row.event.calculation.interval ? `${row.event.calculation.interval.from} → ${row.event.calculation.interval.to}` : "aucun chevauchement"}. Primes et régularisations non ventilées par jour.</p></> : null}{row.event.note || (!row.event.calculation ? <span className="nd">Source non renseignée</span> : null)}</td></tr>)}</tbody></table></ScrollTable>
       {save ? model.rows.map((row) => <details className="ms-read-details" key={row.event.id}><summary>Modifier l’identification : {natureLabel(row.event)} · {formatMonth(row.event.month)}</summary><div className="ms-read-body"><EventForm p={{ ...p, save }} event={row.event} /></div></details>) : null}
     </> : null}
     {save ? <details className="ms-read-details" data-testid="actual-non-recurring-create"><summary>Identifier un élément passé</summary><div className="ms-read-body"><EventForm p={{ ...p, save }} /></div></details> : null}

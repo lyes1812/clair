@@ -31,6 +31,9 @@ function fictionalPdf(grouped = false, staggered = false): Uint8Array {
       + text("Indemnite de rupture conventionnelle", 20, 680) + text("9000,00", 280, 680) + text("20,00", 360, 680) + text("1234,56", 450, 680) + text("999,99", 535, 680)
     : text("Libelle", 20, 700) + text("Base", 280, 700) + text("Taux", 350, 700) + text("A payer", 420, 700) + text("Charges patronales", 520, 700)
       + text("Indemnite de rupture conventionnelle", 20, 680) + text("9000,00", 280, 680) + text("20,00", 350, 680) + text("1234,56", 420, 680) + text("300,00", 520, 680);
+  return pdfFromContent(content);
+}
+function pdfFromContent(content: string): Uint8Array {
   const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 650 800] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", `<< /Length ${content.length} >>\nstream\n${content}endstream`];
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -43,7 +46,7 @@ function fictionalPdf(grouped = false, staggered = false): Uint8Array {
 describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => {
   it("cas manuel : lit 1 234,56 € d’indemnité, pas la base, le taux ni les charges patronales", () => {
     const parsed = parseRcPayslipRows([header(), rc("Indemnité de rupture conventionnelle", "1 234,56", 2, [item("9 000,00", 280), item("20,00", 350), item("300,00", 520)])]);
-    expect(parsed).toEqual({ status: "identified", code: "explicit-rc-amount", indemnityCents: 123456, components: [{ label: "Indemnité de rupture conventionnelle", amountCents: 123456, page: 1, line: 2 }], parserVersion: RC_PARSER_VERSION });
+    expect(parsed).toMatchObject({ status: "identified", code: "explicit-rc-amount", indemnityCents: 123456, components: [{ label: "Indemnité de rupture conventionnelle", amountCents: 123456, page: 1, line: 2 }], parserVersion: RC_PARSER_VERSION, cost: { status: "review", code: "rc-exemption-unconfirmed", chargedCents: null, employerChargesCents: null, components: [] } });
     expect(JSON.stringify(parsed)).not.toMatch(/900000|2000|30000/);
   });
   it("additionne uniquement les parts soumise et exonérée explicitement distinctes", () => {
@@ -166,7 +169,7 @@ describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => 
     expect(await extractRcPayslip(fictionalPdf(true))).toMatchObject({ status: "identified", indemnityCents: 123456, components: [{ label: "Indemnite de rupture conventionnelle", amountCents: 123456, page: 1, line: 3 }] });
   });
   it("lit un PDF fictif avec parents sur deux lignes de base et sous-entête décalée", async () => {
-    expect(await extractRcPayslip(fictionalPdf(false, true))).toMatchObject({ parserVersion: "payfit-rc-coordinate-v3", status: "identified", indemnityCents: 123456, components: [{ label: "Indemnite de rupture conventionnelle", amountCents: 123456, page: 1, line: 5 }] });
+    expect(await extractRcPayslip(fictionalPdf(false, true))).toMatchObject({ parserVersion: RC_PARSER_VERSION, status: "identified", indemnityCents: 123456, components: [{ label: "Indemnite de rupture conventionnelle", amountCents: 123456, page: 1, line: 5 }] });
   });
   it("le diagnostic conserve seulement les mots d’entête autorisés et la géométrie, jamais noms, identifiants ou montants", () => {
     const source = [...groupedHeader(), row(3, [item("NOM_FICTIF_CONFIDENTIEL IDENTIFIANT_SECRET", 20), item("314159,26", 450, 50)]), row(4, [item("MONTANT MOTPRIVE 987654,32", 450, 50)]), groupedRc(5)];
@@ -194,7 +197,7 @@ describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => 
       row(6, [item("Forfait social sur indemnité de rupture conventionnelle ou départ retraite", 20, 225), item("222,22", 520, 50)]),
     ];
     const inspected = inspectRcPayslipRows(source);
-    expect(inspected.parserVersion).toBe("payfit-rc-coordinate-v3");
+    expect(inspected.parserVersion).toBe(RC_PARSER_VERSION);
     expect(inspected.extractionStatus).toBe("identified");
     expect(inspected.chargeCandidates).toHaveLength(5);
     expect(inspected.chargeCandidates[1]).toMatchObject({ page: 1, line: 3, labelTokens: ["CONTRIBUTION", "PATRONALE", "SUR", "INDEMNITE", "DE", "RUPTURE", "CONVENTIONNELLE"], monetaryCells: [{ x: 350, y: 500, width: 40 }, { x: 520, y: 500, width: 50 }], qualifiers: { explicitRc: true, indemnity: true, contribution: true, employer: true, employeeDeduction: false } });
@@ -209,5 +212,96 @@ describe("extraction RC : bulletin fictif, colonne salariale vérifiée", () => 
     expect(inspected.chargeCandidates[1]).toMatchObject({ qualifiers: { explicitRc: true, exempt: false, liable: true, basis: true } });
     expect(JSON.stringify(inspected)).not.toContain("17,77");
     expect(inspected.chargeCandidates.every(candidate => !Object.hasOwn(candidate, "amountCents") && !Object.hasOwn(candidate, "rate"))).toBe(true);
+  });
+});
+
+const costNominal = (label = "Indemnité de rupture conventionnelle non soumise") => rc(label, "1 000,00");
+const costCharge = (patch: { label?: string; value?: string; base?: string | null; line?: number; extra?: RcPayslipTextItem[] } = {}) => row(patch.line ?? 3, [
+  item(patch.label ?? "Contribution patronale sur indemnité de rupture conventionnelle", 20, 225),
+  ...(patch.base === null ? [] : [item(patch.base ?? "1 000,00", 280)]),
+  item("25,00", 350), item("30,00", 420, 50), item(patch.value ?? "250,00", 520, 50), ...(patch.extra ?? []),
+]);
+const withCost = (charge = costCharge(), label?: string) => parseRcPayslipRows([header(), costNominal(label), charge]);
+
+describe("coût RC strict : indemnité indépendante et charges patronales explicitement isolées", () => {
+  it("lit la charge patronale RC et ajoute seulement son montant au nominal", () => {
+    const parsed = parseRcPayslipRows([header(), costNominal(), costCharge(), row(4, [item("Cotisations patronales de salaire", 20, 225), item("9 999,00", 520, 50)]), row(5, [item("Autres contributions dues par l’employeur", 20, 225), item("8 888,00", 520, 50)]), row(6, [item("CSG CRDS sur indemnité de rupture conventionnelle", 20, 225), item("77,00", 420, 50)])]);
+    expect(parsed).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "value", code: "explicit-employer-rc-cost", employerChargesCents: 25000, chargedCents: 125000, components: [{ label: "Contribution patronale sur indemnité de rupture conventionnelle", amountCents: 25000, page: 1, line: 3 }] } });
+    expect(JSON.stringify(parsed.cost)).not.toMatch(/999900|888800|7700|3000/);
+  });
+  it.each(["Indemnité de rupture conventionnelle exonérée", "Indemnité de rupture conventionnelle non-soumise à cotisations"])("admet une exonération explicite de cotisations : %s", (label) => {
+    expect(withCost(costCharge(), label)).toMatchObject({ status: "identified", cost: { status: "value", chargedCents: 125000 } });
+  });
+  it.each(["Indemnité de rupture conventionnelle", "Indemnité de rupture conventionnelle soumise", "Indemnité de rupture conventionnelle exonérée d’impôt"])("une qualification insuffisante conserve le nominal et bloque le coût : %s", (label) => {
+    expect(withCost(costCharge(), label)).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "review", code: "rc-exemption-unconfirmed", chargedCents: null, employerChargesCents: null, components: [] } });
+  });
+  it("une partie soumise suffit à bloquer le coût complet sans effacer les composantes nominales", () => {
+    const parsed = parseRcPayslipRows([header(), rc("Indemnité rupture conventionnelle exonérée", "600,00"), rc("Indemnité rupture conventionnelle soumise", "400,00", 3), costCharge({ line: 4 })]);
+    expect(parsed).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "review", code: "rc-exemption-unconfirmed", chargedCents: null } });
+    expect(parsed.components).toHaveLength(2);
+  });
+  it("absence de charge isolée ou libellé générique ne signifie jamais charge nulle", () => {
+    for (const rows of [[header(), costNominal()], [header(), costNominal(), costCharge({ label: "Autres contributions dues par l’employeur" })], [header(), costNominal(), costCharge({ label: "Forfait social" })]]) {
+      expect(parseRcPayslipRows(rows)).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "review", code: "no-explicit-employer-rc-charge", chargedCents: null, employerChargesCents: null } });
+    }
+  });
+  it("un zéro patronal explicitement imprimé reste zéro confirmé", () => {
+    expect(withCost(costCharge({ value: "0,00" }))).toMatchObject({ status: "identified", cost: { status: "value", chargedCents: 100000, employerChargesCents: 0, components: [{ amountCents: 0 }] } });
+  });
+  it("additionne des charges explicitement RC distinctes sans appliquer leur taux imprimé", () => {
+    const first = costCharge({ value: "200,00" });
+    const second = costCharge({ label: "Forfait social sur rupture conventionnelle", value: "50,00", line: 4 });
+    expect(parseRcPayslipRows([header(), costNominal(), first, second])).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "value", employerChargesCents: 25000, chargedCents: 125000, components: [{ amountCents: 20000 }, { amountCents: 5000 }] } });
+    second.items.find(item => item.x === 280)!.text = "600,00";
+    expect(parseRcPayslipRows([header(), costNominal(), first, second])).toMatchObject({ status: "identified", cost: { status: "review", code: "rc-charge-base-mismatch", chargedCents: null, components: [] } });
+  });
+  it("aucun montant de base, taux ou salarié ne remplace la colonne patronale manquante", () => {
+    const charge = costCharge(); charge.items = charge.items.filter(item => item.x !== 520);
+    expect(withCost(charge)).toMatchObject({ status: "identified", cost: { status: "review", code: "employer-amount-ambiguous", chargedCents: null } });
+    const unnamed = header(); unnamed.items[4].text = "Autre montant";
+    expect(parseRcPayslipRows([unnamed, costNominal(), costCharge()])).toMatchObject({ status: "identified", cost: { status: "review", code: "employer-column-unrecognized", chargedCents: null } });
+    const misleading = header(); misleading.items[4].text = "Taux patronal";
+    expect(parseRcPayslipRows([misleading, costNominal(), costCharge()])).toMatchObject({ status: "identified", cost: { status: "review", code: "employer-column-unrecognized" } });
+  });
+  it("reconnaît un intitulé de montant patronal explicite", () => {
+    const named = header(); named.items[4].text = "Montant patronal";
+    expect(parseRcPayslipRows([named, costNominal(), costCharge()])).toMatchObject({ status: "identified", cost: { status: "value", employerChargesCents: 25000 } });
+  });
+  it("garde les bases absentes distinctes des bases présentes incohérentes", () => {
+    expect(withCost(costCharge({ base: null }))).toMatchObject({ cost: { status: "value", chargedCents: 125000 } });
+    for (const base of ["600,00", "-1 000,00", "1000", "(1 000,00)"]) expect(withCost(costCharge({ base }))).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "review", code: "rc-charge-base-mismatch", chargedCents: null } });
+    expect(withCost(costCharge({ extra: [item("1 000,00", 290, 40)] }))).toMatchObject({ cost: { status: "review", code: "rc-charge-base-ambiguous" } });
+  });
+  it.each(["-250,00", "−250,00", "(250,00)", "250"])("un montant patronal signé ou non exact reste à vérifier : %s", (value) => {
+    expect(withCost(costCharge({ value }))).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "review", chargedCents: null, employerChargesCents: null, components: [] } });
+  });
+  it.each(["Contribution patronale rupture conventionnelle ou mise à la retraite", "Contribution patronale licenciement et rupture conventionnelle", "Régularisation contribution patronale rupture conventionnelle", "Rappel contribution patronale rupture conventionnelle", "Contribution patronale annuelle rupture conventionnelle", "Contribution salariale rupture conventionnelle"])("un libellé mixte ou non patronal garde le coût à vérifier : %s", (label) => {
+    expect(withCost(costCharge({ label }))).toMatchObject({ status: "identified", indemnityCents: 100000, cost: { status: "review", chargedCents: null } });
+  });
+  it("les charges en doublon et montants multiples n’engendrent aucun total partiel", () => {
+    expect(parseRcPayslipRows([header(), costNominal(), costCharge(), costCharge({ line: 4 })])).toMatchObject({ status: "identified", cost: { status: "review", code: "duplicate-rc-charge", components: [] } });
+    expect(withCost(costCharge({ extra: [item("123,45", 530, 50)] }))).toMatchObject({ cost: { status: "review", code: "employer-amount-ambiguous" } });
+    expect(withCost(costCharge({ value: "1000000000001,00" }))).toMatchObject({ cost: { status: "review", code: "unsafe-rc-charge" } });
+  });
+  it("la colonne patronale du groupe est vérifiée sur le format à parents décalés", () => {
+    const nominal = staggeredRc(); nominal.items[0].text += " non soumise";
+    const charge = row(6, [atY("Contribution patronale rupture conventionnelle", 25, 560, 225), atY("1 234,56", 245, 560), atY("42,00", 325, 560), atY("10,00", 410, 560), atY("300,00", 500, 560)]);
+    expect(parseRcPayslipRows([...staggeredHeader(), nominal, charge])).toMatchObject({ status: "identified", indemnityCents: 123456, cost: { status: "value", employerChargesCents: 30000, chargedCents: 153456 } });
+  });
+  it("lit un PDF fictif entier avec contribution RC et ignore salaires, autres cotisations et CSG salariée", async () => {
+    const text = (label: string, x: number, y: number) => `BT /F1 8 Tf 1 0 0 1 ${x} ${y} Tm (${label}) Tj ET\n`;
+    const content = text("Libelle", 20, 740) + text("Base", 280, 740) + text("Taux", 350, 740) + text("A payer", 420, 740) + text("Charges patronales", 520, 740)
+      + text("Salaire fictif", 20, 720) + text("5000,00", 420, 720) + text("2000,00", 520, 720)
+      + text("Cotisations patronales salaire", 20, 700) + text("600,00", 520, 700)
+      + text("Indemnite rupture conventionnelle non soumise", 20, 680) + text("1000,00", 420, 680)
+      + text("Contribution patronale rupture conventionnelle", 20, 660) + text("1000,00", 280, 660) + text("25,00", 350, 660) + text("30,00", 420, 660) + text("250,00", 520, 660)
+      + text("CSG CRDS indemnite rupture conventionnelle", 20, 640) + text("100,00", 420, 640);
+    expect(await extractRcPayslip(pdfFromContent(content))).toMatchObject({ parserVersion: "payfit-rc-coordinate-v4", status: "identified", indemnityCents: 100000, cost: { status: "value", employerChargesCents: 25000, chargedCents: 125000, components: [{ label: "Contribution patronale rupture conventionnelle", amountCents: 25000, page: 1, line: 5 }] } });
+  });
+  it("un coût confirmé ne fait pas apparaître ses montants dans le diagnostic de format", () => {
+    const inspected = inspectRcPayslipRows([header(), costNominal(), costCharge()]);
+    expect(inspected.extractionStatus).toBe("identified");
+    expect(inspected).not.toHaveProperty("cost");
+    expect(JSON.stringify(inspected)).not.toMatch(/100000|25000|125000|1 000,00|250,00|25,00|30,00/);
   });
 });

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { ActualNonRecurringSummary } from "@/components/ActualNonRecurringSummary";
 import type { ActualEvent, ActualNonRecurring } from "@/lib/payroll/non-recurring";
 import { estimateActualOverlap } from "@/lib/payroll/actual-overlap";
+import type { RcPayslipPeriod } from "@/lib/payroll/rc-payslips";
+import type { LiveNonRecurring } from "@/lib/payroll/live-non-recurring";
 
 const SYNC = "11111111-1111-4111-8111-111111111111";
 const rows = (...values: { kind: ActualEvent["kind"]; amount: number | null; reason?: string | null }[]): ActualNonRecurring["rows"] => values.map((value, index) => ({
@@ -22,7 +24,7 @@ describe("résumé des éléments non récurrents — données fictives", () => 
     expect(html).not.toContain("data-money-cents");
     expect(html).toContain("Vigilance");
     expect(html).toContain("Aucun élément identifié ne signifie pas");
-    expect(html).toContain("Déjà inclus dans la masse salariale réelle");
+    expect(html).toContain("Coûts identifiés sur la période affichée");
     expect(html).toContain(`href="${href.replaceAll("&", "&amp;")}"`);
   });
 
@@ -73,5 +75,33 @@ describe("résumé des éléments non récurrents — données fictives", () => 
     const invalid = render(rows({ kind: "autre", amount: null, reason: "SOURCE_LIGNE_PRIVEE_FICTIVE" }));
     expect(invalid).toContain("À vérifier");
     expect(invalid).not.toContain("SOURCE_LIGNE_PRIVEE_FICTIVE");
+  });
+
+  it("reprend les entrées fusionnées pour le coût chargé et le compte, sans doubler la déclaration RC avec son bulletin", () => {
+    const declared = rows({ kind: "rupture-conventionnelle", amount: null, reason: "Montant chargé non saisi ; saisir un montant ou un zéro explicite." });
+    const rc: RcPayslipPeriod = { status: "value", amountCents: 125000, identifiedCount: 1, mergedCount: 1, reviewCount: 0, reason: null, rows: [], costStatus: "value", chargedCents: 140000, employerChargesCents: 15000, costReason: null };
+    const live: LiveNonRecurring = { rows: declared, sourceRows: [], entries: [{ month: "2026-02", kind: "rupture-conventionnelle", amount: 140000, reason: null, estimated: false }], count: 1, raw: 400000, nonRecurring: 140000, adjusted: 260000, reasons: [] };
+    const html = renderToStaticMarkup(createElement(ActualNonRecurringSummary, { rows: declared, live, rc, href }));
+    const result = category(html, "rupture-conventionnelle");
+    expect(result).toContain("Coût chargé RC");
+    expect(result).toContain('data-money-cents="140000"');
+    expect(result).toContain('data-money-cents="125000"');
+    expect(result).toContain("Indemnité RC · bulletin");
+    expect(result).toContain("1 élément identifié");
+    expect(result).not.toContain("Montant à renseigner");
+    expect(result).not.toContain("2 éléments");
+    expect(html).not.toMatch(/CONTRAT_PRIVE|SOURCE_PRIVEE|11111111-1111|00000000-0000/);
+  });
+
+  it("ne masque pas le nominal connu lorsque le coût chargé fusionné reste ambigu", () => {
+    const rc: RcPayslipPeriod = { status: "value", amountCents: 125000, identifiedCount: 1, mergedCount: 1, reviewCount: 0, reason: null, rows: [], costStatus: "review", chargedCents: null, employerChargesCents: null, costReason: "Contributions patronales propres à la RC non isolées." };
+    const live: LiveNonRecurring = { rows: [], sourceRows: [], entries: [{ month: "2026-02", kind: "rupture-conventionnelle", amount: null, reason: "Coût chargé de RC non confirmé par les bulletins", estimated: false }], count: 1, raw: 400000, nonRecurring: null, adjusted: null, reasons: [] };
+    const html = renderToStaticMarkup(createElement(ActualNonRecurringSummary, { rows: [], live, rc, href }));
+    const result = category(html, "rupture-conventionnelle");
+    expect(result).toContain('data-money-cents="125000"');
+    expect(result).toContain("Coût chargé à vérifier");
+    expect(result).toContain("n.d.");
+    expect(html).toContain("Contributions patronales propres à la RC non isolées");
+    expect(html).toContain("Vigilance");
   });
 });

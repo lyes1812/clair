@@ -21,7 +21,10 @@ describe("Excel des indemnités RC des bulletins", () => {
     const value = scan(); const events = [event];
     const sheet = rcPayslipSheet(value, ["2026-01", "2026-02"], syncId, events);
     expect(sheet.name).toBe("Indemnités RC bulletins");
-    expect(sheet.rows[1].slice(0, 4)).toEqual(["2026-02", 1, 123456, "Indemnités identifiées"]);
+    expect(sheet.rows[1].slice(0, 3)).toEqual(["2026-02", 1, 123456]);
+    expect(sheet.rows[1][5]).toBe("Indemnités identifiées");
+    expect(sheet.rows[1][3]).toHaveProperty("nd");
+    expect(sheet.rows[1][4]).toHaveProperty("nd");
     expect(sheet.rows[2].slice(0, 3)).toEqual(["Période", 1, 123456]);
     expect(sheet.rows[0][2]).toHaveProperty("nd");
     expect(sheet.note).toContain("2026-03-01T08:01:00.000Z");
@@ -53,7 +56,7 @@ describe("Excel des indemnités RC des bulletins", () => {
     }
     const none = rcPayslipSheet(scan({ records: [] }), ["2026-01", "2026-02"], syncId);
     expect(none.rows.at(-1)![2]).toHaveProperty("nd");
-    expect(none.rows.at(-1)![3]).toBe("Aucune indemnité repérée");
+    expect(none.rows.at(-1)![5]).toBe("Aucune indemnité repérée");
   });
 
   it("applique le même filtre de mois et de service et conserve un zéro confirmé", () => {
@@ -65,5 +68,38 @@ describe("Excel des indemnités RC des bulletins", () => {
     expect(JSON.stringify(service)).toContain("pas ventilées par service");
     value.records[0].indemnityCents = 0; value.records[0].components[0].amountCents = 0;
     expect(rcPayslipSheet(value, ["2026-02"], syncId).rows.at(-1)![2]).toBe(0);
+  });
+
+  it("exporte l’indemnité, les contributions RC et le coût chargé confirmés dans des colonnes distinctes", async () => {
+    const value = scan();
+    value.records[0].cost = { status: "value", code: "identified-cost", employerChargesCents: 34567, chargedCents: 158023, components: [{ label: "CONTRIBUTION_PRIVEE_FICTIVE", amountCents: 34567, page: 1, line: 12 }] };
+    const sheet = rcPayslipSheet(value, ["2026-01", "2026-02"], syncId, [event]);
+    expect(sheet.rows[1].slice(0, 5)).toEqual(["2026-02", 1, 123456, 34567, 158023]);
+    expect(sheet.rows.at(-1)!.slice(0, 5)).toEqual(["Période", 1, 123456, 34567, 158023]);
+    expect(sheet.rows[1][6]).toBe("Coût chargé identifié");
+    expect(sheet.columns[3].header).toBe("Contributions patronales RC");
+    expect(sheet.columns[4].header).toBe("Coût chargé RC");
+    expect(sheet.note).toContain("Aucun taux reconstitué");
+    expect(sheet.note).not.toContain("cotisations propres à la RC non isolées");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await buildWorkbook({ title: "Export fictif", workspaceName: "Espace fictif", generatedAt: "2026-03-01T08:02:00.000Z", filters: [], sources: [], definitions: [], sheets: [sheet] }) as unknown as ExcelJS.Buffer);
+    expect(wb.getWorksheet("Indemnités RC bulletins")!.getColumn(4).values).toContain(345.67);
+    expect(wb.getWorksheet("Indemnités RC bulletins")!.getColumn(5).values).toContain(1580.23);
+    expect(JSON.stringify(wb.model)).not.toMatch(/CONTRIBUTION_PRIVEE|CONTRAT_PRIVE|COLLAB_PRIVE|PDF_PRIVE|LIBELLE_INDIVIDUEL/);
+  });
+
+  it("garde les indemnités connues lorsqu’un coût manque et refuse tout cumul chargé partiel", () => {
+    const value = scan();
+    value.records[0].cost = { status: "value", code: "identified-cost", employerChargesCents: 34567, chargedCents: 158023, components: [{ label: "CONTRIBUTION_PRIVEE_FICTIVE", amountCents: 34567, page: 1, line: 12 }] };
+    value.records.push({ ...value.records[0], month: "2026-01", payslipId: "AUTRE_PDF_PRIVE_FICTIF", cost: { status: "review", code: "ambiguous-cost", employerChargesCents: null, chargedCents: null, components: [] } });
+    const sheet = rcPayslipSheet(value, ["2026-01", "2026-02"], syncId);
+    expect(sheet.rows.at(-1)![2]).toBe(246912);
+    for (const row of sheet.rows) {
+      expect(row[3]).toHaveProperty("nd");
+      expect(row[4]).toHaveProperty("nd");
+      expect(row[6]).toBe("Coût chargé à vérifier");
+    }
+    expect(JSON.stringify(sheet)).not.toContain("158023");
+    expect(JSON.stringify(sheet)).toContain("aucun coût chargé partiel");
   });
 });
