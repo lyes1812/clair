@@ -44,7 +44,7 @@ function Value({ cell, notes, metric = false }: { cell: SocialCell; notes: strin
   );
 }
 
-function MetricCards({ metrics, notes, slug }: { metrics: SocialMetric[]; notes: string[]; slug: string }) {
+export function MetricCards({ metrics, notes, slug }: { metrics: SocialMetric[]; notes: string[]; slug: string }) {
   return (
     <dl className="rs-metrics">
       {metrics.map((metric) => (
@@ -63,20 +63,34 @@ function MetricCards({ metrics, notes, slug }: { metrics: SocialMetric[]; notes:
 function MonthlyTable({ rows, notes, kind }: { rows: SocialRow[]; notes: string[]; kind: "rh" | "payroll" }) {
   const columns = kind === "rh" ? RH_COLUMNS : PAYROLL_COLUMNS;
   const title = kind === "rh" ? "RH · mois par mois" : "Paie · mois par mois";
+  return <ReportMonthlyTable rows={rows} notes={notes} columns={columns} title={title} testid={`rs-${kind}-table`} coverage={kind === "rh"} money={kind === "payroll"} />;
+}
+
+// Le composeur Publisher réutilise le même tableau en passant uniquement ses
+// colonnes RH choisies ; le rapport social conserve ses deux tableaux complets.
+export function ReportMonthlyTable<K extends Exclude<keyof SocialRow, "month" | "coverage">>({ rows, notes, columns, title, testid, coverage = true, money = false }: {
+  rows: ({ month: string; coverage: SocialCell } & Record<K, SocialCell>)[];
+  notes: string[];
+  columns: readonly (readonly [K, string])[];
+  title: string;
+  testid: string;
+  coverage?: boolean;
+  money?: boolean;
+}) {
   return (
     <div className="rs-table-scroll" tabIndex={0} role="region" aria-label={title}>
-      <table className="data-table rs-table" data-testid={`rs-${kind}-table`}>
-        <caption>{title}{kind === "payroll" && <> · montants en <MoneyUnitLabel /></>}</caption>
+      <table className="data-table rs-table" data-testid={testid}>
+        <caption>{title}{money && <> · montants en <MoneyUnitLabel /></>}</caption>
         <thead><tr>
           <th scope="col">Mois</th>
-          {kind === "rh" && <th scope="col" className="rs-coverage">Couverture RH</th>}
+          {coverage && <th scope="col" className="rs-coverage">Couverture RH</th>}
           {columns.map(([key, label]) => <th key={key} scope="col" className="num">{label}</th>)}
         </tr></thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.month} data-month={row.month}>
               <th scope="row">{formatMonth(row.month)}</th>
-              {kind === "rh" && <td className="rs-coverage"><Value cell={row.coverage} notes={notes} /></td>}
+              {coverage && <td className="rs-coverage"><Value cell={row.coverage} notes={notes} /></td>}
               {columns.map(([key]) => <td key={key} className="num"><Value cell={row[key]} notes={notes} /></td>)}
             </tr>
           ))}

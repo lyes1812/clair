@@ -72,10 +72,10 @@ export function salaryAnalysis(model: PayrollItemsModel, rubricKey = ""): Salary
   const unavailable = (reason: string): SalaryAnalysis => ({ ...result, reason,
     totalSource: nd(reason), totalLinked: nd(reason), mean: nd(reason), median: nd(reason) });
 
-  if (!isMonth(model.month)) return unavailable("Mois invalide.");
-  if (model.source !== "payfit" && model.source !== "dsn") return unavailable("Aucune source RH retenue pour cette analyse.");
+  if (model.source !== "payfit" && model.source !== "dsn") return unavailable(model.reason ?? "Aucune source RH retenue pour cette analyse.");
   if (model.coverage.status !== "complete") return unavailable(model.coverage.reason ?? "Couverture source incomplète : l’analyse des rémunérations n’est pas calculée.");
   if (model.kind !== "value") return unavailable(model.reason ?? "Aucune rémunération disponible pour ce mois.");
+  if (!isMonth(model.month)) return unavailable("Mois invalide.");
   if (rubricKey && !selected) return unavailable(model.source === "dsn"
     ? "Seule la rémunération brute non plafonnée DSN (001) peut être analysée ; les types ne sont pas additionnés."
     : "Rubrique brute absente de la source pour ce mois.");

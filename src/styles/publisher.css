@@ -1,0 +1,43 @@
+/* Composeur de rapport RH : contrôles locaux, charte et impression du rapport existant. */
+.publisher-intro { display: grid; gap: 5px; }
+.publisher-intro h2 { font-size: 24px; letter-spacing: -.02em; }
+.publisher-controls { display: grid; gap: 18px; padding: 20px; border: 1px solid var(--line); border-radius: var(--clair-radius-card); background: #fff; min-width: 0; }
+.publisher-period { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+.publisher-period .field-row { flex: 1 1 200px; min-width: 0; max-width: 320px; }
+.publisher-controls fieldset { margin: 0; padding: 0; min-width: 0; border: 0; }
+.publisher-controls legend { padding: 0; margin-bottom: 8px; font-weight: 600; font-size: var(--clair-type-form-label); }
+.publisher-choices { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.publisher-choices label, .publisher-monthly { display: inline-flex; align-items: center; gap: 9px; min-height: 40px; font-size: var(--clair-type-form); cursor: pointer; }
+.publisher-controls input[type="checkbox"] { flex: none; width: 18px; height: 18px; accent-color: var(--blue); }
+.publisher-controls input:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.publisher-print-action { display: grid; gap: 7px; max-width: 320px; }
+.publisher-print-action .btn:disabled { cursor: default; opacity: .55; }
+.publisher-report .rs-provenance .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.publisher-definition-list { display: grid; gap: 18px; margin-top: 16px; }
+.publisher-definition-list section { display: grid; gap: 8px; }
+.publisher-definition-list h4 { margin: 0; font-size: var(--clair-type-form); }
+.publisher-definition-list p, .publisher-parameter-list { font-size: var(--clair-type-form); }
+.publisher-formula { padding: 10px 12px; background: var(--surface); border-radius: var(--clair-radius-control); }
+.publisher-parameter-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; margin: 16px 0 0; }
+.publisher-parameter-list dt { color: var(--muted); }
+.publisher-parameter-list dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.publisher-parameter-list small { display: block; color: var(--muted); margin-top: 3px; }
+@media (max-width: 760px) {
+  .publisher-controls { padding: 16px; gap: 16px; }
+  .publisher-controls :is(select, button, a.btn) { min-height: 44px; }
+  .publisher-period .field-row { max-width: none; flex-basis: 100%; }
+  .publisher-choices { display: grid; gap: 6px; }
+  .publisher-choices label, .publisher-monthly { min-height: 44px; }
+  .publisher-controls .actions { width: 100%; }
+  .publisher-report .rs-provenance .facts, .publisher-parameter-list { grid-template-columns: minmax(0, 1fr); }
+}
+@media print {
+  .publisher-page > :is(.kpi-head, .tabs), .publisher-page .publisher-controls, .publisher-page .publisher-intro { display: none !important; }
+  .publisher-report .rs-provenance .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .publisher-definition-list { gap: 10pt; margin-top: 8pt; }
+  .publisher-definition-list section { break-inside: avoid; gap: 4pt; }
+  .publisher-definition-list :is(h4, p), .publisher-parameter-list { font-size: 8pt; }
+  .publisher-parameter-list { gap: 7pt 12pt; margin-top: 8pt; }
+  .publisher-parameter-list > div { break-inside: avoid; }
+  .publisher-formula { padding: 5pt; }
+}

@@ -61,6 +61,7 @@ import { PeriodModeFields } from "./PeriodModeFields";
 import { coverageShown, loadCategoryMonths, loadKpiSuivi, suiviColumnOn } from "./suivi-data";
 import { KPI_VUES } from "./tabs";
 import { SalaryAnalysisPage } from "./SalaryAnalysisPage";
+import { PublisherPage } from "./PublisherPage";
 
 export const dynamic = "force-dynamic";
 
@@ -104,8 +105,8 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
 }
 
 // Entrées de KPI RH pas encore construites : l'état en une phrase, ce qui existe déjà (avec un lien) et ce qui reste à préciser.
-type PrevuVue = "pyramide" | "livre" | "publisher";
-const PREVU_VUES: PrevuVue[] = ["pyramide", "livre", "publisher"];
+type PrevuVue = "pyramide" | "livre";
+const PREVU_VUES: PrevuVue[] = ["pyramide", "livre"];
 const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: PrevuLink[]; open: string[] }> = {
   pyramide: (studio) => ({
     lead: "Non disponible avec les données lues : la date de naissance n'est pas lue dans le référentiel Collaborateurs (PayFit et DSN lus), la pyramide des âges ne peut donc pas être construite. L'ancienneté se déduit de la date d'entrée du contrat.",
@@ -123,20 +124,13 @@ const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: Prev
     ],
     open: ["Une source qui fournit les rubriques de bulletin reste à identifier."],
   }),
-  publisher: (studio) => ({
-    lead: "Non réalisé : le contenu de cette entrée n'est pas encore défini.",
-    existing: [
-      { href: `${studio}/kpi`, title: "KPI RH › Suivi des effectifs", text: "Indicateurs, tableaux mensuels et détail de chaque chiffre, consultables à l'écran." },
-      { href: `${studio}/kpi?vue=effectifs`, title: "KPI RH › Effectifs mensuels", text: "Une rubrique, un axe de répartition, une version et une année." },
-    ],
-    open: ["Ce que cette entrée doit produire, son format, ses destinataires et sa périodicité."],
-  }),
 };
 
 export default async function KpiPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
   const sp = await searchParams;
   if (one(sp.vue) === "salaires") return <SalaryAnalysisPage slug={slug} search={sp} />;
+  if (one(sp.vue) === "publisher") return <PublisherPage slug={slug} search={sp} />;
   // Chargement commun avec l'export (mêmes paramètres d'adresse, mêmes règles de remplacement d'une valeur invalide).
   const suivi = await loadKpiSuivi(slug, sp);
   const ctx = suivi.ctx;

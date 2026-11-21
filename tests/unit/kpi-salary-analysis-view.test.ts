@@ -46,4 +46,10 @@ describe("Analyse des salaires : lecture agrégée et source", () => {
     expect(html).toContain('data-testid="salary-status"');
     expect(html).toContain("Vérifier les sources");
   });
+  it("conserve la vraie cause sans source plutôt que de signaler un mois invalide", () => {
+    const html = render(payrollItemsUnavailable(null, "", "Aucune source RH retenue. Connecte PayFit ou applique des DSN dans Données."));
+    expect(html).toContain("Aucune source RH retenue.");
+    expect(html).not.toContain("Mois invalide");
+    expect(html).not.toContain("data-money-cents");
+  });
 });

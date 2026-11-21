@@ -9,7 +9,7 @@ export const KPI_VUES = [
   { key: "pyramide", label: "Pyramide", soon: true },
   { key: "salaires", label: "Analyse des salaires" },
   { key: "livre", label: "Livre de paie", soon: true },
-  { key: "publisher", label: "Publisher", soon: true },
+  { key: "publisher", label: "Publisher" },
 ] as const;
 export type KpiVue = (typeof KPI_VUES)[number]["key"];
 export const resolveKpiVue = (v: string): KpiVue => (KPI_VUES.some((x) => x.key === v) ? (v as KpiVue) : "suivi");

@@ -25,8 +25,8 @@ test("Analyse des salaires : sources fictives, filtres, navigation et lecture mo
   await page.getByLabel("Clé API PayFit").fill("fixture-A-1");
   await page.getByRole("button", { name: "Vérifier et enregistrer" }).click();
   await expect(page.getByRole("status")).toContainText("Connexion vérifiée", slow);
-  await page.getByLabel("Du mois").fill("2026-08");
-  await page.getByLabel("Au mois").fill("2026-09");
+  await page.locator("#from").fill("2026-08");
+  await page.locator("#to").fill("2026-09");
   await page.getByRole("button", { name: "Synchroniser" }).click();
   await expect(page.getByTestId("sync-status")).toHaveText("Aperçu à valider", { timeout: 90_000 });
   await page.getByRole("button", { name: "Appliquer cette lecture" }).click();
