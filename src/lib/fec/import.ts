@@ -1,11 +1,12 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { sourceRecord, sourceSync } from "@/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { sourceSync } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { recordEvent } from "@/lib/events";
 import { digestOf, knownFileHashes, listSourceFiles, safeFilename, storeSourceFiles, type FileOutcome, type StoredUpload } from "@/lib/connectors/files";
 import { contentHash, type SyncSummary } from "@/lib/connectors/sync";
 import type { CollectionOutcome, SourceRecordInput } from "@/lib/connectors/types";
-import { FecError, parseFec, parseFecFilename, type FecParseResult } from "./parser";
+import { controlFec, type FecCheck, type FecStoredControls } from "./controls";
+import { FecError, parseFecFilename, type FecParseResult } from "./parser";
 
 // Import de fichiers FEC : une lecture (source_sync, fournisseur « fec ») par dépôt, un fichier = un exercice.
 // Un FEC appliqué dont la période recouvre celle d'un nouveau dépôt pour le même SIREN est remplacé à l'application.
@@ -29,11 +30,17 @@ export type FecExercise = {
   amountFormat: string;
   warnings: string[];
   replaces: { syncId: string; filename: string }[];
+  /** Contrôles F01 à F09 conservés au dépôt (absents des dépôts antérieurs au lot L1). */
+  controls?: FecStoredControls;
 };
 
-export type FecSyncSummary = SyncSummary & { mode: "additive"; files: FileOutcome[]; exercises: FecExercise[]; collections: CollectionOutcome[] };
+/** Fichier refusé par un contrôle bloquant : son rapport est conservé pour être affiché. */
+export type FecBlockedReport = { filename: string; checks: FecCheck[]; rejectedRows: FecStoredControls["rejectedRows"]; rejectedCount: number };
+
+export type FecSyncSummary = SyncSummary & { mode: "additive"; files: FileOutcome[]; exercises: FecExercise[]; collections: CollectionOutcome[]; blocked?: FecBlockedReport[] };
 
 const MAX_FILES = 6;
+const BLOCKING_SHORT: Record<string, string> = { F02: "lignes illisibles au-delà de 0,1 %", F03: "écriture déséquilibrée", F04: "total des débits différent du total des crédits" };
 // Libellés retirés sur les comptes de personnel (noms possibles), comme pour Pennylane.
 const PERSONAL_ACCOUNTS = /^(?:421|425|427|428|431|437)/;
 
@@ -84,6 +91,7 @@ export async function importFecFiles(workspaceId: string, uploads: FecUpload[], 
   if (uploads.length > MAX_FILES) throw new FecError("too_large", `${MAX_FILES} fichiers au plus par dépôt.`);
   const files: FileOutcome[] = [];
   const exercises: FecExercise[] = [];
+  const blocked: FecBlockedReport[] = [];
   const all: SourceRecordInput[] = [];
   const toStore: StoredUpload[] = [];
   const warnings: string[] = [];
@@ -105,7 +113,18 @@ export async function importFecFiles(workspaceId: string, uploads: FecUpload[], 
     if (seenInBatch.has(digest)) { files.push({ filename, status: "duplicate", sha256: digest, importedAt: "ce dépôt" }); continue; }
     seenInBatch.add(digest);
     try {
-      const parsed = parseFec(u.bytes);
+      const control = controlFec(u.bytes, filename);
+      if (control.blocked || !control.parsed) {
+        const failing = control.controls.checks.filter((c) => c.severity === "blocking" && c.status === "fail");
+        blocked.push({ filename, checks: control.controls.checks, rejectedRows: control.controls.rejectedRows, rejectedCount: control.controls.rejectedCount });
+        // Raison sans montant (l'écran peut arrondir les montants à l'euro) : les écarts au centime sont dans le rapport.
+        const reason = failing.some((c) => c.code === "F01")
+          ? `F01 : ${failing.find((c) => c.code === "F01")!.detail}`
+          : `Refusé par ${failing.map((c) => `${c.code} (${BLOCKING_SHORT[c.code] ?? c.label})`).join(", ")} : voir le rapport de contrôle.`;
+        files.push({ filename, status: "rejected", reason });
+        continue;
+      }
+      const parsed = control.parsed;
       const named = parseFecFilename(filename);
       const siren = named?.siren ?? null;
       const fileWarnings = [...parsed.warnings];
@@ -120,11 +139,13 @@ export async function importFecFiles(workspaceId: string, uploads: FecUpload[], 
         lines: parsed.lines.length, entries: parsed.entryCount, totalDebitCents: parsed.totalDebitCents, totalCreditCents: parsed.totalCreditCents,
         balanced: parsed.balanced, unbalancedEntries: parsed.unbalancedEntries, journals: parsed.journals,
         encoding: parsed.encoding, delimiter: parsed.delimiter, amountFormat: parsed.amountFormat, warnings: fileWarnings, replaces,
+        controls: control.controls,
       });
       files.push({ filename, status: "read", sha256: parsed.hash, sizeBytes: parsed.sizeBytes, encoding: parsed.encoding, detail: `${parsed.firstDate} → ${parsed.lastDate} · ${parsed.lines.length} ligne(s) · ${parsed.balanced ? "équilibré" : "non équilibré"}` });
       for (const w of fileWarnings) warnings.push(`${filename} : ${w}`);
+      for (const c of control.controls.checks) if (c.status === "fail") warnings.push(`${filename} : ${c.code} ${c.detail}`);
       for (const l of parsed.lines) months.add(l.entryDate.slice(0, 7));
-      all.push(...records(parsed, siren, filename));
+      for (const r of records(parsed, siren, filename)) all.push(r);
       toStore.push({ filename, sha256: parsed.hash, sizeBytes: parsed.sizeBytes, encoding: parsed.encoding, bytes: u.bytes });
     } catch (e) {
       files.push({ filename, status: "rejected", reason: e instanceof FecError ? e.message : "Fichier illisible." });
@@ -137,7 +158,7 @@ export async function importFecFiles(workspaceId: string, uploads: FecUpload[], 
   const { hash, hashes } = contentHash(all);
   const collections: CollectionOutcome[] = (["accounts", "ledger_lines"] as const).map((c) => ({ collection: c, status: "read", count: all.filter((r) => r.collection === c).length }));
   const replaces = [...new Set(exercises.flatMap((e) => e.replaces.map((r) => r.syncId)))];
-  const summary: FecSyncSummary = { mode: "additive", files, exercises, collections, months: [...months].sort(), replaces };
+  const summary: FecSyncSummary = { mode: "additive", files, exercises, collections, months: [...months].sort(), replaces, ...(blocked.length ? { blocked } : {}) };
 
   const syncId = await withWorkspace(workspaceId, async (tx) => {
     const [row] = await tx
@@ -150,8 +171,13 @@ export async function importFecFiles(workspaceId: string, uploads: FecUpload[], 
       })
       .returning({ id: sourceSync.id });
     if (status === "preview") {
-      const rows = all.map((r) => ({ workspaceId, syncId: row.id, collection: r.collection, recordKey: r.key, period: r.period, data: r.data, recordHash: hashes.get(`${r.collection}\u0000${r.key}`)! }));
-      for (let i = 0; i < rows.length; i += 500) await tx.insert(sourceRecord).values(rows.slice(i, i + 500));
+      // Insertion en masse : 10 000 lignes par requête, passées en un seul paramètre JSON (un FEC de 200 000 lignes
+      // doit tenir dans le délai de réponse de l'hébergeur). Les politiques RLS s'appliquent comme pour un insert ligne à ligne.
+      const rows = all.map((r) => ({ c: r.collection, k: r.key, p: r.period, d: r.data, h: hashes.get(`${r.collection}\u0000${r.key}`)! }));
+      for (let i = 0; i < rows.length; i += 10_000) {
+        await tx.execute(sql`insert into source_record (workspace_id, sync_id, collection, record_key, period, data, record_hash)
+          select ${workspaceId}, ${row.id}::uuid, r.c, r.k, r.p, r.d, r.h from jsonb_to_recordset(${JSON.stringify(rows.slice(i, i + 10_000))}::jsonb) as r(c text, k text, p text, d jsonb, h text)`);
+      }
       await storeSourceFiles(tx, workspaceId, row.id, "fec", toStore);
     }
     return row.id;

@@ -1,4 +1,5 @@
-import { isIsoDate } from "@/lib/dates";
+import { isIsoDate, todayParis } from "@/lib/dates";
+import { freshnessCheck } from "@/lib/fec/controls";
 import { fecCoverage } from "@/lib/fec/import";
 import { hasAtLeast } from "@/lib/roles";
 import { getSetting } from "@/lib/settings";
@@ -33,7 +34,7 @@ export async function readCrisis(workspace: Workspace, slug: string, query: Cris
   const notices: string[] = [];
   if (!exercises.length) {
     const position: CrisisPosition = { kind: "nd", reason: "Aucun FEC appliqué dans Données. Dépose le FEC de l’exercice en cours pour lire la trésorerie et les dettes." };
-    return { ...base, exercise: null as CrisisExercise | null, asOf: null as string | null, ranks: null as RankSettings | null, ranksUnreadable: false, position, notices, source: null as { syncId: string; filename: string } | null };
+    return { ...base, exercise: null as CrisisExercise | null, asOf: null as string | null, ranks: null as RankSettings | null, ranksUnreadable: false, position, notices, fecAlerts: [] as string[], source: null as { syncId: string; filename: string } | null };
   }
   // L'exercice affiché par défaut est le plus récent ; il est toujours nommé à l'écran.
   let exercise = exercises[0];
@@ -54,9 +55,12 @@ export async function readCrisis(workspace: Workspace, slug: string, query: Cris
   const ranksUnreadable = storedRanks !== null && storedRanks.parsed === null;
   if (ranksUnreadable) notices.push("Rangs enregistrés illisibles : aucun rang n’est appliqué tant qu’ils ne sont pas ressaisis.");
   const ranks = storedRanks?.parsed ?? null;
+  // F06 (avertissement fort) : fraîcheur du FEC lu, mesurée à la date du jour.
+  const freshness = freshnessCheck(exercise.lastDate, todayParis());
+  const fecAlerts = freshness.status === "fail" ? [`F06 · ${freshness.detail}`] : [];
   return {
     ...base, exercise: { filename: exercise.filename, firstDate: exercise.firstDate, lastDate: exercise.lastDate } as CrisisExercise | null, asOf: asOf as string | null,
-    ranks, ranksUnreadable, position: buildCrisisPosition(lines, asOf, ranks), notices,
+    ranks, ranksUnreadable, position: buildCrisisPosition(lines, asOf, ranks), notices, fecAlerts,
     source: { syncId: exercise.syncId, filename: exercise.filename } as { syncId: string; filename: string } | null,
   };
 }

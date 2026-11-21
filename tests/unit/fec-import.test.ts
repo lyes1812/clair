@@ -10,6 +10,7 @@ const sync = await import("@/lib/connectors/sync");
 const { fecCoverage, importFecFiles, listFecFiles } = await import("@/lib/fec/import");
 const { fixtureFecBytes, fixtureFecFilename } = await import("@/lib/fec/fixture");
 const { ledgerTotals } = await import("@/lib/connectors/views");
+const { COMPANY_FEC_FILENAME, companyFecBytes, largeFecText } = await import("@/lib/fec/fixture-company");
 type FecSyncSummary = import("@/lib/fec/import").FecSyncSummary;
 
 const run = Date.now();
@@ -96,4 +97,41 @@ describe("import de fichiers FEC", () => {
     expect(await listFecFiles(B)).toHaveLength(0);
     expect(await fecCoverage(B)).toHaveLength(0);
   });
+});
+
+describe("contrôles F01 à F09 à l'import (Cap 13, lot L1)", () => {
+  it("FEC conforme : contrôles conservés avec l'exercice, constats non bloquants repris en avertissements", async () => {
+    const id = await importFecFiles(B, [{ filename: COMPANY_FEC_FILENAME, bytes: companyFecBytes() }], actor);
+    const s = (await sync.getSync(B, id))!;
+    expect(s.status).toBe("preview");
+    const ex = (s.summary as FecSyncSummary).exercises[0];
+    expect(ex.controls!.checks.map((c) => [c.code, c.status])).toEqual([["F01", "ok"], ["F02", "ok"], ["F03", "ok"], ["F04", "ok"], ["F05", "ok"], ["F07", "ok"], ["F09", "ok"]]);
+    expect(ex.controls!.bank512.at(-1)).toEqual(["2026-10-31", 1_500_000]);
+    await sync.discardSync(B, id, actor);
+  });
+
+  it("FEC déséquilibré : refusé, rapport conservé, aucune ligne enregistrée", async () => {
+    const bytes = companyFecBytes({ mutate: (rows) => { rows[5][11] = "1000,10"; return rows; } });
+    const id = await importFecFiles(B, [{ filename: COMPANY_FEC_FILENAME, bytes }], actor);
+    const s = (await sync.getSync(B, id))!;
+    expect(s.status).toBe("failed");
+    expect(s.errorMessage).toContain("Refusé par F03 (écriture déséquilibrée), F04 (total des débits différent du total des crédits)");
+    const report = (s.summary as FecSyncSummary).blocked![0];
+    expect(report.checks.find((c) => c.code === "F04")).toMatchObject({ status: "fail", gapCents: 10 });
+    expect(await listFecFiles(B)).toHaveLength(0);
+  });
+
+  it("200 000 lignes : lues, contrôlées et enregistrées en aperçu en moins de 30 secondes", async () => {
+    const t0 = Date.now();
+    const id = await importFecFiles(B, [{ filename: "000000000FEC20261231.txt", bytes: new TextEncoder().encode(largeFecText(200_000)) }], actor);
+    const ms = Date.now() - t0;
+    const s = (await sync.getSync(B, id))!;
+    expect(s.status).toBe("preview");
+    expect((s.summary as FecSyncSummary).exercises[0].lines).toBe(200_000);
+    console.info(`Import FEC 200 000 lignes : ${ms} ms`);
+    expect(ms).toBeLessThan(30_000);
+    const t1 = Date.now();
+    await sync.applySync(B, id, actor);
+    console.info(`Application FEC 200 000 lignes : ${Date.now() - t1} ms`);
+  }, 120_000);
 });

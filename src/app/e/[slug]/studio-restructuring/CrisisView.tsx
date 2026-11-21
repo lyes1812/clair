@@ -91,6 +91,7 @@ export function CrisisView(p: Props) {
     <FamilyTabs current="crisis" label="Vues du Studio Restructuring" testid="restructuring-tabs" tabs={VIEWS.map((view) => ({ key: view.id, label: view.label, href: tabHref(p, view.id) }))} />
     <Reading p={p} />
     <Filters p={p} />
+    {p.fecAlerts?.length ? <ul className="restructuring-notices" data-testid="crisis-fec-alerts">{p.fecAlerts.map((alert) => <li className="notice" key={alert}>{alert} <a href={`/e/${p.slug}/donnees/fec#controles`}>Rapport de contrôle</a></li>)}</ul> : null}
     {p.notices.length ? <ul className="restructuring-notices" data-testid="crisis-notices">{p.notices.map((notice) => <li className="notice" key={notice}>{notice}</li>)}</ul> : null}
     {position.kind === "nd" ? <section className="panel restructuring-section" data-testid="crisis-unavailable"><h2>Position non disponible</h2><p className="nd">n.d. — {position.reason}</p><a className="btn" href={`/e/${p.slug}/donnees`}>Ouvrir Données</a></section> : <>
       <dl className="facts ms-tiles four restructuring-tiles" data-testid="crisis-tiles">
