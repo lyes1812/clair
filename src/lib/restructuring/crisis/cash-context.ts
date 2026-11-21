@@ -1,3 +1,5 @@
+import { bankStart, type BankStart } from "@/lib/bank/ledger";
+import { readBankLedger } from "@/lib/bank/store";
 import { requireWorkspace } from "@/lib/workspace";
 import { buildCashPlan, buildScenarioPlan, emptyCashPlan, FLOW_CATEGORIES, MAX_AMOUNT_CENTS, openSupplierItems, type CashPlanSettings, type FlowCategoryId, type OpenItems, type PlanStart } from "./cashplan";
 import { readCrisis, type CrisisQuery } from "./context";
@@ -17,6 +19,13 @@ function prefillOf(query: CrisisQuery): Prefill | null {
   return { label, amountCents: cents, category };
 }
 
+/** Solde de départ retenu : saisi, sinon relevés bancaires appliqués, sinon FEC ; null si aucun n'est disponible. */
+export function chooseStart(saisi: CashPlanSettings["start"], bank: BankStart, fec: { date: string; cents: number } | null): PlanStart | null {
+  if (saisi) return { ...saisi, source: "saisi" };
+  if (bank.kind === "value") return { date: bank.date, cents: bank.cents, source: "releve" };
+  return fec ? { ...fec, source: "fec" } : null;
+}
+
 // Trésorerie à 13 semaines : le FEC n'est pas obligatoire. Avec un solde saisi et daté, le plan se calcule sans lui.
 export async function loadCashContext(slug: string, query: CrisisQuery) {
   const { workspace } = await requireWorkspace(slug);
@@ -33,8 +42,10 @@ export async function loadCashContext(slug: string, query: CrisisQuery) {
   const position = crisis.position;
   const fecStart = position.kind === "value" && position.cash.net.cents !== null && crisis.asOf ? { date: crisis.asOf, cents: position.cash.net.cents } : null;
   const fecReason = position.kind === "nd" ? position.reason : position.cash.net.reason ?? "Solde bancaire non calculable depuis le FEC.";
-  const start: PlanStart | null = settingsUnreadable ? null : settings.start ? { ...settings.start, source: "saisi" } : fecStart ? { ...fecStart, source: "fec" } : null;
-  const startReason = settingsUnreadable ? "Plan de trésorerie enregistré illisible." : `Aucun solde de départ : ${fecReason} Saisis un solde bancaire daté pour calculer le plan.`;
+  // Ordre de priorité du solde de départ : saisi, puis relevés bancaires appliqués (lot L2), puis FEC.
+  const bank = bankStart(await readBankLedger(workspace.id));
+  const start = settingsUnreadable ? null : chooseStart(settings.start, bank, fecStart);
+  const startReason = settingsUnreadable ? "Plan de trésorerie enregistré illisible." : `Aucun solde de départ : relevés bancaires : ${bank.kind === "nd" ? bank.reason : "n.d."} FEC : ${fecReason} Saisis un solde bancaire daté pour calculer le plan.`;
 
   // Aide à la saisie : dettes du lot 1 à la date d'arrêté du FEC. Montants proposés, dates jamais déduites.
   const toPlan: ToPlan[] = position.kind === "value"
@@ -52,7 +63,7 @@ export async function loadCashContext(slug: string, query: CrisisQuery) {
 
   const { source: _source, ...shown } = crisis;
   return {
-    ...shown, notices, settings, settingsUnreadable, fecStart, fecReason,
+    ...shown, notices, settings, settingsUnreadable, fecStart, fecReason, bankStart: bank,
     plan, scenarioPlan: scenario ? buildScenarioPlan(plan, settings, scenario) : null,
     toPlan, openItems, supplierNet, prefill: prefillOf(query),
   };

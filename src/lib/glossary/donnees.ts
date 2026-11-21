@@ -12,6 +12,7 @@ export const DONNEES_TERMS = {
   depotDsn: "donnees-depot-dsn",
   couvertureDsn: "donnees-couverture-dsn",
   depotFec: "donnees-depot-fec",
+  depotBanque: "donnees-depot-banque",
   extraits: "donnees-extraits",
   etapes: "donnees-etapes-pastilles",
   origine: "param-origine",
@@ -110,6 +111,18 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
       "Fichier des écritures comptables (article A47 A-1 du Livre des procédures fiscales), exporté depuis Pennylane ou tout autre logiciel comptable. Un fichier par exercice ; toutes les écritures sont conservées telles quelles, en centimes exacts. Les montants ne sont ni retraités ni interprétés.",
       "Format : 18 colonnes de la norme, séparées par une tabulation ou « | » ; 6 fichiers et 32 Mo par fichier au plus. Chaque fichier est lu, contrôlé (équilibre, dates, montants) et présenté en aperçu avant d'être appliqué. Un fichier déjà déposé est reconnu à son empreinte ; un FEC couvrant la même période que l'un déjà appliqué le remplace.",
       "Un exercice est « équilibré » quand son total débit égale son total crédit et que chacune de ses écritures l'est ; sinon le nombre d'écritures non équilibrées est indiqué.",
+    ].join("\n\n"),
+  },
+  {
+    id: DONNEES_TERMS.depotBanque,
+    term: "Dépôt de relevés bancaires",
+    family: FAMILY,
+    definition: [
+      "Relevés de compte exportés depuis la banque, en lecture seule : CAMT.053 (XML ISO 20022), OFX 1.x ou 2.x, ou CSV. Le format est reconnu par le contenu du fichier. CFONB 120 n'est pas lu. Seul l'euro est accepté ; 24 fichiers et 10 Mo par fichier au plus.",
+      "CSV : les colonnes (date, libellé, montant ou débit et crédit, solde) sont reconnues sur la ligne d'en-tête et affichées dans l'aperçu ; appliquer l'aperçu confirme ce profil. Un CSV ne porte pas l'IBAN : il est saisi au dépôt. Une ligne illisible au milieu des opérations refuse le fichier.",
+      "Dédoublonnage : chaque mouvement est identifié par le compte, la date d'opération, le montant, le libellé normalisé (majuscules, sans accents ni ponctuation) et son rang parmi les mouvements identiques du même jour. Deux relevés qui se chevauchent ne créent aucun doublon.",
+      "Continuité : pour chaque relevé, solde d'ouverture + mouvements = solde de clôture, au centime. Un écart est signalé avec son montant. Un OFX ne porte pas de solde d'ouverture et un CSV sans colonne de solde n'en porte aucun : la continuité est alors n.d. Un intervalle de plus de 5 jours ouvrés (lundi à vendredi, jours fériés non retirés) sans relevé est signalé, ainsi qu'un historique de moins de 6 mois par compte.",
+      "L'IBAN est conservé chiffré et affiché masqué (FR76 … 1234).",
     ].join("\n\n"),
   },
   {

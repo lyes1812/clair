@@ -1,5 +1,5 @@
 import "@/styles/donnees.css";
-import { ArrowDown, ArrowRight, BookOpen, Check, Cloud, Files, UsersRound } from "lucide-react";
+import { ArrowDown, ArrowRight, BookOpen, Check, Cloud, Files, Landmark, UsersRound } from "lucide-react";
 import { GlossaryLink } from "@/components/GlossaryLink";
 import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { DATA_ITEM, STUDIO_RH_ITEMS } from "@/lib/nav";
@@ -7,6 +7,9 @@ import { dateTimeFmt, PROVIDER_LABELS } from "@/lib/connectors/labels";
 import { activeSync, getConnection, lastSync, SYNC_STATUS_LABELS, type SyncStatus } from "@/lib/connectors/sync";
 import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
 import { fecCoverage, listFecFiles } from "@/lib/fec/import";
+import { listBankFiles } from "@/lib/bank/import";
+import { readBankLedger } from "@/lib/bank/store";
+import { formatDate } from "@/lib/dates";
 import { resolveSource, SOURCE_MODE_LABELS, type SourceDomain, type SourceMode, type SourceResolution } from "@/lib/sources";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
@@ -46,6 +49,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
     listDsnFiles(workspace.id), lastSync(workspace.id, "dsn"), dsnCoverage(workspace.id),
     listFecFiles(workspace.id), lastSync(workspace.id, "fec"), fecCoverage(workspace.id),
   ]);
+  const [bankFiles, bankLast, bankLedger] = await Promise.all([listBankFiles(workspace.id), lastSync(workspace.id, "bank"), readBankLedger(workspace.id)]);
   const complete = coverage.filter((c) => c.status === "complete").length;
   const [rhSource, accountingSource] = await Promise.all([resolveSource(workspace.id, "rh"), resolveSource(workspace.id, "accounting")]);
   const isAdmin = workspace.role === "admin";
@@ -234,6 +238,29 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
     </section>
   );
 
+  const bankCard = (
+    <section className="panel dn-card" data-testid="source-bank">
+      <div className="dn-card-head">
+        <span className="dn-source-icon"><Landmark size={21} strokeWidth={1.7} aria-hidden="true" /></span>
+        <div>
+          <h3>Relevés bancaires <span className="tag">Fichier</span></h3>
+        </div>
+      </div>
+      <p className="desc dn-card-summary">Relevés CAMT.053, OFX ou CSV : mouvements et soldes par compte, sans doublon entre relevés qui se chevauchent.</p>
+      <dl className="facts dn-facts">
+        <div><dt>Fichiers conservés</dt><dd data-testid="bank-files-count">{bankFiles.length === 0 ? "aucun" : bankFiles.length}</dd></div>
+        <div><dt>Dernier dépôt</dt><dd>{lastDeposit(bankLast)}</dd></div>
+        <div>
+          <dt>Comptes</dt>
+          <dd data-testid="bank-coverage-summary">
+            {bankLedger.length === 0 ? <span className="nd">n.d. — aucun relevé appliqué</span> : bankLedger.map((a) => `${a.masked} : ${formatDate(a.from)} → ${formatDate(a.to)}`).join(" ; ")}
+          </dd>
+        </div>
+      </dl>
+      {cardFoot(primaryAction("files", { connected: true, isAdmin, canWrite }), `/e/${slug}/donnees/bank`, "les relevés bancaires")}
+    </section>
+  );
+
   return (
     <>
       <div className="dn-overview">
@@ -245,6 +272,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
         <nav className="dn-quick-nav" aria-label="Accès rapide aux sources">
           <a href="#domaine-rh"><UsersRound size={16} aria-hidden="true" />Ressources humaines<ArrowDown size={14} aria-hidden="true" /></a>
           <a href="#domaine-comptabilite"><BookOpen size={16} aria-hidden="true" />Comptabilité<ArrowDown size={14} aria-hidden="true" /></a>
+          <a href="#domaine-banque"><Landmark size={16} aria-hidden="true" />Banque<ArrowDown size={14} aria-hidden="true" /></a>
         </nav>
       </div>
 
@@ -269,6 +297,13 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
           {apiCard(byId.pennylane, accountingSource.chosen === "pennylane")}
           {fecCard}
         </div>
+      </section>
+
+      <section className="dn-domain" id="domaine-banque" aria-labelledby="dn-bank-title">
+        <div className="dn-section-head">
+          <h2 id="dn-bank-title" className="group-title">Banque</h2>
+        </div>
+        <div className="dn-cards">{bankCard}</div>
       </section>
 
       <nav className="dn-studio" aria-label="Aller au Studio RH">

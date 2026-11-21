@@ -101,6 +101,11 @@ const UPLOAD_HELP = {
     limits: "18 colonnes de la norme, tabulation ou « | » · 6 fichiers et 32 Mo par fichier au plus.",
     accept: ".txt,.csv,.fec,text/plain",
   },
+  bank: {
+    label: "Relevés bancaires",
+    limits: "CAMT.053 (XML), OFX ou CSV, en euros · 24 fichiers et 10 Mo par fichier au plus. CFONB 120 non lu.",
+    accept: ".xml,.ofx,.qfx,.csv,.txt,text/plain,text/csv,application/xml,text/xml",
+  },
 } as const;
 
 const SHOWN_FILES = 8;
@@ -127,6 +132,12 @@ export function FileUploadForm({ slug, kind }: { slug: string; kind: keyof typeo
             onChange={(e) => setChosen(Array.from(e.target.files ?? []).map((f) => ({ name: f.name, size: f.size })))}
           />
         </div>
+        {kind === "bank" && (
+          <div className="field-row">
+            <label htmlFor="bank-iban">IBAN du compte (CSV seulement)</label>
+            <input className="input" id="bank-iban" name="iban" type="text" inputMode="text" autoComplete="off" spellCheck={false} placeholder="FR76 …" maxLength={42} />
+          </div>
+        )}
         <button className="btn primary" type="submit" disabled={pending}>{pending ? "Lecture…" : "Déposer et prévisualiser"}</button>
       </div>
       <div className="dn-chosen" aria-live="polite">

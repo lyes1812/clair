@@ -135,7 +135,7 @@ function planDetail(plan: FinancePlan): string {
 }
 
 function sourceLabel(ctx: FinanceExportContext): string {
-  const names = { pennylane: "Pennylane", fec: "Upload FEC", payfit: "PayFit", dsn: "Upload DSN" };
+  const names = { pennylane: "Pennylane", fec: "Upload FEC", payfit: "PayFit", dsn: "Upload DSN", bank: "Relevés bancaires" };
   return ctx.source.chosen ? names[ctx.source.chosen] : "Aucune source retenue";
 }
 
