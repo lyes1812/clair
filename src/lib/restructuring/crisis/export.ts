@@ -1,7 +1,7 @@
 import { formatDate } from "@/lib/dates";
 import type { ColumnSpec, ExportCell, SheetSpec, WorkbookSpec } from "@/lib/export/xlsx";
 import type { CashContext } from "./cash-context";
-import { DIRECTIONS, FLOW_CATEGORIES, RECURRENCES, WEEK_COUNT, type PlanValue, type ScenarioPlan } from "./cashplan";
+import { DIRECTIONS, FLOW_CATEGORIES, RECURRENCES, START_SOURCE_LABELS, WEEK_COUNT, type PlanValue, type ScenarioPlan } from "./cashplan";
 import { DEBT_NATURES, RANKS, type Amount, type CrisisItem, type CrisisPosition } from "./model";
 
 // Cap 13, lot 3 — classeur Excel du dossier de crise : ce que montrent les deux vues, au centime, sans recalcul.
@@ -34,7 +34,7 @@ function summary(ctx: CrisisExportContext): SheetSpec {
   if (plan.kind === "value") {
     const low = plan.weeks[plan.lowPoint.week - 1];
     rows.push(
-      ["Solde de départ du plan", plan.start.cents, `${plan.start.source === "saisi" ? "Solde bancaire saisi" : "Soldes bancaires nets du FEC"} · au ${formatDate(plan.start.date)}`],
+      ["Solde de départ du plan", plan.start.cents, `${START_SOURCE_LABELS[plan.start.source]} · au ${formatDate(plan.start.date)}`],
       ["Découvert autorisé", ctx.settings.overdraftCents ?? { nd: "Non saisi : la rupture se mesure par rapport à zéro." }, ctx.settings.overdraftCents === null ? "Non saisi : la rupture se mesure par rapport à zéro." : "Saisi dans Clair"],
       ["Point bas du plan de base", plan.lowPoint.cents, `Fin de semaine ${plan.lowPoint.week} · ${formatDate(low.to)}`],
       ["Solde de fin de semaine au moment de la rupture", plan.rupture ? plan.rupture.cents : "", plan.rupture ? `Rupture en semaine ${plan.rupture.week}, du ${formatDate(plan.rupture.from)} au ${formatDate(plan.rupture.to)}` : `Aucune rupture sur ${WEEK_COUNT} semaines, avec les flux saisis`],
@@ -171,7 +171,7 @@ export function crisisWorkbook(ctx: CrisisExportContext): WorkbookSpec | null {
     filters: [
       { label: "Exercice FEC lu", value: ctx.exercise ? `${formatDate(ctx.exercise.firstDate)} → ${formatDate(ctx.exercise.lastDate)}` : "Aucun FEC appliqué" },
       { label: "Date d’arrêté du FEC", value: ctx.asOf ? formatDate(ctx.asOf) : "n.d." },
-      { label: "Départ du plan", value: plan ? `${formatDate(plan.start.date)} (${plan.start.source === "saisi" ? "solde saisi" : "solde du FEC"})` : "n.d." },
+      { label: "Départ du plan", value: plan ? `${formatDate(plan.start.date)} (${plan.start.source === "saisi" ? "solde saisi" : plan.start.source === "releve" ? "soldes des relevés bancaires" : "solde du FEC"})` : "n.d." },
       { label: "Scénario", value: sp ? sp.scenario.name : "Plan de base seul" },
       { label: "Devise", value: "EUR, centimes conservés" },
     ],
@@ -183,7 +183,7 @@ export function crisisWorkbook(ctx: CrisisExportContext): WorkbookSpec | null {
     ],
     sources: [
       { label: "FEC appliqué dans Données", detail: ctx.exercise ? `${ctx.exercise.filename} ; exercice du ${formatDate(ctx.exercise.firstDate)} au ${formatDate(ctx.exercise.lastDate)} ; un seul exercice lu.` : "Aucun FEC appliqué : trésorerie et dettes n.d.", syncedAt: null, status: ctx.exercise ? "Lecture appliquée" : "Absent" },
-      { label: "Plan de trésorerie saisi dans Clair", detail: `${ctx.settings.flows.length} ligne(s) de flux, ${ctx.settings.scenarios.length} scénario(s), révision ${ctx.settings.revision}. ${ctx.settings.start ? "Solde de départ saisi." : "Solde de départ lu dans le FEC."}`, syncedAt: null, status: plan ? "Calculé à la demande" : "Non calculable" },
+      { label: "Plan de trésorerie saisi dans Clair", detail: `${ctx.settings.flows.length} ligne(s) de flux, ${ctx.settings.scenarios.length} scénario(s), révision ${ctx.settings.revision}. ${ctx.settings.start ? "Solde de départ saisi." : plan?.start.source === "releve" ? "Solde de départ lu dans les relevés bancaires." : "Solde de départ lu dans le FEC."}`, syncedAt: null, status: plan ? "Calculé à la demande" : "Non calculable" },
     ],
     definitions: DEFINITIONS,
   };

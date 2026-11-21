@@ -163,7 +163,7 @@ export function startFromForm(form: FormData): { start: CashStart | null; overdr
   let start: CashStart | null = null;
   if (date || amount) {
     const cents = toCents(amount);
-    if (!plausible(date) || !isBalance(cents)) throw new Error("Solde saisi : une date valide et un montant en euros sont requis ensemble. Laisse les deux vides pour revenir au solde du FEC.");
+    if (!plausible(date) || !isBalance(cents)) throw new Error("Solde saisi : une date valide et un montant en euros sont requis ensemble. Laisse les deux vides pour revenir au solde des relevés bancaires ou du FEC.");
     start = { date, cents };
   }
   const overdraftText = text(form, "overdraft");
@@ -234,7 +234,8 @@ export function occurrences(flow: CashFlow, after: string, upTo: string): string
   return out;
 }
 
-export type PlanStart = CashStart & { source: "fec" | "saisi" };
+export type PlanStart = CashStart & { source: "fec" | "releve" | "saisi" };
+export const START_SOURCE_LABELS: Record<PlanStart["source"], string> = { saisi: "Solde bancaire saisi", releve: "Soldes de clôture des relevés bancaires", fec: "Soldes bancaires nets du FEC" };
 /** `measureId` : le montant vient d'une mesure de scénario, appliquée à la ligne `flowId` quand elle en vise une. */
 export type Contribution = { flowId: string | null; measureId: string | null; label: string; date: string; cents: number };
 export type RowCategory = FlowCategoryId | "exceptional";

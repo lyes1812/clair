@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), coverage: vi.fn(), lines: vi.fn(), setting: vi.fn(), set: vi.fn(), revalidate: vi.fn(), plan: vi.fn(), update: vi.fn(), suppliers: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), coverage: vi.fn(), lines: vi.fn(), setting: vi.fn(), set: vi.fn(), revalidate: vi.fn(), plan: vi.fn(), update: vi.fn(), suppliers: vi.fn(), bank: vi.fn() }));
 const { CashPlanError } = vi.hoisted(() => ({ CashPlanError: class CashPlanError extends Error {} }));
 vi.mock("@/lib/workspace", () => ({ requireWorkspace: mocks.auth }));
 vi.mock("@/lib/fec/import", () => ({ fecCoverage: mocks.coverage }));
 vi.mock("@/lib/restructuring/crisis/store", () => ({ readCrisisLines: mocks.lines, getCashPlan: mocks.plan, updateCashPlan: mocks.update, readSupplierLines: mocks.suppliers, CashPlanError }));
+vi.mock("@/lib/bank/store", () => ({ readBankLedger: mocks.bank }));
 vi.mock("@/lib/settings", () => ({ getSetting: mocks.setting, setSetting: mocks.set }));
 vi.mock("@/lib/budget/store", () => ({ getScenario: vi.fn(), applyChanges: vi.fn() }));
 vi.mock("@/lib/events", () => ({ recordEvent: vi.fn() }));
@@ -26,6 +27,7 @@ beforeEach(() => {
   mocks.setting.mockImplementation(async (_ws: string, _key: string, parse: (v: unknown) => unknown) => parse({ staff: "superprivilege" }));
   mocks.plan.mockResolvedValue(emptyCashPlan());
   mocks.suppliers.mockResolvedValue([]);
+  mocks.bank.mockResolvedValue([]);
   mocks.update.mockImplementation(async (_ws: string, _actor: string, change: (c: CashPlanSettings) => CashPlanSettings) => change(emptyCashPlan()));
 });
 
@@ -110,6 +112,25 @@ describe("Cap 13 : trésorerie à 13 semaines, solde de départ et accès", () =
     expect(mocks.suppliers).not.toHaveBeenCalled(); expect(empty.openItems.kind).toBe("nd");
     mocks.plan.mockResolvedValue({ ...emptyCashPlan(), start: { date: "2026-10-05", cents: 5_000 } });
     expect((await loadCashContext("fictif", {})).plan.kind).toBe("value");
+  });
+  it("relevés bancaires appliqués : leur solde remplace celui du FEC ; un solde saisi les remplace tous deux", async () => {
+    const statement = (accountKey: string, to: string, cents: number) => ({ accountKey, filename: "r.xml", format: "camt053", from: "2026-09-01", to, opening: null, closing: { date: to, cents }, movementCount: 0, netCents: 0, continuity: { kind: "ok" } });
+    const account = (accountKey: string, to: string, cents: number) => ({ accountKey, masked: `FR76 … ${accountKey}`, identifierKind: "iban", bank: null, movements: [], statements: [statement(accountKey, to, cents)], from: "2026-09-01", to, lastClosing: { date: to, cents }, gaps: [], historyOk: false, duplicates: 0, warnings: [] });
+    // Cas de référence : 8 000,00 € au 10/10 et 1 500,25 € au 09/10 → 9 500,25 € au 10/10.
+    mocks.bank.mockResolvedValue([account("K1", "2026-10-10", 800_000), account("K2", "2026-10-09", 150_025)]);
+    const ctx = await loadCashContext("fictif", {});
+    expect(ctx.plan.kind === "value" && ctx.plan.start).toEqual({ date: "2026-10-10", cents: 950_025, source: "releve" });
+    expect(ctx.bankStart).toMatchObject({ kind: "value", cents: 950_025 });
+    expect(ctx.fecStart).toEqual({ date: "2026-09-30", cents: 1_000 });
+    mocks.plan.mockResolvedValue({ ...emptyCashPlan(), start: { date: "2026-10-12", cents: 7 } });
+    expect((await loadCashContext("fictif", {})).plan).toMatchObject({ start: { date: "2026-10-12", cents: 7, source: "saisi" } });
+  });
+  it("relevé trop ancien pour un compte : solde des relevés n.d., le FEC reste utilisé", async () => {
+    const st = (accountKey: string, to: string) => ({ accountKey, masked: accountKey, identifierKind: "iban", bank: null, movements: [], statements: [{ accountKey, filename: "r", format: "ofx", from: "2026-09-01", to, opening: null, closing: { date: to, cents: 1 }, movementCount: 0, netCents: 0, continuity: { kind: "nd", reason: "x" } }], from: "2026-09-01", to, lastClosing: { date: to, cents: 1 }, gaps: [], historyOk: false, duplicates: 0, warnings: [] });
+    mocks.bank.mockResolvedValue([st("K1", "2026-10-10"), st("K2", "2026-10-01")]);
+    const ctx = await loadCashContext("fictif", {});
+    expect(ctx.bankStart).toMatchObject({ kind: "nd", reason: expect.stringContaining("Saisis le solde du jour") });
+    expect(ctx.plan.kind === "value" && ctx.plan.start.source).toBe("fec");
   });
   it("un plan stocké illisible n’est ni affiché ni remplacé", async () => {
     mocks.plan.mockRejectedValue(new CashPlanError("illisible"));

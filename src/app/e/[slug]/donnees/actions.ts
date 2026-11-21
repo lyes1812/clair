@@ -10,6 +10,9 @@ import { safeFilename } from "@/lib/connectors/files";
 import { importDsnFiles } from "@/lib/dsn/import";
 import { DSN_MAX_BYTES, DsnError } from "@/lib/dsn/parser";
 import { importFecFiles } from "@/lib/fec/import";
+import { importBankFiles } from "@/lib/bank/import";
+import { BankError } from "@/lib/bank/model";
+import { BANK_MAX_BYTES, BANK_MAX_FILES } from "@/lib/bank/parser";
 import { ensureRhBuild } from "@/lib/rh/referential/store";
 import { FEC_MAX_BYTES, FecError } from "@/lib/fec/parser";
 import { chooseSourceMode, DOMAINS, isSourceMode, type SourceDomain } from "@/lib/sources";
@@ -109,6 +112,12 @@ export async function decideSync(slug: string, syncId: string, decision: "apply"
 const UPLOAD_KINDS = {
   dsn: { maxFiles: 24, maxBytes: DSN_MAX_BYTES, maxLabel: "4 Mo", run: importDsnFiles, isError: (e: unknown) => e instanceof DsnError },
   fec: { maxFiles: 6, maxBytes: FEC_MAX_BYTES, maxLabel: "32 Mo", run: importFecFiles, isError: (e: unknown) => e instanceof FecError },
+  // Relevés : l'IBAN saisi n'est utilisé que pour les CSV, qui ne le portent pas.
+  bank: {
+    maxFiles: BANK_MAX_FILES, maxBytes: BANK_MAX_BYTES, maxLabel: "10 Mo",
+    run: (workspaceId: string, uploads: { filename: string; bytes: Uint8Array }[], actor: string, form: FormData) => importBankFiles(workspaceId, uploads, actor, { csvIban: String(form.get("iban") ?? "") }),
+    isError: (e: unknown) => e instanceof BankError,
+  },
 } as const;
 
 export async function uploadFiles(slug: string, kind: keyof typeof UPLOAD_KINDS, _prev: FormState, formData: FormData): Promise<FormState> {
@@ -125,7 +134,7 @@ export async function uploadFiles(slug: string, kind: keyof typeof UPLOAD_KINDS,
   }
   let id: string;
   try {
-    id = await rules.run(workspace.id, uploads, session.user.id);
+    id = await rules.run(workspace.id, uploads, session.user.id, formData);
   } catch (e) {
     return { error: rules.isError(e) ? (e as Error).message : "Dépôt impossible. Réessayez." };
   }

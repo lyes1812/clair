@@ -40,8 +40,8 @@ const planHref = (p: Props, label: string, cents: number, category: FlowCategory
 
 function Reading({ p }: { p: Props }) {
   const start = p.plan.kind === "value" ? p.plan.start : null;
-  return <div className="ms-read restructuring-read"><p className="source-badge"><span>Source :</span><strong>{start?.source === "saisi" ? "Solde bancaire saisi" : "FEC appliqué dans Données"} et flux saisis dans Clair</strong>{start ? <span>— départ au {formatDate(start.date)}</span> : null}</p><ReadDetails>
-    <p><strong>Solde de départ</strong> : soldes nets des comptes de banque et de caisse à la date d’arrêté du FEC (51 hors 519, 53, 54, découverts compris), ou le solde bancaire que tu saisis avec sa date. Un solde saisi remplace celui du FEC.</p>
+  return <div className="ms-read restructuring-read"><p className="source-badge"><span>Source :</span><strong>{start?.source === "saisi" ? "Solde bancaire saisi" : start?.source === "releve" ? "Relevés bancaires appliqués dans Données" : "FEC appliqué dans Données"} et flux saisis dans Clair</strong>{start ? <span>— départ au {formatDate(start.date)}</span> : null}</p><ReadDetails>
+    <p><strong>Solde de départ</strong> : le solde bancaire que tu saisis avec sa date ; à défaut, la somme des derniers soldes de clôture des relevés bancaires appliqués dans Données, à la date la plus récente (n.d. si un compte n’a pas de solde à moins de 3 jours de cette date) ; à défaut, les soldes nets des comptes de banque et de caisse à la date d’arrêté du FEC (51 hors 519, 53, 54, découverts compris).</p>
     <p><strong>Semaines</strong> : {WEEK_COUNT} semaines calendaires, du lundi au dimanche ; la première est celle de la date de départ. Seuls les flux datés après la date de départ comptent : le solde de départ contient déjà les mouvements antérieurs.</p>
     <p><strong>Flux</strong> : chaque montant est une ligne saisie dans Clair, avec sa date. Un flux mensuel revient le même jour du mois, ramené au dernier jour quand le mois est plus court. Clair ne déduit aucune échéance du FEC.</p>
     <p><strong>Rupture</strong> : première semaine dont le solde de fin passe sous le seuil. Le seuil est le découvert autorisé saisi ; s’il n’est pas saisi, c’est zéro. Le solde est lu en fin de semaine : un creux en cours de semaine n’apparaît pas.</p>
@@ -63,11 +63,12 @@ function Filters({ p }: { p: Props }) {
 
 function Start({ p }: { p: Props }) {
   const s = p.settings;
-  return <section className="panel restructuring-section" data-testid="cash-start"><PanelHead title="Solde de départ et découvert autorisé" desc="Un solde saisi et daté remplace le solde du FEC ; aucun découvert n’est supposé" />
-    <p className="desc" data-testid="cash-start-fec">Solde du FEC{p.fecStart ? <> au {formatDate(p.fecStart.date)} : <strong><Money cents={p.fecStart.cents} signed /></strong>{s.start ? " (non utilisé : un solde saisi le remplace)" : ""}</> : <> : <span className="nd">n.d.</span> — {p.fecReason}</>}</p>
+  return <section className="panel restructuring-section" data-testid="cash-start"><PanelHead title="Solde de départ et découvert autorisé" desc="Un solde saisi et daté remplace celui des relevés, qui remplace celui du FEC ; aucun découvert n’est supposé" />
+    <p className="desc" data-testid="cash-start-bank">Soldes des relevés bancaires{p.bankStart.kind === "value" ? <> au {formatDate(p.bankStart.date)} : <strong><Money cents={p.bankStart.cents} signed /></strong> ({p.bankStart.accounts.map((a) => `${a.masked} au ${formatDate(a.date)}`).join(" ; ")}){s.start ? " (non utilisé : un solde saisi le remplace)" : ""}</> : <> : <span className="nd">n.d.</span> — {p.bankStart.reason}</>}</p>
+    <p className="desc" data-testid="cash-start-fec">Solde du FEC{p.fecStart ? <> au {formatDate(p.fecStart.date)} : <strong><Money cents={p.fecStart.cents} signed /></strong>{s.start ? " (non utilisé : un solde saisi le remplace)" : p.bankStart.kind === "value" ? " (non utilisé : le solde des relevés le remplace)" : ""}</> : <> : <span className="nd">n.d.</span> — {p.fecReason}</>}</p>
     {p.saveStart ? <ActionForm action={p.saveStart} submit="Enregistrer" testid="cash-start-form" className="form">
       <div className="filters crisis-rank-fields">
-        <Text key={`d-${s.start?.date ?? ""}`} id="cash-start-date" name="startDate" label="Date du solde saisi" type="date" defaultValue={s.start?.date ?? ""} hint="Vide = solde du FEC." />
+        <Text key={`d-${s.start?.date ?? ""}`} id="cash-start-date" name="startDate" label="Date du solde saisi" type="date" defaultValue={s.start?.date ?? ""} hint="Vide = solde des relevés, sinon du FEC." />
         <Text key={`a-${s.start?.cents ?? ""}`} id="cash-start-amount" name="startAmount" label="Solde bancaire saisi (€)" inputMode="decimal" defaultValue={s.start ? decText(s.start.cents) : ""} hint="Négatif si le compte est à découvert." />
         <Text key={`o-${s.overdraftCents ?? ""}`} id="cash-overdraft" name="overdraft" label="Découvert autorisé (€)" inputMode="decimal" defaultValue={decText(s.overdraftCents)} hint="Vide = non saisi : la rupture se mesure par rapport à zéro." />
       </div>
@@ -78,7 +79,7 @@ function Start({ p }: { p: Props }) {
 function Tiles({ plan }: { plan: Value }) {
   const low = plan.weeks[plan.lowPoint.week - 1];
   return <dl className="facts ms-tiles four restructuring-tiles" data-testid="cash-tiles">
-    <Tile testid="cash-tile-start" main label="Solde de départ" value={<Money cents={plan.start.cents} signed />} lead={`${plan.start.source === "saisi" ? "Saisi" : "FEC"} · au ${formatDate(plan.start.date)}`} />
+    <Tile testid="cash-tile-start" main label="Solde de départ" value={<Money cents={plan.start.cents} signed />} lead={`${plan.start.source === "saisi" ? "Saisi" : plan.start.source === "releve" ? "Relevés" : "FEC"} · au ${formatDate(plan.start.date)}`} />
     <Tile testid="cash-tile-low" label="Point bas" value={<Money cents={plan.lowPoint.cents} signed />} lead={`Fin de semaine ${plan.lowPoint.week} · ${formatDate(low.to)}`} />
     <Tile testid="cash-tile-rupture" label="Rupture" value={plan.rupture ? `Semaine ${plan.rupture.week}` : "Aucune"} lead={plan.rupture ? `Du ${formatDate(plan.rupture.from)} au ${formatDate(plan.rupture.to)}` : `Sur ${WEEK_COUNT} semaines, avec les flux saisis`} />
     <Tile testid="cash-tile-end" label={`Solde fin de semaine ${WEEK_COUNT}`} value={<Money cents={plan.weeks[WEEK_COUNT - 1].closing} signed />} lead={`Au ${formatDate(plan.horizonEnd)}`} />

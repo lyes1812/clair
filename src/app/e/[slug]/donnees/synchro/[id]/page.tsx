@@ -11,6 +11,9 @@ import { dsnCoverage, type DsnSyncSummary } from "@/lib/dsn/import";
 import { fecCoverage, type FecSyncSummary } from "@/lib/fec/import";
 import { CoverageTable } from "../../dsn/CoverageTable";
 import { ExercisesTable } from "../../fec/ExercisesTable";
+import { AccountsTable, StatementsTable } from "../../bank/BankTables";
+import type { BankSyncSummary } from "@/lib/bank/import";
+import { readBankLedger } from "@/lib/bank/store";
 import { formatEuros } from "@/lib/money";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
@@ -19,7 +22,7 @@ import { PageHead, Pill, syncTone } from "../../ui";
 
 export const dynamic = "force-dynamic";
 
-const ORDER = ["company", "accounts", "collaborators", "contracts", "worked_time", "absences", "payroll_status", "ledger_lines"];
+const ORDER = ["company", "accounts", "collaborators", "contracts", "worked_time", "absences", "payroll_status", "ledger_lines", "bank_accounts", "bank_statements", "bank_movements"];
 const nd = (v: unknown) => (v === null || v === undefined || v === "" ? "n.d." : String(v));
 
 export default async function SyncPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
@@ -45,7 +48,9 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
   const statusLabel = additive && status === "applied" ? "Appliquée" : SYNC_STATUS_LABELS[status];
   const dsn = sync.provider === "dsn" ? (summary as DsnSyncSummary) : null;
   const fec = sync.provider === "fec" ? (summary as FecSyncSummary) : null;
-  const uploaded = dsn ?? fec;
+  const bank = sync.provider === "bank" ? (summary as BankSyncSummary) : null;
+  const uploaded = dsn ?? fec ?? bank;
+  const bankLedger = bank && (status === "preview" || status === "applied") ? await readBankLedger(workspace.id, status === "preview" ? id : undefined) : null;
   const coverage = dsn && (status === "preview" || status === "applied") ? await dsnCoverage(workspace.id, status === "preview" ? id : undefined) : null;
   const exercises = fec && (status === "preview" || status === "applied") ? await fecCoverage(workspace.id, status === "preview" ? id : undefined) : null;
   const providerLabel = PROVIDER_LABELS[sync.provider as keyof typeof PROVIDER_LABELS];
@@ -116,6 +121,40 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
               <ExercisesTable rows={fec.exercises.map((e) => ({ ...e, syncId: id, pending: status === "preview" }))} showWarnings />
             </>
           )}
+          {bank && bank.statements.length > 0 && (
+            <>
+              <h3>Relevés lus</h3>
+              <StatementsTable rows={bank.statements} />
+              <p className="desc" data-testid="bank-duplicates">
+                {bank.duplicates.known + bank.duplicates.inDeposit === 0
+                  ? "Aucun mouvement déjà connu : pas de chevauchement avec les relevés appliqués."
+                  : `${bank.duplicates.known} mouvement(s) déjà présent(s) dans un relevé appliqué et ${bank.duplicates.inDeposit} présent(s) deux fois dans ce dépôt : comptés une seule fois.`}
+              </p>
+            </>
+          )}
+          {bank && bank.profiles.length > 0 && (
+            <>
+              <h3>Profil de colonnes CSV reconnu</h3>
+              <p className="desc">Appliquer ce dépôt confirme le profil. S'il est faux, abandonne l'aperçu et corrige l'export de la banque.</p>
+              <div className="table-wrap scroll">
+                <table className="data-table" data-testid="bank-csv-profiles">
+                  <thead><tr><th scope="col">Fichier</th><th scope="col">En-tête (ligne)</th><th scope="col">Date</th><th scope="col">Libellé</th><th scope="col">Montant</th><th scope="col">Solde</th><th scope="col">Ordre</th></tr></thead>
+                  <tbody>
+                    {bank.profiles.map(({ filename, profile: p }) => {
+                      const h = (i: number | null) => (i === null ? "—" : p.headers[i] ?? "n.d.");
+                      return (
+                        <tr key={filename}>
+                          <td>{filename}</td><td>{p.headerLine}</td><td>{h(p.columns.date)}</td><td>{h(p.columns.label)}</td>
+                          <td>{p.columns.amount !== null ? h(p.columns.amount) : `${h(p.columns.debit)} / ${h(p.columns.credit)}`}</td>
+                          <td>{h(p.columns.balance)}</td><td>{p.order === "reverse" ? "plus récent en premier" : "chronologique"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
           {dsn && dsn.declarations.length > 0 && (
             <>
               <h3>Déclarations lues</h3>
@@ -150,6 +189,13 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
         <section className="panel">
           <h2>{status === "preview" ? "Couverture après application" : "Couverture"}</h2>
           <CoverageTable rows={coverage} />
+        </section>
+      )}
+
+      {bankLedger && (
+        <section className="panel">
+          <h2>{status === "preview" ? "Comptes après application" : "Comptes"}</h2>
+          <AccountsTable ledger={bankLedger} testid="bank-accounts-after" />
         </section>
       )}
 

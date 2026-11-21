@@ -15,6 +15,7 @@ export type EventKind =
   | "source.discarded"
   | "dsn.uploaded"
   | "fec.uploaded"
+  | "bank.uploaded"
   | "setting.changed"
   | "rh.rebuilt"
   | "rh.rebuild_failed"
