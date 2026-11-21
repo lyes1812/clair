@@ -71,12 +71,11 @@ describe("contrôles FEC", () => {
     const dot = parseFec(rebuild((r) => { r[1] = r[1].replace(/\|(\d+),(\d\d)\|/, "|$1.$2|"); return r; }));
     expect(dot.warnings.join(" ")).toContain("Séparateur décimal");
   });
-  it("écriture non équilibrée : avertissement, fichier conservé", () => {
+  it("écriture non équilibrée : lue et chiffrée par le lecteur (le refus relève des contrôles F03 et F04)", () => {
     const r = parseFec(rebuild((r) => { r[1] = r[1].replace(/\|(\d+),(\d\d)\|0,00\|/, (_, a, b) => `|${Number(a) + 1},${b}|0,00|`); return r; }));
     expect(r.balanced).toBe(false);
     expect(r.unbalancedEntries).toBe(1);
-    expect(r.warnings.join(" ")).toContain("non équilibrée");
-    expect(r.warnings.join(" ")).toContain("Total des débits");
+    expect(r.unbalancedSample).toEqual([{ journal: "PAI", number: "1", gapCents: 100 }]);
   });
   it("compte sans trois chiffres initiaux : refus", () => {
     expect(() => parseFec(rebuild((r) => { r[1] = r[1].replace("|641100|", "|6A1100|"); return r; }))).toThrow(/CompteNum/);

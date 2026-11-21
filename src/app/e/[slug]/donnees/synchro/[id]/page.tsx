@@ -11,6 +11,8 @@ import { dsnCoverage, type DsnSyncSummary } from "@/lib/dsn/import";
 import { fecCoverage, type FecSyncSummary } from "@/lib/fec/import";
 import { CoverageTable } from "../../dsn/CoverageTable";
 import { ExercisesTable } from "../../fec/ExercisesTable";
+import { ControlReport } from "../../fec/ControlReport";
+import { exerciseReports } from "@/lib/fec/report";
 import { AccountsTable, StatementsTable } from "../../bank/BankTables";
 import type { BankSyncSummary } from "@/lib/bank/import";
 import { readBankLedger } from "@/lib/bank/store";
@@ -53,6 +55,7 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
   const bankLedger = bank && (status === "preview" || status === "applied") ? await readBankLedger(workspace.id, status === "preview" ? id : undefined) : null;
   const coverage = dsn && (status === "preview" || status === "applied") ? await dsnCoverage(workspace.id, status === "preview" ? id : undefined) : null;
   const exercises = fec && (status === "preview" || status === "applied") ? await fecCoverage(workspace.id, status === "preview" ? id : undefined) : null;
+  const fecReports = fec && (status === "preview" || status === "applied") ? await exerciseReports(workspace.id, fec.exercises) : [];
   const providerLabel = PROVIDER_LABELS[sync.provider as keyof typeof PROVIDER_LABELS];
 
   return (
@@ -119,8 +122,14 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
             <>
               <h3>Exercices lus</h3>
               <ExercisesTable rows={fec.exercises.map((e) => ({ ...e, syncId: id, pending: status === "preview" }))} showWarnings />
+              {fecReports.map((r) => (r.checks
+                ? <ControlReport key={r.filename} title={`Rapport de contrôle · ${r.filename}`} checks={r.checks} stored={r.stored} />
+                : <p key={r.filename} className="notice">{r.filename} : {r.reason}</p>))}
             </>
           )}
+          {fec?.blocked?.map((b) => (
+            <ControlReport key={b.filename} title={`Rapport de contrôle · ${b.filename} (refusé)`} checks={b.checks} stored={{ ...b, suppliers: null }} testid="fec-blocked-report" />
+          ))}
           {bank && bank.statements.length > 0 && (
             <>
               <h3>Relevés lus</h3>

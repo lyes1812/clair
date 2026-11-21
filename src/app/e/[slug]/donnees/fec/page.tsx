@@ -9,6 +9,9 @@ import { requireWorkspace } from "@/lib/workspace";
 import { FileUploadForm } from "../Forms";
 import { Empty, PageHead, Pill, sizeFmt, syncTone } from "../ui";
 import { ExercisesTable } from "./ExercisesTable";
+import { ControlReport } from "./ControlReport";
+import { exerciseReports } from "@/lib/fec/report";
+import { formatDate, todayParis } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +21,8 @@ export default async function FecPage({ params }: { params: Promise<{ slug: stri
   const { slug } = await params;
   const { workspace } = await requireWorkspace(slug);
   const [files, syncs, exercises] = await Promise.all([listFecFiles(workspace.id), listSyncs(workspace.id, "fec"), fecCoverage(workspace.id)]);
+  const today = todayParis();
+  const reports = await exerciseReports(workspace.id, exercises, today);
 
   return (
     <>
@@ -37,6 +42,14 @@ export default async function FecPage({ params }: { params: Promise<{ slug: stri
       <section className="panel" id="exercices">
         <h2>Exercices en vigueur</h2>
         <ExercisesTable rows={exercises} />
+      </section>
+
+      <section className="panel" id="controles">
+        <h2>Rapport de contrôle</h2>
+        <p className="desc">Contrôles F01 à F09 de chaque exercice en vigueur. F06 est mesuré au {formatDate(today)} ; F08 compare aux relevés bancaires appliqués.<GlossaryLink slug={slug} term={DONNEES_TERMS.controlesFec} /></p>
+        {reports.length === 0 ? <Empty>n.d. — aucun FEC appliqué.</Empty> : reports.map((r) => (r.checks
+          ? <ControlReport key={r.filename} title={r.filename} checks={r.checks} stored={r.stored} />
+          : <p key={r.filename} className="notice" data-testid="fec-control-report-nd">{r.filename} : {r.reason}</p>))}
       </section>
 
       <section className="panel" id="fichiers">

@@ -12,6 +12,7 @@ export const DONNEES_TERMS = {
   depotDsn: "donnees-depot-dsn",
   couvertureDsn: "donnees-couverture-dsn",
   depotFec: "donnees-depot-fec",
+  controlesFec: "donnees-controles-fec",
   depotBanque: "donnees-depot-banque",
   extraits: "donnees-extraits",
   etapes: "donnees-etapes-pastilles",
@@ -111,6 +112,19 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
       "Fichier des écritures comptables (article A47 A-1 du Livre des procédures fiscales), exporté depuis Pennylane ou tout autre logiciel comptable. Un fichier par exercice ; toutes les écritures sont conservées telles quelles, en centimes exacts. Les montants ne sont ni retraités ni interprétés.",
       "Format : 18 colonnes de la norme, séparées par une tabulation ou « | » ; 6 fichiers et 32 Mo par fichier au plus. Chaque fichier est lu, contrôlé (équilibre, dates, montants) et présenté en aperçu avant d'être appliqué. Un fichier déjà déposé est reconnu à son empreinte ; un FEC couvrant la même période que l'un déjà appliqué le remplace.",
       "Un exercice est « équilibré » quand son total débit égale son total crédit et que chacune de ses écritures l'est ; sinon le nombre d'écritures non équilibrées est indiqué.",
+      "Encodages lus : UTF-8, Windows-1252 et ISO-8859-15. Le FEC au format XML n'est pas lu : exporte-le au format texte.",
+    ].join("\n\n"),
+  },
+  {
+    id: DONNEES_TERMS.controlesFec,
+    term: "Points vérifiés sur le FEC (F01 à F09)",
+    family: FAMILY,
+    definition: [
+      "Contrôles bloquants (le fichier est refusé, son rapport reste consultable) : F01 en-tête aux 18 colonnes de la norme ou variante Montant/Sens ; F02 lignes lisibles (nombre de champs, dates, montants) ; F03 chaque écriture, identifiée par JournalCode + EcritureNum, équilibrée au centime ; F04 total des débits égal au total des crédits.",
+      "F02 : jusqu'à 0,1 % de lignes illisibles, le fichier est lu ; les lignes rejetées sont listées avec leur raison et l'écriture qui les contient est écartée en entier, pour ne pas fausser l'équilibre. Au-delà, le fichier est refusé.",
+      "Avertissements : F05 écritures sur plus de 12 mois (admis jusqu'à 24 mois pour un premier exercice), la date de clôture du nom de fichier comprise ; F06 (avertissement fort) dernière écriture à plus de 45 jours de la date de référence, aujourd'hui ; F07 un avertissement par compte attendu absent parmi 401, 421, 431, 44x, 512 et 164 ; F08 solde des comptes 512 du FEC différent de plus de 1 € du total des soldes de clôture des relevés, à la date la plus récente où tous les comptes ont un solde de relevé dans la période du FEC (n.d. sans relevé ou sans date commune).",
+      "Information : F09 solde créditeur des comptes fournisseurs (401 et 404) par compte auxiliaire, et part non lettrée (lignes sans EcritureLet) rapportée à ce solde.",
+      "F01 à F05, F07 et F09 sont calculés au dépôt ; F06 et F08 sont recalculés à chaque affichage.",
     ].join("\n\n"),
   },
   {
