@@ -412,6 +412,8 @@ const frDate = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.sl
 // --- Postes fournisseurs non lettrés : aide à la saisie, jamais une échéance.
 export type SupplierLine = {
   accountId: string; auxiliary: string | null; auxiliaryLabel: string | null; date: string; pieceRef: string | null; pieceDate: string | null;
+  /** Libellé de l'écriture (absent des écritures de comptes de personnes). */
+  label?: string | null;
   debitCents: number | null; creditCents: number | null;
   /** false : écriture importée avant la lecture du lettrage (information absente, à ne pas confondre avec « non lettré »). */
   letteringKnown: boolean; lettering: string | null; letteringDate: string | null;

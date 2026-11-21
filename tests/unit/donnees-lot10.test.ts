@@ -27,6 +27,7 @@ const ZONE_FILES = [
   "src/app/e/[slug]/donnees/dsn/CoverageTable.tsx",
   "src/app/e/[slug]/donnees/fec/page.tsx",
   "src/app/e/[slug]/donnees/bank/page.tsx",
+  "src/app/e/[slug]/donnees/aged/page.tsx",
   "src/app/e/[slug]/donnees/fec/ExercisesTable.tsx",
   "src/app/e/[slug]/donnees/Forms.tsx",
   "src/app/e/[slug]/donnees/ui.tsx",
@@ -47,7 +48,7 @@ const ZONE_FILES = [
 describe("Glossaire « Données » : entrées déplacées depuis les écrans", () => {
   it("chaque identifiant cité par les écrans existe, dans la famille « Données », avec un id kebab-case unique dans tout le glossaire", () => {
     const ids = Object.values(DONNEES_TERMS);
-    expect(ids).toHaveLength(29);
+    expect(ids).toHaveLength(30);
     expect(GLOSSARY_DONNEES.map((e) => e.id).sort()).toEqual([...ids].sort());
     for (const id of ids) {
       expect(id, id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);

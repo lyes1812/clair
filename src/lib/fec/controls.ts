@@ -43,8 +43,9 @@ const EXPECTED_ACCOUNTS: { prefix: string; label: string; test: (a: string) => b
   { prefix: "512", label: "banques", test: (a) => a.startsWith("512") },
   { prefix: "164", label: "emprunts auprès des établissements de crédit", test: (a) => a.startsWith("164") },
 ];
-// F09 : comptes fournisseurs lus (401 fournisseurs, 404 fournisseurs d'immobilisations).
-export const SUPPLIER_ACCOUNTS = /^40[14]/;
+// F09 : comptes fournisseurs lus (401 fournisseurs, 403 effets à payer, 404 fournisseurs d'immobilisations,
+// 408 factures non parvenues), validé par Lyes le 21/11/2026.
+export const SUPPLIER_ACCOUNTS = /^40[1348]/;
 const TOP_SUPPLIERS = 50;
 const MAX_LISTED_ROWS = 100;
 
@@ -109,7 +110,7 @@ export function supplierSummary(lines: FecLine[]): FecSuppliers {
 }
 
 function suppliersCheck(s: FecSuppliers): FecCheck {
-  if (s.count === 0) return check("F09", "info", "nd", "Aucune ligne sur les comptes fournisseurs 401 ou 404.");
+  if (s.count === 0) return check("F09", "info", "nd", "Aucune ligne sur les comptes fournisseurs 401, 403, 404 ou 408.");
   const share = s.unletteredPermille === null ? "part non lettrée n.d. (solde fournisseurs nul ou débiteur)" : `dont ${formatEuros(s.unletteredCents)} non lettrés (${permille(s.unletteredPermille)})`;
   const noAux = s.top.some((x) => x.auxiliary === null) ? " Des lignes fournisseurs n'ont pas de compte auxiliaire : elles sont regroupées." : "";
   return check("F09", "info", "ok", `${s.count} compte(s) fournisseur(s), solde créditeur total ${formatEuros(s.balanceCents)}, ${share}.${noAux}`);

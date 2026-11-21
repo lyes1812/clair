@@ -11,9 +11,10 @@ import { PanelHead, ReadDetails, Tile } from "../studio-rh/masse-salariale/compo
 import { ActionForm } from "../studio-rh/hypotheses/ActionForm";
 import type { FormState } from "../studio-rh/hypotheses/actions";
 import { Field } from "../studio-rh/hypotheses/shared";
+import { ClaimsSection, type ClaimsAction } from "./ClaimsSection";
 
 export type CrisisRanksAction = (previous: FormState, form: FormData) => Promise<FormState>;
-type Props = CrisisContext & { saveRanks?: CrisisRanksAction };
+type Props = CrisisContext & { saveRanks?: CrisisRanksAction; saveClaims?: ClaimsAction };
 type Value = Extract<CrisisPosition, { kind: "value" }>;
 
 const rankLabel = (id: string | null) => RANKS.find((rank) => rank.id === id)?.label ?? null;
@@ -51,7 +52,7 @@ function Reading({ p }: { p: Props }) {
     <p>Chaque montant est le solde d’un compte, ou d’un compte auxiliaire, calculé sur les écritures de l’exercice jusqu’à la date d’arrêté, à-nouveaux compris. Un seul exercice est lu à la fois.</p>
     <p><strong>Disponibilités</strong> : soldes débiteurs des comptes de banque, d’établissements financiers et de caisse (51 hors 519, 53, 54). Un compte de trésorerie créditeur est un découvert, classé en dette bancaire.</p>
     <p><strong>Dettes comptabilisées</strong> : soldes créditeurs par nature — {DEBT_NATURES.map((n) => `${n.label.toLowerCase()} (${n.accounts})`).join(" ; ")}. Les soldes débiteurs de ces comptes (acomptes, avances, crédits de TVA) sont affichés à part et ne sont jamais déduits.</p>
-    <p><strong>Ce n’est pas encore le passif exigible.</strong> Le FEC ne contient aucune date d’échéance : Clair ne sait pas dire, à partir de lui seul, quelle part de ces dettes est échue. L’échéancier sera saisi dans la trésorerie à 13 semaines.</p>
+    <p><strong>Ce n’est pas encore le passif exigible.</strong> Le FEC ne contient aucune date d’échéance : Clair ne sait pas dire, à partir de lui seul, quelle part de ces dettes est échue. Le passif par créance, plus bas, lit les échéances de la balance âgée fournisseurs et celles que tu saisis ; une créance sans échéance reste n.d.</p>
     <p><strong>Rang</strong> : choisi par toi pour chaque nature de dette. Clair ne qualifie aucune créance et ne suppose aucun rang ; ce classement par nature est une simplification à valider avec le conseil de l’entreprise.</p>
     <p>Non lus ici : clients (41 hors 419), comptes d’attente et de régularisation (47, 48), dépréciations (49, 59), virements internes (58). La lecture Pennylane par API n’est pas utilisée pour ces soldes.</p>
   </ReadDetails></div>;
@@ -104,6 +105,7 @@ export function CrisisView(p: Props) {
       {position.cash.items.length ? <section className="panel restructuring-section" data-testid="crisis-cash"><PanelHead title="Disponibilités par compte" desc={`${position.lineCount} écriture${position.lineCount === 1 ? "" : "s"} de trésorerie et de dette lue${position.lineCount === 1 ? "" : "s"} jusqu’à la date d’arrêté`} /><Items items={position.cash.items} label="Disponibilités par compte" /></section> : null}
       <Natures position={position} />
       <Ranks p={p} position={position} />
+      {p.asOf ? <ClaimsSection claims={p.claims} aged={p.aged} notices={p.claimNotices} slug={p.slug} exercise={p.exercise?.filename ?? null} asOf={p.asOf} ranks={p.ranks} cash={position.cash.available} save={p.saveClaims} /> : null}
     </>}
   </div>;
 }

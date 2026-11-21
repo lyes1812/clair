@@ -6,7 +6,10 @@ import { getSetting } from "@/lib/settings";
 import { requireWorkspace } from "@/lib/workspace";
 import { buildCrisisPosition, type CrisisPosition, type RankSettings } from "./model";
 import { CRISIS_RANKS_KEY, parseRanks } from "./ranks";
-import { readCrisisLines } from "./store";
+import { readBankLedger } from "@/lib/bank/store";
+import { readAgedBalance } from "@/lib/aged/store";
+import { buildClaims, CLAIMS_KEY, parseClaimOverrides, type BankDebit, type ClaimFecLine, type ClaimsView } from "./claims";
+import { readCrisisLines, readSupplierLines } from "./store";
 
 export type CrisisQuery = Record<string, string | undefined>;
 export type CrisisExercise = { filename: string; firstDate: string; lastDate: string };
@@ -15,9 +18,37 @@ export type CrisisExercise = { filename: string; firstDate: string; lastDate: st
 // ses à-nouveaux ne sont pas garantis, donc un solde de bilan n'y serait pas exact.
 export async function loadCrisisContext(slug: string, query: CrisisQuery) {
   const { workspace } = await requireWorkspace(slug);
-  const { source: _source, ...context } = await readCrisis(workspace, slug, query);
-  return context;
+  const { source, ...context } = await readCrisis(workspace, slug, query);
+  return { ...context, ...(await readClaims(workspace.id, source, context)) };
 }
+
+/**
+ * Lot L3 : passif par créance. La balance âgée n'est utilisée que si elle est arrêtée à la date d'arrêté affichée ;
+ * sinon les créances viennent du seul FEC et l'écran propose la date de la balance.
+ */
+async function readClaims(workspaceId: string, source: { syncId: string; filename: string } | null, crisis: Pick<Awaited<ReturnType<typeof readCrisis>>, "asOf" | "position" | "ranks" | "exercise">) {
+  const empty = { claims: { kind: "nd", reason: "Position non disponible." } as ClaimsView, aged: null as AgedInfo | null, claimNotices: [] as string[], claimsUnreadable: false };
+  if (!source || !crisis.asOf || crisis.position.kind === "nd") return empty;
+  const asOf = crisis.asOf;
+  const [aged, stored, supplierLines, bank] = await Promise.all([
+    readAgedBalance(workspaceId),
+    getSetting(workspaceId, CLAIMS_KEY, (value) => ({ parsed: parseClaimOverrides(value) })),
+    readSupplierLines(workspaceId, source.syncId, source.filename, asOf),
+    readBankLedger(workspaceId),
+  ]);
+  const claimNotices: string[] = [];
+  const claimsUnreadable = stored !== null && stored.parsed === null;
+  if (claimsUnreadable) claimNotices.push("Saisies par créance enregistrées illisibles : aucune n’est appliquée et aucune ne peut être enregistrée. Contacte l’administrateur de l’espace.");
+  const usable = aged !== null && aged.asOf === asOf;
+  const inExercise = aged !== null && crisis.exercise !== null && aged.asOf >= crisis.exercise.firstDate && aged.asOf <= crisis.exercise.lastDate;
+  const info: AgedInfo | null = aged ? { asOf: aged.asOf, filename: aged.filename, count: aged.invoices.length, used: usable, dateInExercise: inExercise } : null;
+  const bankDebits: BankDebit[] = bank.flatMap((account) => account.movements.filter((m) => m.amountCents < 0)
+    .map((m) => ({ date: m.bookingDate, amountCents: m.amountCents, label: m.label, counterparty: m.counterparty, reference: m.reference })));
+  const lines: ClaimFecLine[] = supplierLines.map((l) => ({ accountId: l.accountId, auxiliary: l.auxiliary, auxiliaryLabel: l.auxiliaryLabel, date: l.date, pieceRef: l.pieceRef, label: l.label ?? null, debitCents: l.debitCents, creditCents: l.creditCents }));
+  const claims = buildClaims({ asOf, position: crisis.position, invoices: usable ? aged.invoices : null, supplierLines: lines, bankDebits, ranks: crisis.ranks, overrides: claimsUnreadable ? {} : stored?.parsed ?? {} });
+  return { claims, aged: info, claimNotices, claimsUnreadable };
+}
+export type AgedInfo = { asOf: string; filename: string; count: number; used: boolean; dateInExercise: boolean };
 
 type Workspace = { id: string; name: string; role: Parameters<typeof hasAtLeast>[0] };
 /** Lecture du lot 1 pour un espace déjà vérifié ; `source` désigne la lecture FEC utilisée (jamais renvoyée à l'écran). */

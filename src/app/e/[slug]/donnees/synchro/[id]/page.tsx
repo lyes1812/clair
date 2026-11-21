@@ -16,6 +16,10 @@ import { exerciseReports } from "@/lib/fec/report";
 import { AccountsTable, StatementsTable } from "../../bank/BankTables";
 import type { BankSyncSummary } from "@/lib/bank/import";
 import { readBankLedger } from "@/lib/bank/store";
+import type { AgedSyncSummary } from "@/lib/aged/import";
+import { readAgedBalance } from "@/lib/aged/store";
+import { AGED_FIELD_LABELS, type AgedField } from "@/lib/aged/parser";
+import { AgedTable } from "../../aged/AgedTable";
 import { formatEuros } from "@/lib/money";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
@@ -24,7 +28,7 @@ import { PageHead, Pill, syncTone } from "../../ui";
 
 export const dynamic = "force-dynamic";
 
-const ORDER = ["company", "accounts", "collaborators", "contracts", "worked_time", "absences", "payroll_status", "ledger_lines", "bank_accounts", "bank_statements", "bank_movements"];
+const ORDER = ["company", "accounts", "collaborators", "contracts", "worked_time", "absences", "payroll_status", "ledger_lines", "bank_accounts", "bank_statements", "bank_movements", "aged_invoices"];
 const nd = (v: unknown) => (v === null || v === undefined || v === "" ? "n.d." : String(v));
 
 export default async function SyncPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
@@ -51,7 +55,9 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
   const dsn = sync.provider === "dsn" ? (summary as DsnSyncSummary) : null;
   const fec = sync.provider === "fec" ? (summary as FecSyncSummary) : null;
   const bank = sync.provider === "bank" ? (summary as BankSyncSummary) : null;
-  const uploaded = dsn ?? fec ?? bank;
+  const aged = sync.provider === "aged" ? (summary as AgedSyncSummary) : null;
+  const uploaded = dsn ?? fec ?? bank ?? aged;
+  const agedBalance = aged && (status === "preview" || status === "applied") ? await readAgedBalance(workspace.id, id) : null;
   const bankLedger = bank && (status === "preview" || status === "applied") ? await readBankLedger(workspace.id, status === "preview" ? id : undefined) : null;
   const coverage = dsn && (status === "preview" || status === "applied") ? await dsnCoverage(workspace.id, status === "preview" ? id : undefined) : null;
   const exercises = fec && (status === "preview" || status === "applied") ? await fecCoverage(workspace.id, status === "preview" ? id : undefined) : null;
@@ -130,6 +136,21 @@ export default async function SyncPage({ params }: { params: Promise<{ slug: str
           {fec?.blocked?.map((b) => (
             <ControlReport key={b.filename} title={`Rapport de contrôle · ${b.filename} (refusé)`} checks={b.checks} stored={{ ...b, suppliers: null }} testid="fec-blocked-report" />
           ))}
+          {aged?.profile && (
+            <>
+              <h3>Colonnes reconnues</h3>
+              <p className="desc" data-testid="aged-profile">
+                {(Object.entries(aged.profile.columns) as [AgedField, string][]).map(([f, col]) => `${AGED_FIELD_LABELS[f]} : « ${col} »`).join(" · ")}
+                {aged.profile.ignored.length ? ` · non lues : ${aged.profile.ignored.join(", ")}` : ""}
+              </p>
+            </>
+          )}
+          {agedBalance && (
+            <>
+              <h3>Balance arrêtée au {agedBalance.asOf.split("-").reverse().join("/")}{status === "preview" && aged?.replaces?.length ? " · remplacera la balance en vigueur à l'application" : ""}</h3>
+              <AgedTable invoices={agedBalance.invoices} asOf={agedBalance.asOf} testid="aged-preview" />
+            </>
+          )}
           {bank && bank.statements.length > 0 && (
             <>
               <h3>Relevés lus</h3>

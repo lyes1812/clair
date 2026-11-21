@@ -15,8 +15,9 @@ export const COLLECTION_LABELS: Record<string, string> = {
   bank_accounts: "Comptes bancaires",
   bank_statements: "Relevés",
   bank_movements: "Mouvements bancaires",
+  aged_invoices: "Factures de la balance âgée",
 };
 
-export const PROVIDER_LABELS = { payfit: "PayFit", pennylane: "Pennylane", dsn: "Fichiers DSN", fec: "Fichiers FEC", bank: "Relevés bancaires" } as const;
+export const PROVIDER_LABELS = { payfit: "PayFit", pennylane: "Pennylane", dsn: "Fichiers DSN", fec: "Fichiers FEC", bank: "Relevés bancaires", aged: "Balance âgée fournisseurs" } as const;
 
 export const dateTimeFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Paris" });

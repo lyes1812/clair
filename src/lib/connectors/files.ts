@@ -4,7 +4,7 @@ import { withWorkspace } from "@/db/workspace-scope";
 import { encryptSecret, sha256 } from "@/lib/crypto";
 
 // Fichiers déposés (DSN, FEC, relevés bancaires) : contenu brut conservé chiffré par espace, reconnu à son empreinte SHA-256.
-export type SourceFileKind = "dsn" | "fec" | "bank";
+export type SourceFileKind = "dsn" | "fec" | "bank" | "aged";
 
 export type FileOutcome =
   | { filename: string; status: "read"; sha256: string; sizeBytes: number; encoding: string; detail: string }

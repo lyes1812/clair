@@ -43,7 +43,7 @@ export async function readSupplierLines(workspaceId: string, syncId: string, fil
     const d = row.data as Record<string, unknown>;
     return {
       accountId: String(d.accountId), auxiliary: text(d.auxiliaryAccount), auxiliaryLabel: text(d.auxiliaryLabel), date: String(d.operationDate),
-      pieceRef: text(d.pieceRef), pieceDate: text(d.pieceDate), debitCents: cents(d.debitCents), creditCents: cents(d.creditCents),
+      pieceRef: text(d.pieceRef), pieceDate: text(d.pieceDate), label: text(d.label), debitCents: cents(d.debitCents), creditCents: cents(d.creditCents),
       letteringKnown: Object.hasOwn(d, "lettering"), lettering: text(d.lettering), letteringDate: text(d.letteringDate),
     };
   });

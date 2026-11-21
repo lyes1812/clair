@@ -14,6 +14,7 @@ export const DONNEES_TERMS = {
   depotFec: "donnees-depot-fec",
   controlesFec: "donnees-controles-fec",
   depotBanque: "donnees-depot-banque",
+  depotBalanceAgee: "donnees-depot-balance-agee",
   extraits: "donnees-extraits",
   etapes: "donnees-etapes-pastilles",
   origine: "param-origine",
@@ -123,7 +124,7 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
       "Contrôles bloquants (le fichier est refusé, son rapport reste consultable) : F01 en-tête aux 18 colonnes de la norme ou variante Montant/Sens ; F02 lignes lisibles (nombre de champs, dates, montants) ; F03 chaque écriture, identifiée par JournalCode + EcritureNum, équilibrée au centime ; F04 total des débits égal au total des crédits.",
       "F02 : jusqu'à 0,1 % de lignes illisibles, le fichier est lu ; les lignes rejetées sont listées avec leur raison et l'écriture qui les contient est écartée en entier, pour ne pas fausser l'équilibre. Au-delà, le fichier est refusé.",
       "Avertissements : F05 écritures sur plus de 12 mois (admis jusqu'à 24 mois pour un premier exercice), la date de clôture du nom de fichier comprise ; F06 (avertissement fort) dernière écriture à plus de 45 jours de la date de référence, aujourd'hui ; F07 un avertissement par compte attendu absent parmi 401, 421, 431, 44x, 512 et 164 ; F08 solde des comptes 512 du FEC différent de plus de 1 € du total des soldes de clôture des relevés, à la date la plus récente où tous les comptes ont un solde de relevé dans la période du FEC (n.d. sans relevé ou sans date commune).",
-      "Information : F09 solde créditeur des comptes fournisseurs (401 et 404) par compte auxiliaire, et part non lettrée (lignes sans EcritureLet) rapportée à ce solde.",
+      "Information : F09 solde créditeur des comptes fournisseurs (401, 403, 404 et 408) par compte auxiliaire, et part non lettrée (lignes sans EcritureLet) rapportée à ce solde.",
       "F01 à F05, F07 et F09 sont calculés au dépôt ; F06 et F08 sont recalculés à chaque affichage.",
     ].join("\n\n"),
   },
@@ -137,6 +138,16 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
       "Dédoublonnage : chaque mouvement est identifié par le compte, la date d'opération, le montant, le libellé normalisé (majuscules, sans accents ni ponctuation) et son rang parmi les mouvements identiques du même jour. Deux relevés qui se chevauchent ne créent aucun doublon.",
       "Continuité : pour chaque relevé, solde d'ouverture + mouvements = solde de clôture, au centime. Un écart est signalé avec son montant. Un OFX ne porte pas de solde d'ouverture et un CSV sans colonne de solde n'en porte aucun : la continuité est alors n.d. Un intervalle de plus de 5 jours ouvrés (lundi à vendredi, jours fériés non retirés) sans relevé est signalé, ainsi qu'un historique de moins de 6 mois par compte.",
       "L'IBAN est conservé chiffré et affiché masqué (FR76 … 1234).",
+    ].join("\n\n"),
+  },
+  {
+    id: DONNEES_TERMS.depotBalanceAgee,
+    term: "Dépôt d'une balance âgée fournisseurs",
+    family: FAMILY,
+    definition: [
+      "Factures fournisseurs restant dues à une date, exportées du logiciel comptable en CSV ou XLSX : une ligne par facture. Colonnes reconnues sur la ligne d'en-tête : fournisseur, n° de facture, date de facture et montant TTC restant dû (obligatoires), échéance et compte auxiliaire (si disponibles). La date de la balance est saisie au dépôt.",
+      "Les tranches d'âge du fichier ne sont jamais lues : Clair les recalcule d'après l'échéance de chaque facture, à la date de la balance (non échu, 0 à 30 jours, 31 à 60, 61 à 90, plus de 90). Une facture sans échéance reste n.d.",
+      "Une seule balance est en vigueur : appliquer un dépôt remplace la balance précédente. Contrôle dans le Studio Restructuring : total de la balance égal au solde créditeur des comptes 401 du FEC à la même date ; un écart de plus de 2 % ou de 5 000 € est un avertissement fort, détaillé par fournisseur.",
     ].join("\n\n"),
   },
   {
