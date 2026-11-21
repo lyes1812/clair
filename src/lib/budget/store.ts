@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { budgetBase, budgetHypothesis, budgetReference, budgetScenario } from "@/db/schema";
+import { budgetBase, budgetHypothesis, budgetReference, budgetScenario, sourceSync, workspaceCompany } from "@/db/schema";
 import { withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isMonth } from "@/lib/connectors/months";
@@ -59,14 +59,16 @@ export const hypothesisSchema: z.ZodType<Hypothesis> = z.discriminatedUnion("kin
 export type ScenarioKind = "budget" | "revise" | "simulation";
 export const KIND_LABELS: Record<ScenarioKind, string> = { budget: "Budget", revise: "Révisé", simulation: "Simulation" };
 export type ScenarioRow = typeof budgetScenario.$inferSelect;
-export type ScenarioFull = { scenario: ScenarioRow; base: BaseSnapshot; baseHash: string; hypotheses: Hypothesis[] };
+export type ScenarioCompany = Pick<typeof workspaceCompany.$inferSelect, "id" | "name" | "origin">;
+export type ScenarioFull = { scenario: ScenarioRow; base: BaseSnapshot; baseHash: string; hypotheses: Hypothesis[]; companyId?: string; company?: ScenarioCompany };
 
 export async function listScenarios(workspaceId: string) {
   return withWorkspace(workspaceId, (tx) =>
     tx
-      .select({ scenario: budgetScenario, refMonth: budgetBase.refMonth })
+      .select({ scenario: budgetScenario, refMonth: budgetBase.refMonth, companyId: budgetBase.companyId, company: { id: workspaceCompany.id, name: workspaceCompany.name, origin: workspaceCompany.origin } })
       .from(budgetScenario)
       .innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId))
+      .innerJoin(workspaceCompany, eq(workspaceCompany.id, budgetBase.companyId))
       .orderBy(desc(budgetScenario.createdAt)),
   );
 }
@@ -74,11 +76,11 @@ export async function listScenarios(workspaceId: string) {
 export async function getScenario(workspaceId: string, scenarioId: string): Promise<ScenarioFull | null> {
   if (!z.string().uuid().safeParse(scenarioId).success) return null;
   return withWorkspace(workspaceId, async (tx) => {
-    const [row] = await tx.select({ scenario: budgetScenario, base: budgetBase }).from(budgetScenario).innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).where(eq(budgetScenario.id, scenarioId));
+    const [row] = await tx.select({ scenario: budgetScenario, base: budgetBase, company: { id: workspaceCompany.id, name: workspaceCompany.name, origin: workspaceCompany.origin } }).from(budgetScenario).innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).innerJoin(workspaceCompany, eq(workspaceCompany.id, budgetBase.companyId)).where(eq(budgetScenario.id, scenarioId));
     if (!row) return null;
     if (sha256(canonicalJson(row.base.data)) !== row.base.hash) throw new BudgetError("Base figée altérée : son empreinte ne correspond plus à celle enregistrée à la création.");
     const hyps = await tx.select().from(budgetHypothesis).where(eq(budgetHypothesis.scenarioId, scenarioId)).orderBy(asc(budgetHypothesis.createdAt), asc(budgetHypothesis.id));
-    return { scenario: row.scenario, base: row.base.data, baseHash: row.base.hash, hypotheses: hyps.map((h) => hypothesisSchema.parse(h.data)) };
+    return { scenario: row.scenario, base: row.base.data, baseHash: row.base.hash, hypotheses: hyps.map((h) => hypothesisSchema.parse(h.data)), companyId: row.base.companyId, company: row.company };
   });
 }
 
@@ -88,8 +90,21 @@ export async function createScenario(
   input: { name: string; kind: ScenarioKind; firstMonth: string; lastMonth: string },
   base: BaseSnapshot,
   conventions: Conventions,
+  provenance?: { sourceSyncId: string },
 ): Promise<string> {
   return withWorkspace(workspaceId, async (tx) => {
+    // Les métadonnées portent le périmètre : aucun ajout au JSON figé, donc aucune
+    // modification de ses empreintes ni de ses clés de contrat historiques.
+    if (base.origin) {
+      const [parent] = await tx.select({ id: budgetScenario.id, status: budgetScenario.status, syncId: budgetBase.syncId }).from(budgetScenario)
+        .innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).where(eq(budgetScenario.id, base.origin.scenarioId));
+      if (!parent || parent.syncId !== base.syncId) throw new BudgetError("Scénario parent indisponible pour cette société.");
+      if (parent.status !== "fige") throw new BudgetError("Figez le scénario parent avant d'en dériver le budget suivant.");
+    } else if (provenance) {
+      if (provenance.sourceSyncId !== base.syncId || !z.string().uuid().safeParse(provenance.sourceSyncId).success) throw new BudgetError("Lecture PayFit indisponible pour cette société.");
+      const [read] = await tx.select({ id: sourceSync.id }).from(sourceSync).where(and(eq(sourceSync.id, provenance.sourceSyncId), eq(sourceSync.provider, "payfit"), eq(sourceSync.status, "applied")));
+      if (!read) throw new BudgetError("Lecture PayFit indisponible pour cette société. Rechargez la page avant de créer le scénario.");
+    }
     const [b] = await tx.insert(budgetBase).values({ workspaceId, refMonth: base.refMonth, syncId: base.syncId, data: base, hash: sha256(canonicalJson(base)), createdBy: actor }).returning({ id: budgetBase.id });
     const [s] = await tx
       .insert(budgetScenario)
@@ -122,11 +137,11 @@ export async function duplicateScenario(workspaceId: string, actor: string, scen
 type Tx = Parameters<Parameters<typeof withWorkspace>[1]>[0];
 // Verrouille la ligne du scénario, vérifie qu'il est en brouillon et relit sa base et ses hypothèses.
 async function lockDraft(tx: Tx, scenarioId: string) {
-  const [row] = await tx.select({ scenario: budgetScenario, base: budgetBase.data }).from(budgetScenario).innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).where(eq(budgetScenario.id, scenarioId)).for("update", { of: budgetScenario });
+  const [row] = await tx.select({ scenario: budgetScenario, base: budgetBase.data, companyId: budgetBase.companyId }).from(budgetScenario).innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).where(eq(budgetScenario.id, scenarioId)).for("update", { of: budgetScenario });
   if (!row) throw new BudgetError("Scénario introuvable.");
   if (row.scenario.status !== "brouillon") throw new BudgetError("Scénario figé : ses hypothèses ne peuvent plus changer (dupliquez-le pour une variante).");
   const hyps = await tx.select({ data: budgetHypothesis.data }).from(budgetHypothesis).where(eq(budgetHypothesis.scenarioId, scenarioId)).orderBy(asc(budgetHypothesis.createdAt), asc(budgetHypothesis.id));
-  return { scenario: row.scenario, base: row.base, hypotheses: hyps.map((h) => hypothesisSchema.parse(h.data)) };
+  return { scenario: row.scenario, base: row.base, companyId: row.companyId, hypotheses: hyps.map((h) => hypothesisSchema.parse(h.data)) };
 }
 
 // Ajout contrôlé par le moteur dans la même transaction : une hypothèse qui rendrait le scénario incalculable
@@ -213,16 +228,17 @@ export async function applyChanges(workspaceId: string, actor: string, scenarioI
   });
 }
 
-// Reprise des hypothèses d'un autre scénario de l'espace (base identique ou non) : seules celles qui restent calculables
+// Reprise des hypothèses d'un autre scénario de la même société (base identique ou non) : seules celles qui restent calculables
 // contre la base et l'horizon du scénario cible sont reprises ; les autres sont listées avec leur raison.
 export async function importHypotheses(workspaceId: string, actor: string, targetId: string, sourceId: string, kinds: ReadonlySet<HypothesisKind>): Promise<Screened> {
   if (targetId === sourceId) throw new BudgetError("Choisissez un autre scénario que celui-ci.");
   if (!z.string().uuid().safeParse(sourceId).success) throw new BudgetError("Scénario source introuvable.");
   if (kinds.size === 0) throw new BudgetError("Choisissez au moins un type d'hypothèse à reprendre.");
   return withWorkspace(workspaceId, async (tx) => {
-    const { scenario: s, base, hypotheses } = await lockDraft(tx, targetId);
-    const [src] = await tx.select({ id: budgetScenario.id }).from(budgetScenario).where(eq(budgetScenario.id, sourceId));
+    const { scenario: s, base, companyId, hypotheses } = await lockDraft(tx, targetId);
+    const [src] = await tx.select({ id: budgetScenario.id, companyId: budgetBase.companyId }).from(budgetScenario).innerJoin(budgetBase, eq(budgetBase.id, budgetScenario.baseId)).where(eq(budgetScenario.id, sourceId));
     if (!src) throw new BudgetError("Scénario source introuvable.");
+    if (src.companyId !== companyId) throw new BudgetError("Les hypothèses ne peuvent être reprises qu'entre scénarios de la même société.");
     const rows = await tx.select({ data: budgetHypothesis.data }).from(budgetHypothesis).where(eq(budgetHypothesis.scenarioId, sourceId)).orderBy(asc(budgetHypothesis.createdAt), asc(budgetHypothesis.id));
     const plan = planImport(rows.map((r) => hypothesisSchema.parse(r.data)), kinds, randomUUID);
     const r = screen(s, base, hypotheses, plan.items);
@@ -270,7 +286,7 @@ const year = z.string().regex(/^\d{4}$/);
 // Plafond par mois (10^12 €) : la somme de 12 mois reste un entier exact.
 export const MAX_MONTH_CENTS = 100_000_000_000_000;
 export const amountsSchema = z.record(z.string().refine(isMonth), cents.nonnegative().max(MAX_MONTH_CENTS).nullable());
-export type BudgetRow = typeof budgetReference.$inferSelect;
+export type BudgetRow = Omit<typeof budgetReference.$inferSelect, "companyId"> & { companyId?: string };
 
 export async function listBudgets(workspaceId: string): Promise<BudgetRow[]> {
   return withWorkspace(workspaceId, (tx) => tx.select().from(budgetReference).orderBy(desc(budgetReference.year), asc(budgetReference.name)));

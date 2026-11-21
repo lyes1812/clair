@@ -6,7 +6,7 @@ import { createPennylaneFixtureFetch, isPennylaneFixtureKey } from "./pennylane/
 import type { ProviderId, ProviderReadResult } from "./types";
 
 // Registre des fournisseurs : comment vérifier une clé et comment lire un périmètre de mois.
-export type VerifiedConnection = { companyId: string; companyName: string; scopes: string[] };
+export type VerifiedConnection = { companyId: string; companyName: string; scopes: string[]; identificationNumber?: string | null };
 export type ProviderRead = ProviderReadResult & { company: { id: string; name: string; identificationNumber: string | null }; scopes: string[] };
 
 function guardFixture(isFixture: boolean) {
@@ -36,9 +36,9 @@ export const PROVIDERS: Record<ProviderId, {
       const client = payfitClientFor(apiKey);
       const identity = await client.introspect();
       const company = await client.company(identity.companyId);
-      return { companyId: company.id, companyName: company.name, scopes: identity.scopes };
+      return { companyId: company.id, companyName: company.name, scopes: identity.scopes, identificationNumber: company.identificationNumber };
     },
-    read: (apiKey, _companyId, months) => readPayFit(payfitClientFor(apiKey), months),
+    read: (apiKey, companyId, months) => readPayFit(payfitClientFor(apiKey), months, companyId),
   },
   pennylane: {
     async verify(apiKey, companyId) {

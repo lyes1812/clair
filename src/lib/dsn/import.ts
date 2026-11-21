@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { sourceRecord, sourceSync } from "@/db/schema";
-import { withWorkspace } from "@/db/workspace-scope";
+import { sourceRecord, sourceSync, workspaceCompany } from "@/db/schema";
+import { currentCompanyId, withCompanyScope, withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, sha256, workspaceFingerprint } from "@/lib/crypto";
 import { recordEvent } from "@/lib/events";
 import { digestOf, knownFileHashes, listSourceFiles, storeSourceFiles, type FileOutcome, type StoredUpload } from "@/lib/connectors/files";
@@ -47,8 +47,15 @@ function declarationRecords(d: DsnDeclaration, filename: string): SourceRecordIn
 }
 
 export async function importDsnFiles(workspaceId: string, uploads: DsnUpload[], actorUserId: string): Promise<string> {
+  const companyId = await currentCompanyId(workspaceId);
+  return withCompanyScope(workspaceId, companyId, () => importDsnFilesForCompany(workspaceId, companyId, uploads, actorUserId));
+}
+
+async function importDsnFilesForCompany(workspaceId: string, companyId: string, uploads: DsnUpload[], actorUserId: string): Promise<string> {
   if (uploads.length === 0) throw new DsnError("empty", "Aucun fichier.");
   if (uploads.length > MAX_FILES) throw new DsnError("too_large", `${MAX_FILES} fichiers au plus par dépôt.`);
+  const [company] = await withWorkspace(workspaceId, (tx) => tx.select({ siren: workspaceCompany.siren }).from(workspaceCompany).where(eq(workspaceCompany.id, companyId)));
+  if (!company) throw new DsnError("syntax", "Société introuvable.");
   const fingerprint = (v: string) => workspaceFingerprint(workspaceId, v);
   const files: DsnFileOutcome[] = [];
   const declarations: DsnDeclarationSummary[] = [];
@@ -68,6 +75,9 @@ export async function importDsnFiles(workspaceId: string, uploads: DsnUpload[], 
     seenInBatch.add(digest);
     try {
       const parsed = parseDsn(u.bytes, { fingerprint });
+      if (company.siren && parsed.declarations.some((declaration) => declaration.siren !== company.siren)) {
+        throw new DsnError("syntax", "Le SIREN d’une déclaration ne correspond pas à la société sélectionnée, ou n’est pas identifiable.");
+      }
       files.push({ filename: u.filename, status: "read", sha256: parsed.hash, sizeBytes: parsed.sizeBytes, encoding: parsed.encoding, detail: `${parsed.norm ?? "norme n.d."} · ${parsed.declarations.length} déclaration(s)` });
       for (const w of parsed.warnings) if (!warnings.includes(`${u.filename} : ${w}`)) warnings.push(`${u.filename} : ${w}`);
       for (const d of parsed.declarations) {
@@ -109,6 +119,11 @@ export async function importDsnFiles(workspaceId: string, uploads: DsnUpload[], 
   const summary: DsnSyncSummary = { mode: "additive", files, declarations, collections, months: [...months].sort() };
 
   const syncId = await withWorkspace(workspaceId, async (tx) => {
+    // Le registre peut avoir été modifié pendant l’analyse du fichier.
+    const [current] = await tx.select({ siren: workspaceCompany.siren }).from(workspaceCompany).where(eq(workspaceCompany.id, companyId)).for("update");
+    if (!current || current.siren && dedup.some((record) => record.collection === "declarations" && record.data.siren !== current.siren)) {
+      throw new DsnError("syntax", "Le SIREN de la société a changé pendant l’import ; vérifie la société sélectionnée puis recommence.");
+    }
     const [row] = await tx
       .insert(sourceSync)
       .values({

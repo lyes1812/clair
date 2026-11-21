@@ -16,6 +16,7 @@ import { formatEuros } from "@/lib/money";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { monthPayroll } from "@/lib/payroll/engine";
 import { loadPayrollContext } from "@/lib/payroll/context";
+import { getCompanyContext } from "@/lib/companies";
 import { listActualEvents } from "@/lib/payroll/non-recurring-store";
 import { hasAtLeast } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
@@ -29,7 +30,7 @@ import { toCents } from "@/lib/money";
 import { ProjectionView } from "./ProjectionView";
 import { loadComparison } from "./resultat-data";
 import { FamilyTabs } from "@/components/FamilyTabs";
-import { Prevu } from "@/components/Prevu";
+import { CompanyManagerPage } from "./CompanyManager";
 import { BasesView } from "./BasesView";
 import { ControlesChangements, ControlesEffectifs } from "./ControlesView";
 import { EmbauchesView } from "./EmbauchesView";
@@ -101,8 +102,8 @@ async function landingTab(slug: string, workspaceId: string, s: ScenarioRow, bas
 
 // Onglet Comparaison : lectures choisies (paramètre « cmp ») ; par défaut réel courant, N-1 et budgets saisis de l'année. Chargement
 // commun avec l'export Excel.
-async function comparison(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, proj: Projection, sp: Search) {
-  const { years, year, options, selected, principal, compared } = await loadComparison(slug, workspaceId, s, base, proj, sp);
+async function comparison(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, proj: Projection, sp: Search, companyId?: string) {
+  const { years, year, options, selected, principal, compared } = await loadComparison(slug, workspaceId, s, base, proj, sp, companyId);
   return <ComparisonView hrefBase={`/e/${slug}/studio-rh/hypotheses`} scenarioId={s.id} years={years} year={year} principal={principal} compared={compared} options={options} selected={selected} refMonth={base.refMonth} affichage={one(sp.affichage)} />;
 }
 
@@ -205,6 +206,9 @@ export default async function HypothesesPage({ params, searchParams }: { params:
   const scenarioId = one(sp.scenario);
   const vueParam = one(sp.vue);
 
+  // Cette entrée gère les sociétés de l'espace, même lorsqu'aucun scénario n'existe.
+  if (vueParam === "societes") return <CompanyManagerPage slug={slug} />;
+
   // Une entrée du menu général (…/hypotheses?vue=…) mène directement à l'écran voulu : on ouvre le brouillon le plus récent,
   // à défaut le scénario le plus récent, avec la même entrée. Sans scénario, la liste dit quoi faire.
   let noScenarioFor: string | null = null;
@@ -232,7 +236,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
     const draft = s.status === "brouillon";
     const editing = canEdit && draft;
     const all = await listScenarios(workspace.id);
-    const href = (v: string) => `${base}?scenario=${s.id}${v === "resultat" ? "" : `&vue=${v}`}`;
+    const href = (v: string) => v === "societes" ? `${base}?vue=societes` : `${base}?scenario=${s.id}${v === "resultat" ? "" : `&vue=${v}`}`;
     const switchHref = (id: string) => `${base}?scenario=${id}${vue === "resultat" ? `&vue=resultat&sous=${sous}` : `&vue=${vue}`}`;
     const nMonths = monthRange(s.firstMonth, s.lastMonth).length;
     // Seul un état qui interdit la saisie s'écrit sous l'en-tête (il explique pourquoi rien ne se saisit) ; le reste est au glossaire.
@@ -249,6 +253,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
               <h2>{s.name}</h2>
               <span className="tag">{KIND_LABELS[s.kind]}</span>
               <span className={`tag hs-status ${draft ? "is-draft" : "is-frozen"}`} data-testid="hyp-status">{STATUS[s.status]}</span>
+              {full.company && <span className="tag" data-testid="hyp-company">{full.company.name}</span>}
               <GlossaryLink slug={slug} term={BUDGET_TERMS.scenarioStatut} />
             </div>
             <dl className="facts hs-facts">
@@ -323,13 +328,6 @@ export default async function HypothesesPage({ params, searchParams }: { params:
           <EnveloppesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} axis={vue === "env-service" ? "service" : "rubrique"} canEdit={editing} />
         ) : vue === "globales" ? (
           <GlobalesView slug={slug} scenario={s} base={full.base} hypotheses={full.hypotheses} canEdit={editing} />
-        ) : vue === "societes" ? (
-          <Prevu
-            title="Hypothèses par société"
-            lead="Non réalisé : un espace Clair correspond aujourd'hui à une seule société. Des hypothèses propres à chaque société n'ont de sens qu'avec plusieurs sociétés dans l'espace."
-            existing={[{ href: href("globales"), title: "Hypothèses globales", text: "Taux d'augmentation par mois pour toute l'entreprise, chaque service et chaque statut, et constantes de référence." }]}
-            open={["À quelle société rattacher une hypothèse lorsque l'espace en compte plusieurs.", "Priorité entre une hypothèse de société et une hypothèse globale pour un même mois.", "Périmètre des contrôles et de la projection : une société ou l'ensemble."]}
-          />
         ) : vue === "ctrl-effectifs" ? (
           <ControlesEffectifs slug={slug} base={full.base} hypotheses={full.hypotheses} proj={proj} />
         ) : vue === "ctrl-changements" ? (
@@ -344,7 +342,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
             ) : sous === "atterrissage" ? (
               await landingTab(slug, workspace.id, s, full.base, full.hypotheses, sp)
             ) : (
-              await comparison(slug, workspace.id, s, full.base, proj, sp)
+              await comparison(slug, workspace.id, s, full.base, proj, sp, full.companyId)
             )}
           </>
         )}
@@ -353,7 +351,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
   }
 
   // Liste des scénarios et création.
-  const [rows, conv, ctx, budgets] = await Promise.all([listScenarios(workspace.id), getConventions(workspace.id), loadPayrollContext(slug), listBudgets(workspace.id)]);
+  const [rows, conv, ctx, budgets, companyContext] = await Promise.all([listScenarios(workspace.id), getConventions(workspace.id), loadPayrollContext(slug), listBudgets(workspace.id), getCompanyContext(workspace.id)]);
   const input = ctx.source === "payfit" ? ctx.input : null;
   // Mois de référence possibles : paie clôturée, journal lu, et mois fini à la date de lecture du référentiel.
   const refDate = ctx.kpi.input?.data.build.referenceDate ?? null;
@@ -369,6 +367,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
       )}
       <section className="panel" data-testid="hyp-list">
         <CardTitle title="Scénarios" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.scenario} />} />
+        {companyContext.selected && <p className="tile-foot" data-testid="hyp-list-company">Société : <span className="tag">{companyContext.selected.name}</span></p>}
         {rows.length === 0 ? (
           <p className="desc">Aucun scénario pour l'instant.</p>
         ) : (
@@ -396,6 +395,7 @@ export default async function HypothesesPage({ params, searchParams }: { params:
         <summary className="hs-create-summary">Nouveau scénario</summary>
         <div className="hs-create-body">
         <CardTitle title="Créer un scénario" help={<GlossaryLink slug={slug} term={BUDGET_TERMS.scenario} />} />
+        {companyContext.selected && <p className="tile-foot" data-testid="hyp-create-company">Société : {companyContext.selected.name}</p>}
         {unavailable ? (
           <p className="nd" data-testid="hyp-nd">n.d. — base figée impossible : {unavailable}. <a href={`/e/${slug}/donnees`}>Données</a></p>
         ) : !conv ? (

@@ -91,6 +91,47 @@ export const organization = pgTable("organization", {
   metadata: text("metadata"),
 });
 
+// Tables métier : espace et société sont tous deux déclarés dans la transaction.
+const workspaceIsolation = (table: string) => pgPolicy(`${table}_workspace_isolation`, {
+  as: "permissive", for: "all",
+  using: sql`workspace_id = current_setting('app.workspace_id', true)`,
+  withCheck: sql`workspace_id = current_setting('app.workspace_id', true)`,
+});
+
+export const workspaceCompany = pgTable("workspace_company", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workspaceId: text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  siren: text("siren"),
+  origin: text("origin").$type<"initial" | "manual">().notNull().default("manual"),
+  archivedAt: ts("archived_at"),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: ts("created_at").defaultNow().notNull(),
+  updatedAt: ts("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("workspace_company_ws_id_uq").on(t.workspaceId, t.id),
+  uniqueIndex("workspace_company_initial_uq").on(t.workspaceId).where(sql`origin = 'initial'`),
+  uniqueIndex("workspace_company_name_uq").on(t.workspaceId, sql`lower(btrim(${t.name}))`),
+  index("workspace_company_ws_created_idx").on(t.workspaceId, t.createdAt),
+  check("workspace_company_name_valid", sql`length(btrim(${t.name})) between 1 and 120`),
+  check("workspace_company_siren_valid", sql`${t.siren} is null or ${t.siren} ~ '^[0-9]{9}$'`),
+  check("workspace_company_origin_valid", sql`${t.origin} in ('initial', 'manual')`),
+  workspaceIsolation("workspace_company"),
+]).enableRLS();
+
+const companyDefault = sql`case when current_setting('app.company_id', true) ~ '^[0-9a-fA-F-]{36}$' then current_setting('app.company_id', true)::uuid else null end`;
+const companyRef = () => uuid("company_id").notNull().default(companyDefault);
+const companyIsolation = (table: string) => pgPolicy(`${table}_company_isolation`, {
+  as: "restrictive", for: "all",
+  using: sql`current_setting('app.company_id', true) = '*' or company_id::text = current_setting('app.company_id', true)`,
+  withCheck: sql`current_setting('app.company_id', true) = '*' or company_id::text = current_setting('app.company_id', true)`,
+});
+const parentCompanyIsolation = (table: string, parent: string, parentId: string) => {
+  const condition = sql.raw(`exists (select 1 from "${parent}" company_parent where company_parent.id = "${table}"."${parentId}" and company_parent.workspace_id = "${table}".workspace_id)`);
+  return pgPolicy(`${table}_company_isolation`, { as: "restrictive", for: "all", using: condition, withCheck: condition });
+};
+
 export const member = pgTable("member", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id")
@@ -117,16 +158,6 @@ export const invitation = pgTable("invitation", {
     .references(() => user.id, { onDelete: "cascade" }),
 });
 
-// Tables métier : chacune porte workspace_id et une politique RLS (FORCE) qui ne laisse voir
-// que les lignes de l'espace déclaré dans la transaction (voir src/db/workspace-scope.ts).
-const workspaceIsolation = (table: string) =>
-  pgPolicy(`${table}_workspace_isolation`, {
-    as: "permissive",
-    for: "all",
-    using: sql`workspace_id = current_setting('app.workspace_id', true)`,
-    withCheck: sql`workspace_id = current_setting('app.workspace_id', true)`,
-  });
-
 export const workspaceEvent = pgTable(
   "workspace_event",
   {
@@ -134,6 +165,7 @@ export const workspaceEvent = pgTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
+    companyId: uuid("company_id").default(companyDefault),
     actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
     kind: text("kind").notNull(),
     detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
@@ -142,14 +174,16 @@ export const workspaceEvent = pgTable(
   (t) => [index("workspace_event_ws_idx").on(t.workspaceId, t.occurredAt), workspaceIsolation("workspace_event")],
 ).enableRLS();
 
-// Connecteurs : une clé chiffrée par espace et par fournisseur (jamais lisible en clair en base).
+// Connecteurs : une clé chiffrée par société, espace et fournisseur (jamais lisible en clair en base).
 export const connectorCredential = pgTable(
   "connector_credential",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    companyId: companyRef(),
     provider: text("provider").notNull(),
     sealedSecret: text("sealed_secret").notNull(),
+    secretScopeVersion: integer("secret_scope_version").notNull().default(1),
     externalCompanyId: text("external_company_id"),
     companyName: text("company_name"),
     scopes: jsonb("scopes").$type<string[]>().notNull().default([]),
@@ -159,7 +193,7 @@ export const connectorCredential = pgTable(
     createdAt: ts("created_at").defaultNow().notNull(),
     updatedAt: ts("updated_at").defaultNow().notNull(),
   },
-  (t) => [uniqueIndex("connector_credential_ws_provider_uq").on(t.workspaceId, t.provider), workspaceIsolation("connector_credential")],
+  (t) => [uniqueIndex("connector_credential_ws_provider_uq").on(t.workspaceId, t.companyId, t.provider), uniqueIndex("connector_credential_ws_company_id_uq").on(t.workspaceId, t.companyId, t.id), uniqueIndex("connector_credential_external_company_uq").on(t.workspaceId, t.provider, t.externalCompanyId).where(sql`external_company_id is not null`), foreignKey({ name: "connector_credential_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), workspaceIsolation("connector_credential"), companyIsolation("connector_credential")],
 ).enableRLS();
 
 // Une synchronisation = une lecture complète d'une source, d'abord en aperçu, puis appliquée en bloc.
@@ -168,10 +202,12 @@ export const sourceSync = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    companyId: companyRef(),
     provider: text("provider").notNull(),
     status: text("status").notNull(),
     scope: jsonb("scope").$type<Record<string, unknown>>().notNull().default({}),
     baselineSyncId: uuid("baseline_sync_id"),
+    credentialId: uuid("credential_id"),
     contentHash: text("content_hash"),
     summary: jsonb("summary").$type<Record<string, unknown>>().notNull().default({}),
     warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
@@ -183,7 +219,12 @@ export const sourceSync = pgTable(
     decidedBy: text("decided_by").references(() => user.id, { onDelete: "set null" }),
     decidedAt: ts("decided_at"),
   },
-  (t) => [index("source_sync_ws_provider_idx").on(t.workspaceId, t.provider, t.startedAt), workspaceIsolation("source_sync")],
+  (t) => [index("source_sync_ws_provider_idx").on(t.workspaceId, t.companyId, t.provider, t.startedAt),
+    uniqueIndex("source_sync_ws_company_id_uq").on(t.workspaceId, t.companyId, t.id),
+    uniqueIndex("source_sync_api_applied_uq").on(t.workspaceId, t.companyId, t.provider).where(sql`provider in ('payfit', 'pennylane') and status = 'applied'`),
+    uniqueIndex("source_sync_api_running_uq").on(t.workspaceId, t.companyId, t.provider).where(sql`provider in ('payfit', 'pennylane') and status = 'running'`),
+    foreignKey({ name: "source_sync_credential_company_fk", columns: [t.workspaceId, t.companyId, t.credentialId], foreignColumns: [connectorCredential.workspaceId, connectorCredential.companyId, connectorCredential.id] }).onDelete("no action"),
+    foreignKey({ name: "source_sync_baseline_company_fk", columns: [t.workspaceId, t.companyId, t.baselineSyncId], foreignColumns: [t.workspaceId, t.companyId, t.id] }).onDelete("no action"), foreignKey({ name: "source_sync_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), workspaceIsolation("source_sync"), companyIsolation("source_sync")],
 ).enableRLS();
 
 // Enregistrements normalisés d'une synchronisation : une ligne par élément source (collaborateur, contrat, ligne de journal…).
@@ -202,17 +243,18 @@ export const sourceRecord = pgTable(
   (t) => [
     uniqueIndex("source_record_sync_key_uq").on(t.syncId, t.collection, t.recordKey),
     index("source_record_ws_collection_idx").on(t.workspaceId, t.collection),
-    workspaceIsolation("source_record"),
+    workspaceIsolation("source_record"), parentCompanyIsolation("source_record", "source_sync", "sync_id"),
   ],
 ).enableRLS();
 
 // Fichiers déposés (DSN, FEC) : contenu brut chiffré (les DSN contiennent des NIR), supprimable ;
-// un fichier par empreinte et par espace, quel que soit son type.
+// un fichier par empreinte, société et espace, quel que soit son type.
 export const sourceFile = pgTable(
   "source_file",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    companyId: companyRef(),
     syncId: uuid("sync_id").notNull().references(() => sourceSync.id, { onDelete: "cascade" }),
     kind: text("kind").notNull(),
     sha256: text("sha256").notNull(),
@@ -222,7 +264,7 @@ export const sourceFile = pgTable(
     sealedContent: text("sealed_content").notNull(),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [uniqueIndex("source_file_ws_sha_uq").on(t.workspaceId, t.sha256), index("source_file_ws_kind_idx").on(t.workspaceId, t.kind), workspaceIsolation("source_file")],
+  (t) => [uniqueIndex("source_file_ws_sha_uq").on(t.workspaceId, t.companyId, t.sha256), index("source_file_ws_kind_idx").on(t.workspaceId, t.kind), foreignKey({ name: "source_file_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), foreignKey({ name: "source_file_sync_company_fk", columns: [t.workspaceId, t.companyId, t.syncId], foreignColumns: [sourceSync.workspaceId, sourceSync.companyId, sourceSync.id] }).onDelete("cascade"), workspaceIsolation("source_file"), companyIsolation("source_file")],
 ).enableRLS();
 
 // Paramètres d'un espace (règles métier, choix de source…) : une valeur JSON par clé, sans valeur par défaut cachée.
@@ -231,12 +273,13 @@ export const workspaceSetting = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: text("workspace_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+    companyId: companyRef(),
     key: text("key").notNull(),
     value: jsonb("value").$type<unknown>().notNull(),
     updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
     updatedAt: ts("updated_at").defaultNow().notNull(),
   },
-  (t) => [uniqueIndex("workspace_setting_ws_key_uq").on(t.workspaceId, t.key), workspaceIsolation("workspace_setting")],
+  (t) => [uniqueIndex("workspace_setting_ws_key_uq").on(t.workspaceId, t.companyId, t.key), foreignKey({ name: "workspace_setting_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), workspaceIsolation("workspace_setting"), companyIsolation("workspace_setting")],
 ).enableRLS();
 
 // --- Référentiel Collaborateurs (module 2) : construit par source (PayFit ou DSN) à partir des seules lectures
@@ -253,8 +296,9 @@ export const rhBuild = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: wsRef(),
+    companyId: companyRef(),
     source: text("source").$type<RhSource>().notNull(),
-    status: text("status").$type<"current" | "superseded">().notNull(), // un seul « current » par (espace, source) ; indisponible = unavailable_reason renseignée
+    status: text("status").$type<"current" | "superseded">().notNull(), // un seul « current » par (espace, société, source) ; indisponible = unavailable_reason renseignée
     builderVersion: integer("builder_version").notNull(),
     inputsHash: text("inputs_hash").notNull(),
     inputs: jsonb("inputs").$type<RhBuildInputs>().notNull(),
@@ -267,9 +311,9 @@ export const rhBuild = pgTable(
     builtAt: ts("built_at").defaultNow().notNull(),
   },
   (t) => [
-    uniqueIndex("rh_build_current_uq").on(t.workspaceId, t.source).where(sql`status = 'current'`),
+    uniqueIndex("rh_build_current_uq").on(t.workspaceId, t.companyId, t.source).where(sql`status = 'current'`),
     index("rh_build_ws_source_idx").on(t.workspaceId, t.source, t.builtAt),
-    workspaceIsolation("rh_build"),
+    foreignKey({ name: "rh_build_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), workspaceIsolation("rh_build"), companyIsolation("rh_build"),
   ],
 ).enableRLS();
 
@@ -295,7 +339,7 @@ export const rhPerson = pgTable(
     fieldsNd: fieldsNd(),
     provenance: provenance(),
   },
-  (t) => [uniqueIndex("rh_person_build_key_uq").on(t.buildId, t.personKey), index("rh_person_build_name_idx").on(t.buildId, t.familyName), workspaceIsolation("rh_person")],
+  (t) => [uniqueIndex("rh_person_build_key_uq").on(t.buildId, t.personKey), index("rh_person_build_name_idx").on(t.buildId, t.familyName), workspaceIsolation("rh_person"), parentCompanyIsolation("rh_person", "rh_build", "build_id")],
 ).enableRLS();
 
 export const rhContract = pgTable(
@@ -324,7 +368,7 @@ export const rhContract = pgTable(
     fieldsNd: fieldsNd(),
     provenance: provenance(),
   },
-  (t) => [uniqueIndex("rh_contract_build_key_uq").on(t.buildId, t.contractKey), index("rh_contract_build_person_idx").on(t.buildId, t.personKey), workspaceIsolation("rh_contract")],
+  (t) => [uniqueIndex("rh_contract_build_key_uq").on(t.buildId, t.contractKey), index("rh_contract_build_person_idx").on(t.buildId, t.personKey), workspaceIsolation("rh_contract"), parentCompanyIsolation("rh_contract", "rh_build", "build_id")],
 ).enableRLS();
 
 export const rhContractMonth = pgTable(
@@ -355,7 +399,7 @@ export const rhContractMonth = pgTable(
   (t) => [
     uniqueIndex("rh_contract_month_uq").on(t.buildId, t.contractKey, t.month, t.establishmentId),
     index("rh_contract_month_build_month_idx").on(t.buildId, t.month),
-    workspaceIsolation("rh_contract_month"),
+    workspaceIsolation("rh_contract_month"), parentCompanyIsolation("rh_contract_month", "rh_build", "build_id"),
   ],
 ).enableRLS();
 
@@ -381,7 +425,7 @@ export const rhEvent = pgTable(
     uniqueIndex("rh_event_uq").on(t.buildId, t.contractKey, t.kind),
     index("rh_event_build_month_idx").on(t.buildId, t.month),
     index("rh_event_build_person_idx").on(t.buildId, t.personKey),
-    workspaceIsolation("rh_event"),
+    workspaceIsolation("rh_event"), parentCompanyIsolation("rh_event", "rh_build", "build_id"),
   ],
 ).enableRLS();
 
@@ -400,7 +444,7 @@ export const rhMonthCoverage = pgTable(
     declarationKeys: jsonb("declaration_keys").$type<CoverageDraft["declarationKeys"]>().notNull().default([]),
     provenance: provenance(),
   },
-  (t) => [uniqueIndex("rh_month_coverage_uq").on(t.buildId, t.establishmentId, t.month), workspaceIsolation("rh_month_coverage")],
+  (t) => [uniqueIndex("rh_month_coverage_uq").on(t.buildId, t.establishmentId, t.month), workspaceIsolation("rh_month_coverage"), parentCompanyIsolation("rh_month_coverage", "rh_build", "build_id")],
 ).enableRLS();
 
 export const rhFinding = pgTable(
@@ -418,7 +462,7 @@ export const rhFinding = pgTable(
     detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
     provenance: provenance(),
   },
-  (t) => [index("rh_finding_build_code_idx").on(t.buildId, t.code), index("rh_finding_build_month_idx").on(t.buildId, t.month), workspaceIsolation("rh_finding")],
+  (t) => [index("rh_finding_build_code_idx").on(t.buildId, t.code), index("rh_finding_build_month_idx").on(t.buildId, t.month), workspaceIsolation("rh_finding"), parentCompanyIsolation("rh_finding", "rh_build", "build_id")],
 ).enableRLS();
 
 // --- Hypothèses budgétaires (module 5) : base figée (copie immuable du réel au mois de référence), scénarios et
@@ -430,6 +474,7 @@ export const budgetBase = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: wsRef(),
+    companyId: companyRef(),
     refMonth: text("ref_month").notNull(), // AAAA-MM
     syncId: text("sync_id").notNull(), // lecture PayFit appliquée à la création
     data: jsonb("data").$type<BaseSnapshot>().notNull(),
@@ -437,7 +482,7 @@ export const budgetBase = pgTable(
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [index("budget_base_ws_idx").on(t.workspaceId, t.createdAt), workspaceIsolation("budget_base")],
+  (t) => [index("budget_base_ws_idx").on(t.workspaceId, t.createdAt), foreignKey({ name: "budget_base_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), workspaceIsolation("budget_base"), companyIsolation("budget_base")],
 ).enableRLS();
 
 export const budgetScenario = pgTable(
@@ -458,7 +503,7 @@ export const budgetScenario = pgTable(
     frozenBy: text("frozen_by").references(() => user.id, { onDelete: "set null" }),
     frozenAt: ts("frozen_at"),
   },
-  (t) => [index("budget_scenario_ws_idx").on(t.workspaceId, t.createdAt), workspaceIsolation("budget_scenario")],
+  (t) => [index("budget_scenario_ws_idx").on(t.workspaceId, t.createdAt), workspaceIsolation("budget_scenario"), parentCompanyIsolation("budget_scenario", "budget_base", "base_id")],
 ).enableRLS();
 
 export const budgetHypothesis = pgTable(
@@ -473,7 +518,7 @@ export const budgetHypothesis = pgTable(
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: ts("created_at").defaultNow().notNull(),
   },
-  (t) => [index("budget_hypothesis_scenario_idx").on(t.scenarioId, t.createdAt), workspaceIsolation("budget_hypothesis")],
+  (t) => [index("budget_hypothesis_scenario_idx").on(t.scenarioId, t.createdAt), workspaceIsolation("budget_hypothesis"), parentCompanyIsolation("budget_hypothesis", "budget_scenario", "scenario_id")],
 ).enableRLS();
 
 // Budget saisi (module 5) : montants chargés globaux par mois d'une année (budget fait hors de Clair) ; un mois sans
@@ -483,6 +528,7 @@ export const budgetReference = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     workspaceId: wsRef(),
+    companyId: companyRef(),
     name: text("name").notNull(),
     year: text("year").notNull(), // AAAA
     amounts: jsonb("amounts").$type<Record<string, number | null>>().notNull(), // AAAA-MM → centimes (null : non saisi)
@@ -492,7 +538,7 @@ export const budgetReference = pgTable(
     updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
     updatedAt: ts("updated_at").defaultNow().notNull(),
   },
-  (t) => [index("budget_reference_ws_idx").on(t.workspaceId, t.year), workspaceIsolation("budget_reference")],
+  (t) => [index("budget_reference_ws_idx").on(t.workspaceId, t.year), foreignKey({ name: "budget_reference_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), workspaceIsolation("budget_reference"), companyIsolation("budget_reference")],
 ).enableRLS();
 
 // Contrôles manuels : le snapshot ne dépend d'aucun build RH éphémère. Les décisions ne
@@ -500,6 +546,7 @@ export const budgetReference = pgTable(
 export const reconciliationRun = pgTable("reconciliation_run", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: wsRef(),
+    companyId: companyRef(),
   controlMonth: text("control_month").notNull(),
   inputHash: text("input_hash").notNull(),
   comparatorVersion: integer("comparator_version").notNull(),
@@ -509,11 +556,11 @@ export const reconciliationRun = pgTable("reconciliation_run", {
   createdAt: ts("created_at").defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("reconciliation_run_ws_id_uq").on(t.workspaceId, t.id),
-  uniqueIndex("reconciliation_run_ws_input_uq").on(t.workspaceId, t.inputHash),
+  uniqueIndex("reconciliation_run_ws_input_uq").on(t.workspaceId, t.companyId, t.inputHash),
   index("reconciliation_run_ws_created_idx").on(t.workspaceId, t.createdAt),
   check("reconciliation_run_revision_valid", sql`${t.revision} >= 0`),
   check("reconciliation_run_month_valid", sql`${t.controlMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
-  workspaceIsolation("reconciliation_run"),
+  foreignKey({ name: "reconciliation_run_company_ws_fk", columns: [t.workspaceId, t.companyId], foreignColumns: [workspaceCompany.workspaceId, workspaceCompany.id] }).onDelete("no action"), workspaceIsolation("reconciliation_run"), companyIsolation("reconciliation_run"),
 ]).enableRLS();
 
 export const reconciliationDecision = pgTable("reconciliation_decision", {
@@ -529,5 +576,5 @@ export const reconciliationDecision = pgTable("reconciliation_decision", {
   foreignKey({ name: "reconciliation_decision_ws_run_fk", columns: [t.workspaceId, t.runId], foreignColumns: [reconciliationRun.workspaceId, reconciliationRun.id] }).onDelete("cascade"),
   uniqueIndex("reconciliation_decision_run_revision_uq").on(t.workspaceId, t.runId, t.revision),
   check("reconciliation_decision_revision_valid", sql`${t.revision} > 0`),
-  workspaceIsolation("reconciliation_decision"),
+  workspaceIsolation("reconciliation_decision"), parentCompanyIsolation("reconciliation_decision", "reconciliation_run", "run_id"),
 ]).enableRLS();

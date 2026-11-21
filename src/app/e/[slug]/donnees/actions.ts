@@ -1,5 +1,6 @@
 "use server";
 import { redirect } from "next/navigation";
+import { companyAddress } from "@/lib/company-routing";
 import { revalidatePath } from "next/cache";
 import { ProviderError } from "@/lib/connectors/http";
 import { isMonth, monthRange } from "@/lib/connectors/months";
@@ -69,7 +70,7 @@ export async function launchSync(slug: string, source: string, _prev: FormState,
   } catch (e) {
     return { error: e instanceof SyncError ? e.message : "Lecture impossible. Réessayez." };
   }
-  redirect(`/e/${slug}/donnees/synchro/${id}`);
+  redirect(companyAddress(`/e/${slug}/donnees/synchro/${id}`, workspace.company?.id));
 }
 
 export async function decideSync(slug: string, syncId: string, decision: "apply" | "discard"): Promise<FormState> {
@@ -129,7 +130,7 @@ export async function uploadFiles(slug: string, kind: keyof typeof UPLOAD_KINDS,
   } catch (e) {
     return { error: rules.isError(e) ? (e as Error).message : "Dépôt impossible. Réessayez." };
   }
-  redirect(`/e/${slug}/donnees/synchro/${id}`);
+  redirect(companyAddress(`/e/${slug}/donnees/synchro/${id}`, workspace.company?.id));
 }
 
 export async function chooseSource(slug: string, domain: string, formData: FormData): Promise<void> {

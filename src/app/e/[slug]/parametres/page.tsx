@@ -140,7 +140,7 @@ export default async function ParametresPage({ params }: { params: Promise<{ slu
   return (
     <>
       <PageHead kicker="Espace" title="Paramètres">
-        <p className="desc">Règles métier de l'espace.<GlossaryLink slug={slug} term={DONNEES_TERMS.origine} /></p>
+        <p className="desc">Règles métier de la société sélectionnée.<GlossaryLink slug={slug} term={DONNEES_TERMS.origine} /></p>
       </PageHead>
       {!isAdmin && <p className="notice" data-testid="pm-readonly">Lecture seule : réservé aux administrateurs.</p>}
 

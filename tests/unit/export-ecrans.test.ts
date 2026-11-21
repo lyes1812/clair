@@ -47,7 +47,8 @@ const mocks = vi.hoisted(() => ({
   budgets: { value: [] as unknown[] },
   getScenario: vi.fn(),
 }));
-vi.mock("@/lib/workspace", () => ({
+vi.mock("@/lib/workspace", async (original) => ({
+  ...(await original<typeof import("@/lib/workspace")>()),
   requireWorkspace: async (slug: string) => ({ session: {}, workspace: { id: "w1", name: "Espace fictif", slug, role: mocks.role.value } }),
 }));
 vi.mock("@/lib/rh/kpi-context", () => ({ loadKpiContext: async () => mocks.kpiCtx.value }));

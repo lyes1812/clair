@@ -17,12 +17,12 @@ export async function listActualEvents(workspaceId: string): Promise<ActualEvent
   });
 }
 
-// Une ligne par événement, verrou par espace, comparaison de la version affichée et journal sans payload client.
+// Une ligne par événement et société, comparaison de la version affichée et journal sans payload client.
 // Ne pas utiliser setSetting : ce helper général journalise la valeur complète du paramètre.
 export async function saveActualEvent(workspaceId: string, actorUserId: string, event: ActualEvent, expectedVersion: string | null): Promise<void> {
   if (!parseActualEvent(event)) throw new ActualEventError("Déclaration invalide.");
   await withWorkspace(workspaceId, async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`actual-non-recurring:${workspaceId}`}, 0))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`actual-non-recurring:${workspaceId}:`}::text || current_setting('app.company_id', true), 0))`);
     const [active] = await tx.select({ id: sourceSync.id }).from(sourceSync).where(and(eq(sourceSync.provider, "payfit"), eq(sourceSync.status, "applied"))).orderBy(desc(sourceSync.decidedAt)).limit(1);
     if (active?.id !== event.syncId) throw new ActualEventError("La lecture PayFit a changé. Recharge la page avant d’enregistrer.");
     const rows = await tx.select({ key: workspaceSetting.key, value: workspaceSetting.value }).from(workspaceSetting).where(like(workspaceSetting.key, `${ACTUAL_NON_RECURRING_KEY}%`));
@@ -38,7 +38,7 @@ export async function saveActualEvent(workspaceId: string, actorUserId: string, 
       if (other.id !== event.id && signature(other) === signature(event)) throw new ActualEventError("Cet élément existe déjà pour ce mois et ces contrats. Modifie sa ligne.");
     }
     const now = new Date();
-    await tx.insert(workspaceSetting).values({ workspaceId, key: `${ACTUAL_NON_RECURRING_KEY}${event.id}`, value: event, updatedBy: actorUserId, updatedAt: now }).onConflictDoUpdate({ target: [workspaceSetting.workspaceId, workspaceSetting.key], set: { value: event, updatedBy: actorUserId, updatedAt: now } });
-    await tx.insert(workspaceEvent).values({ workspaceId, actorUserId, kind: "setting.changed", detail: { key: "rh.payroll.actualNonRecurring", operation: previous ? "updated" : "created", count: 1 } });
+    await tx.insert(workspaceSetting).values({ workspaceId, key: `${ACTUAL_NON_RECURRING_KEY}${event.id}`, value: event, updatedBy: actorUserId, updatedAt: now }).onConflictDoUpdate({ target: [workspaceSetting.workspaceId, workspaceSetting.companyId, workspaceSetting.key], set: { value: event, updatedBy: actorUserId, updatedAt: now } });
+    await tx.insert(workspaceEvent).values({ workspaceId, companyId: sql`current_setting('app.company_id', true)::uuid`, actorUserId, kind: "setting.changed", detail: { key: "rh.payroll.actualNonRecurring", operation: previous ? "updated" : "created", count: 1 } });
   });
 }

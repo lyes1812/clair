@@ -5,8 +5,17 @@ import { member, organization } from "@/db/schema";
 import { hasAtLeast, isRole, type Role } from "./roles";
 import { requireUser } from "./session";
 import { requiresMfaSetup } from "./mfa-policy";
+import { getCompanyContext, type Company } from "./companies";
+import { readCompanyRequest } from "./company-request";
+import { companyRouteDecision } from "./company-routing";
+import { resourceCompanyId } from "./company-resources";
 
-export type WorkspaceAccess = { id: string; name: string; slug: string; role: Role };
+export type WorkspaceAccess = { id: string; name: string; slug: string; role: Role; company?: Company | null; companies?: Company[] };
+
+export function workspaceDisplayName(workspace: WorkspaceAccess): string {
+  return workspace.company && workspace.company.name !== workspace.name
+    ? `${workspace.name} · ${workspace.company.name}` : workspace.name;
+}
 
 // Seule source de vérité pour « cet utilisateur peut-il voir cet espace ? ».
 export async function findAccess(userId: string, slug: string): Promise<WorkspaceAccess | null> {
@@ -39,6 +48,17 @@ export async function requireWorkspace(slug: string, minRole: Role = "reader") {
   if (!access || !hasAtLeast(access.role, minRole)) notFound();
   if (access.role === "admin" && requiresMfaSetup(session.user)) {
     redirect(`/securite?retour=${encodeURIComponent(`/e/${slug}`)}`);
+  }
+  const request = await readCompanyRequest(access.id);
+  // Les traitements hors page (API de l'espace et tests d'autorisation) restent
+  // des contrôles d'accès. Le middleware identifie les requêtes de travail.
+  if (request.url) {
+    const resourceId = await resourceCompanyId(access.id, request.url);
+    const context = await getCompanyContext(access.id);
+    const destination = companyRouteDecision({ slug, relative: request.url, method: request.method ?? "GET", selectedId: context.selected?.id ?? null, companyCount: context.companies.filter(c => !c.archivedAt).length, error: Boolean(context.selectionError), resourceId });
+    if (destination) redirect(destination);
+    access.company = context.selected;
+    access.companies = context.companies;
   }
   return { session, workspace: access };
 }

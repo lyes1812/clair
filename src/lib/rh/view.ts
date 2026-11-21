@@ -37,7 +37,7 @@ export async function loadCollabContext(slug: string): Promise<CollabContext> {
       tx
         .select({ at: workspaceEvent.occurredAt })
         .from(workspaceEvent)
-        .where(sql`${workspaceEvent.kind} = 'setting.changed' and ${workspaceEvent.detail}->>'key' = 'source.rh.mode'`)
+        .where(sql`${workspaceEvent.companyId} = current_setting('app.company_id', true)::uuid and ${workspaceEvent.kind} = 'setting.changed' and ${workspaceEvent.detail}->>'key' = 'source.rh.mode'`)
         .orderBy(desc(workspaceEvent.occurredAt))
         .limit(1),
     ),

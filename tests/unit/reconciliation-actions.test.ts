@@ -43,13 +43,13 @@ describe("Rapprochement : actions protégées et décisions traçables", () => {
     mocks.load.mockResolvedValue({ selected: null });
     const html = renderToStaticMarkup(await ReconciliationPage({ params: Promise.resolve({ slug: "demo" }), searchParams: Promise.resolve({ run: "PRIVATE-EMPLOYEE-NAME" }) }));
     expect(mocks.load).not.toHaveBeenCalled();
-    expect(html).toContain("Contrôle indisponible dans cet espace.");
+    expect(html).toContain("Contrôle indisponible pour la société sélectionnée.");
     expect(html).not.toContain("PRIVATE-EMPLOYEE-NAME");
   });
   it("un contrôle d'un autre espace rend la même indisponibilité, sans afficher le dernier contrôle par repli", async () => {
     mocks.load.mockRejectedValueOnce({ code: "not_found" });
     const html = renderToStaticMarkup(await ReconciliationPage({ params: Promise.resolve({ slug: "demo" }), searchParams: Promise.resolve({ run: RUN }) }));
-    expect(html).toContain("Contrôle indisponible dans cet espace.");
+    expect(html).toContain("Contrôle indisponible pour la société sélectionnée.");
     expect(mocks.load).toHaveBeenCalledTimes(1);
     expect(mocks.load).toHaveBeenCalledWith("workspace-fixture", RUN);
   });

@@ -336,9 +336,12 @@ export function normalizeLedger(body: unknown, month: string): { records: Source
 }
 
 // Lecture complète d'un périmètre : chaque collection est lue en entier ou signalée indisponible avec sa raison.
-export async function readPayFit(client: PayFitClient, months: string[]): Promise<ProviderReadResult & { company: PayFitCompany; scopes: string[] }> {
+export async function readPayFit(client: PayFitClient, months: string[], expectedCompanyId?: string | null): Promise<ProviderReadResult & { company: PayFitCompany; scopes: string[] }> {
   if (!months.every(isMonth)) throw new ProviderError("invalid_response", "périmètre de mois");
   const identity = await client.introspect();
+  if (expectedCompanyId !== undefined && identity.companyId !== expectedCompanyId) {
+    throw new ProviderError("invalid_response", "la clé PayFit appartient à une autre société");
+  }
   const company = await client.company(identity.companyId);
   const has = (s: string) => identity.scopes.includes(s);
   const records: SourceRecordInput[] = [

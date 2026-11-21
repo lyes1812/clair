@@ -1,0 +1,38 @@
+.company-scope-bar { padding: 12px 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.company-switch-form { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; font-size: var(--clair-type-form); }
+.company-switch-form label { font-weight: 600; }
+.company-switch-form .select { width: min(280px, 100%); min-width: 120px; }
+.company-switch-form a { margin-left: auto; }
+.company-scope-bar > .error { margin-top: 10px; }
+.company-print-label { display: none; }
+.company-manager { display: grid; gap: 20px; min-width: 0; }
+.company-manager-head { display: grid; gap: 8px; }
+.company-manager-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.company-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 20px; }
+.company-card { padding: 20px; display: grid; align-content: start; gap: 16px; border-radius: var(--clair-radius-card); min-width: 0; }
+.company-card h2 { font-size: 20px; overflow-wrap: anywhere; }
+.company-card.is-selected { border-color: var(--blue); }
+.company-card .facts { margin: 0; gap: 12px; }
+.company-card .facts dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.company-card-links { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.company-edit-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px 16px; align-items: end; }
+.company-edit-form .btn { justify-self: start; }
+.company-edit-form :is(.error, [role="status"]) { grid-column: 1 / -1; }
+.company-edit-form .field-row > span { font-size: var(--clair-type-form-label); font-weight: 600; }
+.company-manager .panel > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.company-manager .panel > .company-edit-form { margin-top: 16px; }
+.company-company-label { color: var(--muted); font-size: var(--clair-type-form); }
+@media (max-width: 760px) {
+  .company-scope-bar { padding: 12px 14px; }
+  .company-switch-form .select { flex: 1; min-width: 0; }
+  .company-switch-form :is(.select, .btn) { min-height: 44px; }
+  .company-switch-form a { margin-left: 0; width: 100%; min-height: 32px; }
+  .company-card { padding: 16px; }
+  .company-edit-form { grid-template-columns: minmax(0, 1fr); }
+  .company-edit-form :is(input, .btn) { min-height: 44px; }
+}
+@media print {
+  .company-scope-bar { display: block !important; padding: 0 0 8px; }
+  .company-scope-bar :is(form, .error) { display: none !important; }
+  .company-print-label { display: block; margin: 0; font-weight: 600; }
+}

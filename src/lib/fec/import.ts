@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { sourceRecord, sourceSync } from "@/db/schema";
-import { withWorkspace } from "@/db/workspace-scope";
+import { sourceRecord, sourceSync, workspaceCompany } from "@/db/schema";
+import { currentCompanyId, withCompanyScope, withWorkspace } from "@/db/workspace-scope";
 import { recordEvent } from "@/lib/events";
 import { digestOf, knownFileHashes, listSourceFiles, safeFilename, storeSourceFiles, type FileOutcome, type StoredUpload } from "@/lib/connectors/files";
 import { contentHash, type SyncSummary } from "@/lib/connectors/sync";
@@ -80,8 +80,15 @@ function records(parsed: FecParseResult, siren: string | null, filename: string)
 }
 
 export async function importFecFiles(workspaceId: string, uploads: FecUpload[], actorUserId: string): Promise<string> {
+  const companyId = await currentCompanyId(workspaceId);
+  return withCompanyScope(workspaceId, companyId, () => importFecFilesForCompany(workspaceId, companyId, uploads, actorUserId));
+}
+
+async function importFecFilesForCompany(workspaceId: string, companyId: string, uploads: FecUpload[], actorUserId: string): Promise<string> {
   if (uploads.length === 0) throw new FecError("empty", "Aucun fichier.");
   if (uploads.length > MAX_FILES) throw new FecError("too_large", `${MAX_FILES} fichiers au plus par dépôt.`);
+  const [company] = await withWorkspace(workspaceId, (tx) => tx.select({ siren: workspaceCompany.siren }).from(workspaceCompany).where(eq(workspaceCompany.id, companyId)));
+  if (!company) throw new FecError("row", "Société introuvable.");
   const files: FileOutcome[] = [];
   const exercises: FecExercise[] = [];
   const all: SourceRecordInput[] = [];
@@ -108,6 +115,9 @@ export async function importFecFiles(workspaceId: string, uploads: FecUpload[], 
       const parsed = parseFec(u.bytes);
       const named = parseFecFilename(filename);
       const siren = named?.siren ?? null;
+      if (company.siren && siren !== company.siren) {
+        throw new FecError("row", "Le SIREN du fichier ne correspond pas à la société sélectionnée, ou n’est pas identifiable dans son nom normalisé.");
+      }
       const fileWarnings = [...parsed.warnings];
       if (!named) fileWarnings.push("Nom de fichier hors convention <SIREN>FEC<AAAAMMJJ>.txt : SIREN et date de clôture non déduits.");
       else if (parsed.lastDate > named.closingDate) fileWarnings.push("Des écritures sont postérieures à la date de clôture indiquée dans le nom du fichier.");
@@ -140,6 +150,11 @@ export async function importFecFiles(workspaceId: string, uploads: FecUpload[], 
   const summary: FecSyncSummary = { mode: "additive", files, exercises, collections, months: [...months].sort(), replaces };
 
   const syncId = await withWorkspace(workspaceId, async (tx) => {
+    // Même verrou que l’édition du registre : aucun aperçu sous une identité devenue incompatible.
+    const [current] = await tx.select({ siren: workspaceCompany.siren }).from(workspaceCompany).where(eq(workspaceCompany.id, companyId)).for("update");
+    if (!current || current.siren && exercises.some((exercise) => exercise.siren !== current.siren)) {
+      throw new FecError("row", "Le SIREN de la société a changé pendant l’import ; vérifie la société sélectionnée puis recommence.");
+    }
     const [row] = await tx
       .insert(sourceSync)
       .values({

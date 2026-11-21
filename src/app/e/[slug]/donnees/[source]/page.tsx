@@ -120,7 +120,7 @@ export default async function SourcePage({ params }: { params: Promise<{ slug: s
               )}
             </dl>
           ) : (
-            <Empty>Aucune clé enregistrée pour cet espace.</Empty>
+            <Empty>Aucune clé enregistrée pour cette société.</Empty>
           )}
           {isAdmin ? (
             <>

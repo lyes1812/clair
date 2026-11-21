@@ -38,7 +38,7 @@ export async function saveFinanceSettings(workspaceId: string, actor: string, ex
     const now = new Date();
     const updated = await tx.insert(workspaceSetting).values({ workspaceId, key: FINANCE_SETTINGS_KEY, value, updatedBy: actor, updatedAt: now })
       .onConflictDoUpdate({
-        target: [workspaceSetting.workspaceId, workspaceSetting.key],
+        target: [workspaceSetting.workspaceId, workspaceSetting.companyId, workspaceSetting.key],
         set: { value, updatedBy: actor, updatedAt: now },
         setWhere: and(eq(workspaceSetting.workspaceId, workspaceId), eq(workspaceSetting.key, FINANCE_SETTINGS_KEY), sql`${workspaceSetting.value}->>'revision' = ${String(expectedRevision)}`),
       }).returning({ id: workspaceSetting.id });

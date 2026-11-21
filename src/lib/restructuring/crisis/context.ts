@@ -2,7 +2,7 @@ import { isIsoDate } from "@/lib/dates";
 import { fecCoverage } from "@/lib/fec/import";
 import { hasAtLeast } from "@/lib/roles";
 import { getSetting } from "@/lib/settings";
-import { requireWorkspace } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName, type WorkspaceAccess } from "@/lib/workspace";
 import { buildCrisisPosition, type CrisisPosition, type RankSettings } from "./model";
 import { CRISIS_RANKS_KEY, parseRanks } from "./ranks";
 import { readCrisisLines } from "./store";
@@ -18,7 +18,7 @@ export async function loadCrisisContext(slug: string, query: CrisisQuery) {
   return context;
 }
 
-type Workspace = { id: string; name: string; role: Parameters<typeof hasAtLeast>[0] };
+type Workspace = Pick<WorkspaceAccess, "id" | "name" | "role" | "company">;
 /** Lecture du lot 1 pour un espace déjà vérifié ; `source` désigne la lecture FEC utilisée (jamais renvoyée à l'écran). */
 export async function readCrisis(workspace: Workspace, slug: string, query: CrisisQuery) {
   const applied = (await fecCoverage(workspace.id)).filter((exercise) => !exercise.pending);
@@ -26,7 +26,7 @@ export async function readCrisis(workspace: Workspace, slug: string, query: Cris
     .map((e) => ({ filename: e.filename, firstDate: e.firstDate, lastDate: e.lastDate, syncId: e.syncId }))
     .sort((a, b) => b.lastDate.localeCompare(a.lastDate));
   const base = {
-    slug, workspaceName: workspace.name, canEdit: hasAtLeast(workspace.role, "editor"),
+    slug, workspaceName: workspaceDisplayName({ ...workspace, slug }), canEdit: hasAtLeast(workspace.role, "editor"),
     exercises: exercises.map(({ filename, firstDate, lastDate }) => ({ filename, firstDate, lastDate })),
     reference: query.reference, projet: query.projet,
   };

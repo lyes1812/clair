@@ -10,7 +10,7 @@ import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { formatEuros } from "@/lib/money";
 import { hasAtLeast } from "@/lib/roles";
 import { periodText } from "@/lib/viz/ecart";
-import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName, type WorkspaceAccess } from "@/lib/workspace";
 import { loadVersions, type Loaded } from "../../ecart-data";
 import { ecartRows } from "../../ecart-rows";
 import { peopleIndex, type PersonAbsent, type PersonInfo } from "../../people-index";
@@ -86,7 +86,7 @@ async function tableXlsx(workspace: WorkspaceAccess, loaded: Loaded, vue: "synth
   ];
   const buffer = await buildWorkbook({
     title: "Écart budgétaire",
-    workspaceName: workspace.name,
+    workspaceName: workspaceDisplayName(workspace),
     generatedAt: new Date().toISOString(),
     filters: [...commonFilters(loaded), { label: "Niveau de détail", value: vue === "detail" ? "Détail" : "Synthèse" }],
     sheets: [
@@ -133,7 +133,7 @@ async function zoomXlsx(workspace: WorkspaceAccess, loaded: Loaded, rubric: Zoom
   const reconciliation = gap.kind === "value" ? (gap.num === total ? `rapproché de l'écart de la rubrique (${formatEuros(gap.num)})` : `écart de rubrique ${formatEuros(gap.num)}, différent de la somme des salariés`) : "écart de rubrique n.d.";
   const buffer = await buildWorkbook({
     title: `Écart budgétaire — détail par salarié (${ZOOM_RUBRICS[rubric]})`,
-    workspaceName: workspace.name,
+    workspaceName: workspaceDisplayName(workspace),
     generatedAt: new Date().toISOString(),
     filters: [...commonFilters(loaded), { label: "Rubrique", value: ZOOM_RUBRICS[rubric] }, { label: "Écart détaillé", value: `${b.label} − ${a.label}` }],
     sheets: [

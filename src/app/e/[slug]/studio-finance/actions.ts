@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { companyAddress } from "@/lib/company-routing";
 import { formId, formName, formRevision, mappingsFromForm, planFromForm } from "@/lib/finance/forms";
 import { FinanceError } from "@/lib/finance/plans";
 import { getFinanceSettings, saveFinanceSettings } from "@/lib/finance/store";
@@ -23,7 +24,7 @@ export async function savePlanAction(slug: string, _previous: FinanceFormState, 
     id = plan.id; year = plan.year;
   } catch (e) { return failure(e); }
   revalidatePath(path(slug));
-  redirect(`${path(slug)}?vue=plans&annee=${year}&plan=${id}`);
+  redirect(companyAddress(`${path(slug)}?vue=plans&annee=${year}&plan=${id}`, workspace.company?.id));
 }
 export async function duplicatePlanAction(slug: string, _previous: FinanceFormState, form: FormData): Promise<FinanceFormState> {
   const { session, workspace } = await requireWorkspace(slug, "editor");
@@ -40,7 +41,7 @@ export async function duplicatePlanAction(slug: string, _previous: FinanceFormSt
     id = copy.id; year = copy.year;
   } catch (e) { return failure(e); }
   revalidatePath(path(slug));
-  redirect(`${path(slug)}?vue=plans&annee=${year}&plan=${id}`);
+  redirect(companyAddress(`${path(slug)}?vue=plans&annee=${year}&plan=${id}`, workspace.company?.id));
 }
 export async function saveMappingsAction(slug: string, _previous: FinanceFormState, form: FormData): Promise<FinanceFormState> {
   const { session, workspace } = await requireWorkspace(slug, "admin");

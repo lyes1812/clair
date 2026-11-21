@@ -17,7 +17,7 @@ import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import type { ChapterId } from "@/lib/viz/croisee";
 import { monthShortYear } from "@/lib/viz/masse";
 import { MM, MONTH_NAMES, presets } from "@/lib/viz/synthese";
-import { requireWorkspace } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName } from "@/lib/workspace";
 import { MsHeader, MsTabs } from "../EcartParts";
 import { ModelTable } from "./atomes/ModelTable";
 import { NdNote } from "./atomes/NdNote";
@@ -307,7 +307,7 @@ export default async function CroiseePage({ params, searchParams }: { params: Pr
     <MoneyText>
       <div className="cx-page" data-testid="cx-page" data-chapter={chapter.id}>
         <p className="cx-print-head" data-testid="cx-print-head">
-          {ctx.workspace.name} · Masse salariale croisée · {chapter.num} / {CHAPTER_TOTAL} {chapter.title}
+          {workspaceDisplayName(ctx.workspace)} · Masse salariale croisée · {chapter.num} / {CHAPTER_TOTAL} {chapter.title}
           {ctx.period && (
             <>
               {" "}· {ctx.labels.period} · N-1 : {ctx.labels.prev} · {ctx.service.label}

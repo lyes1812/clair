@@ -1,3 +1,4 @@
+import { workspaceDisplayName } from "@/lib/workspace";
 import "@/styles/reporting-social.css";
 import "@/styles/publisher.css";
 import { FamilyTabs } from "@/components/FamilyTabs";
@@ -18,7 +19,7 @@ export async function PublisherPage({ slug, search }: { slug: string; search: So
   return <div className="rs-page publisher-page" data-testid="publisher-page">
     <KpiHeader ctx={ctx.kpi} closedMonth={period.kind === "ready" ? period.last : null} bare>
       <FamilyTabs label="Entrées KPI RH" testid="kpi-tabs" current="publisher" tabs={KPI_VUES.map((v) => ({ key: v.key, label: v.label, href: v.key === "suivi" ? "?" : `?vue=${v.key}`, soon: "soon" in v ? v.soon : false }))} />
-      <PublisherView report={report} slug={slug} workspaceName={ctx.kpi.collab.workspace.name} />
+      <PublisherView report={report} slug={slug} workspaceName={workspaceDisplayName(ctx.kpi.collab.workspace)} />
     </KpiHeader>
   </div>;
 }

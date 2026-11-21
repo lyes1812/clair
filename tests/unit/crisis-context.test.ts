@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), coverage: vi.fn(), lines: vi.fn(), setting: vi.fn(), set: vi.fn(), revalidate: vi.fn(), plan: vi.fn(), update: vi.fn(), suppliers: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), display: vi.fn(), coverage: vi.fn(), lines: vi.fn(), setting: vi.fn(), set: vi.fn(), revalidate: vi.fn(), plan: vi.fn(), update: vi.fn(), suppliers: vi.fn() }));
 const { CashPlanError } = vi.hoisted(() => ({ CashPlanError: class CashPlanError extends Error {} }));
-vi.mock("@/lib/workspace", () => ({ requireWorkspace: mocks.auth }));
+vi.mock("@/lib/workspace", () => ({ requireWorkspace: mocks.auth, workspaceDisplayName: mocks.display }));
 vi.mock("@/lib/fec/import", () => ({ fecCoverage: mocks.coverage }));
 vi.mock("@/lib/restructuring/crisis/store", () => ({ readCrisisLines: mocks.lines, getCashPlan: mocks.plan, updateCashPlan: mocks.update, readSupplierLines: mocks.suppliers, CashPlanError }));
 vi.mock("@/lib/settings", () => ({ getSetting: mocks.setting, setSetting: mocks.set }));
@@ -20,6 +20,7 @@ const OLD = exercise("000000000FEC20251231.txt", "2025-01-01", "2025-12-31");
 const NEW = exercise("000000000FEC20261231.txt", "2026-01-01", "2026-09-30");
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.display.mockImplementation((workspace: { name: string }) => workspace.name);
   mocks.auth.mockResolvedValue({ workspace: { id: "espace-fictif", name: "Espace fictif", role: "reader" }, session: { user: { id: "editeur-fictif" } } });
   mocks.coverage.mockResolvedValue([OLD, NEW]);
   mocks.lines.mockResolvedValue([{ accountId: "512000", accountName: "Banque fictive", auxiliary: null, auxiliaryLabel: null, date: "2026-01-01", debitCents: 1_000, creditCents: 0 }]);

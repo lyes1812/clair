@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyFinanceSettings } from "@/lib/finance/plans";
 import type { ComptaSource } from "@/lib/payroll/context";
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), source: vi.fn(), accounting: vi.fn(), settings: vi.fn(), scenarios: vi.fn(), scenario: vi.fn(), project: vi.fn() }));
-vi.mock("@/lib/workspace", () => ({ requireWorkspace: mocks.auth }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), display: vi.fn(), source: vi.fn(), accounting: vi.fn(), settings: vi.fn(), scenarios: vi.fn(), scenario: vi.fn(), project: vi.fn() }));
+vi.mock("@/lib/workspace", () => ({ requireWorkspace: mocks.auth, workspaceDisplayName: mocks.display }));
 vi.mock("@/lib/sources", () => ({ resolveSource: mocks.source }));
 vi.mock("@/lib/payroll/context", () => ({ loadCompta: mocks.accounting }));
 vi.mock("@/lib/finance/store", () => ({ getFinanceSettings: mocks.settings }));
@@ -12,6 +12,7 @@ import { loadFinanceContext } from "@/lib/finance/context";
 const ID = "11111111-1111-4111-8111-111111111111", RH = "22222222-2222-4222-8222-222222222222";
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.display.mockImplementation((workspace: { name: string }) => workspace.name);
   mocks.auth.mockResolvedValue({ workspace: { id: "w-fictif", name: "Espace fictif", role: "reader" } });
   mocks.source.mockResolvedValue({ chosen: "pennylane", appliedAt: new Date("2026-10-01") });
   mocks.accounting.mockResolvedValue({ source: "pennylane", reason: "lu", error: false, months: ["2026-01", "2026-09"], nd: {}, lines: [{ accountId: "707", month: "2026-01", debitCents: 0, creditCents: 10000 }, { accountId: "707", month: "2026-09", debitCents: 0, creditCents: 90000 }] } satisfies ComptaSource);

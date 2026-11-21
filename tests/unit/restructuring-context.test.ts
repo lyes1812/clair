@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), list: vi.fn(), get: vi.fn(), model: vi.fn() }));
-vi.mock("@/lib/workspace", () => ({ requireWorkspace: mocks.auth }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), display: vi.fn(), list: vi.fn(), get: vi.fn(), model: vi.fn() }));
+vi.mock("@/lib/workspace", () => ({ requireWorkspace: mocks.auth, workspaceDisplayName: mocks.display }));
 vi.mock("@/lib/budget/store", () => ({ listScenarios: mocks.list, getScenario: mocks.get, BudgetError: class BudgetError extends Error {} }));
 vi.mock("@/lib/restructuring/model", () => ({ buildRestructuring: mocks.model }));
 import { loadRestructuringContext } from "@/lib/restructuring/context";
@@ -9,6 +9,7 @@ const REF = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", PRO = "bbbbbbbb-bbbb-4bbb-8b
 const row = (id: string) => ({ scenario: { id, name: `Scénario fictif ${id.slice(0, 1)}`, firstMonth: "2026-10", lastMonth: "2026-12", status: "brouillon", conventions: { prorata: "calendaire" } } });
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.display.mockImplementation((workspace: { name: string }) => workspace.name);
   mocks.auth.mockResolvedValue({ workspace: { id: "espace-fictif", name: "Espace fictif", role: "reader" } });
   mocks.list.mockResolvedValue([row(REF), row(PRO)]);
   mocks.get.mockImplementation(async (_: string, id: string) => ({ ...row(id), base: { readAt: "2026-10-01" }, baseHash: "fictif", hypotheses: [] }));

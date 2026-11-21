@@ -237,7 +237,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
   return (
     <>
       <div className="dn-overview">
-        <PageHead kicker="Sources de l'espace" title={DATA_ITEM.label}>
+        <PageHead kicker="Sources de la société" title={DATA_ITEM.label}>
           <p className="desc">
             Connexions et fichiers, en lecture seule.<GlossaryLink slug={slug} term={DONNEES_TERMS.lecture} />
           </p>

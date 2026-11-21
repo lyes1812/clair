@@ -31,7 +31,7 @@ export function PublisherView({ report, slug, workspaceName }: { report: Publish
         <span>{block.label}</span>
       </label>)}</div></fieldset>
       <label className="publisher-monthly"><input type="checkbox" name="mensuel" value="1" defaultChecked={report.selection.monthly} /><span>Inclure le détail mensuel</span></label>
-      <p className="desc">Périmètre : tous les établissements · population paramétrée de l’espace. Sources, vigilance et définitions sont toujours incluses.</p>
+      <p className="desc">Périmètre : société sélectionnée · tous ses établissements · population paramétrée. Sources, vigilance et définitions sont toujours incluses.</p>
       <div className="actions"><button className="btn primary" type="submit">Prévisualiser</button><a className="btn" href="?vue=publisher">Réinitialiser</a></div>
       <p className="desc" id="publisher-apply-help">Prévisualise pour appliquer tes choix. Le PDF reprend l’aperçu ci-dessous.</p>
     </form>

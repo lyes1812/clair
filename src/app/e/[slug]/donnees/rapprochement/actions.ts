@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { companyAddress } from "@/lib/company-routing";
 import { z } from "zod";
 import { isMonth } from "@/lib/connectors/months";
 import { pairFingerprint } from "@/lib/reconciliation/compare";
@@ -16,7 +17,7 @@ const uuid = z.string().uuid();
 const meta = z.object({ runId: uuid, revision: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER), inputHash: z.string().regex(/^[a-f0-9]{64}$/) });
 const messages: Record<string, string> = {
   invalid_month: "Choisissez un mois DSN disponible.",
-  not_found: "Contrôle indisponible dans cet espace.",
+  not_found: "Contrôle indisponible pour la société sélectionnée.",
   stale: "Les sources ont changé. Ouvrez un contrôle actualisé.",
   revision_conflict: "Le contrôle a été modifié. Rechargez la page.",
   invalid_decision: "La décision ne correspond plus au contrôle. Rechargez la page.",
@@ -41,7 +42,7 @@ export async function createReconciliationAction(slug: string, _previous: FormSt
   try { id = await createReconciliationRun(workspace.id, session.user.id, month); }
   catch (error) { return failure(error); }
   revalidatePath(base(slug));
-  redirect(`${base(slug)}?run=${encodeURIComponent(id)}`);
+  redirect(companyAddress(`${base(slug)}?run=${encodeURIComponent(id)}`, workspace.company?.id));
 }
 
 export async function decideReconciliationAction(slug: string, _previous: FormState, f: FormData): Promise<FormState> {

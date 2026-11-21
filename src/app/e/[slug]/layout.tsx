@@ -6,6 +6,8 @@ import { CurrencyProvider } from "@/components/CurrencyPreference";
 import { menuFamilies } from "@/lib/menu";
 import { ROLE_LABELS } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/workspace";
+import { CompanySwitcher } from "@/components/CompanySwitcher";
+import "@/styles/companies.css";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +42,7 @@ export default async function WorkspaceLayout({
       </aside>
       <div className="shell-main">
         <WorkspaceTopBar slug={slug} workspaceName={workspace.name} userName={session.user.name} email={session.user.email} families={menuFamilies(slug)} />
+        {workspace.companies && <CompanySwitcher slug={slug} companies={workspace.companies.filter(c => !c.archivedAt)} selectedId={workspace.company?.id ?? null} />}
         <main className="main" id="workspace-content" tabIndex={-1}>{children}</main>
       </div>
     </div></CurrencyProvider>

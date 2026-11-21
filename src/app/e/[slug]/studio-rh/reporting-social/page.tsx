@@ -6,7 +6,7 @@ import { Prevu } from "@/components/Prevu";
 import { DONNEES_TERMS } from "@/lib/glossary/donnees";
 import { STUDIO_RH_ITEMS } from "@/lib/nav";
 import { PageHead } from "../../donnees/ui";
-import { requireWorkspace } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName } from "@/lib/workspace";
 import { loadPayrollContext } from "@/lib/payroll/context";
 import { socialReportOf } from "@/lib/reporting/social";
 import { isMonth } from "@/lib/connectors/months";
@@ -58,7 +58,7 @@ export default async function ReportingSocialPage({ params, searchParams }: { pa
         <p className="desc">{ITEM.summary}</p>
       </PageHead>
       <FamilyTabs label="Entrées Reporting social" testid="rs-tabs" current={vue} tabs={REPORTING_VUES.map((v) => ({ key: v.key, label: v.label, href: `${base}?vue=${v.key}${period.size ? `&${period.toString()}` : ""}`, soon: "soon" in v ? v.soon : undefined }))} />
-      {vue === "rapport" && report ? <ReportView report={report} slug={slug} workspaceName={workspace.name} /> : vue === "index" ? (
+      {vue === "rapport" && report ? <ReportView report={report} slug={slug} workspaceName={workspaceDisplayName(workspace)} /> : vue === "index" ? (
         <Prevu
           title="Index égalité FH"
           lead="Non disponible avec les données lues : le calcul de l'index demande le sexe, la catégorie et la rémunération individuelle de chaque collaborateur, et le sexe n'est pas lu aujourd'hui dans le référentiel Collaborateurs."

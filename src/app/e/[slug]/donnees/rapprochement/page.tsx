@@ -17,7 +17,7 @@ export default async function ReconciliationPage({ params, searchParams }: { par
   const sp = await searchParams;
   const raw = Array.isArray(sp.run) ? sp.run[0] : sp.run;
   const parsed = z.string().uuid().safeParse(raw);
-  const unavailable = <><PageHead kicker="Données" title="Rapprochement DSN–PayFit" /><p className="notice" data-testid="reconciliation-unavailable">Contrôle indisponible dans cet espace.</p><a href={`/e/${slug}/donnees/rapprochement`}>Revenir aux contrôles</a></>;
+  const unavailable = <><PageHead kicker="Données" title="Rapprochement DSN–PayFit" /><p className="notice" data-testid="reconciliation-unavailable">Contrôle indisponible pour la société sélectionnée.</p><a href={`/e/${slug}/donnees/rapprochement`}>Revenir aux contrôles</a></>;
   if (raw && !parsed.success) return unavailable;
   const runId = parsed.success ? parsed.data : undefined;
   let model: Awaited<ReturnType<typeof loadReconciliation>>;

@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { companyAddress } from "@/lib/company-routing";
 import { isIsoDate } from "@/lib/dates";
 import { z } from "zod";
 import type { Hypothesis } from "@/lib/budget/types";
@@ -85,7 +86,7 @@ export async function addCashFlowAction(slug: string, _previous: FormState, form
     const arrete = String(form.get("arrete") ?? "");
     if (exercice && exercice.length <= 255) query.set("exercice", exercice);
     if (isIsoDate(arrete)) query.set("date", arrete);
-    redirect(`/e/${slug}/studio-restructuring?${query}`);
+    redirect(companyAddress(`/e/${slug}/studio-restructuring?${query}`, workspace.company?.id));
   }
   return { ok: "Ligne ajoutée au plan." };
 }
@@ -131,7 +132,7 @@ export async function createCashScenarioAction(slug: string, _previous: FormStat
   const arrete = String(form.get("arrete") ?? "");
   if (exercice && exercice.length <= 255) query.set("exercice", exercice);
   if (isIsoDate(arrete)) query.set("date", arrete);
-  redirect(`/e/${slug}/studio-restructuring?${query}#cash-scenario`);
+  redirect(companyAddress(`/e/${slug}/studio-restructuring?${query}#cash-scenario`, workspace.company?.id));
 }
 
 /** Cap 13 : supprime un scénario et ses mesures. Le plan de base est inchangé. */

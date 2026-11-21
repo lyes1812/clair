@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { companyAddress } from "@/lib/company-routing";
 import { buildBase } from "@/lib/budget/base";
 import { getConventions } from "@/lib/budget/settings";
 import { getCategoryNatures, getContractCategories } from "@/lib/budget/categories";
@@ -53,13 +54,13 @@ export async function createScenarioAction(slug: string, _prev: FormState, f: Fo
   if (b.kind === "nd") return { error: `Base figée impossible : ${b.reason}.` };
   let id: string;
   try {
-    id = await createScenario(workspace.id, session.user.id, { name, kind, firstMonth, lastMonth }, b.base, conv.conventions);
+    id = await createScenario(workspace.id, session.user.id, { name, kind, firstMonth, lastMonth }, b.base, conv.conventions, { sourceSyncId: ctx.read.syncId });
     await recordEvent(workspace.id, session.user.id, "budget.scenario_created", { scenarioId: id, refMonth, firstMonth, lastMonth });
   } catch (e) {
     return fail(e);
   }
   revalidatePath(page(slug));
-  redirect(`${page(slug)}?scenario=${id}`);
+  redirect(companyAddress(`${page(slug)}?scenario=${id}`, workspace.company?.id));
 }
 
 export async function duplicateScenarioAction(slug: string, scenarioId: string, _prev: FormState, f: FormData): Promise<FormState> {
@@ -76,7 +77,7 @@ export async function duplicateScenarioAction(slug: string, scenarioId: string, 
   }
   if (!id) return { error: "Scénario introuvable." };
   revalidatePath(page(slug));
-  redirect(`${page(slug)}?scenario=${id}`);
+  redirect(companyAddress(`${page(slug)}?scenario=${id}`, workspace.company?.id));
 }
 
 export async function freezeScenarioAction(slug: string, scenarioId: string, _prev: FormState, _f: FormData): Promise<FormState> {
@@ -102,7 +103,7 @@ export async function deleteScenarioAction(slug: string, scenarioId: string, _pr
     return fail(e);
   }
   revalidatePath(page(slug));
-  redirect(page(slug));
+  redirect(companyAddress(page(slug), workspace.company?.id));
 }
 
 // --- Hypothèses : lecture du formulaire par type, puis contrôle par le moteur avant enregistrement (une hypothèse
@@ -390,7 +391,7 @@ export async function createChainedScenarioAction(slug: string, parentId: string
     return fail(e);
   }
   revalidatePath(page(slug));
-  redirect(`${page(slug)}?scenario=${id}`);
+  redirect(companyAddress(`${page(slug)}?scenario=${id}`, workspace.company?.id));
 }
 
 // --- Grilles de saisie mensuelles (taux d'augmentation, enveloppes, constantes, bases individuelles).

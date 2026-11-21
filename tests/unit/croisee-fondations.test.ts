@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   getScenarioCalls: 0,
 }));
 vi.mock("@/lib/workspace", () => ({
+  workspaceDisplayName: (workspace: { name: string; company?: { name: string } | null }) => workspace.company && workspace.company.name !== workspace.name ? `${workspace.name} · ${workspace.company.name}` : workspace.name,
   requireWorkspace: async (slug: string) => ({ session: {}, workspace: { id: "w1", name: "Espace démo", slug, role: "reader" } }),
 }));
 vi.mock("@/lib/payroll/context", () => ({

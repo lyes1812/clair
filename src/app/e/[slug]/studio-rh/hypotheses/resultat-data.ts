@@ -1,6 +1,7 @@
 import { project } from "@/lib/budget/engine";
 import { budgetSeries, liveSeries, scenarioSeries, shifted, type Series } from "@/lib/budget/series";
-import { getScenario, KIND_LABELS, listBudgets, listScenarios, type BudgetRow, type ScenarioRow } from "@/lib/budget/store";
+import { BudgetError, getScenario, KIND_LABELS, listBudgets, listScenarios, type BudgetRow, type ScenarioRow } from "@/lib/budget/store";
+import { currentCompanyId } from "@/db/workspace-scope";
 import type { BaseSnapshot, ProjectedMonth, Projection } from "@/lib/budget/types";
 import { monthRange } from "@/lib/connectors/months";
 import { loadPayrollContext } from "@/lib/payroll/context";
@@ -32,7 +33,8 @@ export type ComparisonOption = { value: string; label: string };
 export type ComparisonData = { years: string[]; year: string; options: ComparisonOption[]; selected: string[]; principal: Series; compared: Series[] };
 
 // Onglet Comparaison : lectures choisies (paramètre « cmp », trois au plus) ; par défaut réel courant, N-1 et budgets saisis de l'année.
-export async function loadComparison(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, proj: Projection, sp: Search): Promise<ComparisonData> {
+export async function loadComparison(slug: string, workspaceId: string, s: ScenarioRow, base: BaseSnapshot, proj: Projection, sp: Search, companyId?: string): Promise<ComparisonData> {
+  if (companyId && await currentCompanyId(workspaceId) !== companyId) throw new BudgetError("Le scénario et ses comparaisons doivent appartenir à la même société.");
   const years = [...new Set(monthRange(s.firstMonth, s.lastMonth).map((m) => m.slice(0, 4)))];
   const year = years.includes(one(sp.annee)) ? one(sp.annee) : years[0];
   const [budgets, scenarios] = await Promise.all([listBudgets(workspaceId), listScenarios(workspaceId)]);

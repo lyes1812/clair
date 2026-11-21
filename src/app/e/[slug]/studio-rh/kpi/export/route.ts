@@ -9,7 +9,7 @@ import { buildWorkbook, definitionsFor, type FilterSpec, type SheetSpec } from "
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { KPI_KEYS } from "@/lib/rh-kpi-settings";
 import { splitAxisLabel, unitLabel } from "@/lib/viz/kpi";
-import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName, type WorkspaceAccess } from "@/lib/workspace";
 import { effectifsShare, loadEffectifs } from "../effectifs-data";
 import { loadCategoryMonths, loadKpiSuivi, suiviColumnOn, type KpiSuivi } from "../suivi-data";
 import { KPI_VUES } from "../tabs";
@@ -73,7 +73,7 @@ async function suiviXlsx(workspace: WorkspaceAccess, s: Ready, vue: (typeof TABL
   const label = KPI_VUES.find((v) => v.key === vue)!.label;
   const buffer = await buildWorkbook({
     title: `KPI RH — ${label}`,
-    workspaceName: workspace.name,
+    workspaceName: workspaceDisplayName(workspace),
     generatedAt: new Date().toISOString(),
     filters: [
       { label: "Entrée", value: label },
@@ -107,7 +107,7 @@ async function effectifsXlsx(workspace: WorkspaceAccess, slug: string, s: Ready,
   const axisLabel = splitAxisLabel(AXES.find((a) => a.key === e.axis)!.label).name;
   const buffer = await buildWorkbook({
     title: `Effectifs mensuels — ${e.mdef.label} par ${axisLabel.toLowerCase()}`,
-    workspaceName: workspace.name,
+    workspaceName: workspaceDisplayName(workspace),
     generatedAt: new Date().toISOString(),
     filters: [
       { label: "Rubrique", value: e.mdef.label },

@@ -1,6 +1,6 @@
 import { BudgetError, getScenario, listScenarios, type ScenarioFull } from "@/lib/budget/store";
 import { hasAtLeast } from "@/lib/roles";
-import { requireWorkspace } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName } from "@/lib/workspace";
 import { buildRestructuring, type RestructuringScenario } from "./model";
 import { RESTRUCTURING_VIEWS, type RestructuringViewId } from "./views";
 export { RESTRUCTURING_VIEWS, type RestructuringViewId } from "./views";
@@ -36,7 +36,7 @@ export async function loadRestructuringContext(slug: string, query: Restructurin
   const [reference, proposal] = await Promise.all([read(query.reference, "Référence"), read(query.projet, "Projet")]);
   const view: RestructuringViewId = RESTRUCTURING_VIEWS.some((v) => v.id === query.vue) ? query.vue as RestructuringViewId : "overview";
   return {
-    slug, workspaceName: workspace.name, canEdit: hasAtLeast(workspace.role, "editor"), view,
+    slug, workspaceName: workspaceDisplayName(workspace), canEdit: hasAtLeast(workspace.role, "editor"), view,
     options, reference, proposal, model: buildRestructuring(reference, proposal), notices,
   };
 }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { sourceRecord, sourceSync, workspaceEvent, workspaceSetting } from '@/db/schema';
-import { withWorkspace, type WorkspaceTransaction } from '@/db/workspace-scope';
+import { currentCompanyId, withCompanyScope, withWorkspace, type WorkspaceTransaction } from '@/db/workspace-scope';
 import { activeSync, configuredPayfitClient, getConnection } from '@/lib/connectors/sync';
 import { ProviderError } from '@/lib/connectors/http';
 import { isMonth, monthRange } from '@/lib/connectors/months';
@@ -28,10 +28,10 @@ async function setting(tx: WorkspaceTransaction, key: string) {
 }
 async function put(tx: WorkspaceTransaction, workspaceId: string, actorUserId: string, key: string, value: unknown) {
   await tx.insert(workspaceSetting).values({ workspaceId, key, value, updatedBy: actorUserId, updatedAt: new Date() })
-    .onConflictDoUpdate({ target: [workspaceSetting.workspaceId, workspaceSetting.key], set: { value, updatedBy: actorUserId, updatedAt: new Date() } });
+    .onConflictDoUpdate({ target: [workspaceSetting.workspaceId, workspaceSetting.companyId, workspaceSetting.key], set: { value, updatedBy: actorUserId, updatedAt: new Date() } });
 }
 async function lock(tx: WorkspaceTransaction, workspaceId: string) {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`rc-payslips:${workspaceId}`}, 0))`);
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`rc-payslips:${workspaceId}:`}::text || current_setting('app.company_id', true), 0))`);
 }
 
 export async function getRcPayslipScan(workspaceId: string): Promise<RcPayslipScan | null> {
@@ -47,6 +47,11 @@ const monthNow = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Pari
 
 /** Une lecture auxiliaire ne remplace jamais source_sync/payfit, le journal ni une déclaration manuelle. */
 export async function startRcPayslipScan(workspaceId: string, actorUserId: string, from: string, to: string) {
+  const companyId = await currentCompanyId(workspaceId);
+  return withCompanyScope(workspaceId, companyId, () => startRcPayslipScanForCompany(workspaceId, companyId, actorUserId, from, to));
+}
+
+async function startRcPayslipScanForCompany(workspaceId: string, companyId: string, actorUserId: string, from: string, to: string) {
   if (!isMonth(from) || !isMonth(to) || from > to || to > monthNow() || monthRange(from, to).length > 24) throw new RcPayslipError('Choisis une période valide de 24 mois au plus, sans mois futur.');
   const [source, connection] = await Promise.all([activeSync(workspaceId, 'payfit'), getConnection(workspaceId, 'payfit')]);
   if (!source || !connection?.externalCompanyId) throw new RcPayslipError('Applique une lecture PayFit avant de lire les bulletins.');
@@ -64,17 +69,20 @@ export async function startRcPayslipScan(workspaceId: string, actorUserId: strin
     if (previous?.status === 'running' && previous.payrollSyncId === scan.payrollSyncId) throw new RcPayslipError('Une lecture des bulletins est déjà en cours ; utilise Reprendre si elle a été interrompue.');
     await put(tx, workspaceId, actorUserId, RUN, scan);
     await put(tx, workspaceId, actorUserId, JOB, job);
-    await tx.insert(workspaceEvent).values({ workspaceId, actorUserId, kind: 'setting.changed', detail: { key: 'rh.payroll.rcPayslips', operation: 'started' } });
+    await tx.insert(workspaceEvent).values({ workspaceId, companyId: sql`current_setting('app.company_id', true)::uuid`, actorUserId, kind: 'setting.changed', detail: { key: 'rh.payroll.rcPayslips', operation: 'started' } });
   });
   // Le bail reste reprenable si la base est momentanément indisponible avant son acquisition.
-  void runRcPayslipScan(workspaceId, scan.id).catch(() => {});
+  void runRcPayslipScan(workspaceId, scan.id, companyId).catch(() => {});
   return scan.id;
 }
 
 export async function resumeRcPayslipScan(workspaceId: string) {
-  const scan = await getRcPayslipScan(workspaceId);
-  if (!scan || scan.status !== 'running') throw new RcPayslipError('Aucune lecture interrompue à reprendre.');
-  void runRcPayslipScan(workspaceId, scan.id).catch(() => {});
+  const companyId = await currentCompanyId(workspaceId);
+  await withCompanyScope(workspaceId, companyId, async () => {
+    const scan = await getRcPayslipScan(workspaceId);
+    if (!scan || scan.status !== 'running') throw new RcPayslipError('Aucune lecture interrompue à reprendre.');
+    void runRcPayslipScan(workspaceId, scan.id, companyId).catch(() => {});
+  });
 }
 
 const addIssue = (scan: RcPayslipScan, code: string) => {
@@ -118,7 +126,11 @@ async function heartbeat(workspaceId: string, job: Job) {
 }
 
 /** Curseur et bail persistés par collaborateur : une relance reprend le même scan sans ajouter de doublons. */
-export async function runRcPayslipScan(workspaceId: string, scanId: string) {
+export async function runRcPayslipScan(workspaceId: string, scanId: string, companyId: string) {
+  return withCompanyScope(workspaceId, companyId, () => runRcPayslipScanForCompany(workspaceId, scanId));
+}
+
+async function runRcPayslipScanForCompany(workspaceId: string, scanId: string) {
   const lease = await acquire(workspaceId, scanId, randomUUID());
   if (!lease) return;
   const { scan, job } = lease;
@@ -127,6 +139,8 @@ export async function runRcPayslipScan(workspaceId: string, scanId: string) {
     if (source?.id !== scan.payrollSyncId || versionOf(connection) !== job.credentialVersion || connection?.externalCompanyId !== scan.companyId) throw new RcPayslipError('source-changed');
     const { client, companyId } = await configuredPayfitClient(workspaceId);
     if (companyId !== scan.companyId) throw new RcPayslipError('source-changed');
+    const identity = await client.introspect();
+    if (identity.companyId !== scan.companyId) throw new RcPayslipError('source-changed');
     if (!job.collaborators.length && job.cursor === 0) {
       scan.closedMonths = []; scan.unavailableMonths = [];
       for (const month of monthRange(scan.from, scan.to)) {
@@ -183,7 +197,7 @@ export async function runRcPayslipScan(workspaceId: string, scanId: string) {
     scan.status = scan.unavailableMonths.length || scan.issues.length || scan.records.some(row => row.status === 'review') ? 'partial' : 'complete';
     scan.finishedAt = new Date().toISOString();
     await checkpoint(workspaceId, scan, job);
-    await withWorkspace(workspaceId, tx => tx.insert(workspaceEvent).values({ workspaceId, actorUserId: job.actorUserId, kind: 'setting.changed', detail: { key: 'rh.payroll.rcPayslips', operation: 'finished', status: scan.status, count: scan.records.filter(row => row.status === 'identified').length } }));
+    await withWorkspace(workspaceId, tx => tx.insert(workspaceEvent).values({ workspaceId, companyId: sql`current_setting('app.company_id', true)::uuid`, actorUserId: job.actorUserId, kind: 'setting.changed', detail: { key: 'rh.payroll.rcPayslips', operation: 'finished', status: scan.status, count: scan.records.filter(row => row.status === 'identified').length } }));
   } catch (error) {
     scan.status = 'failed'; scan.finishedAt = new Date().toISOString();
     addIssue(scan, error instanceof ProviderError ? error.code : error instanceof RcPayslipError && ['source-changed', 'scope-unavailable', 'document-limit'].includes(error.message) ? error.message : 'read-failed');

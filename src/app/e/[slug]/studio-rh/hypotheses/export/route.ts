@@ -12,7 +12,7 @@ import { HYP_TERMS } from "@/lib/glossary/hypotheses";
 import { hasAtLeast } from "@/lib/roles";
 import { dateFr } from "@/lib/viz/hyp-saisie";
 import { frDates } from "@/lib/viz/hypotheses";
-import { requireWorkspace, type WorkspaceAccess } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName, type WorkspaceAccess } from "@/lib/workspace";
 import { constantsOf, envelopesOf, rateMap, rateScopes } from "../grids-data";
 import { loadComparison, projectionRows } from "../resultat-data";
 import { resolveVue } from "../tabs";
@@ -40,6 +40,7 @@ function scenarioFilters(full: ScenarioFull): FilterSpec[] {
   const s = full.scenario;
   const b = full.base;
   return [
+    ...(full.company ? [{ label: "Société", value: full.company.name }] : []),
     { label: "Scénario", value: `${s.name} (${KIND_LABELS[s.kind]}, ${s.status === "fige" ? "figé" : "brouillon"})` },
     { label: "Projection", value: `${formatMonth(s.firstMonth)} → ${formatMonth(s.lastMonth)}` },
     { label: "Base", value: b.origin ? `dérivée du scénario « ${b.origin.scenarioName} » (état projeté fin ${formatMonth(b.origin.month).toLowerCase()})` : `figée sur ${formatMonth(b.refMonth).toLowerCase()}` },
@@ -59,7 +60,7 @@ function scenarioSources(full: ScenarioFull): SourceInput[] {
 }
 
 async function workbook(workspace: WorkspaceAccess, o: { title: string; file: string; filters: FilterSpec[]; sheets: SheetSpec[]; sources: SourceSpec[]; definitions: string[] }): Promise<Response> {
-  const buffer = await buildWorkbook({ title: o.title, workspaceName: workspace.name, generatedAt: new Date().toISOString(), filters: o.filters, sheets: o.sheets, sources: o.sources, definitions: definitionsOf(o.definitions) });
+  const buffer = await buildWorkbook({ title: o.title, workspaceName: workspaceDisplayName(workspace), generatedAt: new Date().toISOString(), filters: o.filters, sheets: o.sheets, sources: o.sources, definitions: definitionsOf(o.definitions) });
   return xlsxResponse(buffer, o.file);
 }
 
@@ -100,7 +101,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
         definitions: [HYP_TERMS.projection, HYP_TERMS.coutNature, HYP_TERMS.effectif, BUDGET_TERMS.base],
       });
     }
-    const c = await loadComparison(slug, workspace.id, s, full.base, proj, sp);
+    const c = await loadComparison(slug, workspace.id, s, full.base, proj, sp, full.companyId);
     const sources = scenarioSources(full);
     if (c.selected.includes("reel")) sources.push(...(await loadSourceInputs(workspace.id, [{ provider: "payfit", usage: "journal de paie (réel courant)" }])));
     const sheets: SheetSpec[] = [comparisonSheet(c.principal, c.compared, c.year)];

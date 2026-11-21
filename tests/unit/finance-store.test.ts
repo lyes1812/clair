@@ -117,7 +117,7 @@ describe("paramètres financiers sous le périmètre de l'espace — transaction
     }]);
     const event = JSON.stringify(state.events);
     for (const forbidden of ["FICTIF_NON_JOURNALISE", "123456", "654321", ID]) expect(event).not.toContain(forbidden);
-    expect(state.conflicts[0].target).toEqual([workspaceSetting.workspaceId, workspaceSetting.key]);
+    expect(state.conflicts[0].target).toEqual([workspaceSetting.workspaceId, workspaceSetting.companyId, workspaceSetting.key]);
     const query = dialect.sqlToQuery(state.conflicts[0].setWhere);
     expect(query.sql).toContain("->>'revision'");
     expect(query.params).toEqual(["espace-fictif", FINANCE_SETTINGS_KEY, "0"]);

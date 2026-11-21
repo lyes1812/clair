@@ -7,7 +7,7 @@ export const VUES = [
   { key: "env-service", label: "Enveloppes par service" },
   { key: "env-rubrique", label: "Enveloppes par rubrique" },
   { key: "globales", label: "Hypothèses globales" },
-  { key: "societes", label: "Hypothèses par société", soon: true },
+  { key: "societes", label: "Hypothèses par société", soon: false },
   { key: "ctrl-effectifs", label: "Contrôles effectifs" },
   { key: "ctrl-changements", label: "Contrôles des changements" },
   { key: "resultat", label: "Résultat" },

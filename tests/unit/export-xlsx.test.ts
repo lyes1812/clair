@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   activeSync: vi.fn(),
 }));
 vi.mock("@/lib/workspace", () => ({
+  workspaceDisplayName: (workspace: { name: string; company?: { name: string } | null }) => workspace.company && workspace.company.name !== workspace.name ? `${workspace.name} · ${workspace.company.name}` : workspace.name,
   requireWorkspace: async (slug: string) => ({ session: {}, workspace: { id: "w1", name: "Espace fictif", slug, role: mocks.role.value } }),
 }));
 vi.mock("@/app/e/[slug]/studio-rh/masse-salariale/ecart-data", () => ({ loadVersions: async () => mocks.loaded.value }));

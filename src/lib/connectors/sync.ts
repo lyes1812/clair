@@ -1,12 +1,13 @@
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { connectorCredential, sourceRecord, sourceSync } from "@/db/schema";
-import { withWorkspace } from "@/db/workspace-scope";
+import { connectorCredential, sourceRecord, sourceSync, workspaceCompany } from "@/db/schema";
+import { currentCompanyId, withCompanyScope, withWorkspace } from "@/db/workspace-scope";
 import { canonicalJson, decryptSecret, encryptSecret, sha256 } from "@/lib/crypto";
 import { recordEvent } from "@/lib/events";
 import { ProviderError } from "./http";
 import { PROVIDERS, payfitClientFor, type VerifiedConnection } from "./providers";
 import { sourceFile } from "@/db/schema";
 import type { CollectionOutcome, ProviderId, SourceId, SourceRecordInput } from "./types";
+import { API_COMPANY_IDENTITY_WARNING, sourceSiren } from "./company-identity";
 
 export { payfitClientFor } from "./providers";
 
@@ -37,7 +38,11 @@ export type SyncSummary = {
   months?: string[];
 };
 
-const secretContext = (workspaceId: string, provider: ProviderId) => `${workspaceId}:${provider}`;
+const secretContext = (workspaceId: string, provider: ProviderId, companyId?: string) => `${workspaceId}:${provider}${companyId ? `:${companyId}` : ""}`;
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && ("code" in error && error.code === "23505" || "cause" in error && isUniqueViolation(error.cause));
+}
 
 // --- Clés
 
@@ -54,41 +59,74 @@ export async function saveCredential(
   verified: VerifiedConnection,
   actorUserId: string,
 ) {
-  const sealed = encryptSecret(apiKey.trim(), secretContext(workspaceId, provider));
+  const companyId = await currentCompanyId(workspaceId);
+  if (!verified.companyId) throw new ProviderError("invalid_response", "société de la source absente");
+  const sealed = encryptSecret(apiKey.trim(), secretContext(workspaceId, provider, companyId));
   const now = new Date();
-  await withWorkspace(workspaceId, (tx) =>
-    tx
-      .insert(connectorCredential)
-      .values({
-        workspaceId,
-        provider,
-        sealedSecret: sealed,
-        externalCompanyId: verified.companyId,
-        companyName: verified.companyName,
-        scopes: verified.scopes,
-        status: "verified",
-        lastVerifiedAt: now,
-        createdBy: actorUserId,
-      })
-      .onConflictDoUpdate({
-        target: [connectorCredential.workspaceId, connectorCredential.provider],
-        set: {
-          sealedSecret: sealed,
-          externalCompanyId: verified.companyId,
-          companyName: verified.companyName,
-          scopes: verified.scopes,
-          status: "verified",
-          lastVerifiedAt: now,
-          updatedAt: now,
-        },
-      }),
-  );
-  await recordEvent(workspaceId, actorUserId, "connector.connected", { provider, companyName: verified.companyName, scopes: verified.scopes });
+  await withCompanyScope(workspaceId, companyId, async () => {
+    try {
+      // Métadonnées uniquement : aucun secret d'une autre société n'est lu.
+      const duplicate = await withWorkspace(workspaceId, (tx) => tx.select({ companyId: connectorCredential.companyId })
+        .from(connectorCredential).where(and(eq(connectorCredential.provider, provider), eq(connectorCredential.externalCompanyId, verified.companyId))), { allCompanies: true });
+      if (duplicate.some((row) => row.companyId !== companyId)) {
+        throw new ProviderError("key_rejected", "cette société source est déjà liée à une société de cet espace");
+      }
+      await withWorkspace(workspaceId, async (tx) => {
+        // Deux premières connexions concurrentes ne peuvent changer le rattachement.
+        // L'unicité externe en base couvre aussi les connexions concurrentes entre sociétés.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`credential:${workspaceId}:${companyId}:${provider}`}, 0))`);
+        const [company] = await tx.select({ siren: workspaceCompany.siren }).from(workspaceCompany).where(eq(workspaceCompany.id, companyId)).for("update");
+        const externalSiren = sourceSiren(verified.identificationNumber);
+        if (!company || company.siren && externalSiren && company.siren !== externalSiren) {
+          throw new ProviderError("key_rejected", "le SIREN de la source ne correspond pas à la société sélectionnée");
+        }
+        const [existing] = await tx.select({ externalCompanyId: connectorCredential.externalCompanyId }).from(connectorCredential)
+          .where(eq(connectorCredential.provider, provider)).for("update");
+        if (existing?.externalCompanyId && existing.externalCompanyId !== verified.companyId) {
+          throw new ProviderError("key_rejected", "cette connexion est liée à une autre société ; utilisez la société correspondante");
+        }
+        await tx
+          .insert(connectorCredential)
+          .values({
+            workspaceId,
+            companyId,
+            provider,
+            sealedSecret: sealed,
+            secretScopeVersion: 2,
+            externalCompanyId: verified.companyId,
+            companyName: verified.companyName,
+            scopes: verified.scopes,
+            status: "verified",
+            lastVerifiedAt: now,
+            createdBy: actorUserId,
+          })
+          .onConflictDoUpdate({
+            target: [connectorCredential.workspaceId, connectorCredential.companyId, connectorCredential.provider],
+            set: {
+              sealedSecret: sealed,
+              secretScopeVersion: 2,
+              externalCompanyId: verified.companyId,
+              companyName: verified.companyName,
+              scopes: verified.scopes,
+              status: "verified",
+              lastVerifiedAt: now,
+              updatedAt: now,
+            },
+          });
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ProviderError("key_rejected", "cette société source est déjà liée à une société de cet espace");
+      throw error;
+    }
+    await recordEvent(workspaceId, actorUserId, "connector.connected", { provider, companyName: verified.companyName, scopes: verified.scopes });
+  });
 }
 
 export async function deleteCredential(workspaceId: string, provider: ProviderId, actorUserId: string) {
   await withWorkspace(workspaceId, (tx) =>
-    tx.delete(connectorCredential).where(and(eq(connectorCredential.workspaceId, workspaceId), eq(connectorCredential.provider, provider))),
+    // Le rattachement reste réservé après déconnexion ; seul le secret est effacé.
+    tx.update(connectorCredential).set({ sealedSecret: "", status: "disconnected", updatedAt: new Date() })
+      .where(and(eq(connectorCredential.workspaceId, workspaceId), eq(connectorCredential.provider, provider))),
   );
   await recordEvent(workspaceId, actorUserId, "connector.disconnected", { provider });
 }
@@ -106,21 +144,26 @@ export async function getConnection(workspaceId: string, provider: ProviderId) {
         updatedAt: connectorCredential.updatedAt,
       })
       .from(connectorCredential)
-      .where(and(eq(connectorCredential.workspaceId, workspaceId), eq(connectorCredential.provider, provider))),
+      .where(and(eq(connectorCredential.workspaceId, workspaceId), eq(connectorCredential.provider, provider), sql`${connectorCredential.status} <> 'disconnected'`)),
   );
   return row ?? null;
 }
 
-async function readSecret(workspaceId: string, provider: ProviderId): Promise<{ apiKey: string; companyId: string | null }> {
+async function readSecret(workspaceId: string, provider: ProviderId, credentialId?: string) {
+  const workspaceCompanyId = await currentCompanyId(workspaceId);
   const [row] = await withWorkspace(workspaceId, (tx) =>
     tx
-      .select({ sealed: connectorCredential.sealedSecret, companyId: connectorCredential.externalCompanyId })
+      .select({ id: connectorCredential.id, sealed: connectorCredential.sealedSecret, companyId: connectorCredential.externalCompanyId,
+        secretScopeVersion: connectorCredential.secretScopeVersion, updatedAt: connectorCredential.updatedAt })
       .from(connectorCredential)
-      .where(and(eq(connectorCredential.workspaceId, workspaceId), eq(connectorCredential.provider, provider))),
+      .where(and(eq(connectorCredential.workspaceId, workspaceId), eq(connectorCredential.provider, provider), eq(connectorCredential.status, "verified"),
+        credentialId ? eq(connectorCredential.id, credentialId) : undefined)),
   );
-  if (!row) throw new ProviderError("key_rejected", "aucune clé configurée");
+  if (!row || !row.sealed) throw new ProviderError("key_rejected", "aucune clé configurée");
   try {
-    return { apiKey: decryptSecret(row.sealed, secretContext(workspaceId, provider)), companyId: row.companyId };
+    if (row.secretScopeVersion !== 1 && row.secretScopeVersion !== 2) throw new Error("unsupported-secret-scope");
+    return { apiKey: decryptSecret(row.sealed, secretContext(workspaceId, provider, row.secretScopeVersion === 2 ? workspaceCompanyId : undefined)),
+      companyId: row.companyId, credentialId: row.id, updatedAt: row.updatedAt };
   } catch {
     throw new ProviderError("key_rejected", "clé enregistrée illisible : reconnectez la source");
   }
@@ -156,22 +199,30 @@ async function activeSyncId(tx: Parameters<Parameters<typeof withWorkspace>[1]>[
 }
 
 export async function startSync(workspaceId: string, provider: ProviderId, months: string[], actorUserId: string): Promise<string> {
-  await expireStale(workspaceId);
-  const id = await withWorkspace(workspaceId, async (tx) => {
-    const running = await tx
-      .select({ id: sourceSync.id })
-      .from(sourceSync)
-      .where(and(eq(sourceSync.provider, provider), inArray(sourceSync.status, ["running"])))
-      .limit(1);
-    if (running.length) throw new SyncError("Une lecture est déjà en cours pour cette source.");
-    const [row] = await tx
-      .insert(sourceSync)
-      .values({ workspaceId, provider, status: "running", scope: { months }, requestedBy: actorUserId })
-      .returning({ id: sourceSync.id });
-    return row.id;
+  const companyId = await currentCompanyId(workspaceId);
+  return withCompanyScope(workspaceId, companyId, async () => {
+    await expireStale(workspaceId);
+    const id = await withWorkspace(workspaceId, async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`sync-start:${workspaceId}:${companyId}:${provider}`}, 0))`);
+      const [credential] = await tx.select({ id: connectorCredential.id, externalCompanyId: connectorCredential.externalCompanyId, updatedAt: connectorCredential.updatedAt })
+        .from(connectorCredential).where(and(eq(connectorCredential.provider, provider), eq(connectorCredential.status, "verified")));
+      if (!credential) throw new ProviderError("key_rejected", "aucune clé configurée");
+      const running = await tx
+        .select({ id: sourceSync.id })
+        .from(sourceSync)
+        .where(and(eq(sourceSync.provider, provider), inArray(sourceSync.status, ["running"])))
+        .limit(1);
+      if (running.length) throw new SyncError("Une lecture est déjà en cours pour cette source.");
+      const [row] = await tx
+        .insert(sourceSync)
+        .values({ workspaceId, companyId, credentialId: credential.id, provider, status: "running",
+          scope: { months, externalCompanyId: credential.externalCompanyId, credentialUpdatedAt: credential.updatedAt.toISOString() }, requestedBy: actorUserId })
+        .returning({ id: sourceSync.id });
+      return row.id;
+    });
+    void runSync(workspaceId, provider, id, months, companyId);
+    return id;
   });
-  void runSync(workspaceId, provider, id, months);
-  return id;
 }
 
 export function contentHash(records: SourceRecordInput[]): { hash: string; hashes: Map<string, string> } {
@@ -195,82 +246,104 @@ export function diffByCollection(baseline: Map<string, string>, current: Map<str
   return out;
 }
 
-export async function runSync(workspaceId: string, provider: ProviderId, syncId: string, months: string[]) {
-  try {
-    const { apiKey, companyId } = await readSecret(workspaceId, provider);
-    const result = await PROVIDERS[provider].read(apiKey, companyId, months);
-    const { hash, hashes } = contentHash(result.records);
+export async function runSync(workspaceId: string, provider: ProviderId, syncId: string, months: string[], companyId: string) {
+  return withCompanyScope(workspaceId, companyId, async () => {
+    try {
+      const [sync] = await withWorkspace(workspaceId, (tx) => tx.select({ credentialId: sourceSync.credentialId, scope: sourceSync.scope })
+        .from(sourceSync).where(and(eq(sourceSync.id, syncId), eq(sourceSync.provider, provider), eq(sourceSync.status, "running"))));
+      if (!sync) return;
+      if (!sync.credentialId) throw new ProviderError("key_rejected", "connexion de la lecture absente ; relancez une lecture");
+      const secret = await readSecret(workspaceId, provider, sync.credentialId);
+      const scope = sync.scope as { externalCompanyId?: unknown; credentialUpdatedAt?: unknown };
+      if (!secret.companyId || scope.externalCompanyId !== secret.companyId || scope.credentialUpdatedAt !== secret.updatedAt.toISOString()) {
+        throw new ProviderError("key_rejected", "la connexion a changé ; relancez une lecture");
+      }
+      const result = await PROVIDERS[provider].read(secret.apiKey, secret.companyId, months);
+      if (result.company.id !== secret.companyId) throw new ProviderError("invalid_response", "la source renvoie une autre société");
+      const { hash, hashes } = contentHash(result.records);
 
-    await withWorkspace(workspaceId, async (tx) => {
-      const baselineId = await activeSyncId(tx, provider);
-      const baseline = new Map<string, string>();
-      let baselineHash: string | null = null;
-      if (baselineId) {
-        const [b] = await tx.select({ hash: sourceSync.contentHash }).from(sourceSync).where(eq(sourceSync.id, baselineId));
-        baselineHash = b?.hash ?? null;
-        const rows = await tx
-          .select({ collection: sourceRecord.collection, key: sourceRecord.recordKey, hash: sourceRecord.recordHash })
-          .from(sourceRecord)
-          .where(eq(sourceRecord.syncId, baselineId));
-        for (const r of rows) baseline.set(`${r.collection}\u0000${r.key}`, r.hash);
-      }
-      const summary: SyncSummary = {
-        company: { id: result.company.id, name: result.company.name, identificationNumber: result.company.identificationNumber },
-        scopes: result.scopes,
-        collections: result.collections,
-        diff: diffByCollection(baseline, hashes),
-        months,
-      };
-      const unchanged = baselineHash === hash;
-      if (!unchanged) {
-        const rows = result.records.map((r) => ({
-          workspaceId,
-          syncId,
-          collection: r.collection,
-          recordKey: r.key,
-          period: r.period,
-          data: r.data,
-          recordHash: hashes.get(`${r.collection}\u0000${r.key}`)!,
-        }));
-        for (let i = 0; i < rows.length; i += 500) await tx.insert(sourceRecord).values(rows.slice(i, i + 500));
-      }
-      await tx
-        .update(sourceSync)
-        .set({
-          status: unchanged ? "unchanged" : "preview",
-          baselineSyncId: baselineId,
-          contentHash: hash,
-          summary,
-          warnings: result.warnings,
-          finishedAt: new Date(),
-        })
-        .where(eq(sourceSync.id, syncId));
-    });
-  } catch (e) {
-    const known = e instanceof ProviderError;
-    if (!known) console.error("[sync] échec interne", provider, e instanceof Error ? e.name : "inconnu");
-    await withWorkspace(workspaceId, (tx) =>
-      tx
-        .update(sourceSync)
-        .set({
-          status: "failed",
-          errorCode: known ? e.code : "internal",
-          errorMessage: known ? e.message : "Erreur interne pendant la lecture.",
-          finishedAt: new Date(),
-        })
-        .where(eq(sourceSync.id, syncId)),
-    ).catch(() => {});
-  }
+      await withWorkspace(workspaceId, async (tx) => {
+        const [company] = await tx.select({ siren: workspaceCompany.siren }).from(workspaceCompany).where(eq(workspaceCompany.id, companyId)).for("update");
+        const externalSiren = sourceSiren(result.company.identificationNumber);
+        if (!company || company.siren && externalSiren && company.siren !== externalSiren) {
+          throw new ProviderError("invalid_response", "le SIREN de la source ne correspond pas à la société sélectionnée");
+        }
+        const baselineId = await activeSyncId(tx, provider);
+        const baseline = new Map<string, string>();
+        let baselineHash: string | null = null;
+        if (baselineId) {
+          const [b] = await tx.select({ hash: sourceSync.contentHash }).from(sourceSync).where(eq(sourceSync.id, baselineId));
+          baselineHash = b?.hash ?? null;
+          const rows = await tx
+            .select({ collection: sourceRecord.collection, key: sourceRecord.recordKey, hash: sourceRecord.recordHash })
+            .from(sourceRecord)
+            .where(eq(sourceRecord.syncId, baselineId));
+          for (const r of rows) baseline.set(`${r.collection}\u0000${r.key}`, r.hash);
+        }
+        const summary: SyncSummary = {
+          company: { id: result.company.id, name: result.company.name, identificationNumber: result.company.identificationNumber },
+          scopes: result.scopes,
+          collections: result.collections,
+          diff: diffByCollection(baseline, hashes),
+          months,
+        };
+        const unchanged = baselineHash === hash;
+        if (!unchanged) {
+          const rows = result.records.map((r) => ({
+            workspaceId,
+            syncId,
+            collection: r.collection,
+            recordKey: r.key,
+            period: r.period,
+            data: r.data,
+            recordHash: hashes.get(`${r.collection}\u0000${r.key}`)!,
+          }));
+          for (let i = 0; i < rows.length; i += 500) await tx.insert(sourceRecord).values(rows.slice(i, i + 500));
+        }
+        await tx
+          .update(sourceSync)
+          .set({
+            status: unchanged ? "unchanged" : "preview",
+            baselineSyncId: baselineId,
+            contentHash: hash,
+            summary,
+            warnings: externalSiren ? result.warnings : [...result.warnings, API_COMPANY_IDENTITY_WARNING],
+            finishedAt: new Date(),
+          })
+          .where(and(eq(sourceSync.id, syncId), eq(sourceSync.status, "running")));
+      });
+    } catch (e) {
+      const known = e instanceof ProviderError;
+      if (!known) console.error("[sync] échec interne", provider, e instanceof Error ? e.name : "inconnu");
+      await withWorkspace(workspaceId, (tx) =>
+        tx
+          .update(sourceSync)
+          .set({
+            status: "failed",
+            errorCode: known ? e.code : "internal",
+            errorMessage: known ? e.message : "Erreur interne pendant la lecture.",
+            finishedAt: new Date(),
+          })
+          .where(eq(sourceSync.id, syncId)),
+      ).catch(() => {});
+    }
+  });
 }
 
 export async function applySync(workspaceId: string, syncId: string, actorUserId: string) {
   const provider = await withWorkspace(workspaceId, async (tx) => {
+    const [metadata] = await tx.select({ provider: sourceSync.provider, companyId: sourceSync.companyId }).from(sourceSync).where(eq(sourceSync.id, syncId));
+    if (!metadata) throw new SyncError("Synchronisation introuvable.");
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`sync-apply:${workspaceId}:${metadata.companyId}:${metadata.provider}`}, 0))`);
     const [sync] = await tx.select().from(sourceSync).where(eq(sourceSync.id, syncId)).for("update");
     if (!sync) throw new SyncError("Synchronisation introuvable.");
     if (sync.status !== "preview") throw new SyncError("Seul un aperçu peut être appliqué.");
     const now = new Date();
     const summary = sync.summary as SyncSummary;
     if (summary.mode !== "additive") {
+      const [company] = await tx.select({ siren: workspaceCompany.siren }).from(workspaceCompany).where(eq(workspaceCompany.id, metadata.companyId)).for("update");
+      const externalSiren = sourceSiren(summary.company?.identificationNumber);
+      if (!company || company.siren && externalSiren && company.siren !== externalSiren) throw new SyncError("Le SIREN de la source ne correspond pas à la société sélectionnée.");
       const active = await activeSyncId(tx, sync.provider as SourceId);
       if (active !== sync.baselineSyncId) throw new SyncError("La source a changé depuis cet aperçu : relancez une lecture.");
       if (active) await tx.update(sourceSync).set({ status: "superseded" }).where(eq(sourceSync.id, active));

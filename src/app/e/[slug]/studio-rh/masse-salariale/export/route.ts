@@ -5,7 +5,7 @@ import { buildWorkbook, definitionsFor, type FilterSpec, type SheetSpec } from "
 import { KPI_TERMS } from "@/lib/glossary/kpi";
 import { MASSE_TERMS } from "@/lib/glossary/masse";
 import { loadPayrollContext } from "@/lib/payroll/context";
-import { requireWorkspace } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName } from "@/lib/workspace";
 import { periodLabel, serviceLabel, syntheseOf } from "../synthese-data";
 import { monthlySheet, servicesMonthsSheet, servicesSheet } from "./sheets";
 import { listActualEvents } from "@/lib/payroll/non-recurring-store";
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
 
   const buffer = await buildWorkbook({
     title: "Masse salariale — Synthèse",
-    workspaceName: workspace.name,
+    workspaceName: workspaceDisplayName(workspace),
     generatedAt: new Date().toISOString(),
     filters,
     sheets,

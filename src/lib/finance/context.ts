@@ -3,7 +3,7 @@ import { getScenario, listScenarios } from "@/lib/budget/store";
 import { loadCompta } from "@/lib/payroll/context";
 import { hasAtLeast } from "@/lib/roles";
 import { resolveSource } from "@/lib/sources";
-import { requireWorkspace } from "@/lib/workspace";
+import { requireWorkspace, workspaceDisplayName } from "@/lib/workspace";
 import { buildActuals } from "./actuals";
 import { buildFinanceProjection } from "./plans";
 import { getFinanceSettings } from "./store";
@@ -57,7 +57,7 @@ export async function loadFinanceContext(slug: string, query: FinanceQuery) {
   const projection = selectedPlan ? buildFinanceProjection(actuals, selectedPlan, await rhFor(selectedPlan)) : null;
   const budgetMonths = selectedBudget ? buildFinanceProjection(actuals, selectedBudget, await rhFor(selectedBudget)) : null;
   return {
-    slug, workspaceName: workspace.name, workspaceId: workspace.id,
+    slug, workspaceName: workspaceDisplayName(workspace), workspaceId: workspace.id,
     year, years, from, to, view, months: months.filter((m) => m >= from && m <= to), actuals, previous, selectedPlan, projection, selectedBudget, budgetMonths,
     plans, mappings: settings.mappings, revision: settings.revision, source,
     sourceNotice: "Écritures de la lecture appliquée dans Données ; la couverture d’un mois ne certifie pas sa clôture comptable. Les axes par service ne sont pas disponibles dans cette lecture.",

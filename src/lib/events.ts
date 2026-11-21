@@ -37,13 +37,15 @@ export async function recordEvent(
   kind: EventKind,
   detail: Record<string, unknown> = {},
 ) {
+  const global = kind.startsWith("workspace.") || kind.startsWith("invitation.") || kind.startsWith("member.");
   await withWorkspace(workspaceId, (tx) =>
-    tx.insert(workspaceEvent).values({ workspaceId, actorUserId, kind, detail }),
+    tx.insert(workspaceEvent).values({ workspaceId, actorUserId, kind, detail, ...(global ? { companyId: null } : {}) }),
+    global ? { allCompanies: true } : undefined,
   );
 }
 
 export async function listEvents(workspaceId: string, limit = 50) {
   return withWorkspace(workspaceId, (tx) =>
-    tx.select().from(workspaceEvent).orderBy(desc(workspaceEvent.occurredAt)).limit(limit),
+    tx.select().from(workspaceEvent).orderBy(desc(workspaceEvent.occurredAt)).limit(limit), { allCompanies: true },
   );
 }

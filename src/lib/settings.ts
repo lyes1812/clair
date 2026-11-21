@@ -43,7 +43,7 @@ export async function setSetting(workspaceId: string, key: string, value: unknow
     tx
       .insert(workspaceSetting)
       .values({ workspaceId, key, value, updatedBy: actorUserId, updatedAt: now })
-      .onConflictDoUpdate({ target: [workspaceSetting.workspaceId, workspaceSetting.key], set: { value, updatedBy: actorUserId, updatedAt: now } }),
+      .onConflictDoUpdate({ target: [workspaceSetting.workspaceId, workspaceSetting.companyId, workspaceSetting.key], set: { value, updatedBy: actorUserId, updatedAt: now } }),
   );
   await recordEvent(workspaceId, actorUserId, "setting.changed", { key, value });
 }
