@@ -7,7 +7,7 @@ export const KPI_VUES = [
   { key: "effectifs", label: "Effectifs mensuels" },
   { key: "suivi", label: "Suivi des effectifs" },
   { key: "pyramide", label: "Pyramide", soon: true },
-  { key: "salaires", label: "Analyse des salaires", soon: true },
+  { key: "salaires", label: "Analyse des salaires" },
   { key: "livre", label: "Livre de paie", soon: true },
   { key: "publisher", label: "Publisher", soon: true },
 ] as const;

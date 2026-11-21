@@ -1,0 +1,45 @@
+/* Analyse mensuelle : mêmes cartes, contrôles et police que les autres KPI. */
+.salary-analysis { display: grid; gap: 20px; min-width: 0; }
+.salary-heading, .salary-panel-heading, .salary-context { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; min-width: 0; }
+.salary-heading > div { display: grid; gap: 5px; }
+.salary-heading h2 { font-size: 24px; letter-spacing: -.02em; }
+.salary-heading .kpi-vigilance[open] { flex-basis: 100%; }
+.salary-heading .kpi-vigilance-body { max-width: 100%; }
+.salary-context { color: var(--muted); font-size: var(--clair-type-form); }
+.salary-filters { align-items: end; }
+.salary-filters .field-row { flex: 1 1 220px; }
+.salary-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; min-height: 40px; }
+.rh-studio .salary-analysis .salary-tiles { margin: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.salary-analysis .salary-tiles .kpi-tile { min-width: 0; }
+.salary-analysis .salary-tiles dd:not(.salary-tile-note) { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.rh-studio .salary-analysis .salary-tiles .kpi-tile dd.salary-tile-note { margin: 0; font-size: var(--clair-type-note); line-height: 1.5; color: var(--muted); font-weight: 400; letter-spacing: normal; }
+.salary-help > summary { color: var(--blue); cursor: pointer; min-height: 32px; display: flex; align-items: center; }
+.salary-help p { color: var(--ink); padding-top: 4px; }
+.salary-panel { display: grid; gap: 20px; min-width: 0; padding: 20px; border-radius: var(--clair-radius-card); }
+.salary-panel h2 { font-size: 20px; }
+.salary-table { min-width: 620px; }
+.salary-table td a { display: inline-flex; align-items: center; min-height: 32px; }
+.salary-coverage { font-size: var(--clair-type-form); color: var(--muted); }
+.salary-status { margin: 0; }
+.salary-method { padding: 0; border-radius: var(--clair-radius-card); }
+.salary-method > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; min-height: 48px; }
+.salary-method > summary > span { color: var(--blue); }
+.salary-method > div { padding: 0 20px 20px; border-top: 1px solid var(--line); }
+.salary-method dl { display: grid; gap: 16px; margin: 20px 0 0; }
+.salary-method dt { font-weight: 600; }
+.salary-method dd { margin: 4px 0 0; color: var(--muted); font-size: var(--clair-type-form); }
+.salary-analysis :is(summary, .table-wrap):focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; border-radius: var(--clair-radius-control); }
+.salary-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 1200px) { .rh-studio .salary-analysis .salary-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .salary-analysis { gap: 16px; }
+  .salary-heading { align-items: start; }
+  .salary-heading h2 { font-size: 22px; }
+  .rh-studio .salary-analysis .salary-tiles { grid-template-columns: minmax(0, 1fr); }
+  .salary-panel { padding: 16px; gap: 16px; }
+  .salary-context { align-items: start; flex-direction: column; }
+  .salary-actions { width: 100%; }
+  .salary-analysis :is(.salary-actions a, .salary-help > summary, .salary-table td a) { min-height: 44px; }
+  .salary-method > summary { padding: 16px; }
+  .salary-method > div { padding: 0 16px 16px; }
+}

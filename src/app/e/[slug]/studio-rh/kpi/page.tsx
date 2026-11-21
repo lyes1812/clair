@@ -60,6 +60,7 @@ import { EffectifsMensuels } from "./EffectifsMensuels";
 import { PeriodModeFields } from "./PeriodModeFields";
 import { coverageShown, loadCategoryMonths, loadKpiSuivi, suiviColumnOn } from "./suivi-data";
 import { KPI_VUES } from "./tabs";
+import { SalaryAnalysisPage } from "./SalaryAnalysisPage";
 
 export const dynamic = "force-dynamic";
 
@@ -103,8 +104,8 @@ function paramList(settings: KpiSettings, natures: { codes: string[]; origin: st
 }
 
 // Entrées de KPI RH pas encore construites : l'état en une phrase, ce qui existe déjà (avec un lien) et ce qui reste à préciser.
-type PrevuVue = "pyramide" | "salaires" | "livre" | "publisher";
-const PREVU_VUES: PrevuVue[] = ["pyramide", "salaires", "livre", "publisher"];
+type PrevuVue = "pyramide" | "livre" | "publisher";
+const PREVU_VUES: PrevuVue[] = ["pyramide", "livre", "publisher"];
 const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: PrevuLink[]; open: string[] }> = {
   pyramide: (studio) => ({
     lead: "Non disponible avec les données lues : la date de naissance n'est pas lue dans le référentiel Collaborateurs (PayFit et DSN lus), la pyramide des âges ne peut donc pas être construite. L'ancienneté se déduit de la date d'entrée du contrat.",
@@ -113,14 +114,6 @@ const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: Prev
       { href: `${studio}/kpi?vue=effectifs`, title: "KPI RH › Effectifs mensuels", text: "Effectif et ETP par mois, répartis par catégorie, contrat, établissement ou statut." },
     ],
     open: ["Le découpage des tranches d'âge et d'ancienneté.", "La règle d'ancienneté : par contrat ou par personne.", "La source de la date de naissance, absente des lectures PayFit et DSN."],
-  }),
-  salaires: (studio) => ({
-    lead: "Non réalisé : l'analyse des salaires par collaborateur (médianes, écarts, rapports) n'existe pas encore.",
-    existing: [
-      { href: `${studio}/masse-salariale?vue=fixe-variable`, title: "Masse salariale › Fixe & variable", text: "Rémunération lue par rubrique : salaires, primes, indemnités, gratifications." },
-      { href: `${studio}/masse-salariale`, title: "Masse salariale › Synthèse", text: "Brut, charges et coût chargé par mois, par service et par rubrique." },
-    ],
-    open: ["Les règles d'anonymat et de droits d'accès pour des indicateurs individuels.", "Les statistiques à produire (médiane, écarts, rapports) et leur périmètre."],
   }),
   livre: (studio) => ({
     lead: "Non disponible avec les données lues : l'API PayFit ne renvoie les bulletins qu'en PDF, sans rubrique, le livre de paie par collaborateur et par rubrique de bulletin ne peut donc pas être construit.",
@@ -143,6 +136,7 @@ const PREVU: Record<PrevuVue, (studio: string) => { lead: string; existing: Prev
 export default async function KpiPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<Search> }) {
   const { slug } = await params;
   const sp = await searchParams;
+  if (one(sp.vue) === "salaires") return <SalaryAnalysisPage slug={slug} search={sp} />;
   // Chargement commun avec l'export (mêmes paramètres d'adresse, mêmes règles de remplacement d'une valeur invalide).
   const suivi = await loadKpiSuivi(slug, sp);
   const ctx = suivi.ctx;
