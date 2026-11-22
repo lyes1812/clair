@@ -17,6 +17,8 @@ export type EventKind =
   | "fec.uploaded"
   | "bank.uploaded"
   | "aged.uploaded"
+  | "ia.called"
+  | "bank.categorized"
   | "setting.changed"
   | "rh.rebuilt"
   | "rh.rebuild_failed"

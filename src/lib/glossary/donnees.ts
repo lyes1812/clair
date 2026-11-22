@@ -15,6 +15,7 @@ export const DONNEES_TERMS = {
   controlesFec: "donnees-controles-fec",
   depotBanque: "donnees-depot-banque",
   depotBalanceAgee: "donnees-depot-balance-agee",
+  categorisation: "donnees-categorisation-flux",
   extraits: "donnees-extraits",
   etapes: "donnees-etapes-pastilles",
   origine: "param-origine",
@@ -138,6 +139,17 @@ export const GLOSSARY_DONNEES: GlossaryEntry[] = [
       "Dédoublonnage : chaque mouvement est identifié par le compte, la date d'opération, le montant, le libellé normalisé (majuscules, sans accents ni ponctuation) et son rang parmi les mouvements identiques du même jour. Deux relevés qui se chevauchent ne créent aucun doublon.",
       "Continuité : pour chaque relevé, solde d'ouverture + mouvements = solde de clôture, au centime. Un écart est signalé avec son montant. Un OFX ne porte pas de solde d'ouverture et un CSV sans colonne de solde n'en porte aucun : la continuité est alors n.d. Un intervalle de plus de 5 jours ouvrés (lundi à vendredi, jours fériés non retirés) sans relevé est signalé, ainsi qu'un historique de moins de 6 mois par compte.",
       "L'IBAN est conservé chiffré et affiché masqué (FR76 … 1234).",
+    ].join("\n\n"),
+  },
+  {
+    id: DONNEES_TERMS.categorisation,
+    term: "Catégorisation des flux bancaires",
+    family: FAMILY,
+    definition: [
+      "Chaque mouvement des relevés reçoit une catégorie de trésorerie parmi douze : encaissements clients, autres encaissements, salaires nets, charges sociales, impôts et TVA, fournisseurs d’exploitation, loyers, échéances d’emprunt, frais bancaires, investissements, autres décaissements, flux internes (neutralisés). Une catégorie ne vaut que pour son sens (encaissement ou décaissement), sauf les flux internes.",
+      "Ordre d'application : catégorie saisie pour le flux, puis catégorie apprise pour son tiers (les trois premiers mots significatifs de la contrepartie ou du libellé), puis référentiel de motifs du libellé (URSSAF, DGFIP, salaire, échéance de prêt, frais bancaires, loyer, énergie, remises CB…), puis proposition de l'IA. Un flux sans catégorie reste à catégoriser : il n'est jamais rangé par défaut.",
+      "IA : seuls les flux sans catégorie sont envoyés, par lots de 100 et 500 au plus par lancement, après pseudonymisation (noms des salariés et des tiers des comptes 421, 425 et 455 remplacés par PERSONNE_n, IBAN, adresses électroniques et références de 4 chiffres et plus retirés). Un flux où un nom reste visible n'est pas envoyé. Chaque appel est journalisé (modèle, version du prompt, empreinte, nombre de flux), sans libellé ni montant. Le mode sans IA, réglé par un administrateur, coupe tout envoi.",
+      "Revue : une proposition de l'IA est à revoir quand sa confiance est inférieure à 80 % ou que son montant dépasse 5 % du décaissement mensuel moyen (total des débits rapporté au nombre de mois couverts). Valider ou corriger un flux l'enregistre ; cocher « tout le tiers » l'apprend pour tous les flux de ce tiers dans le même sens.",
     ].join("\n\n"),
   },
   {

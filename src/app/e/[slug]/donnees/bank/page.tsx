@@ -38,6 +38,7 @@ export default async function BankPage({ params }: { params: Promise<{ slug: str
       <section className="panel" id="comptes">
         <h2>Comptes</h2>
         <AccountsTable ledger={ledger} />
+        {ledger.length > 0 && <p className="desc"><a href={`/e/${slug}/donnees/bank/categories`} data-testid="bank-categories-link">Catégories des flux</a></p>}
         {ledger.length > 0 && <RecentMovements ledger={ledger} />}
       </section>
 
