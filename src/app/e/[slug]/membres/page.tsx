@@ -27,6 +27,8 @@ const EVENT_LABELS = {
   "fec.uploaded": "Fichiers FEC déposés",
   "bank.uploaded": "Relevés bancaires déposés",
   "aged.uploaded": "Balance âgée déposée",
+  "ia.called": "Appel au modèle d’IA",
+  "bank.categorized": "Catégories de flux modifiées",
   "setting.changed": "Paramètre modifié",
   "rh.rebuilt": "Référentiel Collaborateurs reconstruit",
   "rh.rebuild_failed": "Reconstruction du référentiel en échec",

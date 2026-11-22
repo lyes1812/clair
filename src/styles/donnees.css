@@ -305,3 +305,7 @@
 .rs-body strong { font-size: var(--clair-type-subheading); font-weight: 600; line-height: 1.3; }
 .rs-kicker { font-size: var(--clair-type-label); color: var(--muted); }
 .rs-note { margin: 0; }
+
+/* Catégories des flux bancaires (lot L4) */
+.cat-label { min-width: 260px; }
+.cat-review .dn-pill { white-space: nowrap; }
