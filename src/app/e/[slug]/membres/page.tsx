@@ -26,6 +26,7 @@ const EVENT_LABELS = {
   "dsn.uploaded": "Fichiers DSN déposés",
   "fec.uploaded": "Fichiers FEC déposés",
   "bank.uploaded": "Relevés bancaires déposés",
+  "aged.uploaded": "Balance âgée déposée",
   "setting.changed": "Paramètre modifié",
   "rh.rebuilt": "Référentiel Collaborateurs reconstruit",
   "rh.rebuild_failed": "Reconstruction du référentiel en échec",

@@ -11,6 +11,8 @@ import { importDsnFiles } from "@/lib/dsn/import";
 import { DSN_MAX_BYTES, DsnError } from "@/lib/dsn/parser";
 import { importFecFiles } from "@/lib/fec/import";
 import { importBankFiles } from "@/lib/bank/import";
+import { importAgedFiles } from "@/lib/aged/import";
+import { AGED_MAX_BYTES, AGED_MAX_FILES, AgedError } from "@/lib/aged/parser";
 import { BankError } from "@/lib/bank/model";
 import { BANK_MAX_BYTES, BANK_MAX_FILES } from "@/lib/bank/parser";
 import { ensureRhBuild } from "@/lib/rh/referential/store";
@@ -117,6 +119,12 @@ const UPLOAD_KINDS = {
     maxFiles: BANK_MAX_FILES, maxBytes: BANK_MAX_BYTES, maxLabel: "10 Mo",
     run: (workspaceId: string, uploads: { filename: string; bytes: Uint8Array }[], actor: string, form: FormData) => importBankFiles(workspaceId, uploads, actor, { csvIban: String(form.get("iban") ?? "") }),
     isError: (e: unknown) => e instanceof BankError,
+  },
+  // Balance âgée : la date d'arrêté est saisie au dépôt.
+  aged: {
+    maxFiles: AGED_MAX_FILES, maxBytes: AGED_MAX_BYTES, maxLabel: "10 Mo",
+    run: (workspaceId: string, uploads: { filename: string; bytes: Uint8Array }[], actor: string, form: FormData) => importAgedFiles(workspaceId, uploads, actor, { asOf: String(form.get("asOf") ?? "") }),
+    isError: (e: unknown) => e instanceof AgedError,
   },
 } as const;
 

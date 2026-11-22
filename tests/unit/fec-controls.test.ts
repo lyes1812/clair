@@ -173,3 +173,14 @@ describe("FEC de 200 000 lignes", () => {
     expect(ms).toBeLessThan(10_000);
   }, 30_000);
 });
+
+describe("F09 : comptes fournisseurs lus", () => {
+  it("401, 403, 404 et 408 comptés ; 409 (fournisseurs débiteurs) exclu", () => {
+    const rows = (account: string, aux: string) => [["AC", "Achats", account, "20260115", "606000", "Achats", "", "", "P", "20260115", "Fictif", "100,00", "0,00", "", "", "20260115", "", ""], ["AC", "Achats", account, "20260115", account, "Fournisseurs", aux, `Tiers fictif ${aux}`, "P", "20260115", "Fictif", "0,00", "100,00", "", "", "20260115", "", ""]];
+    const header = companyFecText().split("\r\n")[0];
+    const body = ["401000", "403000", "404000", "408000", "409000"].flatMap((a, i) => rows(a, `T${i}`)).map((r) => r.join("\t"));
+    const s = controlFec(enc([header, ...body].join("\r\n"))).controls.suppliers!;
+    expect(s.count).toBe(4);
+    expect(s.balanceCents).toBe(40_000);
+  });
+});

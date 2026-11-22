@@ -106,6 +106,11 @@ const UPLOAD_HELP = {
     limits: "CAMT.053 (XML), OFX ou CSV, en euros · 24 fichiers et 10 Mo par fichier au plus. CFONB 120 non lu.",
     accept: ".xml,.ofx,.qfx,.csv,.txt,text/plain,text/csv,application/xml,text/xml",
   },
+  aged: {
+    label: "Balance âgée fournisseurs",
+    limits: "CSV ou XLSX : fournisseur, n° de facture, date de facture, échéance, montant restant dû (compte auxiliaire si disponible) · un fichier de 10 Mo au plus.",
+    accept: ".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  },
 } as const;
 
 const SHOWN_FILES = 8;
@@ -126,7 +131,7 @@ export function FileUploadForm({ slug, kind }: { slug: string; kind: keyof typeo
             id={`${kind}-files`}
             name="files"
             type="file"
-            multiple
+            multiple={kind !== "aged"}
             accept={help.accept}
             required
             onChange={(e) => setChosen(Array.from(e.target.files ?? []).map((f) => ({ name: f.name, size: f.size })))}
@@ -136,6 +141,12 @@ export function FileUploadForm({ slug, kind }: { slug: string; kind: keyof typeo
           <div className="field-row">
             <label htmlFor="bank-iban">IBAN du compte (CSV seulement)</label>
             <input className="input" id="bank-iban" name="iban" type="text" inputMode="text" autoComplete="off" spellCheck={false} placeholder="FR76 …" maxLength={42} />
+          </div>
+        )}
+        {kind === "aged" && (
+          <div className="field-row">
+            <label htmlFor="aged-date">Date de la balance</label>
+            <input className="input" id="aged-date" name="asOf" type="date" required />
           </div>
         )}
         <button className="btn primary" type="submit" disabled={pending}>{pending ? "Lecture…" : "Déposer et prévisualiser"}</button>

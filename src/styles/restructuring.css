@@ -43,3 +43,8 @@
 .cash-flows td .form.inline { display: inline-flex; margin: 0; }
 @media (max-width: 1100px) { .restructuring-charts { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 650px) { .restructuring-header { display: grid; } .restructuring-filters .field-row { flex-basis: 100%; min-width: 0; } }
+/* Cap 13, lot L3 : passif par créance. */
+[data-testid="crisis-claims"] > .notice, [data-testid="crisis-claims"] > .desc, [data-testid="crisis-claims"] > .nd, .claims-block { margin: 0 16px 12px; }
+.claims-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; margin: 0 16px 16px; align-items: start; }
+[data-testid="claims-form"] .input, [data-testid="claims-form"] .select { min-width: 9.5rem; }
+[data-testid="claims-table"] small { display: block; color: var(--muted, inherit); }

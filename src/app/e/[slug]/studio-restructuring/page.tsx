@@ -4,7 +4,7 @@ import { RestructuringView } from "./RestructuringView";
 import { loadCashContext } from "@/lib/restructuring/crisis/cash-context";
 import { CrisisView } from "./CrisisView";
 import { CashPlanView } from "./CashPlanView";
-import { addCashFlowAction, addCashMeasureAction, createCashScenarioAction, deleteCashFlowAction, deleteCashMeasureAction, deleteCashScenarioAction, saveCashStartAction, saveCrisisRanksAction, saveExitAction } from "./actions";
+import { addCashFlowAction, addCashMeasureAction, createCashScenarioAction, deleteCashFlowAction, deleteCashMeasureAction, deleteCashScenarioAction, saveCashStartAction, saveClaimsAction, saveCrisisRanksAction, saveExitAction } from "./actions";
 import { addRestructuringHireAction } from "./hire-actions";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 
@@ -18,7 +18,7 @@ export default async function RestructuringPage({ params, searchParams }: {
   // Cap 13 lit le FEC, pas les scénarios RH : son contexte est chargé seul.
   if (query.vue === "crisis") {
     const crisis = await loadCrisisContext(slug, query);
-    return <CrisisView {...crisis} saveRanks={crisis.canEdit ? saveCrisisRanksAction.bind(null, slug) : undefined} />;
+    return <CrisisView {...crisis} saveRanks={crisis.canEdit ? saveCrisisRanksAction.bind(null, slug) : undefined} saveClaims={crisis.canEdit && !crisis.claimsUnreadable ? saveClaimsAction.bind(null, slug) : undefined} />;
   }
   if (query.vue === "cash") {
     const cash = await loadCashContext(slug, query);

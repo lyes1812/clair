@@ -8,6 +8,8 @@ import { activeSync, getConnection, lastSync, SYNC_STATUS_LABELS, type SyncStatu
 import { dsnCoverage, listDsnFiles } from "@/lib/dsn/import";
 import { fecCoverage, listFecFiles } from "@/lib/fec/import";
 import { listBankFiles } from "@/lib/bank/import";
+import { listAgedFiles } from "@/lib/aged/import";
+import { readAgedBalance } from "@/lib/aged/store";
 import { readBankLedger } from "@/lib/bank/store";
 import { formatDate } from "@/lib/dates";
 import { resolveSource, SOURCE_MODE_LABELS, type SourceDomain, type SourceMode, type SourceResolution } from "@/lib/sources";
@@ -50,6 +52,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
     listFecFiles(workspace.id), lastSync(workspace.id, "fec"), fecCoverage(workspace.id),
   ]);
   const [bankFiles, bankLast, bankLedger] = await Promise.all([listBankFiles(workspace.id), lastSync(workspace.id, "bank"), readBankLedger(workspace.id)]);
+  const [agedFiles, agedLast, agedBalance] = await Promise.all([listAgedFiles(workspace.id), lastSync(workspace.id, "aged"), readAgedBalance(workspace.id)]);
   const complete = coverage.filter((c) => c.status === "complete").length;
   const [rhSource, accountingSource] = await Promise.all([resolveSource(workspace.id, "rh"), resolveSource(workspace.id, "accounting")]);
   const isAdmin = workspace.role === "admin";
@@ -214,6 +217,29 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
     </section>
   );
 
+  const agedCard = (
+    <section className="panel dn-card" data-testid="source-aged">
+      <div className="dn-card-head">
+        <span className="dn-source-icon"><Files size={21} strokeWidth={1.7} aria-hidden="true" /></span>
+        <div>
+          <h3>Balance âgée fournisseurs <span className="tag">Fichier</span></h3>
+        </div>
+      </div>
+      <p className="desc dn-card-summary">Factures fournisseurs restant dues à une date (CSV ou XLSX), pour le passif par créance de Cap 13.</p>
+      <dl className="facts dn-facts">
+        <div><dt>Fichiers conservés</dt><dd data-testid="aged-files-count">{agedFiles.length === 0 ? "aucun" : agedFiles.length}</dd></div>
+        <div><dt>Dernier dépôt</dt><dd>{lastDeposit(agedLast)}</dd></div>
+        <div>
+          <dt>Balance en vigueur</dt>
+          <dd data-testid="aged-coverage-summary">
+            {agedBalance ? `au ${formatDate(agedBalance.asOf)} · ${agedBalance.invoices.length} facture(s)` : <span className="nd">n.d. — aucune balance appliquée</span>}
+          </dd>
+        </div>
+      </dl>
+      {cardFoot(primaryAction("files", { connected: true, isAdmin, canWrite }), `/e/${slug}/donnees/aged`, "la balance âgée")}
+    </section>
+  );
+
   const fecCard = (
     <section className="panel dn-card" data-testid="source-fec" data-chosen={accountingSource.chosen === "fec" ? "true" : undefined}>
       <div className="dn-card-head">
@@ -296,6 +322,7 @@ export default async function DonneesPage({ params }: { params: Promise<{ slug: 
         <div className="dn-cards">
           {apiCard(byId.pennylane, accountingSource.chosen === "pennylane")}
           {fecCard}
+          {agedCard}
         </div>
       </section>
 

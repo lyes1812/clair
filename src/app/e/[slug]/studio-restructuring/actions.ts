@@ -13,7 +13,8 @@ import { exitFromForm } from "@/lib/restructuring/forms";
 import { CRISIS_RANKS_KEY, ranksFromForm } from "@/lib/restructuring/crisis/ranks";
 import { flowFromForm, MAX_FLOWS, MAX_MEASURES, MAX_SCENARIOS, measureFromForm, scenarioNameFromForm, startFromForm } from "@/lib/restructuring/crisis/cashplan";
 import { CashPlanError, updateCashPlan } from "@/lib/restructuring/crisis/store";
-import { setSetting } from "@/lib/settings";
+import { getSetting, setSetting } from "@/lib/settings";
+import { CLAIMS_KEY, overridesFromForm, parseClaimOverrides } from "@/lib/restructuring/crisis/claims";
 import { requireWorkspace } from "@/lib/workspace";
 import type { FormState } from "../studio-rh/hypotheses/actions";
 
@@ -61,6 +62,20 @@ export async function saveCrisisRanksAction(slug: string, _previous: FormState, 
   catch { return { error: "Enregistrement des rangs refusé. Recharge la page avant de réessayer." }; }
   revalidatePath(`/e/${slug}/studio-restructuring`);
   return { ok: "Rangs enregistrés pour cet espace." };
+}
+
+/** Cap 13, lot L3 : rang et échéance saisis créance par créance. Une saisie vide revient à la valeur lue ou héritée. */
+export async function saveClaimsAction(slug: string, _previous: FormState, form: FormData): Promise<FormState> {
+  const { workspace, session } = await requireWorkspace(slug, "editor");
+  const stored = await getSetting(workspace.id, CLAIMS_KEY, (value) => ({ parsed: parseClaimOverrides(value) }));
+  if (stored && stored.parsed === null) return { error: "Saisies par créance enregistrées illisibles : rien n’a été remplacé." };
+  let next;
+  try { next = overridesFromForm(form, stored?.parsed ?? {}); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Saisie invalide." }; }
+  try { await setSetting(workspace.id, CLAIMS_KEY, next, session.user.id); }
+  catch { return { error: "Enregistrement refusé. Recharge la page avant de réessayer." }; }
+  revalidatePath(`/e/${slug}/studio-restructuring`);
+  return { ok: "Rangs et échéances des créances enregistrés." };
 }
 
 const cashFailure = (error: unknown): FormState => ({ error: error instanceof CashPlanError ? error.message : "Enregistrement refusé. Recharge la page avant de réessayer." });
